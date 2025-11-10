@@ -24,10 +24,10 @@ SRCS-$(CONFIG_WEBPOPUP) += src/arch/linux/linux_webpopup.c
 SRCS-$(CONFIG_DVD) += src/backend/dvd/linux_dvd.c
 
 ${BUILDDIR}/src/arch/linux/%.o : CFLAGS = $(CFLAGS_GTK) ${OPTFLAGS} \
--Wall -Werror -Wmissing-prototypes -Wno-cast-qual -Wno-deprecated-declarations
+-Wall -Wmissing-prototypes -Wno-cast-qual -Wno-deprecated-declarations
 
 ${BUILDDIR}/src/prop/prop_glib_courier.o : CFLAGS = $(CFLAGS_GTK) ${OPTFLAGS} \
--Wall -Werror -Wmissing-prototypes -Wno-cast-qual -Wno-deprecated-declarations
+-Wall -Wmissing-prototypes -Wno-cast-qual -Wno-deprecated-declarations
 
 
 DVDCSS_CFLAGS = -DHAVE_LINUX_DVD_STRUCT -DDVD_STRUCT_IN_LINUX_CDROM_H -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE

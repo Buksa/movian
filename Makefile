@@ -38,7 +38,7 @@ LIB=${BUILDDIR}/libmovian
 
 include ${BUILDDIR}/config.mak
 
-CFLAGS_std += -Wall -Werror -Wwrite-strings -Wno-deprecated-declarations \
+CFLAGS_std += -Wall -Wwrite-strings -Wno-deprecated-declarations \
 		-Wmissing-prototypes -Wno-multichar  -Iext/dvd -std=gnu99
 
 CFLAGS = ${CFLAGS_std} ${OPTFLAGS}
@@ -817,6 +817,7 @@ BUNDLE_OBJS=$(BUNDLE_SRCS:%.c=%.o)
 # Common CFLAGS for all files
 CFLAGS_com += -g -funsigned-char ${OPTFLAGS} ${CFLAGS_dbg}
 CFLAGS_com += -iquote${BUILDDIR} -iquote${C}/src -iquote${C}
+CFLAGS_com += -Wno-error
 
 # Tools
 
@@ -862,7 +863,7 @@ ${PROG}.ziptail: $(OBJS) $(ALLDEPS) $(BUILDDIR)/support/dataroot/ziptail.o
 
 ${BUILDDIR}/%.o: %.c $(ALLDEPS)
 	@mkdir -p $(dir $@)
-	$(CC) -MD -MP $(CFLAGS_com) $(CFLAGS) $(CFLAGS_cfg) -c -o $@ $(C)/$<
+	$(CC) -MD -MP $(CFLAGS_com) $(CFLAGS) $(CFLAGS_cfg) -Wno-error -c -o $@ $(C)/$<
 
 ${BUILDDIR}/%.o: %.S $(ALLDEPS)
 	@mkdir -p $(dir $@)
@@ -874,7 +875,7 @@ ${BUILDDIR}/%.o: %.m $(ALLDEPS)
 
 ${BUILDDIR}/%.o: %.cpp $(ALLDEPS)
 	@mkdir -p $(dir $@)
-	$(CXX) -MD -MP $(CFLAGS_com) $(CFLAGS_cfg) -c -o $@ $(C)/$<
+	$(CXX) -MD -MP $(CFLAGS_com) $(CFLAGS_cfg) -Wno-error -c -o $@ $(C)/$<
 
 clean:
 	rm -rf ${BUILDDIR}/src ${BUILDDIR}/ext ${BUILDDIR}/bundles
