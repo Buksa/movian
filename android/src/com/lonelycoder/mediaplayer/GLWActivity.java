@@ -115,6 +115,7 @@ public class GLWActivity extends Activity implements VideoRendererProvider {
                     if(uri != null) {
                         String u = getRealPathFromUri(uri);
                         Core.openUri(u != null ? u : uri.toString());
+                        setIntent(new Intent());
                     }
                     return true;
                 }
