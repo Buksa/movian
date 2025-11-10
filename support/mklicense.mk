@@ -2,7 +2,7 @@ LICENSEDEPS = \
 	support/mklicense.mk \
 	src/LICENSE \
 	ext/duktape/LICENSE.txt \
-	ext/libav/LICENSE \
+	ext/libav/LICENSE.md \
 	licenses/gumbo.txt \
 	licenses/freetype.txt \
 	licenses/bspatch.txt \
@@ -32,7 +32,7 @@ ${BUILDDIR}/LICENSE: ${LICENSEDEPS}
 	cat >>$@ licenses/nanosvg.txt
 
 	echo >>$@ "\f"
-	cat >>$@ ext/libav/LICENSE
+	cat >>$@ ext/libav/LICENSE.md
 
 ifeq ($(CONFIG_GUMBO), yes)
 	echo >>$@ "\f\n============================"
