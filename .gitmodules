@@ -1,21 +1,21 @@
 [submodule "ext/libav"]
-	path = ext/libav
-	url = git://github.com/andoma/libav.git
+    path = ext/libav
+    url = git://github.com/andoma/libav.git
 [submodule "ext/rtmpdump"]
-	path = ext/rtmpdump
-	url = git://github.com/andoma/rtmpdump.git
+    path = ext/rtmpdump
+    url = https://github.com/mirror/rtmpdump.git
 [submodule "ext/libntfs_ext"]
-	path = ext/libntfs_ext
-	url = https://github.com/andoma/libntfs_ext.git
+    path = ext/libntfs_ext
+    url = https://github.com/andoma/libntfs_ext.git
 [submodule "ext/gumbo-parser"]
-	path = ext/gumbo-parser
-	url = https://github.com/google/gumbo-parser
+    path = ext/gumbo-parser
+    url = https://github.com/google/gumbo-parser
 [submodule "ios/freetype2-ios"]
-	path = ios/freetype2-ios
-	url = https://github.com/andoma/freetype2-ios.git
+    path = ios/freetype2-ios
+    url = https://github.com/andoma/freetype2-ios.git
 [submodule "ext/vmir"]
-	path = ext/vmir
-	url = https://github.com/andoma/vmir
+    path = ext/vmir
+    url = https://github.com/andoma/vmir
 [submodule "ext/libyuv"]
-	path = ext/libyuv
-	url = https://chromium.googlesource.com/libyuv/libyuv
+    path = ext/libyuv
+    url = https://chromium.googlesource.com/libyuv/libyuv

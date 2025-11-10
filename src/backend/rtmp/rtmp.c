@@ -37,6 +37,29 @@
 #include "metadata/playinfo.h"
 #include "usage.h"
 
+static void
+movian_RTMP_Init(RTMP *r, void *cancellable)
+{
+  RTMP_Init(r);
+}
+
+static int
+movian_RTMP_Connect(RTMP *r, RTMPPacket *cp, char *errbuf, size_t errlen,
+                    int timeout_ms)
+{
+  r->Link.timeout = (timeout_ms + 999) / 1000;
+  if(!RTMP_Connect(r, cp)) {
+    snprintf(errbuf, errlen, "RTMP connection failed");
+    return 0;
+  }
+  return 1;
+}
+
+static void
+movian_RTMP_SetReadTimeout(RTMP *r, int timeout_ms)
+{
+}
+
 typedef struct {
 
   media_pipe_t *mp;
@@ -84,7 +107,7 @@ rtmp_canhandle(const char *url)
 
 
 
-#define SAVC(x)	static AVal av_##x = { (char *)#x, sizeof(#x)-1};
+#define SAVC(x)    static AVal av_##x = { (char *)#x, sizeof(#x)-1};
 
 SAVC(onMetaData);
 SAVC(duration);
@@ -95,7 +118,7 @@ SAVC(height);
 
 static int
 handle_metadata0(rtmp_t *r, AMFObject *obj,
-		 media_pipe_t *mp, char *errstr, size_t errlen)
+         media_pipe_t *mp, char *errstr, size_t errlen)
 {
   AVal metastring;
   AMFObjectProperty prop;
@@ -149,7 +172,7 @@ handle_metadata0(rtmp_t *r, AMFObject *obj,
 
 static int
 handle_metadata(rtmp_t *r, char *body, unsigned int len,
-		media_pipe_t *mp, char *errstr, size_t errlen)
+        media_pipe_t *mp, char *errstr, size_t errlen)
 {
   AMFObject obj;
   int rval;
@@ -170,7 +193,7 @@ handle_metadata(rtmp_t *r, char *body, unsigned int len,
  */
 static void
 video_seek(rtmp_t *r, media_pipe_t *mp, media_buf_t **mbp,
-	   int64_t pos, const char *txt)
+       int64_t pos, const char *txt)
 {
   if(pos < 0)
     pos = 0;
@@ -234,8 +257,8 @@ rtmp_process_event(rtmp_t *r, event_t *e, media_buf_t **mbp)
  */
 static event_t *
 sendpkt(rtmp_t *r, media_queue_t *mq, media_codec_t *mc,
-	int64_t dts, int64_t pts, const void *data, 
-	size_t size, int skip, int dt, int duration, int drive_clock)
+    int64_t dts, int64_t pts, const void *data, 
+    size_t size, int skip, int dt, int duration, int drive_clock)
 {
   event_t *e = NULL;
   media_buf_t *mb = media_buf_alloc_unlocked(r->mp, size);
@@ -279,7 +302,7 @@ sendpkt(rtmp_t *r, media_queue_t *mq, media_codec_t *mc,
  */
 static event_t *
 get_packet_v(rtmp_t *r, uint8_t *data, int size, int64_t dts,
-	     media_pipe_t *mp)
+         media_pipe_t *mp)
 {
   uint8_t flags;
   uint8_t type = 0;
@@ -326,7 +349,7 @@ get_packet_v(rtmp_t *r, uint8_t *data, int size, int64_t dts,
     switch(id) {
     case AV_CODEC_ID_H264:
       if(type != 0 || size < 0)
-	return NULL;
+    return NULL;
 
       mcp.extradata      = data;
       mcp.extradata_size = size;
@@ -334,7 +357,7 @@ get_packet_v(rtmp_t *r, uint8_t *data, int size, int64_t dts,
 
     case AV_CODEC_ID_VP6F:
       if(size < 1)
-	return NULL;
+    return NULL;
       mcp.extradata      = data;
       mcp.extradata_size = size;
       break;
@@ -367,7 +390,7 @@ get_packet_v(rtmp_t *r, uint8_t *data, int size, int64_t dts,
   }
 
   e = sendpkt(r, &r->mp->mp_video, r->vcodec, dts, pts,
-	      data, size, skip, MB_VIDEO, r->vframeduration, 1);
+          data, size, skip, MB_VIDEO, r->vframeduration, 1);
   return e;
 }
 
@@ -377,7 +400,7 @@ get_packet_v(rtmp_t *r, uint8_t *data, int size, int64_t dts,
  */
 static event_t *
 get_packet_a(rtmp_t *r, uint8_t *data, int size, int64_t dts, 
-	     media_pipe_t *mp)
+         media_pipe_t *mp)
 {
   uint8_t flags;
   uint8_t type = 0;
@@ -415,8 +438,8 @@ get_packet_a(rtmp_t *r, uint8_t *data, int size, int64_t dts,
       
     case AV_CODEC_ID_AAC:
       if(type != 0 || size < 0)
-	return NULL;
-	
+    return NULL;
+    
       mcp.extradata      = data;
       mcp.extradata_size = size;
       fmt = "AAC";
@@ -432,14 +455,14 @@ get_packet_a(rtmp_t *r, uint8_t *data, int size, int64_t dts,
     }
 
     mp_add_track(mp->mp_prop_audio_tracks,
-		 NULL,
-		 "rtmp:1",
-		 fmt,
-		 fmt,
-		 NULL, 
-		 NULL,
-		 NULL,
-		 0,
+         NULL,
+         "rtmp:1",
+         fmt,
+         fmt,
+         NULL, 
+         NULL,
+         NULL,
+         0,
                  1);
 
     prop_set_string(mp->mp_prop_audio_track_current, "rtmp:1");
@@ -459,22 +482,22 @@ get_packet_a(rtmp_t *r, uint8_t *data, int size, int64_t dts,
   r->seekpos_audio = dts;
   if(mc->parser_ctx == NULL)
     return sendpkt(r, &mp->mp_audio, mc, 
-		   dts, dts, data, size, 0, MB_AUDIO, 0, 0);
+           dts, dts, data, size, 0, MB_AUDIO, 0, 0);
 
   while(size > 0) {
     int outlen;
     uint8_t *outbuf;
     int rlen = av_parser_parse2(mc->parser_ctx,
-				mc->fmt_ctx, &outbuf, &outlen, 
-				data, size, dts, dts, AV_NOPTS_VALUE);
+                mc->fmt_ctx, &outbuf, &outlen, 
+                data, size, dts, dts, AV_NOPTS_VALUE);
     if(outlen) {
       event_t *e = sendpkt(r, &mp->mp_audio, mc,
-			   mc->parser_ctx->dts,
-			   mc->parser_ctx->pts,
-			   outbuf, outlen, 0,
-			   MB_AUDIO, 0, 0);
+               mc->parser_ctx->dts,
+               mc->parser_ctx->pts,
+               outbuf, outlen, 0,
+               MB_AUDIO, 0, 0);
       if(e != NULL)
-	return e;
+    return e;
     }
     dts = AV_NOPTS_VALUE;
     data += rlen;
@@ -506,128 +529,128 @@ rtmp_loop(rtmp_t *r, media_pipe_t *mp, char *url, char *errbuf, size_t errlen)
       ret = RTMP_GetNextMediaPacket(r->r, &p);
 
       if(ret == 2) {
-	/* Wait for queues to drain */
-	mp->mp_eof = 1;
+    /* Wait for queues to drain */
+    mp->mp_eof = 1;
       again:
-	e = mp_wait_for_empty_queues(mp);
+    e = mp_wait_for_empty_queues(mp);
 
-	if(e != NULL) {
-	  e = rtmp_process_event(r, e, NULL);
-	  if(e == NULL)
-	    goto again;
-	}
+    if(e != NULL) {
+      e = rtmp_process_event(r, e, NULL);
+      if(e == NULL)
+        goto again;
+    }
 
-	if(e == NULL)
-	  e = event_create_type(EVENT_EOF);
-	break;
+    if(e == NULL)
+      e = event_create_type(EVENT_EOF);
+    break;
       }
 
       if(ret == 0) {
-	int64_t restartpos = r->seekpos_video;
+    int64_t restartpos = r->seekpos_video;
 
         if(cancellable_is_cancelled(mp->mp_cancellable)) {
           snprintf(errbuf, errlen, "Cancelled");
           return NULL;
         }
 
-	TRACE(TRACE_ERROR, "RTMP", "Disconnected");
-	sleep(1);
+    TRACE(TRACE_ERROR, "RTMP", "Disconnected");
+    sleep(1);
 
-	if(restartpos == AV_NOPTS_VALUE) {
-	  snprintf(errbuf, errlen,
-		   "Giving up restart since nothing was decoded");
-	  return NULL;
-	}
+    if(restartpos == AV_NOPTS_VALUE) {
+      snprintf(errbuf, errlen,
+           "Giving up restart since nothing was decoded");
+      return NULL;
+    }
 
 
-	RTMP_Close(r->r);
+    RTMP_Close(r->r);
 
-	RTMP_Init(r->r, mp->mp_cancellable);
+    movian_RTMP_Init(r->r, mp->mp_cancellable);
 
-	memset(&p, 0, sizeof(p));
+    memset(&p, 0, sizeof(p));
 
-	TRACE(TRACE_DEBUG, "RTMP", "Reconnecting stream at pos %"PRId64,
-	      restartpos);
+    TRACE(TRACE_DEBUG, "RTMP", "Reconnecting stream at pos %"PRId64,
+          restartpos);
 
-	if(!RTMP_SetupURL(r->r, url)) {
-	  snprintf(errbuf, errlen, "Unable to setup RTMP session");
-	  return NULL;
-	}
+    if(!RTMP_SetupURL(r->r, url)) {
+      snprintf(errbuf, errlen, "Unable to setup RTMP session");
+      return NULL;
+    }
 
-	if(!RTMP_Connect(r->r, NULL, errbuf, errlen, 5000)) {
-	  return NULL;
-	}
+    if(!movian_RTMP_Connect(r->r, NULL, errbuf, errlen, 5000)) {
+      return NULL;
+    }
 
-	if(!RTMP_ConnectStream(r->r, 0)) {
-	  snprintf(errbuf, errlen, "Unable to stream RTMP session");
-	  return NULL;
-	}
+    if(!RTMP_ConnectStream(r->r, 0)) {
+      snprintf(errbuf, errlen, "Unable to stream RTMP session");
+      return NULL;
+    }
 
-	if(mp->mp_flags & MP_CAN_SEEK)
-	  RTMP_SendSeek(r->r, restartpos / 1000);
-	continue;
+    if(mp->mp_flags & MP_CAN_SEEK)
+      RTMP_SendSeek(r->r, restartpos / 1000);
+    continue;
       }
 
       dts = p.m_nTimeStamp;
 
       switch(p.m_packetType) {
       case RTMP_PACKET_TYPE_INFO:
-	if(handle_metadata(r, p.m_body, p.m_nBodySize, mp, errbuf, errlen)) {
-	  RTMPPacket_Free(&p);
-	  return NULL;
-	}
-	break;
+    if(handle_metadata(r, p.m_body, p.m_nBodySize, mp, errbuf, errlen)) {
+      RTMPPacket_Free(&p);
+      return NULL;
+    }
+    break;
 
       case RTMP_PACKET_TYPE_VIDEO:
-	e = get_packet_v(r, (void *)p.m_body, p.m_nBodySize, dts, mp);
-	break;
+    e = get_packet_v(r, (void *)p.m_body, p.m_nBodySize, dts, mp);
+    break;
 
       case RTMP_PACKET_TYPE_AUDIO:
-	e = get_packet_a(r, (void *)p.m_body, p.m_nBodySize, dts, mp);
-	break;
-	
+    e = get_packet_a(r, (void *)p.m_body, p.m_nBodySize, dts, mp);
+    break;
+    
       case 0x16:
-	pos = 0;
-	break;
+    pos = 0;
+    break;
       default:
-	TRACE(TRACE_DEBUG, "RTMP", 
-	      "Got unknown packet type %d\n", p.m_packetType);
-	break;
+    TRACE(TRACE_DEBUG, "RTMP", 
+          "Got unknown packet type %d\n", p.m_packetType);
+    break;
       }
       if(pos == -1)
-	RTMPPacket_Free(&p);
+    RTMPPacket_Free(&p);
     }
 
     if(pos != -1) {
       if(pos + 11 < p.m_nBodySize) {
-	uint32_t ds = AMF_DecodeInt24(p.m_body + pos + 1);
-	  
-	if(pos + 11 + ds + 4 > p.m_nBodySize) {
-	  snprintf(errbuf, errlen, "Corrupt stream");
-	  RTMPPacket_Free(&p);
-	  return NULL;
-	}
+    uint32_t ds = AMF_DecodeInt24(p.m_body + pos + 1);
+      
+    if(pos + 11 + ds + 4 > p.m_nBodySize) {
+      snprintf(errbuf, errlen, "Corrupt stream");
+      RTMPPacket_Free(&p);
+      return NULL;
+    }
 
-	dts = AMF_DecodeInt24(p.m_body + pos + 4);
-	dts |= (p.m_body[pos + 7] << 24);
+    dts = AMF_DecodeInt24(p.m_body + pos + 4);
+    dts |= (p.m_body[pos + 7] << 24);
 
-	if(p.m_body[pos] == RTMP_PACKET_TYPE_INFO) {
-	  if(handle_metadata(r, p.m_body, p.m_nBodySize, mp, errbuf, errlen)) {
-	    RTMPPacket_Free(&p);
-	    return NULL;
-	  }
-	} else if(p.m_body[pos] == RTMP_PACKET_TYPE_VIDEO) {
-	  e = get_packet_v(r, (void *)p.m_body + pos + 11, ds, dts, mp);
-	} else if(p.m_body[pos] == RTMP_PACKET_TYPE_AUDIO) {
-	  e = get_packet_a(r, (void *)p.m_body + pos + 11, ds, dts, mp);
-	} else {
-	  TRACE(TRACE_DEBUG, "RTMP", 
-		"Got unknown packet type %d\n", p.m_body[pos]);
-	}
-	pos += 11 + ds + 4;
+    if(p.m_body[pos] == RTMP_PACKET_TYPE_INFO) {
+      if(handle_metadata(r, p.m_body, p.m_nBodySize, mp, errbuf, errlen)) {
+        RTMPPacket_Free(&p);
+        return NULL;
+      }
+    } else if(p.m_body[pos] == RTMP_PACKET_TYPE_VIDEO) {
+      e = get_packet_v(r, (void *)p.m_body + pos + 11, ds, dts, mp);
+    } else if(p.m_body[pos] == RTMP_PACKET_TYPE_AUDIO) {
+      e = get_packet_a(r, (void *)p.m_body + pos + 11, ds, dts, mp);
+    } else {
+      TRACE(TRACE_DEBUG, "RTMP", 
+        "Got unknown packet type %d\n", p.m_body[pos]);
+    }
+    pos += 11 + ds + 4;
       } else {
-	pos = -1;
-	RTMPPacket_Free(&p);
+    pos = -1;
+    RTMPPacket_Free(&p);
       }
     }
     if(e != NULL)
@@ -660,9 +683,9 @@ static int rtmp_log_level;
  */
 static event_t *
 rtmp_playvideo(const char *url0, media_pipe_t *mp,
-	       char *errbuf, size_t errlen,
-	       video_queue_t *vq, struct vsource_list *vsl,
-	       const video_args_t *va0)
+           char *errbuf, size_t errlen,
+           video_queue_t *vq, struct vsource_list *vsl,
+           const video_args_t *va0)
 {
   video_args_t va = *va0;
   rtmp_t r = {0};
@@ -682,7 +705,7 @@ rtmp_playvideo(const char *url0, media_pipe_t *mp,
   RTMP_LogSetLevel(rtmp_log_level);
 
   r.r = RTMP_Alloc();
-  RTMP_Init(r.r, mp->mp_cancellable);
+  movian_RTMP_Init(r.r, mp->mp_cancellable);
 
   int64_t start = playinfo_get_restartpos(va.canonical_url, va.title, va.resume_mode);
 
@@ -694,7 +717,7 @@ rtmp_playvideo(const char *url0, media_pipe_t *mp,
 
   r.r->Link.lFlags |= RTMP_LF_SWFV;
 
-  if(!RTMP_Connect(r.r, NULL, errbuf, errlen, 5000)) {
+  if(!movian_RTMP_Connect(r.r, NULL, errbuf, errlen, 5000)) {
     rtmp_free(&r);
     return NULL;
   }
@@ -749,7 +772,7 @@ rtmp_playvideo(const char *url0, media_pipe_t *mp,
     int p = mp->mp_seek_base / (r.total_duration * 10);
     if(p >= video_settings.played_threshold) {
       TRACE(TRACE_DEBUG, "RTMP", "Playback reached %d%%, counting as played",
-	    p);
+        p);
       playinfo_register_play(va.canonical_url, 1);
       playinfo_set_restartpos(va.canonical_url, -1, 0);
     } else {
@@ -809,7 +832,7 @@ rtmp_probe(const char *url0, char *errbuf, size_t errlen, int timeout_ms)
   char *url = mystrdupa(url0);
 
   r = RTMP_Alloc();
-  RTMP_Init(r, NULL);
+  movian_RTMP_Init(r, NULL);
 
   if(!RTMP_SetupURL(r, url)) {
     snprintf(errbuf, errlen, "Unable to setup RTMP-session");
@@ -817,13 +840,13 @@ rtmp_probe(const char *url0, char *errbuf, size_t errlen, int timeout_ms)
     return BACKEND_PROBE_FAIL;
   }
 
-  if(!RTMP_Connect(r, NULL, errbuf, errlen, timeout_ms)) {
+  if(!movian_RTMP_Connect(r, NULL, errbuf, errlen, timeout_ms)) {
     RTMP_Close(r);
     RTMP_Free(r);
     return BACKEND_PROBE_FAIL;
   }
 
-  RTMP_SetReadTimeout(r, timeout_ms);
+  movian_RTMP_SetReadTimeout(r, timeout_ms);
 
   if(!RTMP_ConnectStream(r, 0)) {
     snprintf(errbuf, errlen, "Unable to connect RTMP-stream");
