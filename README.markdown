@@ -1,91 +1,76 @@
-Movian mediaplayer
-==================
+Movian Multimedia Player
+=========================
 
 (c) 2006 - 2018 Lonelycoder AB
 
 [![Build status](https://doozer.io/badge/andoma/movian/buildstatus/master)](https://doozer.io/user/andoma/movian)
 
-For more information and latest versions, please visit:
+## Overview
 
-[https://movian.tv/](https://movian.tv/)
+Movian is a cross-platform multimedia player with sophisticated media playback capabilities, an extensible plugin architecture, and a modern OpenGL-based user interface. It supports audio, video, and streaming content across desktop, embedded, and mobile platforms.
 
-## How to build for Linux
+**Project Website:** [https://movian.tv/](https://movian.tv/)
 
-First you need to satisfy some dependencies (for Ubuntu 16.04.3 LTS)
+## Quick Start
 
-	sudo apt-get install libfreetype6-dev libfontconfig1-dev libxext-dev libgl1-mesa-dev libasound2-dev libasound2-dev libgtk2.0-dev libxss-dev libxxf86vm-dev libxv-dev libvdpau-dev yasm libpulse-dev libssl-dev curl libwebkitgtk-dev libsqlite3-dev libavahi-client-dev
+### Linux
+```bash
+./configure
+make -j4
+./build.linux/movian
+```
 
-Then you need to configure:
+### macOS
+```bash
+./configure
+make -j4
+./build.osx/Movian.app/Contents/MacOS/movian
+```
 
-	./configure
+### Raspberry Pi
+```bash
+./Autobuild.sh -t rpi -v 5.0.500
+```
 
-If your system lacks libwebkitgtk or some other lib you can configure like this:
+## Documentation
 
-	./configure --disable-webkit
+Complete documentation is available in the `docs/` directory:
 
-If any dependencies are missing the configure script will complain.
-You then have the option to disable that particular module/subsystem.
+- **[Overview](docs/overview.md)** - What Movian is, capabilities, and supported platforms
+- **[Repository Structure](docs/repository-structure.md)** - Understanding the codebase layout and module organization
+- **[Getting Started](docs/getting-started.md)** - Prerequisites, cloning, environment setup for Linux and macOS
+- **[Build Instructions](docs/build-instructions.md)** - Detailed build procedures for all platforms
+- **[Runtime Guide](docs/runtime.md)** - Launching, configuration, debugging, and troubleshooting
 
-	make
+## Supported Platforms
 
-Build the binary, after build the binary resides in `./build.linux/`.
-Thus, to start it, just type:
+**Desktop:** Linux, macOS, Windows (POSIX compatibility)  
+**Embedded:** PlayStation 3, Raspberry Pi, Sunxi, Android, iOS  
+**Specialized:** Google NaCl, custom platforms
 
-	./build.linux/movian
+## Key Features
 
-Settings are stored in `~/.hts/showtime`
+- Universal multimedia playback (FFmpeg/libav integration)
+- Network streaming (HLS, RTMP, BitTorrent, HTSP, Icecast, DVD)
+- Extensible plugin system (ECMAScript + native plugins)
+- Metadata integration (TMDB, TVDB, Last.fm, AirPlay)
+- Multi-language support (20+ localizations)
+- Advanced UI with multiple themes
 
-If you want to build with extra debugging options for development these options might be of interest:
+## Building for Different Targets
 
-	--cc=gcc-5 --extra-cflags=-fno-omit-frame-pointer --optlevel=g --sanitize=address --enable-bughunt
+See [Build Instructions](docs/build-instructions.md) for:
+- **Linux desktop builds** with debug/release options
+- **macOS** with framework integration and DMG distribution
+- **PlayStation 3** using PSL1GHT toolchain
+- **Raspberry Pi** cross-compilation via Autobuild
+- **Other platforms** (Android, iOS, Sunxi, NaCl)
 
+## Contributing
 
-## How to build for Mac OS X
+To contribute, start with the [Getting Started guide](docs/getting-started.md) and review the [Repository Structure](docs/repository-structure.md) to understand the codebase organization.
 
-To build for Mac OS X you need Xcode and yasm. Xcode should be installed from Mac Appstore.
+## License
 
-To install yasm, install [Brew](http://brew.sh/) and then
-
-	$ brew install yasm
-
-Now run configure
-
-	$ ./configure
-
-Or if you build for release
-
-	$ ./configure --release
-
-If configured successfully run:
-
-	$ make
-
-Run Movian binary from build directory
-
-	$ build.osx/Movian.app/Contents/MacOS/movian
-
-Note that in this case Movian loads all resources from current directory
-so this binary can't be run elsewhere.
-
-If you want a build that can be run as a normal Mac Application you shold do
-
-	$ make dist
-
-This will generate a DMG
-
-## How to build for PS3 with PSL1GHT
-
-$ ./Autobuild.sh -t ps3 -v 5.0.500
-
-## How to build for Raspberry Pi
-
-First you need to satisfy some dependencies (for Ubuntu 16.04.3 LTS 64bit):
-
-	sudo apt-get install git-core build-essential autoconf bison flex libelf-dev libtool pkg-config texinfo libncurses5-dev libz-dev python-dev libssl-dev libgmp3-dev ccache zip squashfs-tools
-
-$ ./Autobuild.sh -t rpi -v 5.0.500
-
-To update Movian on rpi with compiled one, enable Binreplace in settings:dev and issue:
-
-	curl --data-binary @build.rpi/showtime.sqfs http://rpi_ip_address:42000/api/replace
+See LICENSE file for licensing information.
 
