@@ -29,6 +29,17 @@ New to Movian? Start here:
 
 - **[Runtime & Configuration](runtime.md)** - Launching builds, configuration, debugging, and troubleshooting
 
+### Plugin Development
+
+- **[ECMAScript API v2 Reference](plugin-dev-api-v2.md)** - Complete API documentation for plugin development:
+  - Page and Item navigation
+  - Property system and reactive bindings
+  - Service management
+  - Settings and persistence
+  - HTTP/HTTPS networking
+  - SQLite database access
+  - All 90+ exported functions with examples
+
 ## Quick Reference
 
 ### Build Commands
@@ -80,7 +91,8 @@ docs/
 ├── repository-structure.md     # Directory organization and module guide
 ├── getting-started.md          # Setup and environment preparation
 ├── build-instructions.md       # Platform-specific build procedures
-└── runtime.md                  # Launching, configuration, debugging
+├── runtime.md                  # Launching, configuration, debugging
+└── plugin-dev-api-v2.md        # ECMAScript plugin API reference (90+ functions)
 ```
 
 ## By Use Case
@@ -98,8 +110,9 @@ docs/
 ### "I want to develop features or plugins"
 1. Complete [Getting Started](getting-started.md) setup
 2. Understand [Repository Structure](repository-structure.md)
-3. Review `plugin_examples/` directory for reference implementations
-4. Read [Runtime Guide](runtime.md) for debugging techniques
+3. Review the [ECMAScript API v2 Reference](plugin-dev-api-v2.md) for complete API documentation
+4. Review `plugin_examples/` directory for reference implementations
+5. Read [Runtime Guide](runtime.md) for debugging techniques
 
 ### "I'm troubleshooting a build or runtime issue"
 1. Check [Build Instructions](build-instructions.md) - "Common Build Issues" section
