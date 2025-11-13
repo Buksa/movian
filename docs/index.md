@@ -29,6 +29,14 @@ New to Movian? Start here:
 
 - **[Runtime & Configuration](runtime.md)** - Launching builds, configuration, debugging, and troubleshooting
 
+### Plugin Development
+
+- **[ECMAScript Plugin API v2 Documentation](plugin-dev-api-v2/00-introduction.md)** - Complete guide to building plugins
+  - [00 - Introduction](plugin-dev-api-v2/00-introduction.md) - Plugin system architecture overview
+  - [01 - Quick Start](plugin-dev-api-v2/01-quick-start.md) - Create your first plugin in 45–60 minutes
+  - [02 - Plugin Lifecycle](plugin-dev-api-v2/02-plugin-lifecycle.md) - Load, initialization, runtime, and cleanup phases
+  - [03 - 10 - Additional Topics (stubs)](plugin-dev-api-v2/03-page-routing-ui.md) - Page routing, HTTP, settings, advanced patterns, debugging, distribution, and more
+
 ## Quick Reference
 
 ### Build Commands
@@ -75,12 +83,24 @@ All Movian settings and caches are stored in:
 
 ```
 docs/
-├── index.md                    # This file - documentation overview
-├── overview.md                 # Project overview and capabilities
-├── repository-structure.md     # Directory organization and module guide
-├── getting-started.md          # Setup and environment preparation
-├── build-instructions.md       # Platform-specific build procedures
-└── runtime.md                  # Launching, configuration, debugging
+├── index.md                         # This file - documentation overview
+├── overview.md                      # Project overview and capabilities
+├── repository-structure.md          # Directory organization and module guide
+├── getting-started.md               # Setup and environment preparation
+├── build-instructions.md            # Platform-specific build procedures
+├── runtime.md                       # Launching, configuration, debugging
+└── plugin-dev-api-v2/               # Plugin development documentation
+    ├── 00-introduction.md           # Plugin system architecture
+    ├── 01-quick-start.md            # Quick start guide (45–60 min)
+    ├── 02-plugin-lifecycle.md       # Plugin lifecycle phases
+    ├── 03-page-routing-ui.md        # Page routing and UI (stub)
+    ├── 04-http-data.md              # HTTP and data fetching (stub)
+    ├── 05-settings-storage.md       # Settings and storage (stub)
+    ├── 06-advanced-patterns.md      # Advanced patterns (stub)
+    ├── 07-debugging-profiling.md    # Debugging and profiling (stub)
+    ├── 08-distribution-publishing.md # Distribution (stub)
+    ├── 09-api-reference.md          # API reference (stub)
+    └── 10-real-world-examples.md    # Real-world examples (stub)
 ```
 
 ## By Use Case
@@ -98,8 +118,9 @@ docs/
 ### "I want to develop features or plugins"
 1. Complete [Getting Started](getting-started.md) setup
 2. Understand [Repository Structure](repository-structure.md)
-3. Review `plugin_examples/` directory for reference implementations
-4. Read [Runtime Guide](runtime.md) for debugging techniques
+3. Start with [Plugin Development Guide](plugin-dev-api-v2/00-introduction.md) for API v2 plugins
+4. Review `plugin_examples/` directory for reference implementations
+5. Read [Runtime Guide](runtime.md) for debugging techniques
 
 ### "I'm troubleshooting a build or runtime issue"
 1. Check [Build Instructions](build-instructions.md) - "Common Build Issues" section
