@@ -31,6 +31,14 @@ New to Movian? Start here:
 
 ### Plugin Development
 
+- **[ECMAScript API v2 Reference](plugin-dev-api-v2.md)** - Complete API documentation for plugin development:
+  - Page and Item navigation
+  - Property system and reactive bindings
+  - Service management
+  - Settings and persistence
+  - HTTP/HTTPS networking
+  - SQLite database access
+  - All 90+ exported functions with examples
 - **[ECMAScript Plugin API v2 Documentation](plugin-dev-api-v2/00-introduction.md)** - Complete guide to building plugins
   - [00 - Introduction](plugin-dev-api-v2/00-introduction.md) - Plugin system architecture overview
   - [01 - Quick Start](plugin-dev-api-v2/01-quick-start.md) - Create your first plugin in 45–60 minutes
@@ -83,6 +91,13 @@ All Movian settings and caches are stored in:
 
 ```
 docs/
+├── index.md                    # This file - documentation overview
+├── overview.md                 # Project overview and capabilities
+├── repository-structure.md     # Directory organization and module guide
+├── getting-started.md          # Setup and environment preparation
+├── build-instructions.md       # Platform-specific build procedures
+├── runtime.md                  # Launching, configuration, debugging
+└── plugin-dev-api-v2.md        # ECMAScript plugin API reference (90+ functions)
 ├── index.md                         # This file - documentation overview
 ├── overview.md                      # Project overview and capabilities
 ├── repository-structure.md          # Directory organization and module guide
@@ -118,6 +133,7 @@ docs/
 ### "I want to develop features or plugins"
 1. Complete [Getting Started](getting-started.md) setup
 2. Understand [Repository Structure](repository-structure.md)
+3. Review the [ECMAScript API v2 Reference](plugin-dev-api-v2.md) for complete API documentation
 3. Start with [Plugin Development Guide](plugin-dev-api-v2/00-introduction.md) for API v2 plugins
 4. Review `plugin_examples/` directory for reference implementations
 5. Read [Runtime Guide](runtime.md) for debugging techniques
