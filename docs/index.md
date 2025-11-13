@@ -44,6 +44,19 @@ New to Movian? Start here:
   - [01 - Quick Start](plugin-dev-api-v2/01-quick-start.md) - Create your first plugin in 45–60 minutes
   - [02 - Plugin Lifecycle](plugin-dev-api-v2/02-plugin-lifecycle.md) - Load, initialization, runtime, and cleanup phases
   - [03 - 10 - Additional Topics (stubs)](plugin-dev-api-v2/03-page-routing-ui.md) - Page routing, HTTP, settings, advanced patterns, debugging, distribution, and more
+- **[Native Plugin Development](04-native-plugins.md)** - C/C++ plugin development with VMIR:
+  - LLVM bitcode compilation and VMIR architecture
+  - Native plugin API (file probing, audio decoding, protocol handlers)
+  - Build system with Clang, llvm-link, and opt
+  - Module registration and lifecycle management
+  - Performance-critical codecs and file format detection
+- **[Advanced Topics](05-advanced-topics.md)** - Advanced ECMAScript patterns and optimization:
+  - Async control flow (setTimeout, pagination, race conditions)
+  - Item hooks (context menus on media items)
+  - Subscription patterns (prop observers, lifecycle management)
+  - Performance optimization (caching, debouncing, memory management)
+  - Error handling and recovery (exceptions, zombie props, validation)
+  - Debugging strategies (logging, profiling, property inspection)
 
 ## Quick Reference
 
@@ -91,19 +104,15 @@ All Movian settings and caches are stored in:
 
 ```
 docs/
-├── index.md                    # This file - documentation overview
-├── overview.md                 # Project overview and capabilities
-├── repository-structure.md     # Directory organization and module guide
-├── getting-started.md          # Setup and environment preparation
-├── build-instructions.md       # Platform-specific build procedures
-├── runtime.md                  # Launching, configuration, debugging
-└── plugin-dev-api-v2.md        # ECMAScript plugin API reference (90+ functions)
 ├── index.md                         # This file - documentation overview
 ├── overview.md                      # Project overview and capabilities
 ├── repository-structure.md          # Directory organization and module guide
 ├── getting-started.md               # Setup and environment preparation
 ├── build-instructions.md            # Platform-specific build procedures
 ├── runtime.md                       # Launching, configuration, debugging
+├── plugin-dev-api-v2.md             # ECMAScript plugin API reference (90+ functions)
+├── 04-native-plugins.md             # Native C/C++ plugin development (VMIR, LLVM)
+├── 05-advanced-topics.md            # Advanced ECMAScript patterns and optimization
 └── plugin-dev-api-v2/               # Plugin development documentation
     ├── 00-introduction.md           # Plugin system architecture
     ├── 01-quick-start.md            # Quick start guide (45–60 min)
@@ -134,9 +143,11 @@ docs/
 1. Complete [Getting Started](getting-started.md) setup
 2. Understand [Repository Structure](repository-structure.md)
 3. Review the [ECMAScript API v2 Reference](plugin-dev-api-v2.md) for complete API documentation
-3. Start with [Plugin Development Guide](plugin-dev-api-v2/00-introduction.md) for API v2 plugins
-4. Review `plugin_examples/` directory for reference implementations
-5. Read [Runtime Guide](runtime.md) for debugging techniques
+4. Start with [Plugin Development Guide](plugin-dev-api-v2/00-introduction.md) for API v2 plugins
+5. Study [Advanced Topics](05-advanced-topics.md) for performance patterns and debugging
+6. For performance-critical code, see [Native Plugin Development](04-native-plugins.md)
+7. Review `plugin_examples/` directory for reference implementations
+8. Read [Runtime Guide](runtime.md) for debugging techniques
 
 ### "I'm troubleshooting a build or runtime issue"
 1. Check [Build Instructions](build-instructions.md) - "Common Build Issues" section
