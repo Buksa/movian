@@ -132,7 +132,7 @@ new page.Route(BASE_URL + 'item(\\d+)', function(page, itemNumber) {
 // See src/ecmascript/es_service.c for service creation
 var service = require('movian/service');
 
-new service.Service('helloVideoService', 'Hello Video', BASE_URL + 'start', 'video');
+service.create('Hello Video', BASE_URL + 'start', 'video');
 ```
 
 ### Code Walkthrough
