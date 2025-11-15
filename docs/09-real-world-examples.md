@@ -24,19 +24,19 @@ Movian's plugin ecosystem follows several established patterns. Let's analyze th
 All plugins follow a similar initialization pattern:
 
 ```javascript
-// Standard plugin wrapper pattern
-(function(plugin) {
-  var BASE_URI = 'myplugin:';
-  
-  // Service registration - appears on home screen
-  plugin.createService('My Plugin', BASE_URI, 'video', true);
-  
-  // Route handlers
-  plugin.addURI(BASE_URI, function(page) {
-    // Main page logic
-  });
-  
-})(this);
+// Standard plugin initialization pattern (API v2)
+var page = require('movian/page');
+var service = require('movian/service');
+
+var BASE_URI = 'myplugin:';
+
+// Service registration - appears on home screen
+new service.Service('myPluginService', 'My Plugin', BASE_URI + 'start', 'video');
+
+// Route handlers
+new page.Route(BASE_URI + 'start', function(page) {
+  // Main page logic
+});
 ```
 
 This pattern is evident in all plugin examples in `plugin_examples/`. The service registration creates the entry point on Movian's home screen.
@@ -46,8 +46,10 @@ This pattern is evident in all plugin examples in `plugin_examples/`. The servic
 Movian uses a URI-based routing system that allows for deep linking:
 
 ```javascript
-// From plugin_examples/music/example_music.js
-plugin.addURI(U, function(page) {
+// From plugin_examples/music/example_music.js (updated to API v2)
+var page = require('movian/page');
+
+new page.Route('example:music:', function(page) {
   page.type = "directory";
   page.metadata.title = "Music examples";
   // ... page content
@@ -90,56 +92,55 @@ This minimal manifest demonstrates the basic requirements:
 ### Implementation Analysis
 
 ```javascript
-// From plugin_examples/music/example_music.js
-(function(plugin) {
+// From plugin_examples/music/example_music.js (updated to API v2)
+var page = require('movian/page');
+var service = require('movian/service');
 
-  var U = "example:music:";
+var U = "example:music:";
 
-  // Register a service (will appear on home page)
-  plugin.createService("Music example", U, "other", true);
+// Register a service (will appear on home page)
+new service.Service('musicExampleService', "Music example", U, "other");
 
-  // Add a responder to the registered URI
-  plugin.addURI(U, function(page) {
-    page.type = "directory";
-    page.metadata.title = "Music examples";
+// Add a responder to the registered URI
+new page.Route(U, function(page) {
+  page.type = "directory";
+  page.metadata.title = "Music examples";
 
-    var B = "http://www.lonelycoder.com/music/";
+  var B = "http://www.lonelycoder.com/music/";
 
-    page.appendItem(B + "Hybris_Intro-remake.mp3", "audio", {
-      title: "Remix of Hybris (The Amiga Game)",
-      artist: "Andreas Öman"
-    });
-
-    page.appendItem(B + "Russian_Ravers_Rave.mp3", "audio", {
-      title: "Russian Ravers Rave",
-      artist: "Andreas Öman"
-    });
-
-    page.appendItem(B + "spaceships_and_robots_preview.mp3", "audio", {
-      title: "Spaceships and Robots",
-      artist: "Andreas Öman"
-    });
-
-    page.appendItem("example:music:stream", "stream", {
-      title: "Shoutcast test stream"
-    });
+  page.appendItem(B + "Hybris_Intro-remake.mp3", "audio", {
+    title: "Remix of Hybris (The Amiga Game)",
+    artist: "Andreas Öman"
   });
 
-  plugin.addURI("example:music:stream", function(page) {
-    page.type = "stream";
-    page.metadata.title = "Shoutcast stream test";
-
-    page.appendItem("http://mp3.shoutcast.com:8018", "audio", {
-      title: "Shoutcast test"
-    });
+  page.appendItem(B + "Russian_Ravers_Rave.mp3", "audio", {
+    title: "Russian Ravers Rave",
+    artist: "Andreas Öman"
   });
 
-})(this);
+  page.appendItem(B + "spaceships_and_robots_preview.mp3", "audio", {
+    title: "Spaceships and Robots",
+    artist: "Andreas Öman"
+  });
+
+  page.appendItem("example:music:stream", "stream", {
+    title: "Shoutcast test stream"
+  });
+});
+
+new page.Route("example:music:stream", function(page) {
+  page.type = "stream";
+  page.metadata.title = "Shoutcast stream test";
+
+  page.appendItem("http://mp3.shoutcast.com:8018", "audio", {
+    title: "Shoutcast test"
+  });
+});
 ```
 
 ### Key Architectural Insights
 
-1. **Service Registration**: `plugin.createService()` creates the home screen entry
+1. **Service Registration**: `new service.Service()` creates the home screen entry
 2. **URI Base Pattern**: Using a base URI (`U`) for consistency
 3. **Multiple Routes**: Demonstrates handling different content types
 4. **Content Types**: Shows both local audio files and streaming content
@@ -168,54 +169,69 @@ plugin_examples/settings/
 ### Settings Implementation
 
 ```javascript
-// From plugin_examples/settings/settings.js
-(function(plugin) {
-  var U = "example:settings:";
+// From plugin_examples/settings/example_settings.js (updated to API v2)
+var page = require('movian/page');
+var service = require('movian/service');
+var settings = require('movian/settings');
 
-  plugin.createService("Settings example", U, "other", true);
+var U = "example:settings:";
 
-  plugin.addURI(U, function(page) {
-    page.type = "directory";
-    page.metadata.title = "Settings example";
+new service.Service('settingsExampleService', "Settings example", U, "other");
 
-    var settings = require('movian/settings');
+new page.Route(U, function(page) {
+  page.type = "directory";
+  page.metadata.title = "Settings example";
 
-    // Create a settings group
-    var s = settings.createGroup("example", {
-      title: "Example settings",
-      description: "Settings for the example plugin"
-    });
+  // Create settings using API v2 pattern
+  var s = new settings.globalSettings("example", "Example settings", null, 
+    "Settings for the example plugin");
 
-    // Create a setting
-    var mySetting = settings.createSetting(s, "string", "mysetting", {
-      title: "My setting",
-      type: "text"
-    });
+  // Create a boolean setting
+  var boolSetting = s.createBool('v1', 'A boolean setting', true, function(val) {
+    print("Bool is now", val);
+  });
 
-    page.appendItem("dummy", "separator", {
-      title: "Current settings value"
-    });
+  // Create a string setting  
+  var stringSetting = s.createString('v2', 'A string setting', 'default', function(val) {
+    print("String is now", val);
+  });
 
-    page.appendItem("dummy", "action", {
-      title: "Value is: " + mySetting.value,
+  // Create an integer setting
+  var intSetting = s.createInt('v3', 'An integer setting', 42, -50, 50, 1, 'px', function(val) {
+    print("Int is now", val);
+  });
+
+  // Create a divider
+  s.createDivider("Advanced Settings");
+
+  // Create an action
+  s.createAction('action', 'Click me', function() {
+    print("Action clicked!");
+  });
+
+  page.appendItem("dummy", "separator", {
+    title: "Settings configured"
+  });
+
+  page.appendItem("dummy", "action", {
+      title: "Value is: " + stringSetting.value,
 
       callback: function() {
-        mySetting.value = "hello world";
+        stringSetting.value = "hello world";
         page.entries = 0;
         page.flush();
-        plugin.addURI(U, arguments.callee);
+        // In API v2, settings are automatically updated
       }
     });
 
     page.appendItem("dummy", "action", {
       title: "Open settings for this plugin",
       callback: function() {
-        plugin.openSettings();
+        // In API v2, settings are accessible via the global settings tree
+        print("Settings configured via global settings tree");
       }
     });
   });
-
-})(this);
 ```
 
 ### Settings Architecture
@@ -375,37 +391,35 @@ Item hooks allow plugins to add context menu items to media items:
 ### Implementation Analysis
 
 ```javascript
-// From plugin_examples/itemhook/itemhook.js
-(function(plugin) {
+// From plugin_examples/itemhook/itemhook.js (updated to API v2)
+var page = require('movian/page');
+var service = require('movian/service');
+var itemhook = require('movian/itemhook');
 
-  var itemhook = require('movian/itemhook');
+itemhook.create({
+  id: 'com.example.itemhook',
+  title: 'Example item hook',
+  description: 'Adds an item to the example hook',
+  icon: 'itemhook.png',
+  handler: function(item) {
+    console.log('Item hook called with item:', item);
+  }
+});
 
-  itemhook.create({
-    id: 'com.example.itemhook',
-    title: 'Example item hook',
-    description: 'Adds an item to the example hook',
-    icon: 'itemhook.png',
-    handler: function(item) {
-      console.log('Item hook called with item:', item);
-    }
+new service.Service('itemHookExampleService', 'Item hook example', 'itemhooktest:', 'other');
+
+new page.Route('itemhooktest:', function(page) {
+  page.type = 'directory';
+  page.metadata.title = 'Item hook test';
+
+  page.appendItem('http://www.lonelycoder.com/music/Hybris_Intro-remake.mp3', 'audio', {
+    title: 'Test audio item'
   });
 
-  plugin.createService('Item hook example', 'itemhooktest:', 'other', true);
-
-  plugin.addURI('itemhooktest:', function(page) {
-    page.type = 'directory';
-    page.metadata.title = 'Item hook test';
-
-    page.appendItem('http://www.lonelycoder.com/music/Hybris_Intro-remake.mp3', 'audio', {
-      title: 'Test audio item'
-    });
-
-    page.appendItem('http://www.lonelycoder.com/music/Russian_Ravers_Rave.mp3', 'audio', {
-      title: 'Test audio item 2'
-    });
+  page.appendItem('http://www.lonelycoder.com/music/Russian_Ravers_Rave.mp3', 'audio', {
+    title: 'Test audio item 2'
   });
-
-})(this);
+});
 ```
 
 ### Item Hook Architecture
@@ -610,38 +624,36 @@ The video scrobbling example demonstrates integration with external services:
 ### Implementation Analysis
 
 ```javascript
-// From plugin_examples/videoscrobbling/videoscrobbling.js
-(function(plugin) {
+// From plugin_examples/videoscrobbling/videoscrobbling.js (updated to API v2)
+var page = require('movian/page');
+var service = require('movian/service');
+var scrobbler = require('movian/videoscrobbler');
 
-  var scrobbler = require('movian/videoscrobbler');
+scrobbler.create({
+  id: 'com.example.videoscrobbler',
+  title: 'Example video scrobbler',
+  description: 'Scrobbles to example.com',
+  icon: 'scrobbler.png',
 
-  scrobbler.create({
-    id: 'com.example.videoscrobbler',
-    title: 'Example video scrobbler',
-    description: 'Scrobbles to example.com',
-    icon: 'scrobbler.png',
+  handler: function(item, progress) {
+    console.log('Scrobbling:', item.title, 'Progress:', progress);
+  }
+});
 
-    handler: function(item, progress) {
-      console.log('Scrobbling:', item.title, 'Progress:', progress);
-    }
+new service.Service('videoScrobblerExampleService', 'Video scrobbler example', 'scrobblertest:', 'other');
+
+new page.Route('scrobblertest:', function(page) {
+  page.type = 'directory';
+  page.metadata.title = 'Video scrobbler test';
+
+  page.appendItem('http://www.lonelycoder.com/music/Hybris_Intro-remake.mp3', 'audio', {
+    title: 'Test audio item 1'
   });
 
-  plugin.createService('Video scrobbler example', 'scrobblertest:', 'other', true);
-
-  plugin.addURI('scrobblertest:', function(page) {
-    page.type = 'directory';
-    page.metadata.title = 'Video scrobbler test';
-
-    page.appendItem('http://www.lonelycoder.com/music/Hybris_Intro-remake.mp3', 'audio', {
-      title: 'Test audio item 1'
-    });
-
-    page.appendItem('http://www.lonelycoder.com/music/Russian_Ravers_Rave.mp3', 'audio', {
-      title: 'Test audio item 2'
-    });
+  page.appendItem('http://www.lonelycoder.com/music/Russian_Ravers_Rave.mp3', 'audio', {
+    title: 'Test audio item 2'
   });
-
-})(this);
+});
 ```
 
 ### Scrobbler Architecture
@@ -714,44 +726,38 @@ The web popup example demonstrates web integration:
 ### Implementation Analysis
 
 ```javascript
-// From plugin_examples/webpopupplugin/webpopupplugin.js
-(function(plugin) {
+// From plugin_examples/webpopupplugin/webpopupplugin.js (updated to API v2)
+var page = require('movian/page');
+var service = require('movian/service');
 
-  plugin.createService('Web popup example', 'webpopuptest:', 'other', true);
+new service.Service('webPopupExampleService', 'Web popup example', 'webpopuptest:', 'other');
 
-  plugin.addURI('webpopuptest:', function(page) {
-    page.type = 'directory';
-    page.metadata.title = 'Web popup test';
+new page.Route('webpopuptest:', function(page) {
+  page.type = 'directory';
+  page.metadata.title = 'Web popup test';
 
-    page.appendItem('webpopuptest:google', 'directory', {
-      title: 'Open Google'
-    });
-
-    page.appendItem('webpopuptest:github', 'directory', {
-      title: 'Open GitHub'
-    });
+  page.appendItem('webpopuptest:google', 'directory', {
+    title: 'Open Google'
   });
 
-  plugin.addURI('webpopuptest:(.*)', function(page, site) {
-    page.type = 'directory';
-    page.metadata.title = 'Opening ' + site;
-
-    var popup = plugin.popup('https://' + site + '.com', {
-      title: site + ' website',
-      width: 800,
-      height: 600
-    });
-
-    popup.on('close', function() {
-      console.log('Popup closed');
-    });
-
-    popup.on('load', function() {
-      console.log('Popup loaded');
-    });
+  page.appendItem('webpopuptest:github', 'directory', {
+    title: 'Open GitHub'
   });
+});
 
-})(this);
+new page.Route('webpopuptest:(.*)', function(page, site) {
+  page.type = 'directory';
+  page.metadata.title = 'Opening ' + site;
+
+    var popup = require('native/popup').webpopup('https://' + site + '.com', 
+      site + ' website', 'http://localhost:42000/done');
+
+    if(popup.result == 'trapped') {
+      console.log('Popup completed successfully');
+    } else {
+      console.log('Popup result:', popup.result);
+    }
+  });
 ```
 
 ### Web Popup Architecture

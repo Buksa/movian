@@ -98,44 +98,45 @@ Home → Services → Plugin → Category → Item → Details
 ```
 
 ```javascript
-// Implement hierarchical navigation
-(function(plugin) {
-  var BASE = 'myplugin:';
+// Implement hierarchical navigation (API v2)
+var page = require('movian/page');
+var service = require('movian/service');
+
+var BASE = 'myplugin:';
+
+// Level 1: Service (appears on home screen)
+new service.Service('myPluginService', 'My Plugin', BASE, 'video');
+
+// Level 2: Categories
+new page.Route(BASE, function(page) {
+  page.type = 'directory';
+  page.metadata.title = 'My Plugin';
   
-  // Level 1: Service (appears on home screen)
-  plugin.createService('My Plugin', BASE, 'video', true);
-  
-  // Level 2: Categories
-  plugin.addURI(BASE, function(page) {
-    page.type = 'directory';
-    page.metadata.title = 'My Plugin';
-    
-    page.appendItem(BASE + 'movies', 'directory', {
-      title: 'Movies',
-      icon: 'movie'
-    });
-    
-    page.appendItem(BASE + 'series', 'directory', {
-      title: 'TV Series',
-      icon: 'tv'
-    });
+  page.appendItem(BASE + 'movies', 'directory', {
+    title: 'Movies',
+    icon: 'movie'
   });
   
-  // Level 3: Content lists
-  plugin.addURI(BASE + 'movies', function(page) {
-    page.type = 'directory';
-    page.metadata.title = 'Movies';
-    
-    loadMovies(function(movies) {
-      movies.forEach(function(movie) {
-        page.appendItem(movie.url, 'video', {
-          title: movie.title,
-          year: movie.year
-        });
+  page.appendItem(BASE + 'series', 'directory', {
+    title: 'TV Series',
+    icon: 'tv'
+  });
+});
+
+// Level 3: Content lists
+new page.Route(BASE + 'movies', function(page) {
+  page.type = 'directory';
+  page.metadata.title = 'Movies';
+  
+  loadMovies(function(movies) {
+    movies.forEach(function(movie) {
+      page.appendItem(movie.url, 'video', {
+        title: movie.title,
+        year: movie.year
       });
     });
   });
-})(this);
+});
 ```
 
 ### Breadcrumb Navigation
@@ -144,13 +145,13 @@ Movian automatically provides breadcrumb navigation. Maintain clear titles:
 
 ```javascript
 // Good: Clear, hierarchical titles
-plugin.addURI('myplugin:category:(.*)', function(page, category) {
+new page.Route('myplugin:category:(.*)', function(page, category) {
   page.metadata.title = 'My Plugin > ' + category; // Shows navigation path
 });
 
 // Better: Use localized titles
 var localized = require('movian/localization');
-plugin.addURI('myplugin:category:(.*)', function(page, category) {
+new page.Route('myplugin:category:(.*)', function(page, category) {
   page.metadata.title = localized.t('myplugin.title') + ' > ' + 
                         localized.t('category.' + category);
 });
@@ -587,31 +588,25 @@ function adjustLayoutForRTL() {
 Use Movian's settings system for plugin configuration. Settings are handled by `res/ecmascript/modules/movian/settings.js`:
 
 ```javascript
-// From res/ecmascript/modules/movian/settings.js
+// From res/ecmascript/modules/movian/settings.js (API v2)
 var settings = require('movian/settings');
 
 // Create settings group
-var pluginSettings = settings.createGroup('myplugin', {
-  title: 'My Plugin Settings',
-  description: 'Configure My Plugin behavior'
-});
+var pluginSettings = new settings.globalSettings('myplugin', 'My Plugin Settings', null,
+  'Configure My Plugin behavior');
 
 // Add settings
-var qualitySetting = settings.createSetting(pluginSettings, 'string', 'quality', {
-  title: 'Video Quality',
-  type: 'select',
-  options: [
-    { value: 'auto', title: 'Auto' },
-    { value: '360p', title: '360p' },
-    { value: '720p', title: '720p' },
-    { value: '1080p', title: '1080p' }
-  ],
-  default: 'auto'
+var qualitySetting = pluginSettings.createMultiOpt('quality', 'Video Quality', [
+  ['auto', 'Auto', true],
+  ['360p', '360p', false],
+  ['720p', '720p', false],
+  ['1080p', '1080p', false]
+], function(value) {
+  console.log('Quality changed to:', value);
 });
 
-var autoPlaySetting = settings.createSetting(pluginSettings, 'bool', 'autoPlay', {
-  title: 'Auto-play next episode',
-  default: true
+var autoPlaySetting = pluginSettings.createBool('autoPlay', 'Auto-play next episode', true, function(value) {
+  console.log('Auto-play changed to:', value);
 });
 ```
 

@@ -253,11 +253,11 @@ done
 While Movian doesn't have a formal testing framework, you can create test pages:
 
 ```javascript
-// test.js - Create a test route for your plugin
-(function(plugin) {
-  
-  // Test route for various plugin functions
-  plugin.addURI('myplugin:test', function(page) {
+// test.js - Create a test route for your plugin (API v2)
+var page = require('movian/page');
+
+// Test route for various plugin functions
+new page.Route('myplugin:test', function(page) {
     page.type = 'directory';
     page.metadata.title = 'Plugin Tests';
     
@@ -311,8 +311,7 @@ While Movian doesn't have a formal testing framework, you can create test pages:
       title: 'Property test: ' + testProp.value
     });
   }
-  
-})(this);
+});
 ```
 
 ### Integration Testing
