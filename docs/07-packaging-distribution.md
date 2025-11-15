@@ -219,18 +219,19 @@ EOF
 
 # Create main plugin file
 cat > main.js << EOF
-(function(plugin) {
-  plugin.createService("My Plugin", "myplugin:start", "video", true);
+var page = require('movian/page');
+var service = require('movian/service');
+
+new service.Service('myPluginService', "My Plugin", "myplugin:start", "video");
+
+new page.Route("myplugin:start", function(page) {
+  page.type = "directory";
+  page.metadata.title = "My Plugin";
   
-  plugin.addURI("myplugin:start", function(page) {
-    page.type = "directory";
-    page.metadata.title = "My Plugin";
-    
-    page.appendItem("http://example.com/video.mp4", "video", {
-      title: "Sample Video"
-    });
+  page.appendItem("http://example.com/video.mp4", "video", {
+    title: "Sample Video"
   });
-})(this);
+});
 EOF
 
 # Create ZIP package
