@@ -57,6 +57,34 @@ New to Movian? Start here:
   - Performance optimization (caching, debouncing, memory management)
   - Error handling and recovery (exceptions, zombie props, validation)
   - Debugging strategies (logging, profiling, property inspection)
+- **[Development Workflow](06-development-workflow.md)** - Complete plugin development lifecycle:
+  - Environment setup and development tools
+  - Loading development plugins with `-p` flag
+  - Debugging techniques and console logging
+  - Hot reload and iterative development
+  - Testing strategies and validation
+  - Using plugin examples as templates
+- **[Packaging & Distribution](07-packaging-distribution.md)** - Plugin packaging and deployment:
+  - Plugin package structure and ZIP format
+  - Manifest requirements and metadata
+  - Version management and compatibility checking
+  - Creating plugin repositories
+  - Distribution methods and security considerations
+  - Repository management and updates
+- **[UX Conventions](08-ux-conventions.md)** - User experience guidelines:
+  - Design principles and navigation paradigms
+  - Page layout and standard item types
+  - Property system integration
+  - Iconography and visual design
+  - Localization and accessibility
+  - Settings integration and responsive design
+- **[Real-world Examples](09-real-world-examples.md)** - Practical plugin implementations:
+  - Music plugin deep dive with architecture analysis
+  - Settings plugin patterns and configuration
+  - Async pagination and lazy loading
+  - Item hook integration and context menus
+  - Video scrobbling and web integration
+  - Common architectural patterns and performance optimization
 
 ## Quick Reference
 
@@ -113,6 +141,10 @@ docs/
 ├── plugin-dev-api-v2.md             # ECMAScript plugin API reference (90+ functions)
 ├── 04-native-plugins.md             # Native C/C++ plugin development (VMIR, LLVM)
 ├── 05-advanced-topics.md            # Advanced ECMAScript patterns and optimization
+├── 06-development-workflow.md        # Complete plugin development lifecycle
+├── 07-packaging-distribution.md     # Plugin packaging and deployment guide
+├── 08-ux-conventions.md             # User experience guidelines and best practices
+├── 09-real-world-examples.md        # Practical plugin implementations and patterns
 └── plugin-dev-api-v2/               # Plugin development documentation
     ├── 00-introduction.md           # Plugin system architecture
     ├── 01-quick-start.md            # Quick start guide (45–60 min)
@@ -144,10 +176,14 @@ docs/
 2. Understand [Repository Structure](repository-structure.md)
 3. Review the [ECMAScript API v2 Reference](plugin-dev-api-v2.md) for complete API documentation
 4. Start with [Plugin Development Guide](plugin-dev-api-v2/00-introduction.md) for API v2 plugins
-5. Study [Advanced Topics](05-advanced-topics.md) for performance patterns and debugging
-6. For performance-critical code, see [Native Plugin Development](04-native-plugins.md)
-7. Review `plugin_examples/` directory for reference implementations
-8. Read [Runtime Guide](runtime.md) for debugging techniques
+5. Follow [Development Workflow](06-development-workflow.md) for setup, debugging, and testing
+6. Study [Advanced Topics](05-advanced-topics.md) for performance patterns and debugging
+7. Learn [UX Conventions](08-ux-conventions.md) for consistent user interface design
+8. Review [Real-world Examples](09-real-world-examples.md) for practical implementations
+9. For performance-critical code, see [Native Plugin Development](04-native-plugins.md)
+10. Use [Packaging & Distribution](07-packaging-distribution.md) for deployment
+11. Review `plugin_examples/` directory for reference implementations
+12. Read [Runtime Guide](runtime.md) for debugging techniques
 
 ### "I'm troubleshooting a build or runtime issue"
 1. Check [Build Instructions](build-instructions.md) - "Common Build Issues" section
