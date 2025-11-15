@@ -146,7 +146,7 @@ Internally, this invokes [es_route_create()](../../src/ecmascript/es_route.c#L10
 
 ### 2.4 Service Registration
 
-Services are created via `new service.Service()`, which calls [es_service_create()](../../src/ecmascript/es_service.c#L108) (line 108):
+Services are created via `service.create()`, which calls [es_service_create()](../../src/ecmascript/es_service.c#L108) (line 108):
 
 - Creates a service object visible in Movian's UI
 - Links it to the plugin
@@ -315,10 +315,14 @@ Always clean up resources in your plugin:
 
 ```javascript
 // ✅ Good: Destroy resources when done
-var service = new service.Service(...);
-service.destroy();  // Unregisters from UI
+var service = require('movian/service');
+var s = service.create('My Service', 'example:start', 'video');
+s.destroy();  // Unregisters from UI
 
-var route = new page.Route(...);
+var page = require('movian/page');
+var route = new page.Route('example:start', function(page) {
+  // Route handler
+});
 route.destroy();    // Unregisters route handler
 ```
 
@@ -331,7 +335,7 @@ Wrap asynchronous operations in try-catch:
 new page.Route('example:test', function(page) {
   try {
     var http = require('movian/http');
-    var data = http.httpGet(url);
+    var data = http.request(url);
     // Process data
   } catch(e) {
     page.error("Failed to load data: " + e);

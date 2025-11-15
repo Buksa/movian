@@ -24,7 +24,7 @@ Complete API documentation for all Movian plugin modules, native functions, and 
 
 - **movian/http** – HTTP client
   - Source: `res/ecmascript/modules/movian/http.js`
-  - Functions: `httpGet()`, `httpPost()`, etc.
+  - Functions: `request()`
 
 - **movian/sqlite** – SQLite database
   - Source: `res/ecmascript/modules/movian/sqlite.js`
