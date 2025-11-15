@@ -2023,7 +2023,7 @@ Complete example using multiple modules:
 | **service** | service.create() | ✓ | es_service.c |
 | **service** | service.enabled (property) | ✓ | service.js |
 | **service** | service.destroy() | ✓ | service.js |
-| **settings** | plugin.createSettings() | ✓ | settings.js |
+| **settings** | settings.globalSettings() | ✓ | settings.js |
 | **settings** | group.createBool() | ✓ | settings.js |
 | **settings** | group.createString() | ✓ | settings.js |
 | **settings** | group.createInt() | ✓ | settings.js |
