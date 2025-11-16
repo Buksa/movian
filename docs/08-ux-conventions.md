@@ -23,7 +23,9 @@ Movian plugins should follow established patterns to provide a consistent user e
 
 ```javascript
 // Good: Follows established patterns
-plugin.addURI('myplugin:start', function(page) {
+var page = require('movian/page');
+
+new page.Route('myplugin:start', function(page) {
   page.type = 'directory';
   page.metadata.title = 'My Plugin';
   
@@ -44,7 +46,9 @@ Show information progressively to avoid overwhelming users:
 
 ```javascript
 // Good: Start with overview, drill down to details
-plugin.addURI('myplugin:category:(.*)', function(page, category) {
+var page = require('movian/page');
+
+new page.Route('myplugin:category:(.*)', function(page, category) {
   page.type = 'directory';
   page.metadata.title = category + ' Videos';
   
@@ -58,7 +62,7 @@ plugin.addURI('myplugin:category:(.*)', function(page, category) {
 });
 
 // Detailed view when user selects item
-plugin.addURI('myplugin:video:(.*)', function(page, videoId) {
+new page.Route('myplugin:video:(.*)', function(page, videoId) {
   // Show full details, cast, reviews, etc.
 });
 ```
@@ -105,7 +109,7 @@ var service = require('movian/service');
 var BASE = 'myplugin:';
 
 // Level 1: Service (appears on home screen)
-new service.Service('myPluginService', 'My Plugin', BASE, 'video');
+service.create('My Plugin', BASE, 'video');
 
 // Level 2: Categories
 new page.Route(BASE, function(page) {
@@ -163,7 +167,9 @@ Support deep linking to specific content:
 
 ```javascript
 // Support direct links to content
-plugin.addURI('myplugin:video:(.*):(.*)', function(page, videoId, title) {
+var page = require('movian/page');
+
+new page.Route('myplugin:video:(.*):(.*)', function(page, videoId, title) {
   // Direct access to specific video
   loadVideo(videoId, function(video) {
     page.appendItem(video.url, 'video', {
@@ -520,13 +526,15 @@ Movian supports localization through language files in the `lang/` directory. Ea
 
 ```javascript
 // Use Movian's localization system
+var page = require('movian/page');
+
 var _ = function(str) {
   // Movian provides _() function for localization
   return _(str); // Will be replaced with localized string
 };
 
 // In your plugin
-plugin.addURI('myplugin:start', function(page) {
+new page.Route('myplugin:start', function(page) {
   page.type = 'directory';
   page.metadata.title = _('My Plugin'); // Will be localized
   
