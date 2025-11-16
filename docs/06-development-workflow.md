@@ -281,16 +281,16 @@ new page.Route('myplugin:test', function(page) {
     });
     
     // Test GET request
-    http.request('https://httpbin.org/get', function(response) {
-      if (response.status === 200) {
+    http.request('https://httpbin.org/get', {}, function(err, response) {
+      if (!err && response.statuscode === 200) {
         page.appendItem('dummy', 'video', {
           title: '✓ GET request successful',
-          description: 'Status: ' + response.status
+          description: 'Status: ' + response.statuscode
         });
       } else {
         page.appendItem('dummy', 'video', {
           title: '✗ GET request failed',
-          description: 'Status: ' + response.status
+          description: 'Error: ' + (err ? err.message : response.statuscode)
         });
       }
     });
@@ -355,8 +355,12 @@ var perf = {
 
 // Usage example
 perf.start('http-request');
-http.request(url, function(response) {
+http.request(url, {}, function(err, response) {
   perf.end('http-request');
+  if(err) {
+    console.error('HTTP request failed:', err);
+    return;
+  }
   // Process response
 });
 ```
@@ -370,7 +374,7 @@ Movian provides several example plugins in `plugin_examples/`:
 The `plugin_examples/music/` directory demonstrates basic plugin structure:
 
 ```json
-// plugin_examples/music/plugin.json
+// plugin.json
 {
   "type": "ecmascript",
   "id": "example_music",
@@ -378,30 +382,33 @@ The `plugin_examples/music/` directory demonstrates basic plugin structure:
 }
 ```
 
+**API v2 Implementation:**
+
 ```javascript
-// plugin_examples/music/example_music.js
-(function(plugin) {
-  var U = "example:music:";
+// example_music.js (API v2)
+var service = require('movian/service');
+var page = require('movian/page');
 
-  // Register a service (will appear on home page)
-  plugin.createService("Music example", U, "other", true);
+// Register a service (will appear on home page)
+service.create("Music example", "example:music:start", "other");
 
-  // Add a responder to the registered URI
-  plugin.addURI(U, function(page) {
-    page.type = "directory";
-    page.metadata.title = "Music examples";
+// Add a route handler
+new page.Route("example:music:start", function(page) {
+  page.type = "directory";
+  page.metadata.title = "Music examples";
 
-    var B = "http://www.lonelycoder.com/music/";
+  var B = "http://www.lonelycoder.com/music/";
 
-    page.appendItem(B + "Hybris_Intro-remake.mp3", "audio", {
-      title: "Remix of Hybris (The Amiga Game)",
-      artist: "Andreas Öman"
-    });
-    
-    // ... more items
+  page.appendItem(B + "Hybris_Intro-remake.mp3", "audio", {
+    title: "Remix of Hybris (The Amiga Game)",
+    artist: "Andreas Öman"
   });
-})(this);
+  
+  page.loading = false;
+});
 ```
+
+**Note:** The actual `plugin_examples/music/` directory contains API v1 code. The example above shows the API v2 equivalent.
 
 ### Loading Examples
 

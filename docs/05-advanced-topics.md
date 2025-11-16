@@ -76,23 +76,25 @@ clearInterval(interval);  // Stop repeating
 **Example: Retry with Exponential Backoff**
 
 ```javascript
+var http = require('movian/http');
+
 function fetchWithRetry(url, maxRetries, callback) {
   var retries = 0;
   
   function attempt() {
-    var req = require('showtime').httpReq(url);
-    req.success = function(response) {
-      callback(null, response);
-    };
-    req.failure = function(error) {
-      if(retries++ < maxRetries) {
-        var delay = Math.min(1000 * Math.pow(2, retries), 30000);  // Cap at 30s
-        console.log("Retry " + retries + " in " + delay + "ms");
-        setTimeout(attempt, delay);
+    http.request(url, {}, function(err, response) {
+      if(err || response.statuscode >= 400) {
+        if(retries++ < maxRetries) {
+          var delay = Math.min(1000 * Math.pow(2, retries), 30000);  // Cap at 30s
+          console.log("Retry " + retries + " in " + delay + "ms");
+          setTimeout(attempt, delay);
+        } else {
+          callback(new Error("Max retries exceeded"));
+        }
       } else {
-        callback(new Error("Max retries exceeded"));
+        callback(null, response);
       }
-    };
+    });
   }
   
   attempt();
@@ -212,24 +214,28 @@ new page.Searcher('MyApp', 'icon.png', function(page, query) {
 });
 ```
 
-**Alternative: Abort HTTP requests**
+**Alternative: Use cancellation tokens for HTTP requests**
 
 ```javascript
-var currentRequest = null;
+var http = require('movian/http');
+var currentToken = null;
 
 function search(page, query) {
-  if(currentRequest) {
-    currentRequest.abort();  // Cancel pending request
-  }
+  var token = currentToken = {};  // New token cancels previous requests
   
-  currentRequest = http.request(url, {
-    method: 'GET',
-    headers: {'Accept': 'application/json'}
-  });
-  
-  currentRequest.then(function(response) {
+  http.request('https://api.example.com/search?q=' + encodeURIComponent(query), {}, function(err, response) {
+    if(token !== currentToken) return;  // Cancelled - ignore results
+    
+    if(err) {
+      console.error("Search failed:", err);
+      return;
+    }
+    
     // Process results...
-    currentRequest = null;
+    var data = JSON.parse(response.toString());
+    data.results.forEach(function(item) {
+      page.appendItem(item.url, 'video', {title: item.title});
+    });
   });
 }
 ```
@@ -275,6 +281,8 @@ hook.destroy();
 Filter hooks by content type:
 
 ```javascript
+var itemhook = require('movian/itemhook');
+
 itemhook.create({
   title: "Show audio details",
   itemtype: "audio",
@@ -282,7 +290,7 @@ itemhook.create({
     var msg = "Title: " + item.metadata.title + "\n" +
               "Artist: " + item.metadata.artist + "\n" +
               "Duration: " + item.metadata.duration;
-    showtime.message(msg, true, false);
+    console.log(msg);
   }
 });
 ```
@@ -301,6 +309,9 @@ itemhook.create({
 **Opening custom pages:**
 
 ```javascript
+var itemhook = require('movian/itemhook');
+var page = require('movian/page');
+
 itemhook.create({
   title: "Detailed view",
   handler: function(item, nav) {
@@ -335,29 +346,28 @@ new page.Route('myapp:details:(.*)', function(page, jsonStr) {
 **Auto-cleanup pattern:**
 
 ```javascript
-(function(plugin) {
-  var hooks = [];
-  
-  // Register multiple hooks
-  hooks.push(itemhook.create({
-    title: "Hook 1",
-    handler: function(item, nav) { /* ... */ }
-  }));
-  
-  hooks.push(itemhook.create({
-    title: "Hook 2",
-    handler: function(item, nav) { /* ... */ }
-  }));
-  
-  // Cleanup on unload
-  plugin.onUnload(function() {
-    hooks.forEach(function(h) { h.destroy(); });
-  });
-  
-})(this);
+var itemhook = require('movian/itemhook');
+var hooks = [];
+
+// Register multiple hooks
+hooks.push(itemhook.create({
+  title: "Hook 1",
+  handler: function(item, nav) { /* ... */ }
+}));
+
+hooks.push(itemhook.create({
+  title: "Hook 2",
+  handler: function(item, nav) { /* ... */ }
+}));
+
+// Manual cleanup if needed
+function cleanup() {
+  hooks.forEach(function(h) { h.destroy(); });
+  hooks = [];
+}
 ```
 
-**Note:** Item hooks with `autoDestroy: true` (default) are automatically cleaned up.
+**Note:** Item hooks with `autoDestroy: true` (default) are automatically cleaned up when the plugin is unloaded, so manual cleanup is usually not necessary.
 
 **Source:** [`res/ecmascript/modules/movian/itemhook.js#L15-L33`](https://github.com/andoma/movian/blob/1f76b9ad66335477b10ebc23b8a687a25407a3d9/res/ecmascript/modules/movian/itemhook.js#L15-L33)
 
@@ -1075,114 +1085,103 @@ breakpoint(items.length === 0, "No items returned from API");
 ### Complete Example: Robust Feed Loader
 
 ```javascript
-(function(plugin) {
-  var page = require('movian/page');
-  var http = require('showtime').httpReq;
-  var store = require('movian/store').create('feeds');
+var page = require('movian/page');
+var store = require('movian/store').create('feeds');
+
+var cache = {};
+
+function fetchFeed(url, callback) {
+  // Check memory cache
+  if(cache[url] && (Date.now() - cache[url].timestamp) < 60000) {
+    console.log("Memory cache hit: " + url);
+    callback(null, cache[url].data);
+    return;
+  }
   
-  var logger = new Logger('FeedPlugin');
-  var cache = {};
+  // Check persistent cache
+  var stored = store[url];
+  if(stored && (Date.now() - stored.timestamp) < 3600000) {
+    console.log("Disk cache hit: " + url);
+    cache[url] = stored;  // Promote to memory
+    callback(null, stored.data);
+    return;
+  }
   
-  function fetchFeed(url, callback) {
-    // Check memory cache
-    if(cache[url] && (Date.now() - cache[url].timestamp) < 60000) {
-      logger.debug("Memory cache hit: " + url);
-      callback(null, cache[url].data);
+  // Fetch from network with retry
+  console.log("Fetching: " + url);
+  fetchWithRetry(url, 3, function(err, response) {
+    if(err) {
+      console.error("Fetch failed: " + url, err);
+      callback(err);
       return;
     }
     
-    // Check persistent cache
-    var stored = store[url];
-    if(stored && (Date.now() - stored.timestamp) < 3600000) {
-      logger.debug("Disk cache hit: " + url);
-      cache[url] = stored;  // Promote to memory
-      callback(null, stored.data);
-      return;
+    try {
+      var data = JSON.parse(response.toString());
+      
+      // Cache in memory and disk
+      var cached = {
+        data: data,
+        timestamp: Date.now()
+      };
+      cache[url] = cached;
+      store[url] = cached;
+      
+      callback(null, data);
+    } catch(parseErr) {
+      console.error("JSON parse failed", parseErr);
+      callback(parseErr);
     }
+  });
+}
+
+new page.Route('feed:list:(.*)', function(page, feedId) {
+  page.type = 'directory';
+  page.metadata.title = 'Loading...';
+  
+  var offset = 0;
+  var pageSize = 20;
+  var loading = false;
+  
+  function loadMore() {
+    if(loading) return;
+    loading = true;
     
-    // Fetch from network with retry
-    logger.info("Fetching: " + url);
-    fetchWithRetry(url, 3, function(err, response) {
+    var url = 'https://api.example.com/feed/' + feedId + 
+              '?offset=' + offset + '&limit=' + pageSize;
+    
+    fetchFeed(url, function(err, data) {
+      loading = false;
+      
       if(err) {
-        logger.error("Fetch failed: " + url, err);
-        callback(err);
+        page.error("Failed to load feed: " + err.message);
+        page.loading = false;
         return;
       }
       
-      try {
-        var data = JSON.parse(response);
-        
-        // Cache in memory and disk
-        var cached = {
-          data: data,
-          timestamp: Date.now()
-        };
-        cache[url] = cached;
-        store[url] = cached;
-        
-        callback(null, data);
-      } catch(parseErr) {
-        logger.error("JSON parse failed", parseErr);
-        callback(parseErr);
+      if(data.items.length === 0) {
+        page.haveMore(false);
+        page.loading = false;
+        return;
       }
+      
+      data.items.forEach(function(item) {
+        page.appendItem(item.url, 'video', {
+          title: item.title,
+          icon: item.thumbnail,
+          duration: item.duration
+        });
+      });
+      
+      offset += data.items.length;
+      page.haveMore(data.hasMore);
+      page.loading = false;
     });
   }
   
-  new page.Route('feed:list:(.*)', function(page, feedId) {
-    page.type = 'directory';
-    page.metadata.title = 'Loading...';
-    
-    var offset = 0;
-    var pageSize = 20;
-    var loading = false;
-    
-    function loadMore() {
-      if(loading) return;
-      loading = true;
-      
-      var url = 'https://api.example.com/feed/' + feedId + 
-                '?offset=' + offset + '&limit=' + pageSize;
-      
-      fetchFeed(url, function(err, data) {
-        loading = false;
-        
-        if(err) {
-          page.error("Failed to load feed: " + err.message);
-          page.loading = false;
-          return;
-        }
-        
-        if(data.items.length === 0) {
-          page.haveMore(false);
-          page.loading = false;
-          return;
-        }
-        
-        data.items.forEach(function(item) {
-          page.appendItem(item.url, 'video', {
-            title: item.title,
-            icon: item.thumbnail,
-            duration: item.duration
-          });
-        });
-        
-        offset += data.items.length;
-        page.haveMore(data.hasMore);
-        page.loading = false;
-      });
-    }
-    
-    page.asyncPaginator = loadMore;
-    loadMore();
-  });
-  
-  // Cleanup
-  plugin.onUnload(function() {
-    logger.info("Plugin unloading, clearing cache");
-    cache = {};
-  });
-  
-})(this);
+  page.asyncPaginator = loadMore;
+  loadMore();
+});
 ```
 
 ### Pattern: State Machine for Complex Flows
