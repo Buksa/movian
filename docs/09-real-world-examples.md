@@ -31,7 +31,7 @@ var service = require('movian/service');
 var BASE_URI = 'myplugin:';
 
 // Service registration - appears on home screen
-new service.Service('myPluginService', 'My Plugin', BASE_URI + 'start', 'video');
+service.create('My Plugin', BASE_URI + 'start', 'video');
 
 // Route handlers
 new page.Route(BASE_URI + 'start', function(page) {
@@ -99,7 +99,7 @@ var service = require('movian/service');
 var U = "example:music:";
 
 // Register a service (will appear on home page)
-new service.Service('musicExampleService', "Music example", U, "other");
+service.create("Music example", U, "other");
 
 // Add a responder to the registered URI
 new page.Route(U, function(page) {
@@ -140,7 +140,7 @@ new page.Route("example:music:stream", function(page) {
 
 ### Key Architectural Insights
 
-1. **Service Registration**: `new service.Service()` creates the home screen entry
+1. **Service Registration**: `service.create()` creates the home screen entry
 2. **URI Base Pattern**: Using a base URI (`U`) for consistency
 3. **Multiple Routes**: Demonstrates handling different content types
 4. **Content Types**: Shows both local audio files and streaming content
@@ -176,7 +176,7 @@ var settings = require('movian/settings');
 
 var U = "example:settings:";
 
-new service.Service('settingsExampleService', "Settings example", U, "other");
+service.create("Settings example", U, "other");
 
 new page.Route(U, function(page) {
   page.type = "directory";
@@ -406,7 +406,7 @@ itemhook.create({
   }
 });
 
-new service.Service('itemHookExampleService', 'Item hook example', 'itemhooktest:', 'other');
+service.create('Item hook example', 'itemhooktest:', 'other');
 
 new page.Route('itemhooktest:', function(page) {
   page.type = 'directory';
@@ -640,7 +640,7 @@ scrobbler.create({
   }
 });
 
-new service.Service('videoScrobblerExampleService', 'Video scrobbler example', 'scrobblertest:', 'other');
+service.create('Video scrobbler example', 'scrobblertest:', 'other');
 
 new page.Route('scrobblertest:', function(page) {
   page.type = 'directory';
@@ -730,7 +730,7 @@ The web popup example demonstrates web integration:
 var page = require('movian/page');
 var service = require('movian/service');
 
-new service.Service('webPopupExampleService', 'Web popup example', 'webpopuptest:', 'other');
+service.create('Web popup example', 'webpopuptest:', 'other');
 
 new page.Route('webpopuptest:', function(page) {
   page.type = 'directory';
@@ -822,19 +822,25 @@ function showWebConfig(configUrl) {
 ### Service Factory Pattern
 
 ```javascript
-// Factory for creating consistent services
+// Factory for creating consistent services (API v2)
+var page = require('movian/page');
+var service = require('movian/service');
+
 function createService(name, baseUri, category) {
   return {
     name: name,
     baseUri: baseUri,
     category: category || 'other',
+    serviceHandle: null,
+    routes: [],
     
-    register: function(plugin) {
-      plugin.createService(this.name, this.baseUri, this.category, true);
+    register: function() {
+      this.serviceHandle = service.create(this.name, this.baseUri, this.category);
     },
     
-    addRoute: function(plugin, pattern, handler) {
-      plugin.addURI(this.baseUri + pattern, handler);
+    addRoute: function(pattern, handler) {
+      var route = new page.Route(this.baseUri + pattern, handler);
+      this.routes.push(route);
     },
     
     createPage: function(title, type) {
@@ -844,15 +850,22 @@ function createService(name, baseUri, category) {
           title: title
         }
       };
+    },
+    
+    destroy: function() {
+      if (this.serviceHandle) {
+        this.serviceHandle.destroy();
+      }
+      this.routes.forEach(function(r) { r.destroy(); });
     }
   };
 }
 
 // Usage
 var videoService = createService('My Video Service', 'myservice:', 'video');
-videoService.register(plugin);
+videoService.register();
 
-videoService.addRoute(plugin, 'browse', function(page) {
+videoService.addRoute('browse', function(page) {
   Object.assign(page, videoService.createPage('Browse Videos'));
   // ... page content
 });

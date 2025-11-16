@@ -222,7 +222,7 @@ cat > main.js << EOF
 var page = require('movian/page');
 var service = require('movian/service');
 
-new service.Service('myPluginService', "My Plugin", "myplugin:start", "video");
+service.create("My Plugin", "myplugin:start", "video");
 
 new page.Route("myplugin:start", function(page) {
   page.type = "directory";
