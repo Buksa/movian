@@ -50,9 +50,6 @@ static const uint8_t gif87sig[6] = {'G', 'I', 'F', '8', '7', 'a'};
 static const uint8_t svgsig1[5] = {'<', '?', 'x', 'm', 'l'};
 static const uint8_t svgsig2[4] = {'<', 's', 'v', 'g'};
 
-static const uint8_t riffsig[4] = {'R', 'I', 'F', 'F'};
-static const uint8_t webpsig[4] = {'W', 'E', 'B', 'P'};
-
 #if ENABLE_LIBAV
 static hts_mutex_t image_from_video_mutex[2];
 static AVCodecContext *thumbctx;
@@ -99,8 +96,8 @@ fa_imageloader_buf(buf_t *buf, char *errbuf, size_t errlen)
     jpeginfo_t ji;
 
     if(jpeg_info(&ji, jpeginfo_mem_reader, &mi,
-         JPEG_INFO_DIMENSIONS | JPEG_INFO_ORIENTATION,
-         p, buf->b_size, errbuf, errlen)) {
+		 JPEG_INFO_DIMENSIONS | JPEG_INFO_ORIENTATION,
+		 p, buf->b_size, errbuf, errlen)) {
       return NULL;
     }
 
@@ -116,16 +113,13 @@ fa_imageloader_buf(buf_t *buf, char *errbuf, size_t errlen)
   } else if(!memcmp(pngsig, p, 8)) {
     fmt = IMAGE_PNG;
   } else if(!memcmp(gif87sig, p, sizeof(gif87sig)) ||
-        !memcmp(gif89sig, p, sizeof(gif89sig))) {
+	    !memcmp(gif89sig, p, sizeof(gif89sig))) {
     fmt = IMAGE_GIF;
   } else if(p[0] == 'B' && p[1] == 'M') {
     fmt = IMAGE_BMP;
   } else if(!memcmp(svgsig1, p, sizeof(svgsig1)) ||
-        !memcmp(svgsig2, p, sizeof(svgsig2))) {
+	    !memcmp(svgsig2, p, sizeof(svgsig2))) {
     fmt = IMAGE_SVG;
-  } else if(!memcmp(riffsig, p, 4) && buf->b_size >= 12 &&
-        !memcmp(webpsig, p + 8, 4)) {
-    fmt = IMAGE_WEBP;
   } else {
   bad:
     snprintf(errbuf, errlen, "Unknown format");
@@ -189,8 +183,8 @@ jpeginfo_reader(void *handle, void *buf, int64_t offset, size_t size)
  */
 image_t *
 fa_imageloader(const char *url, const struct image_meta *im,
-           char *errbuf, size_t errlen,
-           int *cache_control, cancellable_t *c,
+	       char *errbuf, size_t errlen,
+	       int *cache_control, cancellable_t *c,
                backend_t *be)
 {
   uint8_t p[16];
@@ -238,10 +232,10 @@ fa_imageloader(const char *url, const struct image_meta *im,
     jpeginfo_t ji;
     
     if(jpeg_info(&ji, jpeginfo_reader, fh,
-         JPEG_INFO_DIMENSIONS |
-         JPEG_INFO_ORIENTATION |
-         (im->im_want_thumb ? JPEG_INFO_THUMBNAIL : 0),
-         p, sizeof(p), errbuf, errlen)) {
+		 JPEG_INFO_DIMENSIONS |
+		 JPEG_INFO_ORIENTATION |
+		 (im->im_want_thumb ? JPEG_INFO_THUMBNAIL : 0),
+		 p, sizeof(p), errbuf, errlen)) {
       fa_close(fh);
       return NULL;
     }
@@ -280,16 +274,13 @@ fa_imageloader(const char *url, const struct image_meta *im,
   } else if(!memcmp(pngsig, p, 8)) {
     fmt = IMAGE_PNG;
   } else if(!memcmp(gif87sig, p, sizeof(gif87sig)) ||
-        !memcmp(gif89sig, p, sizeof(gif89sig))) {
+	    !memcmp(gif89sig, p, sizeof(gif89sig))) {
     fmt = IMAGE_GIF;
   } else if(p[0] == 'B' && p[1] == 'M') {
     fmt = IMAGE_BMP;
   } else if(!memcmp(svgsig1, p, sizeof(svgsig1)) ||
-        !memcmp(svgsig2, p, sizeof(svgsig2))) {
+	    !memcmp(svgsig2, p, sizeof(svgsig2))) {
     fmt = IMAGE_SVG;
-  } else if(!memcmp(riffsig, p, 4) && sizeof(p) >= 12 &&
-        !memcmp(webpsig, p + 8, 4)) {
-    fmt = IMAGE_WEBP;
   } else {
     snprintf(errbuf, errlen, "Unknown format");
     fa_close(fh);
@@ -475,8 +466,8 @@ thumb_from_attachment(const char *url, int64_t offset, int size,
  */
 static image_t *
 fa_image_from_video2(const char *url, const image_meta_t *im,
-             const char *cacheid, char *errbuf, size_t errlen,
-             int sec, time_t mtime, cancellable_t *c)
+		     const char *cacheid, char *errbuf, size_t errlen,
+		     int sec, time_t mtime, cancellable_t *c)
 {
   image_t *img = NULL;
 
@@ -524,11 +515,10 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
         break;
 
       case AVMEDIA_TYPE_ATTACHMENT:
-         mt = av_dict_get(st->metadata, "mimetype", NULL, AV_DICT_IGNORE_SUFFIX);
-         if(sec == -1 && mt != NULL &&
-            (!strcmp(mt->value, "image/jpeg") ||
-             !strcmp(mt->value, "image/png") ||
-             !strcmp(mt->value, "image/webp"))) {
+        mt = av_dict_get(st->metadata, "mimetype", NULL, AV_DICT_IGNORE_SUFFIX);
+        if(sec == -1 && mt != NULL &&
+           (!strcmp(mt->value, "image/jpeg") ||
+            !strcmp(mt->value, "image/png"))) {
 #if ENABLE_LIBAV_ATTACHMENT_POINTER
           int64_t offset = st->attached_offset;
           int size = st->attached_size;
@@ -703,7 +693,7 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
 
     struct SwsContext *sws;
     sws = sws_getContext(ifv_ctx->width, ifv_ctx->height, ifv_ctx->pix_fmt,
-             w, h, AV_PIX_FMT_BGR32, SWS_BILINEAR,
+			 w, h, AV_PIX_FMT_BGR32, SWS_BILINEAR,
                          NULL, NULL, NULL);
     if(sws == NULL) {
       ifv_close();
@@ -720,7 +710,7 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
     strides[0] = pm->pm_linesize;
 
     sws_scale(sws, (const uint8_t **)frame->data, frame->linesize,
-          0, ifv_ctx->height, ptr, strides);
+	      0, ifv_ctx->height, ptr, strides);
 
     sws_freeContext(sws);
 
@@ -735,7 +725,7 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
   av_frame_free(&frame);
   if(img == NULL)
     snprintf(errbuf, errlen, "Frame not found (scanned %d)", 
-         MAX_FRAME_SCAN - cnt);
+	     MAX_FRAME_SCAN - cnt);
 
   if(ifv_ctx != NULL) {
     avcodec_flush_buffers(ifv_ctx);
@@ -750,8 +740,8 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
  */
 static image_t *
 fa_image_from_video(const char *url0, const image_meta_t *im,
-            char *errbuf, size_t errlen, int *cache_control,
-            cancellable_t *c)
+		    char *errbuf, size_t errlen, int *cache_control,
+		    cancellable_t *c)
 {
   static char *stated_url;
   static fa_stat_t fs;

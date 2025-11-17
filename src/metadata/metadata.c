@@ -133,9 +133,9 @@ metadata_destroy(metadata_t *md)
  */
 void
 metadata_add_stream(metadata_t *md, const char *codec, int type,
-            int streamindex,
-            const char *title, const char *info, const char *isolang,
-            int disposition, int tracknum, int channels)
+		    int streamindex,
+		    const char *title, const char *info, const char *isolang,
+		    int disposition, int tracknum, int channels)
 {
   metadata_stream_t *ms = malloc(sizeof(metadata_stream_t));
   ms->ms_title = rstr_alloc(title);
@@ -249,7 +249,7 @@ metadata_stream_make_prop(const metadata_stream_t *ms, prop_t *parent,
  */
 void
 metadata_to_proptree(const metadata_t *md, prop_t *proproot,
-             int cleanup_streams)
+		     int cleanup_streams)
 {
   metadata_stream_t *ms;
   int ac = 0, vc = 0, sc = 0, *pc;
@@ -261,7 +261,7 @@ metadata_to_proptree(const metadata_t *md, prop_t *proproot,
     prop_set(proproot, "artist", PROP_SET_RSTRING, md->md_artist);
 
     metadata_bind_artistpics(prop_create(proproot, "artist_images"),
-                 md->md_artist);
+			     md->md_artist);
   }
 
   if(md->md_icons != NULL)
@@ -272,7 +272,7 @@ metadata_to_proptree(const metadata_t *md, prop_t *proproot,
 
     if(md->md_artist != NULL)
       metadata_bind_albumart(prop_create(proproot, "album_art"),
-                 md->md_artist, md->md_album);
+			     md->md_artist, md->md_album);
   }
 
   TAILQ_FOREACH(ms, &md->md_streams, ms_link) {
@@ -387,7 +387,6 @@ static struct strtab postfixtab[] = {
   { "png",             CONTENT_IMAGE },
   { "gif",             CONTENT_IMAGE },
   { "svg",             CONTENT_IMAGE },
-  { "webp",            CONTENT_IMAGE },
 
   { "mp3",             CONTENT_AUDIO },
   { "m4a",             CONTENT_AUDIO },

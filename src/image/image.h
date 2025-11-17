@@ -80,7 +80,6 @@ typedef enum image_coded_type {
   IMAGE_GIF = 3,
   IMAGE_SVG = 4,
   IMAGE_BMP = 5,
-  IMAGE_WEBP = 6,
 } image_coded_type_t;
 
 
@@ -206,9 +205,9 @@ struct pixmap *image_decode_libav(image_coded_type_t type,
                                   char *errbuf, size_t errlen);
 
 extern struct pixmap *(*accel_image_decode)(image_coded_type_t type,
-                        struct buf *buf,
-                        const image_meta_t *im,
-                        char *errbuf, size_t errlen,
+					    struct buf *buf,
+					    const image_meta_t *im,
+					    char *errbuf, size_t errlen,
                                             const image_t *img);
 
 #if ENABLE_LIBJPEG
