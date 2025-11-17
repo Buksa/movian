@@ -175,7 +175,8 @@ is_probably_image(const char *filename)
     !strcasecmp(e, "bmp") ||
     !strcasecmp(e, "gif") ||
     !strcasecmp(e, "jpg") ||
-    !strcasecmp(e, "jpeg");
+    !strcasecmp(e, "jpeg") ||
+    !strcasecmp(e, "webp");
 }
 
 
@@ -341,8 +342,8 @@ glw_settings_init(void)
 {
   glw_settings.gs_settings = prop_create_root(NULL);
   prop_concat_add_source(gconf.settings_look_and_feel,
-			 prop_create(glw_settings.gs_settings, "nodes"),
-			 NULL);
+             prop_create(glw_settings.gs_settings, "nodes"),
+             NULL);
 
   prop_t *s = glw_settings.gs_settings;
 
@@ -406,7 +407,7 @@ glw_settings_init(void)
                    SETTING_TITLE(_p("Screensaver delay")),
                    SETTING_VALUE(10),
                    SETTING_RANGE(0, 60),
-		   SETTING_ZERO_TEXT(_p("Off")),
+           SETTING_ZERO_TEXT(_p("Off")),
                    SETTING_UNIT_CSTR("min"),
                    SETTING_WRITE_INT(&glw_settings.gs_screensaver_delay),
                    SETTING_STORE("glw", "screensaver"),

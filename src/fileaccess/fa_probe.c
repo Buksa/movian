@@ -92,6 +92,8 @@ static const uint8_t ttfsig[5] = {0,1,0,0,0};
 static const uint8_t otfsig[4] = {'O', 'T', 'T', 'O'};
 static const uint8_t pdfsig[] = {'%', 'P', 'D', 'F', '-'};
 static const uint8_t offsig[8] ={0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1};
+static const uint8_t riffsig[4] = {'R', 'I', 'F', 'F'};
+static const uint8_t webpsig[4] = {'W', 'E', 'B', 'P'};
 
 /**
  *
@@ -214,9 +216,9 @@ fa_probe_exif(metadata_t *md, const char *url, const uint8_t *pb,
   jpeginfo_t ji;
 
   if(jpeg_info(&ji, jpeginfo_reader, fh,
-	       JPEG_INFO_DIMENSIONS | JPEG_INFO_ORIENTATION |
-	       JPEG_INFO_METADATA,
-	       pb, buflen, NULL, 0))
+           JPEG_INFO_DIMENSIONS | JPEG_INFO_ORIENTATION |
+           JPEG_INFO_METADATA,
+           pb, buflen, NULL, 0))
     return;
 
   md->md_time = ji.ji_time;
@@ -231,7 +233,7 @@ fa_probe_exif(metadata_t *md, const char *url, const uint8_t *pb,
  */
 static int
 fa_probe_header(metadata_t *md, const char *url, fa_handle_t *fh,
-		const char *filename, const uint8_t *buf, size_t l)
+        const char *filename, const uint8_t *buf, size_t l)
 {
   uint16_t flags;
 
@@ -276,15 +278,15 @@ fa_probe_header(metadata_t *md, const char *url, fa_handle_t *fh,
       buf_release(buf);
 
       if(json != NULL) {
-	const char *title = htsmsg_get_str(json, "title");
-	if(title != NULL && htsmsg_get_str(json, "id") != NULL &&
-	   htsmsg_get_str(json, "type") != NULL) {
-	  md->md_title = rstr_alloc(title);
-	  md->md_contenttype = CONTENT_PLUGIN;
-	  htsmsg_release(json);
-	  return 1;
-	}
-	htsmsg_release(json);
+    const char *title = htsmsg_get_str(json, "title");
+    if(title != NULL && htsmsg_get_str(json, "id") != NULL &&
+       htsmsg_get_str(json, "type") != NULL) {
+      md->md_title = rstr_alloc(title);
+      md->md_contenttype = CONTENT_PLUGIN;
+      htsmsg_release(json);
+      return 1;
+    }
+    htsmsg_release(json);
       }
     }
     metdata_set_redirect(md, "zip://%s", url);
@@ -343,6 +345,12 @@ fa_probe_header(metadata_t *md, const char *url, fa_handle_t *fh,
 
   if(!memcmp(buf, "<?xml", 5) && find_str((char *)buf, l, "<svg")) {
     /* SVG */
+    md->md_contenttype = CONTENT_IMAGE;
+    return 1;
+  }
+
+  if(l >= 12 && !memcmp(buf, riffsig, 4) && !memcmp(buf + 8, webpsig, 4)) {
+    /* WebP */
     md->md_contenttype = CONTENT_IMAGE;
     return 1;
   }
@@ -428,7 +436,7 @@ fa_probe_iso(metadata_t *md, fa_handle_t *fh)
  */
 static void
 fa_lavf_load_meta(metadata_t *md, AVFormatContext *fctx,
-		  const char *filename)
+          const char *filename)
 {
   int i;
   char tmp1[1024];
@@ -491,25 +499,25 @@ fa_lavf_load_meta(metadata_t *md, AVFormatContext *fctx,
 
       switch(avctx->codec_type) {
       case AVMEDIA_TYPE_VIDEO:
-	has_video = !!codec;
-	tn = ++vtrack;
-	break;
+    has_video = !!codec;
+    tn = ++vtrack;
+    break;
       case AVMEDIA_TYPE_AUDIO:
-	has_audio = !!codec;
-	tn = ++atrack;
-	break;
+    has_audio = !!codec;
+    tn = ++atrack;
+    break;
       case AVMEDIA_TYPE_SUBTITLE:
-	tn = ++strack;
-	break;
+    tn = ++strack;
+    break;
 
       default:
-	continue;
+    continue;
       }
 
       if(codec == NULL) {
-	snprintf(tmp1, sizeof(tmp1), "%s", codecname(avctx->codec_id));
+    snprintf(tmp1, sizeof(tmp1), "%s", codecname(avctx->codec_id));
       } else {
-	metadata_from_libav(tmp1, sizeof(tmp1), codec, avctx);
+    metadata_from_libav(tmp1, sizeof(tmp1), codec, avctx);
       }
 
       lang = av_dict_get(stream->metadata, "language", NULL,
@@ -519,12 +527,12 @@ fa_lavf_load_meta(metadata_t *md, AVFormatContext *fctx,
                           AV_DICT_IGNORE_SUFFIX);
 
       metadata_add_stream(md, codecname(avctx->codec_id),
-			  avctx->codec_type, i,
-			  title ? title->value : NULL,
-			  tmp1,
-			  lang ? lang->value : NULL,
-			  stream->disposition,
-			  tn, avctx->channels);
+              avctx->codec_type, i,
+              title ? title->value : NULL,
+              tmp1,
+              lang ? lang->value : NULL,
+              stream->disposition,
+              tn, avctx->channels);
     }
 
     md->md_contenttype = CONTENT_FILE;
@@ -542,7 +550,7 @@ fa_lavf_load_meta(metadata_t *md, AVFormatContext *fctx,
  */
 metadata_t *
 fa_probe_metadata(const char *url, char *errbuf, size_t errsize,
-		  const char *filename, prop_t *stats)
+          const char *filename, prop_t *stats)
 {
   const char *postfix = strrchr(url, '.');
   if(postfix != NULL) {

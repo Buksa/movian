@@ -50,7 +50,7 @@ my-plugin.zip
 
 ### Optional Files
 
-- **Icon**: `icon.png` or `icon.jpg` (recommended 256x256 pixels)
+- **Icon**: `icon.png`, `icon.jpg`, `icon.webp` or `icon.gif` (recommended 256x256 pixels)
 - **Localization**: `locales/*.json` files for multi-language support
 - **Views**: `views/` directory for custom UI views (for GLW plugins)
 - **Documentation**: `README.md` for plugin documentation
