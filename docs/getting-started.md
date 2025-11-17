@@ -32,6 +32,7 @@ sudo apt-get install \
   libvdpau-dev \
   libpulse-dev \
   libssl-dev \
+  libwebp-dev \
   curl \
   libwebkitgtk-dev \
   libsqlite3-dev \
@@ -67,6 +68,9 @@ xcode-select --install
 
 # Install yasm for assembly
 brew install yasm
+
+# WebP decoder dependency
+brew install webp
 
 # Optional: Additional tools
 brew install pkg-config
@@ -147,6 +151,7 @@ yasm --version
 # Check critical libraries
 pkg-config --cflags --libs freetype2
 pkg-config --cflags --libs fontconfig
+pkg-config --cflags --libs libwebp
 ```
 
 ## Initial Build Configuration

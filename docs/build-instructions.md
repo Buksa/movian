@@ -10,6 +10,7 @@ Complete build procedures for all supported platforms. Ensure you have completed
 pkg-config --cflags --libs freetype2
 pkg-config --cflags --libs fontconfig
 pkg-config --cflags --libs x11
+pkg-config --cflags --libs libwebp
 ```
 
 ### Standard Debug Build
@@ -102,6 +103,7 @@ Ensure Xcode and Command Line Tools are installed:
 ```bash
 xcode-select --install
 brew install yasm
+brew install webp
 ```
 
 ### Debug Build
