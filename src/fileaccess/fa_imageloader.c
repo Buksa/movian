@@ -50,6 +50,9 @@ static const uint8_t gif87sig[6] = {'G', 'I', 'F', '8', '7', 'a'};
 static const uint8_t svgsig1[5] = {'<', '?', 'x', 'm', 'l'};
 static const uint8_t svgsig2[4] = {'<', 's', 'v', 'g'};
 
+static const uint8_t riffsig[4] = {'R', 'I', 'F', 'F'};
+static const uint8_t webpsig[4] = {'W', 'E', 'B', 'P'};
+
 #if ENABLE_LIBAV
 static hts_mutex_t image_from_video_mutex[2];
 static AVCodecContext *thumbctx;
@@ -120,6 +123,9 @@ fa_imageloader_buf(buf_t *buf, char *errbuf, size_t errlen)
   } else if(!memcmp(svgsig1, p, sizeof(svgsig1)) ||
 	    !memcmp(svgsig2, p, sizeof(svgsig2))) {
     fmt = IMAGE_SVG;
+  } else if(!memcmp(riffsig, p, 4) && buf->b_size >= 12 &&
+        !memcmp(webpsig, p + 8, 4)) {
+    fmt = IMAGE_WEBP;
   } else {
   bad:
     snprintf(errbuf, errlen, "Unknown format");
@@ -281,6 +287,9 @@ fa_imageloader(const char *url, const struct image_meta *im,
   } else if(!memcmp(svgsig1, p, sizeof(svgsig1)) ||
 	    !memcmp(svgsig2, p, sizeof(svgsig2))) {
     fmt = IMAGE_SVG;
+  } else if(!memcmp(riffsig, p, 4) && sizeof(p) >= 12 &&
+        !memcmp(webpsig, p + 8, 4)) {
+    fmt = IMAGE_WEBP;
   } else {
     snprintf(errbuf, errlen, "Unknown format");
     fa_close(fh);
@@ -518,7 +527,8 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
         mt = av_dict_get(st->metadata, "mimetype", NULL, AV_DICT_IGNORE_SUFFIX);
         if(sec == -1 && mt != NULL &&
            (!strcmp(mt->value, "image/jpeg") ||
-            !strcmp(mt->value, "image/png"))) {
+             !strcmp(mt->value, "image/png") ||
+             !strcmp(mt->value, "image/webp"))) {
 #if ENABLE_LIBAV_ATTACHMENT_POINTER
           int64_t offset = st->attached_offset;
           int size = st->attached_size;
