@@ -175,7 +175,8 @@ is_probably_image(const char *filename)
     !strcasecmp(e, "bmp") ||
     !strcasecmp(e, "gif") ||
     !strcasecmp(e, "jpg") ||
-    !strcasecmp(e, "jpeg");
+    !strcasecmp(e, "jpeg") ||
+    !strcasecmp(e, "webp");
 }
 
 

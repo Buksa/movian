@@ -92,6 +92,8 @@ static const uint8_t ttfsig[5] = {0,1,0,0,0};
 static const uint8_t otfsig[4] = {'O', 'T', 'T', 'O'};
 static const uint8_t pdfsig[] = {'%', 'P', 'D', 'F', '-'};
 static const uint8_t offsig[8] ={0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1};
+static const uint8_t riffsig[4] = {'R', 'I', 'F', 'F'};
+static const uint8_t webpsig[4] = {'W', 'E', 'B', 'P'};
 
 /**
  *
@@ -343,6 +345,12 @@ fa_probe_header(metadata_t *md, const char *url, fa_handle_t *fh,
 
   if(!memcmp(buf, "<?xml", 5) && find_str((char *)buf, l, "<svg")) {
     /* SVG */
+    md->md_contenttype = CONTENT_IMAGE;
+    return 1;
+  }
+
+  if(l >= 12 && !memcmp(buf, riffsig, 4) && !memcmp(buf + 8, webpsig, 4)) {
+    /* WebP */
     md->md_contenttype = CONTENT_IMAGE;
     return 1;
   }

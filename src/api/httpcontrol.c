@@ -206,6 +206,9 @@ hc_image(http_connection_t *hc, const char *remain, void *opaque,
   case IMAGE_BMP:
     content = "image/bmp";
     break;
+  case IMAGE_WEBP:
+    content = "image/webp";
+    break;
   default:
     content = "image";
     break;
