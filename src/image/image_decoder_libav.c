@@ -83,9 +83,9 @@ fulhack(const AVPicture *pict, int src_w, int src_h,
  */
 static pixmap_t *
 pixmap_rescale_swscale(const AVPicture *pict, int src_pix_fmt, 
-		       int src_w, int src_h,
-		       int dst_w, int dst_h,
-		       int with_alpha, int margin)
+               int src_w, int src_h,
+               int dst_w, int dst_h,
+               int with_alpha, int margin)
 {
   AVPicture pic;
   int dst_pix_fmt;
@@ -126,13 +126,13 @@ pixmap_rescale_swscale(const AVPicture *pict, int src_pix_fmt,
 
   if(gconf.enable_image_debug)
     TRACE(TRACE_DEBUG, "swscale", "Converting %d x %d [%s] to %d x %d [%s]",
-	  src_w, src_h, av_get_pix_fmt_name(src_pix_fmt),
-	  dst_w, dst_h, av_get_pix_fmt_name(dst_pix_fmt));
+      src_w, src_h, av_get_pix_fmt_name(src_pix_fmt),
+      dst_w, dst_h, av_get_pix_fmt_name(dst_pix_fmt));
   
   sws = sws_getContext(src_w, src_h, src_pix_fmt, 
-		       dst_w, dst_h, dst_pix_fmt,
-		       SWS_LANCZOS | 
-		       (gconf.enable_image_debug ? SWS_PRINT_INFO : 0),
+               dst_w, dst_h, dst_pix_fmt,
+               SWS_LANCZOS | 
+               (gconf.enable_image_debug ? SWS_PRINT_INFO : 0),
                        NULL, NULL, NULL);
   if(sws == NULL)
     return NULL;
@@ -236,9 +236,9 @@ pixmap_32bit_swizzle(AVPicture *pict, int pix_fmt, int w, int h, int m)
  */
 static pixmap_t *
 pixmap_from_avpic(AVPicture *pict, int pix_fmt,
-		  int src_w, int src_h,
-		  int req_w0, int req_h0,
-		  const image_meta_t *im)
+          int src_w, int src_h,
+          int req_w0, int req_h0,
+          const image_meta_t *im)
 {
   int i;
   int need_format_conv = 0;
@@ -288,7 +288,7 @@ pixmap_from_avpic(AVPicture *pict, int pix_fmt,
 
     for(i = 0; i < 256; i++) {
       if((palette[i] >> 24) == 0)
-	palette[i] = 0;
+    palette[i] = 0;
     }
 
     need_format_conv = 1;
@@ -303,15 +303,15 @@ pixmap_from_avpic(AVPicture *pict, int pix_fmt,
     int want_alpha = im->im_corner_radius;
 
     pm = pixmap_rescale_swscale(pict, pix_fmt, src_w, src_h, req_w, req_h,
-				want_alpha, im->im_margin);
+                want_alpha, im->im_margin);
     if(pm != NULL)
       return pm;
 
     if(need_format_conv) {
       pm = pixmap_rescale_swscale(pict, pix_fmt, src_w, src_h, src_w, src_h,
-				  want_alpha, im->im_margin);
+                  want_alpha, im->im_margin);
       if(pm != NULL)
-	return pm;
+    return pm;
 
       return pixmap_32bit_swizzle(pict, pix_fmt, src_w, src_h, im->im_margin);
     }
@@ -343,8 +343,8 @@ pixmap_from_avpic(AVPicture *pict, int pix_fmt,
  */
 void
 pixmap_compute_rescale_dim(const image_meta_t *im,
-			   int src_width, int src_height,
-			   int *dst_width, int *dst_height)
+               int src_width, int src_height,
+               int *dst_width, int *dst_height)
 {
   int w;
   int h;
@@ -412,7 +412,7 @@ image_decode_libav(image_coded_type_t type,
     mi.size = buf_size(buf);
 
     if(jpeg_info(&ji, jpeginfo_mem_reader, &mi,
-		 JPEG_INFO_DIMENSIONS,
+         JPEG_INFO_DIMENSIONS,
                  buf_data(buf), buf_size(buf), errbuf, errlen)) {
       return NULL;
     }
@@ -423,6 +423,9 @@ image_decode_libav(image_coded_type_t type,
     break;
   case IMAGE_BMP:
     codec = avcodec_find_decoder(AV_CODEC_ID_BMP);
+    break;
+  case IMAGE_WEBP:
+    codec = avcodec_find_decoder(AV_CODEC_ID_WEBP);
     break;
   default:
     codec = NULL;
@@ -461,11 +464,11 @@ image_decode_libav(image_coded_type_t type,
 
 #if 0
   printf("%d x %d => %d x %d (lowres=%d) req = %d x %d%s%s\n",
-	 ji.ji_width, ji.ji_height,
-	 ctx->width, ctx->height, lowres,
-	 im->im_req_width, im->im_req_height,
-	 im->im_want_thumb ? ", want thumb" : "",
-	 pm->pm_flags & PIXMAP_THUMBNAIL ? ", is thumb" : "");
+     ji.ji_width, ji.ji_height,
+     ctx->width, ctx->height, lowres,
+     im->im_req_width, im->im_req_height,
+     im->im_want_thumb ? ", want thumb" : "",
+     pm->pm_flags & PIXMAP_THUMBNAIL ? ", is thumb" : "");
 #endif
 
   pixmap_compute_rescale_dim(im, ctx->width, ctx->height, &w, &h);
@@ -473,7 +476,7 @@ image_decode_libav(image_coded_type_t type,
   pixmap_t *pm;
 
   pm = pixmap_from_avpic((AVPicture *)frame, 
-			 ctx->pix_fmt, ctx->width, ctx->height, w, h, im);
+             ctx->pix_fmt, ctx->width, ctx->height, w, h, im);
 
   if(pm != NULL) {
     pm->pm_aspect = (float)w / (float)h;

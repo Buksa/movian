@@ -48,7 +48,7 @@ const char *openpage = STRINGIFY(
 
 static int
 hc_open(http_connection_t *hc, const char *remain, void *opaque,
-	http_cmd_t method)
+    http_cmd_t method)
 {
   htsbuf_queue_t out;
 
@@ -93,7 +93,7 @@ diag_html(http_connection_t *hc, htsbuf_queue_t *out)
 
 
     htsbuf_qprintf(out,
-		   APPNAME"-%d.log (Last modified %s ago): <a href=\"/api/logfile/%d\">View</a> | <a href=\"/api/logfile/%d?mode=download\">Download</a>| <a href=\"/api/logfile/%d?mode=pastebin\">Pastebin</a><br>", i, timestr, i, i, i);
+           APPNAME"-%d.log (Last modified %s ago): <a href=\"/api/logfile/%d\">View</a> | <a href=\"/api/logfile/%d?mode=download\">Download</a>| <a href=\"/api/logfile/%d?mode=pastebin\">Pastebin</a><br>", i, timestr, i, i, i);
   }
 }
 
@@ -115,17 +115,17 @@ hc_root_old(http_connection_t *hc)
   htsbuf_queue_init(&out, 0);
 
   htsbuf_qprintf(&out, 
-		 "<html><body>"
-		 "<h2>%s</h2><p>Version %s"
-		 , gconf.system_name,
-		 appversion);
+         "<html><body>"
+         "<h2>%s</h2><p>Version %s"
+         , gconf.system_name,
+         appversion);
 
   htsbuf_qprintf(&out, 
-		 "<form name=\"input\" method=\"get\">"
-		 "Open URL in %s: "
-		 "<input type=\"text\" name=\"url\" style=\"width:500px\"/>"
-		 "<input type=\"submit\" value=\"Open\" />"
-		 "</form>", APPNAMEUSER);
+         "<form name=\"input\" method=\"get\">"
+         "Open URL in %s: "
+         "<input type=\"text\" name=\"url\" style=\"width:500px\"/>"
+         "<input type=\"submit\" value=\"Open\" />"
+         "</form>", APPNAMEUSER);
 
   htsbuf_qprintf(&out, "<h3>Diagnostics</h3>"); 
 
@@ -153,7 +153,7 @@ hc_done(http_connection_t *hc, const char *remain, void *opaque,
 
 static int
 hc_image(http_connection_t *hc, const char *remain, void *opaque,
-	http_cmd_t method)
+    http_cmd_t method)
 {
   htsbuf_queue_t out;
   image_t *img;
@@ -179,14 +179,14 @@ hc_image(http_connection_t *hc, const char *remain, void *opaque,
   rstr_release(url);
   if(img == NULL)
     return http_error(hc, 404, "Unable to load image %s : %s",
-		      remain, errbuf);
+              remain, errbuf);
 
   const image_component_t *ic = image_find_component(img, IMAGE_CODED);
   if(ic == NULL) {
     image_release(img);
     return http_error(hc, 404,
-		      "Unable to load image %s : Original data not available",
-		      remain);
+              "Unable to load image %s : Original data not available",
+              remain);
   }
   const image_component_coded_t *icc = &ic->coded;
 
@@ -206,6 +206,9 @@ hc_image(http_connection_t *hc, const char *remain, void *opaque,
   case IMAGE_BMP:
     content = "image/bmp";
     break;
+  case IMAGE_WEBP:
+    content = "image/webp";
+    break;
   default:
     content = "image";
     break;
@@ -222,7 +225,7 @@ hc_image(http_connection_t *hc, const char *remain, void *opaque,
 
 static int
 hc_action(http_connection_t *hc, const char *remain, void *opaque,
-	  http_cmd_t method)
+      http_cmd_t method)
 {
   if(remain == NULL)
     return 404;
@@ -234,7 +237,7 @@ hc_action(http_connection_t *hc, const char *remain, void *opaque,
 
 static int
 hc_utf8(http_connection_t *hc, const char *remain, void *opaque,
-	http_cmd_t method)
+    http_cmd_t method)
 {
   const char *str = http_arg_get_req(hc, "str");
   int c;
@@ -247,8 +250,8 @@ hc_utf8(http_connection_t *hc, const char *remain, void *opaque,
     switch(c) {
     case 8:
       e = event_create_action_multi(
-				    (const action_type_t[]){
-				      ACTION_BS, ACTION_NAV_BACK}, 2);
+                    (const action_type_t[]){
+                      ACTION_BS, ACTION_NAV_BACK}, 2);
       break;
 
     default:
@@ -271,7 +274,7 @@ hc_utf8(http_connection_t *hc, const char *remain, void *opaque,
  */
 static int
 hc_binreplace(http_connection_t *hc, const char *remain, void *opaque,
-	      http_cmd_t method)
+          http_cmd_t method)
 {
   if(gconf.binary == NULL)
     return HTTP_STATUS_PRECONDITION_FAILED;
@@ -288,7 +291,7 @@ hc_binreplace(http_connection_t *hc, const char *remain, void *opaque,
   const char *fname = gconf.upgrade_path ?: gconf.binary;
 
   TRACE(TRACE_INFO, "BINREPLACE", "Replacing %s with %d bytes received",
-	fname, (int)len);
+    fname, (int)len);
 
   unlink(fname);
 
@@ -313,7 +316,7 @@ hc_binreplace(http_connection_t *hc, const char *remain, void *opaque,
  */
 static int
 hc_notify_user(http_connection_t *hc, const char *remain, void *opaque,
-	       http_cmd_t method)
+           http_cmd_t method)
 {
   const char *msg  = http_arg_get_req(hc, "msg");
   const char *icon = http_arg_get_req(hc, "icon");
@@ -339,16 +342,16 @@ hc_notify_user(http_connection_t *hc, const char *remain, void *opaque,
  */
 static int
 hc_diagnostics(http_connection_t *hc, const char *remain, void *opaque,
-	       http_cmd_t method)
+           http_cmd_t method)
 {
   htsbuf_queue_t out;
   htsbuf_queue_init(&out, 0);
 
   htsbuf_qprintf(&out,
-		 "<html><body>"
-		 "<strong>%s</strong> Version %s<br><br>"
-		 , gconf.system_name,
-		 appversion);
+         "<html><body>"
+         "<strong>%s</strong> Version %s<br><br>"
+         , gconf.system_name,
+         appversion);
 
   diag_html(hc, &out);
 
@@ -363,7 +366,7 @@ hc_diagnostics(http_connection_t *hc, const char *remain, void *opaque,
  */
 static int
 hc_logfile(http_connection_t *hc, const char *remain, void *opaque,
-	   http_cmd_t method)
+       http_cmd_t method)
 {
   htsbuf_queue_t out;
   htsbuf_queue_init(&out, 0);
@@ -392,10 +395,10 @@ hc_logfile(http_connection_t *hc, const char *remain, void *opaque,
     char errbuf[256];
 
     int ret = http_req("http://sprunge.us",
-		       HTTP_RESULT_PTR(&result),
-		       HTTP_POSTDATA(&hq, "application/x-www-form-urlencoded"),
-		       HTTP_ERRBUF(errbuf, sizeof(errbuf)),
-		       NULL);
+               HTTP_RESULT_PTR(&result),
+               HTTP_POSTDATA(&hq, "application/x-www-form-urlencoded"),
+               HTTP_ERRBUF(errbuf, sizeof(errbuf)),
+               NULL);
 
 
     if(ret) {
@@ -404,7 +407,7 @@ hc_logfile(http_connection_t *hc, const char *remain, void *opaque,
     }
 
     htsbuf_qprintf(&out, "<html><body><a href=\"%s\">%s</a></body></html>",
-		   buf_cstr(result), buf_cstr(result));
+           buf_cstr(result), buf_cstr(result));
 
     buf_release(result);
     return http_send_reply(hc, 0, "text/html", NULL, NULL, 0, &out);
@@ -442,7 +445,7 @@ static void memdumpf(const char *fmt, ...)
  */
 static int
 hc_memstats(http_connection_t *hc, const char * remain, void *opaque,
-	    http_cmd_t method)
+        http_cmd_t method)
 {
   htsbuf_queue_t out;
   hugeptr = 0;
@@ -490,7 +493,7 @@ hexdump(const char *pfx, const uint8_t *data, int len, htsbuf_queue_t *out)
  */
 static int
 hc_hexdump(http_connection_t *hc, const char *remain, void *opaque,
-	    http_cmd_t method)
+        http_cmd_t method)
 {
   htsbuf_queue_t out;
   const char *atxt = http_arg_get_req(hc, "addr");
@@ -530,7 +533,7 @@ hc_echo_init(http_connection_t *hc, void *opaque)
  */
 static int
 hc_echo_data(http_connection_t *hc, int opcode, 
-	     uint8_t *data, size_t len, void *opaque)
+         uint8_t *data, size_t len, void *opaque)
 {
   websocket_send(hc, opcode, data, len);
   TRACE(TRACE_DEBUG, "WS", "Echoing %zd bytes (opcode:%d)", len, opcode);
@@ -575,10 +578,10 @@ hc_serve_file(http_connection_t *hc, const char *file, const char *contenttype)
       pfx++;
       int i;
       for(i = 0; i < sizeof(cttable) / sizeof(cttable[0]); i++) {
-	if(!strcmp(pfx, cttable[i].pfx)) {
-	  contenttype = cttable[i].contenttype;
-	  break;
-	}
+    if(!strcmp(pfx, cttable[i].pfx)) {
+      contenttype = cttable[i].contenttype;
+      break;
+    }
       }
     }
   }
@@ -599,7 +602,7 @@ hc_serve_file(http_connection_t *hc, const char *file, const char *contenttype)
  */
 static int
 hc_root(http_connection_t *hc, const char *remain, void *opaque,
-	  http_cmd_t method)
+      http_cmd_t method)
 {
   if(!gconf.enable_experimental)
     return hc_root_old(hc);
@@ -611,10 +614,10 @@ hc_root(http_connection_t *hc, const char *remain, void *opaque,
  */
 static int
 hc_favicon(http_connection_t *hc, const char *remain, void *opaque,
-	   http_cmd_t method)
+       http_cmd_t method)
 {
   return hc_serve_file(hc, "dataroot://res/static/favicon.ico",
-		       "image/ico");
+               "image/ico");
 }
 
 
@@ -623,7 +626,7 @@ hc_favicon(http_connection_t *hc, const char *remain, void *opaque,
  */
 static int
 hc_static(http_connection_t *hc, const char *remain, void *opaque,
-	   http_cmd_t method)
+       http_cmd_t method)
 {
   char path[PATH_MAX];
   if(remain == NULL || strstr(remain, ".."))
@@ -686,7 +689,7 @@ httpcontrol_init(void)
   http_path_add("/api/logfile", NULL, hc_logfile, 0);
   http_path_add("/api/replace", NULL, hc_binreplace, 1);
   http_add_websocket("/api/ws/echo", NULL,
-		     hc_echo_init, hc_echo_data, hc_echo_fini, NULL);
+             hc_echo_init, hc_echo_data, hc_echo_fini, NULL);
 
   http_path_add("/", NULL, hc_root, 1);
   http_path_add("/favicon.ico", NULL, hc_favicon, 1);
