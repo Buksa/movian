@@ -104,7 +104,7 @@ static int stream_readv ( dvdcss_t, const struct iovec *, int );
 static int svfs_open  ( dvdcss_t, char const * );
 static int svfs_seek  ( dvdcss_t, int );
 static int svfs_read  ( dvdcss_t, void *, int );
-static int svfs_readv ( dvdcss_t, struct iovec *, int );
+static int svfs_readv ( dvdcss_t, const struct iovec *, int );
 
 #ifdef _WIN32
 static int win2k_open  ( dvdcss_t, const char * );
@@ -441,7 +441,7 @@ int dvdcss_open_device ( dvdcss_t dvdcss, struct svfs_ops *svfs_ops )
         dvdcss->pf_readv = libc_readv;
         return libc_open( dvdcss, psz_device );
 #else
-	return -1;
+    return -1;
 #endif
     }
 }
@@ -930,14 +930,14 @@ static int svfs_seek( dvdcss_t dvdcss, int i_blocks )
     int64_t   off;
 
     if(dvdcss->i_pos == i_blocks)
-	return i_blocks;
+    return i_blocks;
 
     off = (int64_t)i_blocks * (int64_t)DVDCSS_BLOCK_SIZE;
 
     off = dvdcss->svfs_ops->seek(dvdcss->svfs_handle, off, SEEK_SET);
     if(off < 0) {
-	dvdcss->i_pos = -1;
-	return -1;
+    dvdcss->i_pos = -1;
+    return -1;
     }
     dvdcss->i_pos = i_blocks;
     return dvdcss->i_pos;
@@ -978,7 +978,7 @@ static int svfs_read ( dvdcss_t dvdcss, void *p_buffer, int i_blocks )
 }
 
 
-static int svfs_readv ( dvdcss_t dvdcss, struct iovec *p_iovec, int i_blocks )
+static int svfs_readv ( dvdcss_t dvdcss, const struct iovec *p_iovec, int i_blocks )
 {
     int i_index, i_len, i_total = 0;
     unsigned char *p_base;
