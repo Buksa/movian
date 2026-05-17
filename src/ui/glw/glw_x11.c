@@ -294,14 +294,17 @@ window_open(glw_x11_t *gx11, int fullscreen)
   mask = CWBackPixmap | CWBorderPixel | CWColormap | CWEventMask;
 
   if(fullscreen) {
+    int steam_game = getenv("SteamGameId") || getenv("SteamAppId");
 
     x = 0;
     y = 0;
     w = gx11->screen_width;
     h = gx11->screen_height;
 
-    winAttr.override_redirect = True;
-    mask |= CWOverrideRedirect;
+    if(!steam_game) {
+      winAttr.override_redirect = True;
+      mask |= CWOverrideRedirect;
+    }
 
   } else {
 
@@ -797,6 +800,7 @@ window_change_fullscreen(glw_x11_t *gx11)
     window_shutdown(gx11);
     if(window_open(gx11, gx11->want_fullscreen))
       exit(1);
+    gx11->is_fullscreen = gx11->want_fullscreen;
   }
   glw_set_fullscreen(&gx11->gr, gx11->is_fullscreen);
 }
@@ -844,6 +848,7 @@ static const struct {
 
   { XK_Home,         0,           ACTION_TOP},
   { XK_End,          0,           ACTION_BOTTOM},
+  { XK_Menu,         0,           ACTION_MENU},
 
   { XK_plus,         ControlMask, ACTION_ZOOM_UI_INCR},
   { XK_minus,        ControlMask, ACTION_ZOOM_UI_DECR},
