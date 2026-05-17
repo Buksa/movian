@@ -23,9 +23,12 @@
 #include "net_i.h"
 #include "net_openssl.h"
 
+#include <openssl/opensslv.h>
 #include <openssl/x509v3.h>
 
 static SSL_CTX *app_ssl_ctx;
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
 static pthread_mutex_t *ssl_locks;
 
 static unsigned long
@@ -42,6 +45,7 @@ ssl_lock_fn(int mode, int n, const char *file, int line)
   else
     pthread_mutex_unlock(&ssl_locks[n]);
 }
+#endif
 
 
 
@@ -245,12 +249,14 @@ net_ssl_init(void)
 
   SSL_CTX_load_verify_locations(app_ssl_ctx, NULL, "/etc/ssl/certs");
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
   int i, n = CRYPTO_num_locks();
   ssl_locks = malloc(sizeof(pthread_mutex_t) * n);
   for(i = 0; i < n; i++)
     pthread_mutex_init(&ssl_locks[i], NULL);
   CRYPTO_set_locking_callback(ssl_lock_fn);
   CRYPTO_set_id_callback(ssl_tid_fn);
+#endif
 }
 
 
