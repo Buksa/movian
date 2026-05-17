@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.uzver.MovianM7</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Movian M7</name>
+  <summary>Media player for plugins, streams, and local files</summary>
+  <developer id="dev.uzver">
+    <name>Movian M7 contributors</name>
+  </developer>
+  <launchable type="desktop-id">dev.uzver.MovianM7.desktop</launchable>
+  <description>
+    <p>
+      Movian M7 is a GLW-based media player build intended for local media,
+      network streams, and JavaScript plugin development.
+    </p>
+  </description>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Player</category>
+  </categories>
+  <provides>
+    <binary>showtime</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <url type="homepage">https://movian.eu/</url>
+  <releases>
+    <release version="5.0.581" date="2026-05-17"/>
+  </releases>
+</component>

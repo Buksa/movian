@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Movian M7 (GameMode)
+GenericName=Media Player
+Comment=Fullscreen Movian M7 launcher for Steam Deck Gaming Mode
+Exec=showtime --fullscreen %U
+Icon=dev.uzver.MovianM7
+Terminal=false
+Categories=AudioVideo;Player;
+StartupWMClass=showtime
+MimeType=application/ogg;application/x-matroska;audio/mp4;audio/mpeg;audio/ogg;audio/x-flac;audio/x-matroska;video/mp4;video/mpeg;video/ogg;video/quicktime;video/webm;video/x-matroska;

@@ -1,0 +1,58 @@
+id: dev.uzver.MovianM7
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: showtime
+
+finish-args:
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --device=dri
+  - --socket=pulseaudio
+  - --share=network
+  - --filesystem=xdg-videos:ro
+  - --filesystem=xdg-music:ro
+  - --filesystem=xdg-pictures:ro
+  - --filesystem=xdg-download:ro
+  - --persist=.hts
+  - --persist=.cache/movian
+
+modules:
+  - name: movian-m7
+    buildsystem: simple
+    build-options:
+      env:
+        SKIP_SUBMODULE_UPDATE: '1'
+        LIBAV_COMMON_FLAGS: >-
+          --disable-inline-asm
+          --disable-hwaccels
+    build-commands:
+      - >-
+        ./configure.linux
+        --build=flatpak
+        --release
+        --prefix=/app
+        --disable-gu
+        --disable-webkit
+        --disable-dvd
+        --disable-vdpau
+        --disable-avahi
+        --disable-libxss
+        --disable-libxxf86vm
+        --disable-librtmp
+      - make BUILD=flatpak "$PWD/build.flatpak/movian.bundle" -j${FLATPAK_BUILDER_N_JOBS}
+      - install -Dm755 build.flatpak/movian.bundle /app/bin/showtime
+      - install -Dm644 support/flatpak/dev.uzver.MovianM7.desktop /app/share/applications/dev.uzver.MovianM7.desktop
+      - install -Dm644 support/flatpak/dev.uzver.MovianM7.GameMode.desktop /app/share/applications/dev.uzver.MovianM7.GameMode.desktop
+      - install -Dm644 support/flatpak/dev.uzver.MovianM7.metainfo.xml /app/share/metainfo/dev.uzver.MovianM7.metainfo.xml
+      - install -Dm644 support/artwork/vector/movian.svg /app/share/icons/hicolor/scalable/apps/dev.uzver.MovianM7.svg
+      - rm -f /app/share/applications/showtime.desktop /app/share/icons/hicolor/scalable/apps/showtime.svg
+    sources:
+      - type: dir
+        path: ../..
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - '*.a'
