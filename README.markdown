@@ -13,11 +13,28 @@ For more information and latest versions, please visit:
 
 First you need to satisfy some dependencies (for Ubuntu 16.04.3 LTS)
 
-	sudo apt-get install libfreetype6-dev libfontconfig1-dev libxext-dev libgl1-mesa-dev libasound2-dev libasound2-dev libgtk2.0-dev libxss-dev libxxf86vm-dev libxv-dev libvdpau-dev yasm libpulse-dev libssl-dev curl libwebkitgtk-dev libsqlite3-dev libavahi-client-dev
+	sudo apt-get install libfreetype6-dev libfontconfig1-dev libxext-dev libgl1-mesa-dev libasound2-dev libgtk2.0-dev libxss-dev libxxf86vm-dev libxv-dev libvdpau-dev yasm libpulse-dev libssl-dev curl libwebkitgtk-dev libsqlite3-dev libavahi-client-dev
 
 Then you need to configure:
 
 	./configure
+
+On newer Ubuntu releases, including WSL environments where VDPAU headers are
+not installed and the system OpenSSL is too new for bundled librtmp, use the
+built-in PolarSSL and disable VDPAU:
+
+	sudo apt-get install build-essential pkg-config git curl yasm python-is-python3 libfreetype6-dev libfontconfig1-dev libxext-dev libgl1-mesa-dev libasound2-dev libgtk2.0-dev libxss-dev libxxf86vm-dev libxv-dev libpulse-dev libssl-dev libsqlite3-dev libavahi-client-dev libwebkitgtk-dev
+	./support/configure-linux-debug.sh
+	make BUILD=debug -j$(nproc)
+
+The helper runs:
+
+	./configure.linux --build=debug --disable-vdpau --enable-polarssl
+
+The debug binary is written to `./build.debug/movian`. Extra configure
+options can be appended to the helper command; for example, use
+`./support/configure-linux-debug.sh --disable-webkit` if WebKitGTK is not
+available on your distribution.
 
 If your system lacks libwebkitgtk or some other lib you can configure like this:
 
@@ -88,4 +105,3 @@ $ ./Autobuild.sh -t rpi -v 5.0.500
 To update Movian on rpi with compiled one, enable Binreplace in settings:dev and issue:
 
 	curl --data-binary @build.rpi/showtime.sqfs http://rpi_ip_address:42000/api/replace
-
