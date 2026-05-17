@@ -50,30 +50,52 @@ static char *
 linux_get_dist(void)
 {
   char buf[1024] = {0};
-  FILE *fp = popen("lsb_release -d", "r");
-  if(fp == NULL)
-    return NULL;
-
+  FILE *fp = popen("lsb_release -d 2>/dev/null", "r");
   char *ret = NULL;
-  while(1) {
-    int r = fread(buf, 1, sizeof(buf) - 1, fp);
-    if(r == 0)
-      break;
 
-    const char *s;
-    if((s = mystrbegins(buf, "Description:")) != NULL) {
-      while(*s && *s <= 32)
-        s++;
-
-      if(*s) {
-        ret = strdup(s);
-        ret[strcspn(ret, "\n\r")] = 0;
+  if(fp != NULL) {
+    while(1) {
+      int r = fread(buf, 1, sizeof(buf) - 1, fp);
+      if(r == 0)
         break;
+
+      const char *s;
+      if((s = mystrbegins(buf, "Description:")) != NULL) {
+        while(*s && *s <= 32)
+          s++;
+
+        if(*s) {
+          ret = strdup(s);
+          ret[strcspn(ret, "\n\r")] = 0;
+          break;
+        }
       }
     }
+
+    pclose(fp);
   }
 
-  pclose(fp);
+  if(ret == NULL && (fp = fopen("/etc/os-release", "r")) != NULL) {
+    while(fgets(buf, sizeof(buf), fp) != NULL) {
+      const char *s = mystrbegins(buf, "PRETTY_NAME=");
+      if(s == NULL)
+        continue;
+
+      if(*s == '"' || *s == '\'') {
+        const char quote = *s++;
+        ret = strdup(s);
+        char *e = strchr(ret, quote);
+        if(e != NULL)
+          *e = 0;
+      } else {
+        ret = strdup(s);
+        ret[strcspn(ret, "\n\r")] = 0;
+      }
+      break;
+    }
+    fclose(fp);
+  }
+
   return ret;
 }
 #endif
