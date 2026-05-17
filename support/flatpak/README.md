@@ -18,6 +18,8 @@ SteamOS-specific configure flag.
 
 Bundled libav is also configured with `--disable-inline-asm` and
 `--disable-hwaccels` so the old bundled libav stays portable in the Flatpak SDK.
+The manifest adds `LIBAV_CFLAGS=-Wno-error=incompatible-pointer-types` for the
+old libav snapshot under the newer Freedesktop SDK compiler.
 
 The Flatpak build installs `$PWD/build.flatpak/movian.bundle` as
 `/app/bin/showtime`. That binary carries the Movian resource bundle and does

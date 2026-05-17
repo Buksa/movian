@@ -24,6 +24,7 @@ modules:
     build-options:
       env:
         SKIP_SUBMODULE_UPDATE: '1'
+        LIBAV_CFLAGS: -Wno-error=incompatible-pointer-types
         LIBAV_COMMON_FLAGS: >-
           --disable-inline-asm
           --disable-hwaccels

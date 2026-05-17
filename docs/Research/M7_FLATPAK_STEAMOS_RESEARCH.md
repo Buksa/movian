@@ -54,6 +54,10 @@ old movian6 libav snapshot:
 - `--disable-inline-asm`
 - `--disable-hwaccels`
 
+The Flatpak manifest also sets
+`LIBAV_CFLAGS=-Wno-error=incompatible-pointer-types` for the newer Freedesktop
+SDK compiler.
+
 The public WSL GLX compatibility path is runtime-detected. It does not need a
 SteamOS configure switch.
 

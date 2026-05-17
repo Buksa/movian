@@ -27,6 +27,9 @@ internals (`HMAC_CTX`, `DH->p`, `DH->g`), которые закрыты в OpenS
 Bundled libav дополнительно получает `--disable-inline-asm` и
 `--disable-hwaccels`, чтобы старый bundled libav оставался переносимым внутри
 Flatpak SDK.
+Для Freedesktop SDK compiler manifest добавляет
+`LIBAV_CFLAGS=-Wno-error=incompatible-pointer-types`, потому что старый libav
+snapshot иначе падает на pointer-type diagnostics.
 Public WSL GLX compatibility определяется во время запуска по WSL
 environment/osrelease и не требует отдельного SteamOS configure flag.
 Flatpak устанавливает `$PWD/build.flatpak/movian.bundle` как
