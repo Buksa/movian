@@ -28,6 +28,7 @@ modules:
           --disable-inline-asm
           --disable-hwaccels
     build-commands:
+      - rm -rf build.flatpak
       - >-
         ./configure.linux
         --build=flatpak

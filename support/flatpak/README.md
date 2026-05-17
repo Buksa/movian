@@ -21,7 +21,9 @@ Bundled libav is also configured with `--disable-inline-asm` and
 
 The Flatpak build installs `$PWD/build.flatpak/movian.bundle` as
 `/app/bin/showtime`. That binary carries the Movian resource bundle and does
-not need a separate `make install` target.
+not need a separate `make install` target. The manifest removes any copied
+`build.flatpak` directory first, because local `type: dir` sources can otherwise
+carry stale absolute build paths into the sandbox.
 
 The sandbox persists Movian's legacy home-relative state directories:
 

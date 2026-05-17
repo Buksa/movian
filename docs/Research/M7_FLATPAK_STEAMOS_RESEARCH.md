@@ -61,6 +61,10 @@ The package installs `$PWD/build.flatpak/movian.bundle` as `/app/bin/showtime`.
 Using the bundled binary avoids relying on a Linux `make install` target and
 keeps GLW skin/resources embedded for the sideload package.
 
+Because the manifest uses local `type: dir` sources, it removes any copied
+`build.flatpak` directory before configure. Otherwise a previous host-side
+build can leave absolute paths in generated libav Makefiles inside the sandbox.
+
 ## Gaming Mode
 
 Two X11 fixes are included for Steam Deck Gaming Mode:

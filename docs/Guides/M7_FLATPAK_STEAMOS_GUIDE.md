@@ -31,6 +31,8 @@ Public WSL GLX compatibility определяется во время запус
 environment/osrelease и не требует отдельного SteamOS configure flag.
 Flatpak устанавливает `$PWD/build.flatpak/movian.bundle` как
 `/app/bin/showtime`, поэтому отдельный upstream `make install` target не нужен.
+Manifest сначала удаляет скопированный `build.flatpak`, чтобы local `type: dir`
+source не принёс stale absolute build paths из host checkout внутрь sandbox.
 
 ## Установка инструментов в WSL Ubuntu
 
