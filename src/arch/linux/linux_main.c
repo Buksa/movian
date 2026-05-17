@@ -105,7 +105,7 @@ add_xdg_path(const char *class, const char *type)
     service_create_managed(id, title, path, type, NULL, 0, 1,
 			   SVC_ORIGIN_SYSTEM);
   }
-  fclose(fp);
+  pclose(fp);
 }
 
 

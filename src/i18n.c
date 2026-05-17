@@ -196,7 +196,7 @@ findscore(const char *str, char vec[][4])
     return 0;
 
   for(i = 0; i < 3; i++)
-    if(vec[i] && !strcasecmp(vec[i], str))
+    if(vec[i][0] && !strcasecmp(vec[i], str))
       return 100000 * (3 - i);
   return 0;
 }
