@@ -1428,6 +1428,7 @@ build_msg(stppmsg_t *msg)
   extern int http_server_port;
   if(stpp_system_name == NULL)
     return -1;
+  memset(msg, 0, sizeof(*msg));
   snprintf(msg->name, sizeof(msg->name), "%s", rstr_get(stpp_system_name));
   snprintf(msg->type, sizeof(msg->type), "%s", arch_get_system_type());
   memcpy(msg->magic, "STPP", 4);
