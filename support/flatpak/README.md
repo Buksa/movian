@@ -1,45 +1,17 @@
 # Movian M7 Flatpak
 
-This is a local/sideload Flatpak manifest for GLW-only Movian M7 testing.
-It is not a Flathub-ready manifest yet.
+This directory contains the local/sideload Flatpak packaging for Movian M7.
+The manifest builds the GLW/X11/OpenGL UI and installs the bundled binary as
+`/app/bin/showtime`.
 
-The manifest intentionally configures Movian with:
+## Files
 
-```sh
---disable-gu --disable-webkit --disable-dvd --disable-librtmp
-```
-
-That keeps the package out of the legacy GTK/GU path and avoids GTK2 runtime
-dependencies. The Flatpak SDK OpenSSL package is used instead of bundled
-PolarSSL. RTMP is disabled for this first Flatpak MVP because bundled rtmpdump
-needs OpenSSL 1.x internals that are opaque in OpenSSL 3.
-The public WSL GLX compatibility path is runtime-detected and does not need a
-SteamOS-specific configure flag.
-
-Bundled libav is also configured with `--disable-inline-asm` and
-`--disable-hwaccels` so the old bundled libav stays portable in the Flatpak SDK.
-The manifest adds `LIBAV_CFLAGS=-Wno-error=incompatible-pointer-types` for the
-old libav snapshot under the newer Freedesktop SDK compiler.
-
-The Flatpak build installs `$PWD/build.flatpak/movian.bundle` as
-`/app/bin/showtime`. That binary carries the Movian resource bundle and does
-not need a separate `make install` target. The manifest removes any copied
-`build.flatpak` directory first, because local `type: dir` sources can otherwise
-carry stale absolute build paths into the sandbox.
-The AppStream metadata is generated from
-`support/flatpak/dev.uzver.MovianM7.metainfo.xml.in` during the build so
-Discover shows the same git-derived version as Movian's About/log output.
-
-The sandbox persists Movian's legacy home-relative state directories:
-
-```text
-~/.hts/showtime
-~/.cache/movian
-```
-
-This is important for installed plugins, settings, metadata, logs and image
-cache. Installed plugin ZIPs are stored under
-`~/.hts/showtime/installedplugins` inside Movian.
+- `dev.uzver.MovianM7.yml` - Flatpak manifest.
+- `dev.uzver.MovianM7.desktop` - normal launcher.
+- `dev.uzver.MovianM7.GameMode.desktop` - fullscreen launcher.
+- `dev.uzver.MovianM7.metainfo.xml.in` - AppStream template.
+- `build-local.sh` - local builder wrapper.
+- `steam-deck-gamemode-launcher.sh` - optional host-side diagnostic launcher.
 
 ## Build
 
@@ -49,20 +21,61 @@ From the repository root:
 support/flatpak/build-local.sh
 ```
 
-Expected artifact:
+The bundle is written to:
 
 ```text
 build.flatpak/dev.uzver.MovianM7.flatpak
 ```
 
-## Run
+The build log is written to:
 
-```sh
-flatpak install --user --reinstall --bundle build.flatpak/dev.uzver.MovianM7.flatpak
-flatpak run dev.uzver.MovianM7
+```text
+build.flatpak/flatpak-build.log
 ```
 
-For Steam Deck Gaming Mode, prefer the fullscreen desktop entry or copy
-`support/flatpak/steam-deck-gamemode-launcher.sh` to the Deck and add that
-script as a Non-Steam Game. It writes diagnostics to
-`~/movian-m7-gamemode.log`.
+## Validate
+
+```sh
+desktop-file-validate \
+  support/flatpak/dev.uzver.MovianM7.desktop \
+  support/flatpak/dev.uzver.MovianM7.GameMode.desktop
+
+appstreamcli validate --no-net \
+  build.flatpak-builder/files/share/metainfo/dev.uzver.MovianM7.metainfo.xml
+
+flatpak build build.flatpak-builder /app/bin/showtime --help
+
+flatpak build build.flatpak-builder ldd /app/bin/showtime | \
+  grep -Ei 'gtk|gdk|webkit|rtmp|dvd|vaapi|vdpau|libva|nvidia' || true
+```
+
+The dependency grep should be empty for this MVP profile.
+
+## Install
+
+```sh
+flatpak install --user --reinstall --bundle \
+  build.flatpak/dev.uzver.MovianM7.flatpak
+
+flatpak run --user dev.uzver.MovianM7
+flatpak info --user dev.uzver.MovianM7
+flatpak info --user --show-permissions dev.uzver.MovianM7
+```
+
+## Manifest Notes
+
+The package persists Movian's legacy state and cache:
+
+```text
+--persist=.hts
+--persist=.cache/movian
+```
+
+AppStream metadata is generated from `dev.uzver.MovianM7.metainfo.xml.in`
+during the build. The version comes from:
+
+```sh
+git describe --dirty --abbrev=5 | sed -e 's/-/./g'
+```
+
+That keeps Discover, `flatpak info`, and Movian's About/log version aligned.

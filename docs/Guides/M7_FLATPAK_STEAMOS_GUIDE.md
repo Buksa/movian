@@ -1,45 +1,67 @@
-# M7 Flatpak / SteamOS Guide
+# SteamOS Flatpak Guide
 
-Дата: 2026-05-13
+This guide covers the local Movian M7 Flatpak used for SteamOS and Steam Deck
+smoke testing. It is a sideload package built from this checkout, not a
+Flathub-ready manifest.
 
-Цель: собрать локальный GLW-only Flatpak для SteamOS / Steam Deck и проверить
-его как sideload package. Это не Flathub recipe.
-
-## Что уже подготовлено
+## Files
 
 - Manifest: `support/flatpak/dev.uzver.MovianM7.yml`
-- Desktop file: `support/flatpak/dev.uzver.MovianM7.desktop`
-- AppStream metadata template: `support/flatpak/dev.uzver.MovianM7.metainfo.xml.in`
+- Desktop entry: `support/flatpak/dev.uzver.MovianM7.desktop`
+- Fullscreen desktop entry: `support/flatpak/dev.uzver.MovianM7.GameMode.desktop`
+- AppStream template: `support/flatpak/dev.uzver.MovianM7.metainfo.xml.in`
 - Build wrapper: `support/flatpak/build-local.sh`
+- Optional diagnostic launcher: `support/flatpak/steam-deck-gamemode-launcher.sh`
 
-Flatpak build использует:
+## Build Profile
+
+The Flatpak profile builds the GLW/X11/OpenGL frontend and disables older or
+deferred subsystems:
 
 ```sh
---disable-gu --disable-webkit --disable-dvd --disable-librtmp
+--disable-gu
+--disable-webkit
+--disable-dvd
+--disable-vdpau
+--disable-avahi
+--disable-libxss
+--disable-libxxf86vm
+--disable-librtmp
 ```
 
-Поэтому пакет должен быть GLW/X11/OpenGL-only, без GTK2/GU. DVD отключён для
-первого SteamOS MVP, потому что bundled `ext/dvd` падает на более строгом
-компиляторе Freedesktop SDK 25.08; для plugin/stream/local-file сценариев DVD
-не нужен. TLS берётся из OpenSSL внутри Freedesktop SDK, не из bundled
-PolarSSL. RTMP отключён, потому что bundled `rtmpdump` зависит от OpenSSL 1.x
-internals (`HMAC_CTX`, `DH->p`, `DH->g`), которые закрыты в OpenSSL 3.
-Bundled libav дополнительно получает `--disable-inline-asm` и
-`--disable-hwaccels`, чтобы старый bundled libav оставался переносимым внутри
-Flatpak SDK.
-Для Freedesktop SDK compiler manifest добавляет
-`LIBAV_CFLAGS=-Wno-error=incompatible-pointer-types`, потому что старый libav
-snapshot иначе падает на pointer-type diagnostics.
-Public WSL GLX compatibility определяется во время запуска по WSL
-environment/osrelease и не требует отдельного SteamOS configure flag.
-Flatpak устанавливает `$PWD/build.flatpak/movian.bundle` как
-`/app/bin/showtime`, поэтому отдельный upstream `make install` target не нужен.
-Manifest сначала удаляет скопированный `build.flatpak`, чтобы local `type: dir`
-source не принёс stale absolute build paths из host checkout внутрь sandbox.
-AppStream metadata генерируется во время build из template и получает ту же
-`git describe` версию, которую показывает Movian в About/log.
+The manifest also sets:
 
-## Установка инструментов в WSL Ubuntu
+```text
+SKIP_SUBMODULE_UPDATE=1
+LIBAV_COMMON_FLAGS=--disable-inline-asm --disable-hwaccels
+LIBAV_CFLAGS=-Wno-error=incompatible-pointer-types
+```
+
+`SKIP_SUBMODULE_UPDATE=1` keeps Flatpak builds from reaching out to git during
+packaging, so the submodules must already be populated in the checkout.
+
+The build installs `build.flatpak/movian.bundle` as `/app/bin/showtime`.
+AppStream metadata is generated during the build from `git describe`, which
+keeps Discover's version aligned with Movian's About/log output.
+
+## Sandbox
+
+The manifest keeps permissions narrow:
+
+```text
+shared=network;ipc;
+sockets=x11;wayland;pulseaudio;
+devices=dri;
+filesystems=xdg-download:ro;xdg-pictures:ro;xdg-videos:ro;xdg-music:ro;
+persistent=.hts;.cache/movian;
+```
+
+The persisted directories preserve Movian's legacy settings, plugin state, and
+image cache inside the Flatpak app home.
+
+## Host Setup
+
+On Ubuntu or WSL Ubuntu:
 
 ```sh
 sudo apt update
@@ -51,7 +73,7 @@ sudo apt install -y \
   dbus-user-session
 ```
 
-Добавить Flathub и runtime:
+Add Flathub and install the runtime:
 
 ```sh
 flatpak remote-add --user --if-not-exists flathub \
@@ -62,250 +84,114 @@ flatpak install --user -y flathub \
   org.freedesktop.Sdk//25.08
 ```
 
-Если `25.08` ещё недоступен в конкретном окружении, посмотреть доступные
-версии:
+## Build
+
+From the repository root:
 
 ```sh
-flatpak remote-ls flathub --runtime | grep 'org.freedesktop.Sdk'
-```
-
-и заменить `runtime-version` в manifest.
-
-## Сборка в WSL Ubuntu
-
-```sh
-cd /home/uzver/movian-public-clean
 support/flatpak/build-local.sh
 ```
 
-Ожидаемый файл:
+Expected artifact:
 
 ```text
-/home/uzver/movian-public-clean/build.flatpak/dev.uzver.MovianM7.flatpak
+build.flatpak/dev.uzver.MovianM7.flatpak
 ```
 
-Проверено в WSL Ubuntu 2026-05-13:
-
-- bundle собрался;
-- `/app/bin/showtime --help` работает внутри Flatpak build sandbox;
-- `ldd /app/bin/showtime` не показывает GTK/GDK/WebKit/RTMP/DVD/VAAPI/VDPAU
-  libs.
-- manifest сохраняет legacy state directories через `--persist=.hts` и
-  `--persist=.cache/movian`, поэтому установленные плагины должны переживать
-  перезапуск.
-- Gaming Mode без window manager не должен зациклиться на пересоздании
-  fullscreen window.
-
-Если wrapper пишет:
-
-```text
-flatpak-builder: not found
-```
-
-значит сначала нужно поставить пакеты из раздела выше.
-
-Проверить локально:
-
-```sh
-flatpak install --user --reinstall --bundle build.flatpak/dev.uzver.MovianM7.flatpak
-flatpak run dev.uzver.MovianM7
-```
-
-Проверить зависимости внутри sandbox:
-
-```sh
-flatpak run --command=sh dev.uzver.MovianM7 -c \
-  'ldd /app/bin/showtime | grep -Ei "gtk|gdk|webkit|rtmp|dvd|vaapi|vdpau|libva|nvidia" || true'
-```
-
-Ожидаемо: пустой вывод.
-
-До установки bundle можно проверить build sandbox:
+Useful local checks after a build:
 
 ```sh
 flatpak build build.flatpak-builder /app/bin/showtime --help
+appstreamcli validate --no-net \
+  build.flatpak-builder/files/share/metainfo/dev.uzver.MovianM7.metainfo.xml
 flatpak build build.flatpak-builder ldd /app/bin/showtime | \
   grep -Ei 'gtk|gdk|webkit|rtmp|dvd|vaapi|vdpau|libva|nvidia' || true
+sha256sum build.flatpak/dev.uzver.MovianM7.flatpak
 ```
 
-## Перенос на Steam Deck
+The dependency grep should print nothing for the current MVP profile.
 
-Собрать лучше в WSL/Ubuntu или другой Linux VM, а на Steam Deck только
-установить готовый bundle.
+## Install And Run
 
-Пример через `scp`:
+Install the generated bundle:
 
 ```sh
-scp /home/uzver/movian-public-clean/build.flatpak/dev.uzver.MovianM7.flatpak \
-  deck@steamdeck:~/Downloads/
+flatpak install --user --reinstall --bundle \
+  build.flatpak/dev.uzver.MovianM7.flatpak
 ```
 
-На Steam Deck в Desktop Mode:
+Run from CLI:
 
 ```sh
-flatpak install --user --reinstall --bundle ~/Downloads/dev.uzver.MovianM7.flatpak
-flatpak run dev.uzver.MovianM7
+flatpak run --user dev.uzver.MovianM7
+flatpak run --user --command=showtime dev.uzver.MovianM7 --help
+flatpak info --user dev.uzver.MovianM7
+flatpak info --user --show-permissions dev.uzver.MovianM7
 ```
 
-После обновления bundle плагины, которые пропали в старой сборке, нужно
-установить один раз заново. Проверить host-side storage можно так:
+`flatpak info` should show the same version that Movian prints in About/log.
+
+## Steam Deck Smoke
+
+Build on Ubuntu/WSL/VM, copy the bundle to the Deck, then install it in Desktop
+Mode through Discover or CLI:
 
 ```sh
-find ~/.var/app/dev.uzver.MovianM7 -path '*installedplugins*' -print
+flatpak install --user --reinstall --bundle \
+  ~/Downloads/dev.uzver.MovianM7.flatpak
 ```
 
-Movian сам использует legacy путь `$HOME/.hts/showtime/installedplugins`; в
-Flatpak он сохраняется через `--persist=.hts`.
+Minimum smoke checklist:
 
-Добавить в Gaming Mode, вариант 1:
+- Discover shows the same version as `flatpak info` and Movian About/log.
+- Desktop Mode launch opens the GLW UI.
+- Gaming Mode launch opens through `Movian M7 (GameMode)` or a Non-Steam Game.
+- Fullscreen does not loop or bounce back to the Steam loading screen.
+- Basic navigation works through a Steam Input keyboard-style layout.
+- Installed plugins and settings survive a restart.
+- A direct WebP URL opens as an image.
+- `/api/screenshot/raw` returns a PNG when the HTTP API is enabled.
 
-1. Steam Desktop Mode.
-2. Library -> Add a Non-Steam Game.
-3. Выбрать `Movian M7 (GameMode)`, если он появился в списке.
-4. Если виден только обычный `Movian M7`, можно выбрать его и в Launch Options
-   добавить:
+## Steam Input
 
-   ```text
-   --fullscreen
-   ```
-
-Вариант 2, более диагностический: создать host-side launcher script на Deck,
-добавить его как Non-Steam Game и получить лог запуска.
-
-```sh
-mkdir -p ~/bin
-cat > ~/bin/movian-m7-gamemode.sh <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-log_file="${HOME}/movian-m7-gamemode.log"
-{
-  echo "=== $(date -Iseconds) ==="
-  echo "DISPLAY=${DISPLAY:-}"
-  echo "WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}"
-  echo "XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-}"
-  echo "SteamAppId=${SteamAppId:-}"
-  echo "SteamGameId=${SteamGameId:-}"
-  /usr/bin/flatpak info dev.uzver.MovianM7 || true
-  exec /usr/bin/flatpak run dev.uzver.MovianM7 --fullscreen -d "$@"
-} >>"${log_file}" 2>&1
-EOF
-chmod +x ~/bin/movian-m7-gamemode.sh
-```
-
-В Steam выбрать `~/bin/movian-m7-gamemode.sh` как Non-Steam Game. Если Gaming
-Mode всё ещё не открывает окно, прислать `~/movian-m7-gamemode.log`.
-
-В свойствах Non-Steam Game лучше выставить:
-
-```text
-Target: /home/deck/bin/movian-m7-gamemode.sh
-Start In: /home/deck
-Launch Options: пусто
-```
-
-## Steam Deck gamepad через Steam Input
-
-Movian Linux/GLW получает обычные X11 keyboard/mouse events. Steam Deck
-touchscreen работает как pointer input сразу, но дефолтный Steam Input layout
-`Gamepad` отдаёт controller events, которые текущая Linux/X11 сборка Movian не
-читает напрямую.
-
-Для Gaming Mode выбери у Non-Steam Game controller icon -> Current Layout ->
-Edit Layout и задай keyboard-style mapping:
+Movian's Linux GLW UI consumes keyboard and pointer events. For Steam Deck
+Gaming Mode, map the controller to keyboard actions:
 
 ```text
 D-pad / Left Stick: Arrow Up / Down / Left / Right
 A: Enter
 B: Escape
 X: Backspace
-Y или Menu: Menu key
-L1/R1: Page Up / Page Down
-Steam Input media play/pause: XF86 Audio Play/Pause, если нужен playback toggle
+Y or Menu: Menu key
+L1 / R1: Page Up / Page Down
 ```
 
-Минимальная проверка: назначить хотя бы D-pad Up на `Arrow Up` и A на `Enter`.
-Если фокус в Movian начал двигаться, проблема именно в layout, а не в Flatpak
-или GLW window.
+If arrows and Enter move focus inside Movian, input is reaching the app. Native
+raw controller input is out of scope for this Flatpak branch.
 
-Нативный raw controller path через `/dev/input/event*` в старом коде есть
-(`src/ipc/devevent.c`), но он не подключён в Linux makefile и потребовал бы
-широких Flatpak permissions к input devices. Для Steam Deck MVP лучше держать
-управление через Steam Input.
+## Diagnostic Launcher
 
-## Сборка прямо на Steam Deck
-
-Не рекомендованный путь: SteamOS immutable, pacman-пакеты могут пропасть после
-обновления. Лучше собирать вне Deck.
-
-Если всё-таки нужно:
+If Gaming Mode does not show a window, copy
+`support/flatpak/steam-deck-gamemode-launcher.sh` to the Deck and add it as a
+Non-Steam Game. It runs:
 
 ```sh
-sudo steamos-readonly disable
-sudo pacman -Syu --needed flatpak-builder base-devel git
+flatpak run dev.uzver.MovianM7 --fullscreen -d
 ```
 
-После этого шаги такие же:
+and writes environment and launch diagnostics to:
 
-```sh
-flatpak remote-add --user --if-not-exists flathub \
-  https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak install --user -y flathub \
-  org.freedesktop.Platform//25.08 \
-  org.freedesktop.Sdk//25.08
-cd ~/movian
-support/flatpak/build-local.sh
+```text
+~/movian-m7-gamemode.log
 ```
 
-После сборки read-only mode можно вернуть:
+## Known Limits
 
-```sh
-sudo steamos-readonly enable
-```
-
-## Установка готового bundle на Steam Deck без сборки
-
-Это основной рекомендуемый путь: собрать `.flatpak` в WSL/Ubuntu/VM, перенести
-на Deck и установить:
-
-```sh
-flatpak install --user --reinstall ~/Downloads/dev.uzver.MovianM7.flatpak
-flatpak run dev.uzver.MovianM7
-```
-
-## Smoke checks
-
-1. `flatpak run dev.uzver.MovianM7 --help`
-2. UI opens in Desktop Mode.
-3. Log shows OpenGL renderer, not GTK/GU.
-4. Plugin repo loads from `https://repo.movian.eu/plugins-v1.json`.
-5. Install a plugin, restart Movian, plugin is still present.
-6. MP4 playback works.
-7. HLS playback works.
-8. `/api/screenshot/raw` returns an image.
-9. Gaming Mode opens via `Movian M7 (GameMode)` or the diagnostic launcher.
-
-## Known risks
-
-- WSL может быть неудобен для running GUI Flatpak; build может пройти, а запуск
-  лучше проверять на Steam Deck.
-- Manifest uses `type: dir`, поэтому это local/sideload recipe. Для Flathub
-  нужны pinned git/archive sources and hashes.
-- `SKIP_SUBMODULE_UPDATE=1` требует, чтобы `ext/libav`, `ext/gumbo-parser` и
-  `ext/vmir` уже были populated в исходниках.
-- DVD backend отключён в Flatpak MVP. Если он понадобится позже, надо отдельно
-  поправить bundled `ext/dvd` под новый compiler.
-- Bundled PolarSSL не используется в Flatpak MVP: старый код падает на
-  Freedesktop SDK 25.08 из-за более строгой проверки implicit declarations.
-- RTMP backend отключён в Flatpak MVP. Если понадобится RTMP, нужен отдельный
-  порт bundled `rtmpdump` под OpenSSL 3 или замена зависимости.
-- Hardware acceleration в bundled libav отключён явно. Для Steam Deck это
-  можно вернуть позже отдельной задачей, но потребуется проверить VAAPI deps и
-  sandbox permissions.
-- Если Gaming Mode зависает на Steam logo, но Desktop Mode и Big Picture
-  работают, сначала использовать host-side diagnostic launcher и смотреть
-  `~/movian-m7-gamemode.log`. Это отделяет проблему Flatpak/package от
-  gamescope/Steam launch environment.
-- Если в логе тысячи повторов `OpenGL Renderer` после `No window manager
-  found`, это fullscreen state loop: GLW пересоздает окно каждый кадр. В M7
-  Flatpak это исправлено выставлением `is_fullscreen = want_fullscreen` после
-  no-WM reopen.
+- The manifest uses local `type: dir` sources; Flathub needs pinned source
+  archives and hashes.
+- Hardware acceleration is disabled for this first package profile.
+- DVD, RTMP, GU/WebKit, Avahi, VDPAU, libXss, and libXxf86vm are disabled.
+- The sandbox exposes common XDG media folders read-only, not every removable
+  media path.
+- Native `/dev/input/event*` controller access is not requested; use Steam
+  Input keyboard mapping.
