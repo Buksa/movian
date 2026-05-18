@@ -73,7 +73,7 @@ linux_get_dist(void)
     }
   }
 
-  fclose(fp);
+  pclose(fp);
   return ret;
 }
 #endif

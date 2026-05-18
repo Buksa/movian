@@ -38,8 +38,10 @@ LIB=${BUILDDIR}/libmovian
 
 include ${BUILDDIR}/config.mak
 
-CFLAGS_std += -Wall -Werror -Wwrite-strings -Wno-deprecated-declarations \
+CFLAGS_std_noerror += -Wall -Wwrite-strings -Wno-deprecated-declarations \
 		-Wmissing-prototypes -Wno-multichar  -Iext/dvd -std=gnu99
+CFLAGS_std += ${CFLAGS_std_noerror} -Werror -Wno-error=attributes \
+		-Wno-error=format-truncation -Wno-error=format-overflow
 
 CFLAGS = ${CFLAGS_std} ${OPTFLAGS}
 
@@ -531,7 +533,7 @@ ${BUILDDIR}/ext/rtmpdump/librtmp/%.o : CFLAGS = ${OPTFLAGS}
 
 SRCS-$(CONFIG_LIBRTMP)  +=      src/backend/rtmp/rtmp.c
 
-${BUILDDIR}/src/backend/rtmp/rtmp.o : CFLAGS = ${OPTFLAGS} -Wall -Werror -Iext/rtmpdump
+${BUILDDIR}/src/backend/rtmp/rtmp.o : CFLAGS = ${OPTFLAGS} -Wall -Werror -Wno-error=attributes -Iext/rtmpdump
 
 
 ##############################################################
@@ -755,7 +757,7 @@ SRCS-${CONFIG_VMIR} += \
 	src/np/np_backend.c \
 	src/np/np_stats.c \
 
-${BUILDDIR}/ext/vmir/src/vmir.o : CFLAGS = ${CFLAGS_std} ${OPTFLAGS} -DVMIR_USE_TLSF -Iext/tlsf
+${BUILDDIR}/ext/vmir/src/vmir.o : CFLAGS = ${CFLAGS_std_noerror} ${OPTFLAGS} -DVMIR_USE_TLSF -Iext/tlsf
 
 ${BUILDDIR}/src/np/%.o : CFLAGS = ${CFLAGS_std} ${OPTFLAGS} -DNATIVEPLUGIN_HOST -Inativeplugin/include/
 
