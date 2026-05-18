@@ -85,7 +85,9 @@ hc_screenshot_raw(http_connection_t *hc)
   screenshot_raw_error = NULL;
   hts_mutex_unlock(&screenshot_mutex);
 
-  event_to_ui(event_create(EVENT_MAKE_SCREENSHOT, sizeof(event_t)));
+  event_t *e = event_create(EVENT_MAKE_SCREENSHOT, sizeof(event_t));
+  e->e_flags |= EVENT_SCREENSHOT_RAW;
+  event_to_ui(e);
 
   hts_mutex_lock(&screenshot_mutex);
   int timedout = 0;
@@ -155,7 +157,9 @@ hc_screenshot(http_connection_t *hc, const char *remain,
   screenshot_connection = hc;
   hts_mutex_unlock(&screenshot_mutex);
 
-  event_to_ui(event_create(EVENT_MAKE_SCREENSHOT, sizeof(event_t)));
+  event_t *e = event_create(EVENT_MAKE_SCREENSHOT, sizeof(event_t));
+  e->e_flags |= EVENT_SCREENSHOT_UPLOAD;
+  event_to_ui(e);
   return 0;
 }
 
@@ -289,24 +293,32 @@ screenshot_compress(pixmap_t *pm, int codecid)
 }
 
 
+typedef struct screenshot_task {
+  pixmap_t *pm;
+  int flags;
+} screenshot_task_t;
+
+
 /**
  *
  */
 static void
 screenshot_process(void *task)
 {
-  pixmap_t *pm = task;
+  screenshot_task_t *st = task;
+  pixmap_t *pm = st->pm;
+  int raw_request = st->flags & EVENT_SCREENSHOT_RAW;
+  int upload_request = st->flags & EVENT_SCREENSHOT_UPLOAD;
+  free(st);
 
   if(pm == NULL) {
-    hts_mutex_lock(&screenshot_mutex);
-    int raw_waiting = screenshot_raw_waiting;
-    hts_mutex_unlock(&screenshot_mutex);
-    if(raw_waiting) {
+    if(raw_request) {
       screenshot_raw_complete(NULL,
                               "Screenshot not supported on this platform");
       return;
     }
-    screenshot_response(NULL, "Screenshot not supported on this platform");
+    if(upload_request)
+      screenshot_response(NULL, "Screenshot not supported on this platform");
     return;
   }
 
@@ -318,27 +330,38 @@ screenshot_process(void *task)
   int raw_waiting = screenshot_raw_waiting;
   hts_mutex_unlock(&screenshot_mutex);
 
+  if(raw_request && !raw_waiting) {
+    pixmap_release(pm);
+    return;
+  }
+
+  if(upload_request && !has_connection) {
+    pixmap_release(pm);
+    return;
+  }
+
   int codecid = AV_CODEC_ID_PNG;
-  if(has_connection && !raw_waiting)
+  if(upload_request)
     codecid = AV_CODEC_ID_MJPEG;
 
   buf_t *b = screenshot_compress(pm, codecid);
   pixmap_release(pm);
   if(b == NULL) {
-    if(raw_waiting) {
+    if(raw_request) {
       screenshot_raw_complete(NULL, "Unable to compress image");
       return;
     }
-    screenshot_response(NULL, "Unable to compress image");
+    if(upload_request)
+      screenshot_response(NULL, "Unable to compress image");
     return;
   }
 
-  if(raw_waiting) {
+  if(raw_request) {
     screenshot_raw_complete(b, NULL);
     return;
   }
 
-  if(!has_connection) {
+  if(!upload_request) {
     char path[512];
     char errbuf[512];
     snprintf(path, sizeof(path), "%s/screenshot.png",
@@ -410,9 +433,12 @@ screenshot_process(void *task)
  *
  */
 void
-screenshot_deliver(pixmap_t *pm)
+screenshot_deliver(pixmap_t *pm, int flags)
 {
-  task_run(screenshot_process, pm ? pixmap_dup(pm) : NULL);
+  screenshot_task_t *st = malloc(sizeof(screenshot_task_t));
+  st->pm = pm ? pixmap_dup(pm) : NULL;
+  st->flags = flags;
+  task_run(screenshot_process, st);
 }
 
 

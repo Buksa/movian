@@ -1,4 +1,4 @@
 #pragma once
 
 struct pixmap;
-void screenshot_deliver(struct pixmap *pm);
+void screenshot_deliver(struct pixmap *pm, int flags);
