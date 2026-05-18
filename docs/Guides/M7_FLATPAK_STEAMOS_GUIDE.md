@@ -9,7 +9,7 @@
 
 - Manifest: `support/flatpak/dev.uzver.MovianM7.yml`
 - Desktop file: `support/flatpak/dev.uzver.MovianM7.desktop`
-- AppStream metadata: `support/flatpak/dev.uzver.MovianM7.metainfo.xml`
+- AppStream metadata template: `support/flatpak/dev.uzver.MovianM7.metainfo.xml.in`
 - Build wrapper: `support/flatpak/build-local.sh`
 
 Flatpak build использует:
@@ -36,6 +36,8 @@ Flatpak устанавливает `$PWD/build.flatpak/movian.bundle` как
 `/app/bin/showtime`, поэтому отдельный upstream `make install` target не нужен.
 Manifest сначала удаляет скопированный `build.flatpak`, чтобы local `type: dir`
 source не принёс stale absolute build paths из host checkout внутрь sandbox.
+AppStream metadata генерируется во время build из template и получает ту же
+`git describe` версию, которую показывает Movian в About/log.
 
 ## Установка инструментов в WSL Ubuntu
 

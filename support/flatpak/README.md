@@ -26,6 +26,9 @@ The Flatpak build installs `$PWD/build.flatpak/movian.bundle` as
 not need a separate `make install` target. The manifest removes any copied
 `build.flatpak` directory first, because local `type: dir` sources can otherwise
 carry stale absolute build paths into the sandbox.
+The AppStream metadata is generated from
+`support/flatpak/dev.uzver.MovianM7.metainfo.xml.in` during the build so
+Discover shows the same git-derived version as Movian's About/log output.
 
 The sandbox persists Movian's legacy home-relative state directories:
 

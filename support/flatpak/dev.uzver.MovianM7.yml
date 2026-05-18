@@ -47,7 +47,10 @@ modules:
       - install -Dm755 build.flatpak/movian.bundle /app/bin/showtime
       - install -Dm644 support/flatpak/dev.uzver.MovianM7.desktop /app/share/applications/dev.uzver.MovianM7.desktop
       - install -Dm644 support/flatpak/dev.uzver.MovianM7.GameMode.desktop /app/share/applications/dev.uzver.MovianM7.GameMode.desktop
-      - install -Dm644 support/flatpak/dev.uzver.MovianM7.metainfo.xml /app/share/metainfo/dev.uzver.MovianM7.metainfo.xml
+      - >-
+        movian_version=$(git describe --dirty --abbrev=5 2>/dev/null | sed -e 's/-/./g') &&
+        sed "s/@MOVIAN_VERSION@/${movian_version}/g" support/flatpak/dev.uzver.MovianM7.metainfo.xml.in > build.flatpak/dev.uzver.MovianM7.metainfo.xml &&
+        install -Dm644 build.flatpak/dev.uzver.MovianM7.metainfo.xml /app/share/metainfo/dev.uzver.MovianM7.metainfo.xml
       - install -Dm644 support/artwork/vector/movian.svg /app/share/icons/hicolor/scalable/apps/dev.uzver.MovianM7.svg
       - rm -f /app/share/applications/showtime.desktop /app/share/icons/hicolor/scalable/apps/showtime.svg
     sources:

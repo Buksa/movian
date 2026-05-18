@@ -25,6 +25,6 @@
   <content_rating type="oars-1.1"/>
   <url type="homepage">https://movian.eu/</url>
   <releases>
-    <release version="5.0.581" date="2026-05-17"/>
+    <release version="@MOVIAN_VERSION@" date="2026-05-17"/>
   </releases>
 </component>
