@@ -2375,15 +2375,15 @@ glw_kill_screensaver(glw_root_t *gr)
  *
  */
 static void
-glw_screenshot(glw_root_t *gr)
+glw_screenshot(glw_root_t *gr, int flags)
 {
   if(gr->gr_br_read_pixels == NULL) {
-    screenshot_deliver(NULL);
+    screenshot_deliver(NULL, flags);
     return;
   }
 
   pixmap_t *pm = gr->gr_br_read_pixels(gr);
-  screenshot_deliver(pm);
+  screenshot_deliver(pm, flags);
   pixmap_release(pm);
 }
 
@@ -2434,7 +2434,8 @@ glw_dispatch_event(glw_root_t *gr, event_t *e)
   }
 
   if(e->e_type == EVENT_MAKE_SCREENSHOT) {
-    glw_screenshot(gr);
+    glw_screenshot(gr, e->e_flags & (EVENT_SCREENSHOT_UPLOAD |
+                                     EVENT_SCREENSHOT_RAW));
     return;
   }
 

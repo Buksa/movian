@@ -195,6 +195,8 @@ typedef struct event {
 #define EVENT_KEYPRESS        0x1 // Came from user keypress
 #define EVENT_MOUSE           0x2 // Came from mouse input
 #define EVENT_SCREEN_POSITION 0x4 // e_screen_[xy] is valid
+#define EVENT_SCREENSHOT_UPLOAD 0x8 // Only valid for EVENT_MAKE_SCREENSHOT
+#define EVENT_SCREENSHOT_RAW 0x10 // Only valid for EVENT_MAKE_SCREENSHOT
   event_type_t e_type;
 } event_t;
 
