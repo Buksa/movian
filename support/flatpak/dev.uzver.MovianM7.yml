@@ -48,7 +48,8 @@ modules:
       - install -Dm644 support/flatpak/dev.uzver.MovianM7.desktop /app/share/applications/dev.uzver.MovianM7.desktop
       - install -Dm644 support/flatpak/dev.uzver.MovianM7.GameMode.desktop /app/share/applications/dev.uzver.MovianM7.GameMode.desktop
       - >-
-        movian_version=$(git describe --dirty --abbrev=5 2>/dev/null | sed -e 's/-/./g') &&
+        movian_version=$(git describe --always --dirty --abbrev=5 2>/dev/null || printf '0.0.0') &&
+        movian_version=$(printf '%s' "$movian_version" | sed -e 's/-/./g') &&
         sed "s/@MOVIAN_VERSION@/${movian_version}/g" support/flatpak/dev.uzver.MovianM7.metainfo.xml.in > build.flatpak/dev.uzver.MovianM7.metainfo.xml &&
         install -Dm644 build.flatpak/dev.uzver.MovianM7.metainfo.xml /app/share/metainfo/dev.uzver.MovianM7.metainfo.xml
       - install -Dm644 res/showtime/showtime.png /app/share/icons/hicolor/256x256/apps/dev.uzver.MovianM7.png
