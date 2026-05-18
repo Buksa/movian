@@ -12,6 +12,7 @@ Flathub-ready manifest.
 - AppStream template: `support/flatpak/dev.uzver.MovianM7.metainfo.xml.in`
 - Build wrapper: `support/flatpak/build-local.sh`
 - Optional diagnostic launcher: `support/flatpak/steam-deck-gamemode-launcher.sh`
+- Icon source: `res/showtime/showtime.png`
 
 ## Build Profile
 
@@ -43,6 +44,8 @@ packaging, so the submodules must already be populated in the checkout.
 The build installs `build.flatpak/movian.bundle` as `/app/bin/showtime`.
 AppStream metadata is generated during the build from `git describe`, which
 keeps Discover's version aligned with Movian's About/log output.
+The app icon is installed from `res/showtime/showtime.png` as a hicolor
+`256x256` PNG under the Flatpak app id.
 
 ## Sandbox
 

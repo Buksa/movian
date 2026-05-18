@@ -51,8 +51,8 @@ modules:
         movian_version=$(git describe --dirty --abbrev=5 2>/dev/null | sed -e 's/-/./g') &&
         sed "s/@MOVIAN_VERSION@/${movian_version}/g" support/flatpak/dev.uzver.MovianM7.metainfo.xml.in > build.flatpak/dev.uzver.MovianM7.metainfo.xml &&
         install -Dm644 build.flatpak/dev.uzver.MovianM7.metainfo.xml /app/share/metainfo/dev.uzver.MovianM7.metainfo.xml
-      - install -Dm644 support/artwork/vector/movian.svg /app/share/icons/hicolor/scalable/apps/dev.uzver.MovianM7.svg
-      - rm -f /app/share/applications/showtime.desktop /app/share/icons/hicolor/scalable/apps/showtime.svg
+      - install -Dm644 res/showtime/showtime.png /app/share/icons/hicolor/256x256/apps/dev.uzver.MovianM7.png
+      - rm -f /app/share/applications/showtime.desktop /app/share/icons/hicolor/scalable/apps/showtime.svg /app/share/icons/hicolor/256x256/apps/showtime.png
     sources:
       - type: dir
         path: ../..

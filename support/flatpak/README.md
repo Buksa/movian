@@ -12,6 +12,7 @@ The manifest builds the GLW/X11/OpenGL UI and installs the bundled binary as
 - `dev.uzver.MovianM7.metainfo.xml.in` - AppStream template.
 - `build-local.sh` - local builder wrapper.
 - `steam-deck-gamemode-launcher.sh` - optional host-side diagnostic launcher.
+- `../../res/showtime/showtime.png` - installed app icon source.
 
 ## Build
 
@@ -79,3 +80,9 @@ git describe --dirty --abbrev=5 | sed -e 's/-/./g'
 ```
 
 That keeps Discover, `flatpak info`, and Movian's About/log version aligned.
+
+The app icon is installed as:
+
+```text
+/app/share/icons/hicolor/256x256/apps/dev.uzver.MovianM7.png
+```
