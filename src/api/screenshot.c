@@ -34,7 +34,105 @@
 #include <libswscale/swscale.h>
 
 static hts_mutex_t screenshot_mutex;
+static hts_cond_t screenshot_cond;
 static http_connection_t *screenshot_connection;
+static int screenshot_raw_waiting;
+static int screenshot_raw_done;
+static buf_t *screenshot_raw_image;
+static char *screenshot_raw_error;
+
+
+/**
+ *
+ */
+static void
+screenshot_raw_complete(buf_t *image, const char *errmsg)
+{
+  hts_mutex_lock(&screenshot_mutex);
+  if(screenshot_raw_waiting) {
+    if(screenshot_raw_image != NULL)
+      buf_release(screenshot_raw_image);
+    free(screenshot_raw_error);
+    screenshot_raw_image = image;
+    screenshot_raw_error = errmsg ? strdup(errmsg) : NULL;
+    screenshot_raw_done = 1;
+    hts_cond_signal(&screenshot_cond);
+  } else if(image != NULL) {
+    buf_release(image);
+  }
+  hts_mutex_unlock(&screenshot_mutex);
+}
+
+
+/**
+ *
+ */
+static int
+hc_screenshot_raw(http_connection_t *hc)
+{
+  hts_mutex_lock(&screenshot_mutex);
+  if(screenshot_raw_waiting || screenshot_connection != NULL) {
+    hts_mutex_unlock(&screenshot_mutex);
+    return 502;
+  }
+  screenshot_raw_waiting = 1;
+  screenshot_raw_done = 0;
+  if(screenshot_raw_image != NULL) {
+    buf_release(screenshot_raw_image);
+    screenshot_raw_image = NULL;
+  }
+  free(screenshot_raw_error);
+  screenshot_raw_error = NULL;
+  hts_mutex_unlock(&screenshot_mutex);
+
+  event_t *e = event_create(EVENT_MAKE_SCREENSHOT, sizeof(event_t));
+  e->e_flags |= EVENT_SCREENSHOT_RAW;
+  event_to_ui(e);
+
+  hts_mutex_lock(&screenshot_mutex);
+  int timedout = 0;
+  while(!screenshot_raw_done) {
+    if(hts_cond_wait_timeout(&screenshot_cond, &screenshot_mutex, 5000)) {
+      timedout = 1;
+      break;
+    }
+  }
+
+  buf_t *image = screenshot_raw_image;
+  screenshot_raw_image = NULL;
+  char *error = screenshot_raw_error;
+  screenshot_raw_error = NULL;
+  screenshot_raw_waiting = 0;
+  screenshot_raw_done = 0;
+  hts_mutex_unlock(&screenshot_mutex);
+
+  if(timedout) {
+    if(image != NULL)
+      buf_release(image);
+    free(error);
+    return http_error(hc, 504, "Screenshot timed out");
+  }
+
+  if(image == NULL) {
+    int r = http_error(hc, 500, "%s",
+                       error != NULL ? error : "Screenshot capture failed");
+    free(error);
+    return r;
+  }
+
+  htsbuf_queue_t out;
+  htsbuf_queue_init(&out, 0);
+  htsbuf_append(&out, buf_data(image), buf_len(image));
+  struct http_header_list headers;
+  LIST_INIT(&headers);
+  http_header_add(&headers, "Content-Type", "image/png", 0);
+  http_header_add_int(&headers, "Content-Length", buf_len(image));
+  http_header_add(&headers, "Connection", "Close", 0);
+  int r = http_send_raw(hc, 200, "OK", &headers, &out);
+  buf_release(image);
+  free(error);
+  return r;
+}
 
 
 /**
@@ -44,15 +142,24 @@ static int
 hc_screenshot(http_connection_t *hc, const char *remain,
               void *opaque, http_cmd_t method)
 {
+  const char *raw = http_arg_get_req(hc, "raw");
+  int want_raw = (remain != NULL && !strcmp(remain, "raw")) ||
+                 (raw != NULL && (!strcmp(raw, "1") || !strcmp(raw, "true")));
+
+  if(want_raw)
+    return hc_screenshot_raw(hc);
+
   hts_mutex_lock(&screenshot_mutex);
-  if(screenshot_connection != NULL) {
+  if(screenshot_raw_waiting || screenshot_connection != NULL) {
     hts_mutex_unlock(&screenshot_mutex);
     return 502;
   }
   screenshot_connection = hc;
   hts_mutex_unlock(&screenshot_mutex);
 
-  event_to_ui(event_create(EVENT_MAKE_SCREENSHOT, sizeof(event_t)));
+  event_t *e = event_create(EVENT_MAKE_SCREENSHOT, sizeof(event_t));
+  e->e_flags |= EVENT_SCREENSHOT_UPLOAD;
+  event_to_ui(e);
   return 0;
 }
 
@@ -142,6 +249,9 @@ screenshot_compress(pixmap_t *pm, int codecid)
   }
 
   AVFrame *oframe = av_frame_alloc();
+  oframe->format = ctx->pix_fmt;
+  oframe->width  = width;
+  oframe->height = height;
 
   avpicture_alloc((AVPicture *)oframe, ctx->pix_fmt, width, height);
 
@@ -183,34 +293,75 @@ screenshot_compress(pixmap_t *pm, int codecid)
 }
 
 
+typedef struct screenshot_task {
+  pixmap_t *pm;
+  int flags;
+} screenshot_task_t;
+
+
 /**
  *
  */
 static void
 screenshot_process(void *task)
 {
-  pixmap_t *pm = task;
+  screenshot_task_t *st = task;
+  pixmap_t *pm = st->pm;
+  int raw_request = st->flags & EVENT_SCREENSHOT_RAW;
+  int upload_request = st->flags & EVENT_SCREENSHOT_UPLOAD;
+  free(st);
 
   if(pm == NULL) {
-    screenshot_response(NULL, "Screenshot not supported on this platform");
+    if(raw_request) {
+      screenshot_raw_complete(NULL,
+                              "Screenshot not supported on this platform");
+      return;
+    }
+    if(upload_request)
+      screenshot_response(NULL, "Screenshot not supported on this platform");
     return;
   }
 
   TRACE(TRACE_DEBUG, "Screenshot", "Processing image %d x %d",
         pm->pm_width, pm->pm_height);
 
+  hts_mutex_lock(&screenshot_mutex);
+  int has_connection = screenshot_connection != NULL;
+  int raw_waiting = screenshot_raw_waiting;
+  hts_mutex_unlock(&screenshot_mutex);
+
+  if(raw_request && !raw_waiting) {
+    pixmap_release(pm);
+    return;
+  }
+
+  if(upload_request && !has_connection) {
+    pixmap_release(pm);
+    return;
+  }
+
   int codecid = AV_CODEC_ID_PNG;
-  if(screenshot_connection)
+  if(upload_request)
     codecid = AV_CODEC_ID_MJPEG;
 
   buf_t *b = screenshot_compress(pm, codecid);
   pixmap_release(pm);
   if(b == NULL) {
-    screenshot_response(NULL, "Unable to compress image");
+    if(raw_request) {
+      screenshot_raw_complete(NULL, "Unable to compress image");
+      return;
+    }
+    if(upload_request)
+      screenshot_response(NULL, "Unable to compress image");
     return;
   }
 
-  if(!screenshot_connection) {
+  if(raw_request) {
+    screenshot_raw_complete(b, NULL);
+    return;
+  }
+
+  if(!upload_request) {
     char path[512];
     char errbuf[512];
     snprintf(path, sizeof(path), "%s/screenshot.png",
@@ -282,9 +433,12 @@ screenshot_process(void *task)
  *
  */
 void
-screenshot_deliver(pixmap_t *pm)
+screenshot_deliver(pixmap_t *pm, int flags)
 {
-  task_run(screenshot_process, pm ? pixmap_dup(pm) : NULL);
+  screenshot_task_t *st = malloc(sizeof(screenshot_task_t));
+  st->pm = pm ? pixmap_dup(pm) : NULL;
+  st->flags = flags;
+  task_run(screenshot_process, st);
 }
 
 
@@ -295,6 +449,7 @@ static void
 screenshot_init(void)
 {
   hts_mutex_init(&screenshot_mutex);
+  hts_cond_init(&screenshot_cond, &screenshot_mutex);
   http_path_add("/api/screenshot", NULL, hc_screenshot, 0);
 }
 

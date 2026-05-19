@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.uzver.Movian</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Movian</name>
+  <summary>Media player for plugins, streams, and local files</summary>
+  <developer id="dev.uzver">
+    <name>Movian contributors</name>
+  </developer>
+  <launchable type="desktop-id">dev.uzver.Movian.desktop</launchable>
+  <description>
+    <p>
+      Movian is a GLW-based media player build intended for local media,
+      network streams, and JavaScript plugin development.
+    </p>
+  </description>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Player</category>
+  </categories>
+  <provides>
+    <binary>showtime</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <url type="homepage">https://movian.eu/</url>
+  <releases>
+    <release version="@MOVIAN_VERSION@" date="2026-05-17"/>
+  </releases>
+</component>

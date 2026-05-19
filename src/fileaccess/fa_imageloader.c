@@ -46,6 +46,8 @@
 static const uint8_t pngsig[8] = {137, 80, 78, 71, 13, 10, 26, 10};
 static const uint8_t gif89sig[6] = {'G', 'I', 'F', '8', '9', 'a'};
 static const uint8_t gif87sig[6] = {'G', 'I', 'F', '8', '7', 'a'};
+static const uint8_t webpsig1[4] = {'R', 'I', 'F', 'F'};
+static const uint8_t webpsig2[4] = {'W', 'E', 'B', 'P'};
 
 static const uint8_t svgsig1[5] = {'<', '?', 'x', 'm', 'l'};
 static const uint8_t svgsig2[4] = {'<', 's', 'v', 'g'};
@@ -117,6 +119,9 @@ fa_imageloader_buf(buf_t *buf, char *errbuf, size_t errlen)
     fmt = IMAGE_GIF;
   } else if(p[0] == 'B' && p[1] == 'M') {
     fmt = IMAGE_BMP;
+  } else if(!memcmp(webpsig1, p, sizeof(webpsig1)) &&
+	    !memcmp(webpsig2, p + 8, sizeof(webpsig2))) {
+    fmt = IMAGE_WEBP;
   } else if(!memcmp(svgsig1, p, sizeof(svgsig1)) ||
 	    !memcmp(svgsig2, p, sizeof(svgsig2))) {
     fmt = IMAGE_SVG;
@@ -278,6 +283,9 @@ fa_imageloader(const char *url, const struct image_meta *im,
     fmt = IMAGE_GIF;
   } else if(p[0] == 'B' && p[1] == 'M') {
     fmt = IMAGE_BMP;
+  } else if(!memcmp(webpsig1, p, sizeof(webpsig1)) &&
+	    !memcmp(webpsig2, p + 8, sizeof(webpsig2))) {
+    fmt = IMAGE_WEBP;
   } else if(!memcmp(svgsig1, p, sizeof(svgsig1)) ||
 	    !memcmp(svgsig2, p, sizeof(svgsig2))) {
     fmt = IMAGE_SVG;

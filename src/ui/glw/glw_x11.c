@@ -54,6 +54,30 @@
 
 #include "glw_rec.h"
 
+static int
+running_under_wsl(void)
+{
+  const char *interop = getenv("WSL_INTEROP");
+  const char *distro = getenv("WSL_DISTRO_NAME");
+
+  if((interop != NULL && interop[0] != 0) ||
+     (distro != NULL && distro[0] != 0))
+    return 1;
+
+  FILE *fp = fopen("/proc/sys/kernel/osrelease", "r");
+  if(fp == NULL)
+    return 0;
+
+  char buf[256];
+  char *r = fgets(buf, sizeof(buf), fp);
+  fclose(fp);
+
+  return r != NULL &&
+    (strstr(buf, "Microsoft") != NULL ||
+     strstr(buf, "microsoft") != NULL ||
+     strstr(buf, "WSL") != NULL);
+}
+
 typedef struct glw_x11 {
 
   glw_root_t gr;
@@ -67,6 +91,8 @@ typedef struct glw_x11 {
   int screen_height;
   int root;
   XVisualInfo *xvi;
+  GLXFBConfig fbconfig;
+  int use_fbconfig;
   Window win;
   GLXContext glxctx;
   Cursor blank_cursor;
@@ -268,14 +294,17 @@ window_open(glw_x11_t *gx11, int fullscreen)
   mask = CWBackPixmap | CWBorderPixel | CWColormap | CWEventMask;
 
   if(fullscreen) {
+    int steam_game = getenv("SteamGameId") || getenv("SteamAppId");
 
     x = 0;
     y = 0;
     w = gx11->screen_width;
     h = gx11->screen_height;
 
-    winAttr.override_redirect = True;
-    mask |= CWOverrideRedirect;
+    if(!steam_game) {
+      winAttr.override_redirect = True;
+      mask |= CWOverrideRedirect;
+    }
 
   } else {
 
@@ -297,7 +326,12 @@ window_open(glw_x11_t *gx11, int fullscreen)
   gx11->gr.gr_width  = w;
   gx11->gr.gr_height = h;
 
-  gx11->glxctx = glXCreateContext(gx11->display, gx11->xvi, NULL, 1);
+  if(gx11->use_fbconfig) {
+    gx11->glxctx = glXCreateNewContext(gx11->display, gx11->fbconfig,
+                                       GLX_RGBA_TYPE, NULL, True);
+  } else {
+    gx11->glxctx = glXCreateContext(gx11->display, gx11->xvi, NULL, 1);
+  }
 
   if(gx11->glxctx == NULL) {
     TRACE(TRACE_ERROR, "GLW", "Unable to create GLX context on \"%s\"\n",
@@ -305,8 +339,19 @@ window_open(glw_x11_t *gx11, int fullscreen)
     return 1;
   }
 
+  int current_ok;
+  if(gx11->use_fbconfig) {
+    current_ok = glXMakeContextCurrent(gx11->display, gx11->win, gx11->win,
+                                       gx11->glxctx);
+  } else {
+    current_ok = glXMakeCurrent(gx11->display, gx11->win, gx11->glxctx);
+  }
 
-  glXMakeCurrent(gx11->display, gx11->win, gx11->glxctx);
+  if(!current_ok) {
+    TRACE(TRACE_ERROR, "GLW", "Unable to make GLX context current on \"%s\"\n",
+          gx11->displayname_real);
+    return 1;
+  }
 
   XMapWindow(gx11->display, gx11->win);
 
@@ -328,8 +373,17 @@ window_open(glw_x11_t *gx11, int fullscreen)
 
   glw_opengl_init_context(&gx11->gr);
 
-  if(gx11->glXSwapIntervalSGI != NULL)
+  const char *renderer = (const char *)glGetString(GL_RENDERER);
+  int skip_swap_interval =
+    running_under_wsl() ||
+    (renderer != NULL && strstr(renderer, "D3D12") != NULL);
+
+  if(gx11->glXSwapIntervalSGI != NULL && !skip_swap_interval) {
     gx11->glXSwapIntervalSGI(1);
+  } else if(gx11->glXSwapIntervalSGI != NULL) {
+    TRACE(TRACE_INFO, "GLW",
+          "Skipping GLX_SGI_swap_control under WSL");
+  }
 
   gx11->working_vsync = check_vsync(gx11);
 
@@ -573,8 +627,10 @@ vdpau_preempted(void *aux)
 static int
 glw_x11_init(glw_x11_t *gx11)
 {
-  int attribs[10];
+  int attribs[16];
   int na = 0;
+  int glx_major = 0;
+  int glx_minor = 0;
 
   int use_locales = XSupportsLocale() && XSetLocaleModifiers("@im=none") != NULL;
 
@@ -591,23 +647,65 @@ glw_x11_init(glw_x11_t *gx11)
     return 1;
   }
 
+  if(!glXQueryVersion(gx11->display, &glx_major, &glx_minor)) {
+    TRACE(TRACE_ERROR, "GLW", "Unable to query GLX version on \"%s\"\n",
+          gx11->displayname_real);
+    return 1;
+  }
 
   gx11->screen        = DefaultScreen(gx11->display);
   gx11->screen_width  = DisplayWidth(gx11->display, gx11->screen);
   gx11->screen_height = DisplayHeight(gx11->display, gx11->screen);
   gx11->root          = RootWindow(gx11->display, gx11->screen);
 
-  attribs[na++] = GLX_RGBA;
-  attribs[na++] = GLX_RED_SIZE;
-  attribs[na++] = 1;
-  attribs[na++] = GLX_GREEN_SIZE;
-  attribs[na++] = 1;
-  attribs[na++] = GLX_BLUE_SIZE;
-  attribs[na++] = 1;
-  attribs[na++] = GLX_DOUBLEBUFFER;
-  attribs[na++] = None;
+  if(glx_major > 1 || (glx_major == 1 && glx_minor >= 3)) {
+    attribs[na++] = GLX_X_RENDERABLE;
+    attribs[na++] = True;
+    attribs[na++] = GLX_DRAWABLE_TYPE;
+    attribs[na++] = GLX_WINDOW_BIT;
+    attribs[na++] = GLX_RENDER_TYPE;
+    attribs[na++] = GLX_RGBA_BIT;
+    attribs[na++] = GLX_RED_SIZE;
+    attribs[na++] = 8;
+    attribs[na++] = GLX_GREEN_SIZE;
+    attribs[na++] = 8;
+    attribs[na++] = GLX_BLUE_SIZE;
+    attribs[na++] = 8;
+    attribs[na++] = GLX_DOUBLEBUFFER;
+    attribs[na++] = True;
+    attribs[na++] = None;
 
-  gx11->xvi = glXChooseVisual(gx11->display, gx11->screen, attribs);
+    int num_fbc = 0;
+    GLXFBConfig *fbconfigs =
+      glXChooseFBConfig(gx11->display, gx11->screen, attribs, &num_fbc);
+
+    if(fbconfigs != NULL && num_fbc > 0) {
+      gx11->fbconfig = fbconfigs[0];
+      gx11->xvi = glXGetVisualFromFBConfig(gx11->display, gx11->fbconfig);
+      XFree(fbconfigs);
+      if(gx11->xvi != NULL) {
+        gx11->use_fbconfig = 1;
+        TRACE(TRACE_DEBUG, "GLW", "Using GLX FBConfig visual");
+      }
+    }
+  }
+
+  if(gx11->xvi == NULL) {
+    TRACE(TRACE_INFO, "GLW",
+          "Unable to get GLX FBConfig visual, trying legacy GLX visual");
+
+    na = 0;
+    attribs[na++] = GLX_RGBA;
+    attribs[na++] = GLX_RED_SIZE;
+    attribs[na++] = 1;
+    attribs[na++] = GLX_GREEN_SIZE;
+    attribs[na++] = 1;
+    attribs[na++] = GLX_BLUE_SIZE;
+    attribs[na++] = 1;
+    attribs[na++] = GLX_DOUBLEBUFFER;
+    attribs[na++] = None;
+    gx11->xvi = glXChooseVisual(gx11->display, gx11->screen, attribs);
+  }
 
   if(gx11->xvi == NULL) {
     TRACE(TRACE_ERROR, "GLW", "Unable to find an adequate Visual on \"%s\"\n",
@@ -702,6 +800,7 @@ window_change_fullscreen(glw_x11_t *gx11)
     window_shutdown(gx11);
     if(window_open(gx11, gx11->want_fullscreen))
       exit(1);
+    gx11->is_fullscreen = gx11->want_fullscreen;
   }
   glw_set_fullscreen(&gx11->gr, gx11->is_fullscreen);
 }
@@ -749,6 +848,7 @@ static const struct {
 
   { XK_Home,         0,           ACTION_TOP},
   { XK_End,          0,           ACTION_BOTTOM},
+  { XK_Menu,         0,           ACTION_MENU},
 
   { XK_plus,         ControlMask, ACTION_ZOOM_UI_INCR},
   { XK_minus,        ControlMask, ACTION_ZOOM_UI_DECR},

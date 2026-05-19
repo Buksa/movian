@@ -383,6 +383,14 @@ EOF
 
 
 update_ext_submodule() {
+    if [ "x${SKIP_SUBMODULE_UPDATE}" = "x1" ]; then
+	echo "Skipping $1 submodule update (SKIP_SUBMODULE_UPDATE=1)"
+	if [ ! -d "ext/$1" ]; then
+	    echo "ext/$1 is missing"
+	    die
+	fi
+	return
+    fi
     echo "Updating $1, submodule status before update"
     git submodule status ext/$1
     git submodule update -f --init ext/$1
