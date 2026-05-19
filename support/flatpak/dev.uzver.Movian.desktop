@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Movian
+GenericName=Media Player
+Comment=Media player for plugins, streams, and local files
+Exec=showtime %U
+Icon=dev.uzver.Movian
+Terminal=false
+Categories=AudioVideo;Player;
+StartupWMClass=showtime
+MimeType=application/ogg;application/x-matroska;audio/mp4;audio/mpeg;audio/ogg;audio/x-flac;audio/x-matroska;video/mp4;video/mpeg;video/ogg;video/quicktime;video/webm;video/x-matroska;x-content/video-dvd;
