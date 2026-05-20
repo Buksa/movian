@@ -4,21 +4,19 @@ Movian is a media player for plugins, streams, and local files. This repository
 is a clean public fork based on `andoma/movian:movian6`.
 
 The goal of this fork is to keep changes small, reviewable, and based on public
-upstream source. Changes are developed as a stacked set of branches on top of
-the upstream `movian6` branch.
+upstream source.
 
-## Current Branch Stack
+## Current Public Baseline
 
-- `movian6` - clean upstream baseline from `andoma/movian:movian6`.
-- `public/gcc-modernize` - modern GCC and Ubuntu build fixes.
-- `public/linux-build-cleanup` - reproducible Linux debug configure helper and
-  build notes.
-- `public/screenshot-api` - raw screenshot HTTP API plus WSL2 GLX runtime
-  compatibility.
-- `public/webp-image-support` - WebP probing, loading, decoding, and
-  `/api/image` content type support.
-- `public/flatpak-steamos` - local SteamOS/Steam Deck Flatpak packaging and
-  small Linux runtime fixes used by that package.
+The `movian6` branch includes:
+
+- modern GCC and Ubuntu build fixes;
+- a reproducible Linux debug configure helper;
+- raw screenshot HTTP API support;
+- WSL2 GLX runtime compatibility;
+- WebP probing, loading, decoding, and `/api/image` content type support;
+- local SteamOS/Steam Deck Flatpak packaging;
+- a documented plugin debug workflow.
 
 ## Linux Debug Build
 
@@ -80,6 +78,26 @@ Movian stores legacy settings under:
 ~/.hts/showtime
 ```
 
+## Plugin Debug Workflow
+
+For plugin development, use the direct debug binary instead of a packaged app:
+
+```sh
+PLUGIN_PATH=/path/to/plugin \
+START_URL=plugin:start \
+EXPECTED_TITLE="Plugin Title" \
+support/plugin-smoke/run-plugin-smoke.sh
+```
+
+The runner starts Movian with an isolated profile, opens the requested route
+through the HTTP API, checks page state, captures logs, and attempts a raw
+screenshot.
+
+More details:
+
+- `docs/Guides/PLUGIN_DEBUG_WORKFLOW.md`
+- `support/plugin-smoke/run-plugin-smoke.sh`
+
 ## Runtime Features In This Stack
 
 - WSL2 GLX handling is detected at runtime; there is no WSL configure option.
@@ -129,6 +147,7 @@ More details:
 
 - `docs/README.md`
 - `docs/Guides/FLATPAK_STEAMOS_GUIDE.md`
+- `docs/Guides/PLUGIN_DEBUG_WORKFLOW.md`
 - `support/flatpak/README.md`
 
 ## Project Scope

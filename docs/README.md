@@ -1,23 +1,21 @@
 # Movian Public Branch Notes
 
-This directory documents the public branch stack in this checkout. The notes
-are based on code, scripts, and packaging files present in this repository.
+This directory documents the public `movian6` branch in this checkout. The
+notes are based on code, scripts, and packaging files present in this
+repository.
 
-## Branch Stack
+## Current Public Baseline
 
-The current public work is organized as small reviewable branches:
+The current branch includes:
 
-- `public/gcc-modernize` - modern GCC and Ubuntu build fixes only.
-- `public/linux-build-cleanup` - reproducible Linux debug configure helper and
-  README build notes.
-- `public/screenshot-api` - raw screenshot HTTP API on top of the existing
-  screenshot code.
-- `public/webp-image-support` - WebP probing, image loading, libav decode
-  mapping, and `/api/image` WebP content type.
-- `public/flatpak-steamos` - local SteamOS/Steam Deck Flatpak packaging and
-  small Linux runtime fixes needed by that package.
-
-Each branch is intended to stay narrow and easy to review.
+- modern GCC and Ubuntu build fixes;
+- reproducible Linux debug configure helper and README build notes;
+- raw screenshot HTTP API on top of the existing screenshot code;
+- WebP probing, image loading, libav decode mapping, and `/api/image` WebP
+  content type;
+- local SteamOS/Steam Deck Flatpak packaging and small Linux runtime fixes used
+  by that package;
+- a plugin debug workflow for route smoke tests against `build.debug/movian`.
 
 ## Linux Build
 
@@ -37,6 +35,25 @@ The helper runs:
 ```
 
 Extra configure flags can be appended to the helper command.
+
+## Plugin Debug Workflow
+
+Use the direct debug binary for plugin development and route smoke tests:
+
+```sh
+PLUGIN_PATH=/path/to/plugin \
+START_URL=plugin:start \
+EXPECTED_TITLE="Plugin Title" \
+support/plugin-smoke/run-plugin-smoke.sh
+```
+
+The main guide is:
+
+- `Guides/PLUGIN_DEBUG_WORKFLOW.md`
+
+The reusable runner lives under:
+
+- `support/plugin-smoke/`
 
 ## Runtime Changes
 
