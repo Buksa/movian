@@ -1,21 +1,28 @@
 [submodule "ext/libav"]
 	path = ext/libav
 	url = https://github.com/andoma/libav.git
+	branch = movian-master
 [submodule "ext/rtmpdump"]
 	path = ext/rtmpdump
 	url = https://github.com/andoma/rtmpdump.git
+	branch = master
 [submodule "ext/libntfs_ext"]
 	path = ext/libntfs_ext
 	url = https://github.com/andoma/libntfs_ext.git
+	branch = master
 [submodule "ext/gumbo-parser"]
 	path = ext/gumbo-parser
 	url = https://github.com/google/gumbo-parser
+	branch = master
 [submodule "ios/freetype2-ios"]
 	path = ios/freetype2-ios
 	url = https://github.com/andoma/freetype2-ios.git
+	branch = master
 [submodule "ext/vmir"]
 	path = ext/vmir
 	url = https://github.com/andoma/vmir
+	branch = master
 [submodule "ext/libyuv"]
 	path = ext/libyuv
 	url = https://chromium.googlesource.com/libyuv/libyuv
+	branch = main
