@@ -47,9 +47,10 @@ EXPECTED_TITLE="Plugin Title" \
 support/plugin-smoke/run-plugin-smoke.sh
 ```
 
-The main guide is:
+The main guides are:
 
 - `Guides/PLUGIN_DEBUG_WORKFLOW.md`
+- `Guides/PLUGIN_DEVELOPMENT_NOTES.md`
 
 The reusable runner lives under:
 
