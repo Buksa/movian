@@ -20,14 +20,13 @@ The current long-standing API exposes these node methods:
 - `getElementByTagName(tagName)` returns an array.
 
 The class and tag helpers return multiple nodes, even though their historical
-names use singular `Element`. Newer Movian builds may also provide DOM-style
-plural aliases:
+names use singular `Element`. Movian also provides DOM-style plural aliases:
 
 - `getElementsByClassName(className)`
 - `getElementsByTagName(tagName)`
 
-For plugins that should run on both newer and older Movian builds, prefer a
-small compatibility wrapper instead of copying the whole built-in HTML module.
+For plugins that should also run on older Movian builds, prefer a small
+compatibility wrapper instead of copying the whole built-in HTML module.
 
 Example `utils/html_compat.js`:
 
