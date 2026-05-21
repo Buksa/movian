@@ -604,6 +604,9 @@ parse_opts(int argc, char **argv)
 	     "   --show-usage-events - Log usage events.\n"
 	     "   --upgrade-path <path> - Override upgrade path.\n"
 	     "   --showtime-shell-fd <fd> - Use inherited shell fd.\n"
+#ifdef __APPLE__
+	     "   -psn*               - Ignore macOS process serial number.\n"
+#endif
 	     "\n"
 	     "  URL is any URL-type supported, "
 	     "e.g., \"file:///...\"\n"
