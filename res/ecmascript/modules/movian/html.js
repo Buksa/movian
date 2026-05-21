@@ -62,11 +62,17 @@ NodeProto.prototype.getElementByClassName = function(cls) {
   });
 }
 
+NodeProto.prototype.getElementsByClassName =
+  NodeProto.prototype.getElementByClassName;
+
 NodeProto.prototype.getElementByTagName = function(tag) {
   return gumbo.findByTagName(this._gumboNode, tag).map(function(n) {
     return new Node(n);
   });
 }
+
+NodeProto.prototype.getElementsByTagName =
+  NodeProto.prototype.getElementByTagName;
 
 var nodeProto = new NodeProto();
 
