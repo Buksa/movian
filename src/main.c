@@ -24,6 +24,9 @@
 #include <string.h>
 
 #include "main.h"
+#if ENABLE_NETLOG
+#include <arpa/inet.h>
+#endif
 #include "event.h"
 #include "prop/prop.h"
 #include "arch/arch.h"
@@ -135,6 +138,27 @@ fflog(void *ptr, int level, const char *fmt, va_list vl)
 
   TRACE(level, avc ? avc->item_name(ptr) : "libav", "%s", line);
   line[0] = 0;
+}
+#endif
+
+
+#if ENABLE_NETLOG
+static void
+set_netlog_target(const char *target)
+{
+  char *host = mystrdupa(target);
+  char *portstr = strchr(host, ':');
+
+  if(portstr != NULL) {
+    *portstr++ = 0;
+    gconf.log_server_port = atoi(portstr);
+  } else {
+    gconf.log_server_port = 4000;
+  }
+
+  struct in_addr addr;
+  gconf.log_server_ipv4 =
+    inet_pton(AF_INET, host, &addr) == 1 ? addr.s_addr : 0;
 }
 #endif
 
@@ -544,9 +568,15 @@ parse_opts(int argc, char **argv)
 	     "   --libav-log         - Print libav log messages.\n"
 	     "   --with-standby      - Enable system standby.\n"
 	     "   --with-poweroff     - Enable system power-off.\n"
-	     "   -s <path>           - Non-default settings path.\n"
+	     "   --with-logout       - Enable system logout.\n"
+	     "   --with-openshell    - Enable open-shell action.\n"
+	     "   --with-restart      - Enable restart action.\n"
+	     "   --without-exit      - Disable exit action.\n"
+	     "   -s <path>           - Alias for --persistent <path>.\n"
 	     "   --ui <ui>           - Use specified user interface.\n"
-	     "   -L <ip:host>        - Send log messages to remote <ip:host>.\n"
+#if ENABLE_NETLOG
+	     "   -L <ip[:port]>      - Send log messages to remote UDP log server.\n"
+#endif
 	     "   --syslog            - Send log messages to syslog.\n"
 #if ENABLE_STDIN
 	     "   --stdin             - Listen on stdin for events.\n"
@@ -558,13 +588,22 @@ parse_opts(int argc, char **argv)
 	     "   --disable-upnp      - Disable UPNP/DLNA stack.\n"
 #endif
 	     "   --disable-sd        - Disable service discovery (mDNS, etc).\n"
-	     "   -p                  - Path to plugin directory to load\n"
+	     "   --disable-upgrades  - Disable upgrade checks.\n"
+	     "   -p <path>           - Path to plugin directory to load\n"
 	     "                         Intended for plugin development\n"
-	     "   --plugin-repo       - URL to plugin repository\n"
+	     "   --plugin-repo <url> - URL to plugin repository\n"
 	     "                         Intended for plugin development\n"
-	     "   --proxy <host:port> - Use SOCKS 4/5 proxy for http requests.\n"
-	     "   -j <path>           - Load javascript file\n"
+	     "   --proxy <host[:port]> - Use SOCKS 4/5 proxy for http requests.\n"
+	     "   -j <path>           - Alias for --ecmascript <path>.\n"
+	     "   --ecmascript <path> - Load javascript file\n"
+	     "   --bypass-ecmascript-acl - Disable ECMAScript ACL checks.\n"
+	     "   --vmir-bitcode <path> - Load native plugin bitcode.\n"
 	     "   --skin <skin>       - Select skin (for GLW ui)\n"
+	     "   --debug-glw         - Enable GLW debug mode.\n"
+	     "   --pointer-is-touch  - Treat pointer input as touch input.\n"
+	     "   --show-usage-events - Log usage events.\n"
+	     "   --upgrade-path <path> - Override upgrade path.\n"
+	     "   --showtime-shell-fd <fd> - Use inherited shell fd.\n"
 	     "\n"
 	     "  URL is any URL-type supported, "
 	     "e.g., \"file:///...\"\n"
@@ -607,6 +646,12 @@ parse_opts(int argc, char **argv)
       gconf.trace_to_syslog = 1;
       argc -= 1; argv += 1;
       continue;
+#if ENABLE_NETLOG
+    } else if(!strcmp(argv[0], "-L") && argc > 1) {
+      set_netlog_target(argv[1]);
+      argc -= 2; argv += 2;
+      continue;
+#endif
     } else if(!strcmp(argv[0], "--stdin")) {
       gconf.listen_on_stdin = 1;
       argc -= 1; argv += 1;
@@ -660,7 +705,8 @@ parse_opts(int argc, char **argv)
     } else if(!strcmp(argv[0], "--bypass-ecmascript-acl")) {
       gconf.bypass_ecmascript_acl = 1;
       argc -= 1; argv += 1;
-    } else if(!strcmp(argv[0], "--ecmascript") && argc > 1) {
+    } else if((!strcmp(argv[0], "--ecmascript") ||
+	       !strcmp(argv[0], "-j")) && argc > 1) {
       gconf.load_ecmascript = argv[1];
       argc -= 2; argv += 2;
       continue;
@@ -674,7 +720,8 @@ parse_opts(int argc, char **argv)
     } else if (!strcmp(argv[0], "--cache") && argc > 1) {
       mystrset(&gconf.cache_path, argv[1]);
       argc -= 2; argv += 2;
-    } else if (!strcmp(argv[0], "--persistent") && argc > 1) {
+    } else if ((!strcmp(argv[0], "--persistent") ||
+		!strcmp(argv[0], "-s")) && argc > 1) {
       mystrset(&gconf.persistent_path, argv[1]);
       argc -= 2; argv += 2;
     } else if (!strcmp(argv[0], "--ui") && argc > 1) {
