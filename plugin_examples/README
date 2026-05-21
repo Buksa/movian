@@ -1,3 +1,48 @@
-To load an example start showtime with -p <path to plugin>
+# Movian Plugin Examples
 
-build.linux/showtime -p plugin_examples/music
+These examples are small development plugins. Run them from a debug build with
+an isolated profile so the examples do not modify your normal Movian settings.
+
+Build Movian first:
+
+```sh
+./support/configure-linux-debug.sh
+make BUILD=debug -j$(nproc)
+```
+
+Run an example manually:
+
+```sh
+ART=/tmp/movian-plugin-example
+rm -rf "$ART"
+mkdir -p "$ART"
+
+./build.debug/movian \
+  --disable-upgrades \
+  --persistent "$ART/persistent" \
+  --cache "$ART/cache" \
+  -p plugin_examples/music \
+  example:music:
+```
+
+The generic smoke runner can open a route and check the page model:
+
+```sh
+PLUGIN_PATH=plugin_examples/music \
+START_URL=example:music: \
+EXPECTED_TITLE="Music examples" \
+EXPECTED_TYPE=directory \
+MIN_NODES=1 \
+support/plugin-smoke/run-plugin-smoke.sh
+```
+
+Useful routes:
+
+- `plugin_examples/music` -> `example:music:`
+- `plugin_examples/subscriptions` -> `example:subscriptions:`
+- `plugin_examples/async_page_load` -> `asyncPageLoad:test:demo`
+- `plugin_examples/webpopupplugin` -> `devplug:webtest`
+
+Some examples demonstrate APIs that need user interaction, network services, or
+specific media playback state. For those, use the manual command and inspect the
+Movian log instead of expecting a fully automated smoke.
