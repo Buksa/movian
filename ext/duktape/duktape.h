@@ -1,13 +1,13 @@
 /*
- *  Duktape public API for Duktape 1.5.0.
+ *  Duktape public API for Duktape 1.8.0.
  *
  *  See the API reference for documentation on call semantics.
  *  The exposed API is inside the DUK_API_PUBLIC_H_INCLUDED
  *  include guard.  Other parts of the header are Duktape
  *  internal and related to platform/compiler/feature detection.
  *
- *  Git commit c3a0767c043afdea98c09f656dea9b7d266c4714 (v1.5.0-1-gc3a0767).
- *  Git branch heads/v1.5.0.
+ *  Git commit 0a70d7e4c5227c84e3fed5209828973117d02849 (v1.8.0).
+ *  Git branch v1.8-maintenance.
  *
  *  See Duktape AUTHORS.rst and LICENSE.txt for copyright and
  *  licensing information.
@@ -21,7 +21,7 @@
  *  
  *  (http://opensource.org/licenses/MIT)
  *  
- *  Copyright (c) 2013-2016 by Duktape authors (see AUTHORS.rst)
+ *  Copyright (c) 2013-2017 by Duktape authors (see AUTHORS.rst)
  *  
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -193,6 +193,10 @@ typedef duk_idx_t (*duk_debug_request_function) (duk_context *ctx, void *udata, 
 typedef void (*duk_debug_detached_function) (void *udata);
 
 struct duk_thread_state {
+	/* XXX: Enough space to hold internal suspend/resume structure.
+	 * This is rather awkward and to be fixed when the internal
+	 * structure is visible for the public API header.
+	 */
 	char data[128];
 };
 
@@ -224,16 +228,16 @@ struct duk_number_list_entry {
  * have 99 for patch level (e.g. 0.10.99 would be a development version
  * after 0.10.0 but before the next official release).
  */
-#define DUK_VERSION                       10500L
+#define DUK_VERSION                       10800L
 
 /* Git commit, describe, and branch for Duktape build.  Useful for
  * non-official snapshot builds so that application code can easily log
  * which Duktape snapshot was used.  Not available in the Ecmascript
  * environment.
  */
-#define DUK_GIT_COMMIT                    "c3a0767c043afdea98c09f656dea9b7d266c4714"
-#define DUK_GIT_DESCRIBE                  "v1.5.0-1-gc3a0767"
-#define DUK_GIT_BRANCH                    "heads/v1.5.0"
+#define DUK_GIT_COMMIT                    "0a70d7e4c5227c84e3fed5209828973117d02849"
+#define DUK_GIT_DESCRIBE                  "v1.8.0"
+#define DUK_GIT_BRANCH                    "v1.8-maintenance"
 
 /* Duktape debug protocol version used by this build. */
 #define DUK_DEBUG_PROTOCOL_VERSION        1
@@ -435,7 +439,7 @@ DUK_API_NORETURN(DUK_EXTERNAL_DECL void duk_error_raw(duk_context *ctx, duk_errc
 
 #ifdef DUK_API_VARIADIC_MACROS
 #define duk_error(ctx,err_code,...)  \
-	duk_error_raw((ctx), (duk_errcode_t) (err_code), (const char *) (__FILE__), (duk_int_t) (__LINE__), __VA_ARGS__)
+	duk_error_raw((ctx), (duk_errcode_t) (err_code), (const char *) (DUK_FILE_MACRO), (duk_int_t) (DUK_LINE_MACRO), __VA_ARGS__)
 #else
 DUK_API_NORETURN(DUK_EXTERNAL_DECL void duk_error_stash(duk_context *ctx, duk_errcode_t err_code, const char *fmt, ...));
 /* One problem with this macro is that expressions like the following fail
@@ -443,14 +447,14 @@ DUK_API_NORETURN(DUK_EXTERNAL_DECL void duk_error_stash(duk_context *ctx, duk_er
  * they make little sense anyway.
  */
 #define duk_error  \
-	(duk_api_global_filename = (const char *) (__FILE__), \
-	 duk_api_global_line = (duk_int_t) (__LINE__), \
+	(duk_api_global_filename = (const char *) (DUK_FILE_MACRO), \
+	 duk_api_global_line = (duk_int_t) (DUK_LINE_MACRO), \
 	 duk_error_stash)  /* last value is func pointer, arguments follow in parens */
 #endif
 
 DUK_API_NORETURN(DUK_EXTERNAL_DECL void duk_error_va_raw(duk_context *ctx, duk_errcode_t err_code, const char *filename, duk_int_t line, const char *fmt, va_list ap));
 #define duk_error_va(ctx,err_code,fmt,ap)  \
-	duk_error_va_raw((ctx), (duk_errcode_t) (err_code), (const char *) (__FILE__), (duk_int_t) (__LINE__), (fmt), (ap))
+	duk_error_va_raw((ctx), (duk_errcode_t) (err_code), (const char *) (DUK_FILE_MACRO), (duk_int_t) (DUK_LINE_MACRO), (fmt), (ap))
 
 /*
  *  Other state related functions
@@ -556,19 +560,19 @@ DUK_EXTERNAL_DECL duk_idx_t duk_push_error_object_raw(duk_context *ctx, duk_errc
 
 #ifdef DUK_API_VARIADIC_MACROS
 #define duk_push_error_object(ctx,err_code,...)  \
-	duk_push_error_object_raw((ctx), (err_code), (const char *) (__FILE__), (duk_int_t) (__LINE__), __VA_ARGS__)
+	duk_push_error_object_raw((ctx), (err_code), (const char *) (DUK_FILE_MACRO), (duk_int_t) (DUK_LINE_MACRO), __VA_ARGS__)
 #else
 DUK_EXTERNAL_DECL duk_idx_t duk_push_error_object_stash(duk_context *ctx, duk_errcode_t err_code, const char *fmt, ...);
 /* Note: parentheses are required so that the comma expression works in assignments. */
 #define duk_push_error_object  \
-	(duk_api_global_filename = (const char *) (__FILE__), \
-	 duk_api_global_line = (duk_int_t) (__LINE__), \
+	(duk_api_global_filename = (const char *) (DUK_FILE_MACRO), \
+	 duk_api_global_line = (duk_int_t) (DUK_LINE_MACRO), \
 	 duk_push_error_object_stash)  /* last value is func pointer, arguments follow in parens */
 #endif
 
 DUK_EXTERNAL_DECL duk_idx_t duk_push_error_object_va_raw(duk_context *ctx, duk_errcode_t err_code, const char *filename, duk_int_t line, const char *fmt, va_list ap);
 #define duk_push_error_object_va(ctx,err_code,fmt,ap)  \
-	duk_push_error_object_va_raw((ctx), (err_code), (const char *) (__FILE__), (duk_int_t) (__LINE__), (fmt), (ap))
+	duk_push_error_object_va_raw((ctx), (err_code), (const char *) (DUK_FILE_MACRO), (duk_int_t) (DUK_LINE_MACRO), (fmt), (ap))
 
 #define DUK_BUF_FLAG_DYNAMIC   (1 << 0)    /* internal flag: dynamic buffer */
 #define DUK_BUF_FLAG_EXTERNAL  (1 << 1)    /* internal flag: external buffer */
@@ -634,6 +638,7 @@ DUK_EXTERNAL_DECL duk_bool_t duk_is_nan(duk_context *ctx, duk_idx_t index);
 DUK_EXTERNAL_DECL duk_bool_t duk_is_string(duk_context *ctx, duk_idx_t index);
 DUK_EXTERNAL_DECL duk_bool_t duk_is_object(duk_context *ctx, duk_idx_t index);
 DUK_EXTERNAL_DECL duk_bool_t duk_is_buffer(duk_context *ctx, duk_idx_t index);
+DUK_EXTERNAL_DECL duk_bool_t duk_is_buffer_data(duk_context *ctx, duk_idx_t idx);
 DUK_EXTERNAL_DECL duk_bool_t duk_is_pointer(duk_context *ctx, duk_idx_t index);
 DUK_EXTERNAL_DECL duk_bool_t duk_is_lightfunc(duk_context *ctx, duk_idx_t index);
 
