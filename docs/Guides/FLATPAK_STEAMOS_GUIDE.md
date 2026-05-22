@@ -33,9 +33,12 @@ deferred subsystems:
 The manifest also sets:
 
 ```text
-SKIP_SUBMODULE_UPDATE=1
-LIBAV_COMMON_FLAGS=--disable-inline-asm --disable-hwaccels
 LIBAV_CFLAGS=-Wno-error=incompatible-pointer-types
+LIBAV_COMMON_FLAGS=--disable-x86asm --disable-inline-asm --disable-hwaccels
+                   --disable-vaapi --disable-vdpau --disable-cuda
+                   --disable-cuda-llvm --disable-cuvid --disable-ffnvcodec
+                   --disable-nvdec --disable-v4l2-m2m
+SKIP_SUBMODULE_UPDATE=1
 ```
 
 `SKIP_SUBMODULE_UPDATE=1` keeps Flatpak builds from reaching out to git during
