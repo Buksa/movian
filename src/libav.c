@@ -26,6 +26,7 @@
 #include "main.h"
 #include "media/media.h"
 #include "libav.h"
+#include "libav_compat.h"
 #include "fileaccess/fa_libav.h"
 #include "video/video_decoder.h"
 #include "video/video_settings.h"
@@ -560,5 +561,4 @@ mp_set_mq_meta(media_queue_t *mq, const AVCodec *codec,
   metadata_from_libav(buf, sizeof(buf), codec, avctx);
   prop_set_string(mq->mq_prop_codec, buf);
 }
-
 

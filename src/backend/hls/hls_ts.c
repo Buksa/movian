@@ -23,6 +23,7 @@
 #include <libavcodec/avcodec.h>
 #include <libavutil/mathematics.h>
 
+#include "libav_compat.h"
 #include "fileaccess/fa_libav.h"
 #include "media/media.h"
 #include "backend/backend.h"
