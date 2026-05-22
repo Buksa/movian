@@ -51,6 +51,7 @@ The main guides are:
 
 - `Guides/PLUGIN_DEBUG_WORKFLOW.md`
 - `Guides/PLUGIN_DEVELOPMENT_NOTES.md`
+- `Guides/PLUGIN_API_REFERENCE.md`
 
 The reusable runner lives under:
 
