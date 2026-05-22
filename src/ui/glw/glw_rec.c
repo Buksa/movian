@@ -346,7 +346,12 @@ rec_thread(void *aux)
   }
 
   /* write the stream header, if any */
-  avformat_write_header(gr->oc, NULL);
+  if(avformat_write_header(gr->oc, NULL) < 0) {
+    TRACE(TRACE_ERROR, "REC",
+          "Unable to record to %s -- Unable to write stream header",
+          gr->filename);
+    return NULL;
+  }
 
 
   hts_mutex_lock(&glw_rec_mutex);

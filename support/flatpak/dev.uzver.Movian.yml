@@ -26,8 +26,17 @@ modules:
         SKIP_SUBMODULE_UPDATE: '1'
         LIBAV_CFLAGS: -Wno-error=incompatible-pointer-types
         LIBAV_COMMON_FLAGS: >-
+          --disable-x86asm
           --disable-inline-asm
           --disable-hwaccels
+          --disable-vaapi
+          --disable-vdpau
+          --disable-cuda
+          --disable-cuda-llvm
+          --disable-cuvid
+          --disable-ffnvcodec
+          --disable-nvdec
+          --disable-v4l2-m2m
     build-commands:
       - rm -rf build.flatpak
       - >-
