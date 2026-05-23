@@ -192,7 +192,12 @@ emit_audio(glw_rec_t *gr, int64_t pts)
     if(ts >= 0) {
 
       frame.data[0] = (void *)data;
+      frame.extended_data = frame.data;
       frame.nb_samples = SAMPLES_PER_FRAME;
+      frame.format = gr->a_ctx->sample_fmt;
+      frame.channel_layout = gr->a_ctx->channel_layout;
+      frame.channels = gr->a_ctx->channels;
+      frame.sample_rate = gr->a_ctx->sample_rate;
 
       int got_packet;
       int r = avcodec_encode_audio2(gr->a_ctx, &pkt, &frame, &got_packet);
@@ -203,7 +208,7 @@ emit_audio(glw_rec_t *gr, int64_t pts)
       pkt.pts = pkt.dts = ts;
       pkt.stream_index = gr->a_st->index;
       pkt.duration = av_rescale_q(1, (AVRational){SAMPLES_PER_FRAME, 48000},
-                                  gr->v_st->time_base);
+                                  gr->a_st->time_base);
       av_interleaved_write_frame(gr->oc, &pkt);
       av_free_packet(&pkt);
     }
@@ -232,7 +237,11 @@ encode_vframe(glw_rec_t *gr, struct pixmap *pm)
   memset(&frame, 0, sizeof(frame));
 
   frame.data[0] = pm->pm_data + pm->pm_linesize * (gr->height - 1);
+  frame.extended_data = frame.data;
   frame.linesize[0] = -pm->pm_linesize;
+  frame.width = gr->v_ctx->width;
+  frame.height = gr->v_ctx->height;
+  frame.format = gr->v_ctx->pix_fmt;
   frame.pts = 1000000LL * gr->framenum / gr->fps;
   gr->framenum++;
 
@@ -299,6 +308,7 @@ rec_thread(void *aux)
   gr->v_ctx->height = gr->height;
   gr->v_ctx->time_base.den = gr->fps;
   gr->v_ctx->time_base.num = 1;
+  gr->v_st->time_base = gr->v_ctx->time_base;
   gr->v_ctx->pix_fmt = AV_PIX_FMT_RGB32;
   gr->v_ctx->coder_type = 0;
 
@@ -321,8 +331,10 @@ rec_thread(void *aux)
   gr->a_ctx->sample_rate = 48000;
   gr->a_ctx->sample_fmt = AV_SAMPLE_FMT_S16;
   gr->a_ctx->channel_layout = AV_CH_LAYOUT_STEREO;
+  gr->a_ctx->channels = av_get_channel_layout_nb_channels(gr->a_ctx->channel_layout);
   gr->a_ctx->time_base.den = 48000;
   gr->a_ctx->time_base.num = 1;
+  gr->a_st->time_base = gr->a_ctx->time_base;
 
   c = avcodec_find_encoder(gr->a_ctx->codec_id);
   if(avcodec_open2(gr->a_ctx, c, NULL)) {
@@ -335,6 +347,15 @@ rec_thread(void *aux)
   gr->v_ctx->thread_count = gconf.concurrency;
 
   // Output output file
+
+  if(avcodec_parameters_from_context(gr->v_st->codecpar, gr->v_ctx) < 0 ||
+     avcodec_parameters_from_context(gr->a_st->codecpar, gr->a_ctx) < 0) {
+    TRACE(TRACE_ERROR, "REC",
+          "Unable to record to %s -- Unable to copy codec parameters",
+          gr->filename);
+    rec_close_output(gr, 0);
+    return NULL;
+  }
 
   av_dump_format(gr->oc, 0, gr->filename, 1);
 
