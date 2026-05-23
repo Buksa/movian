@@ -166,8 +166,8 @@ done
 
 case "$ARCH" in
   x86_64|amd64|i?86)
-    # The bundled libav x86 inline asm is rejected by newer GCC/binutils.
-    LIBAV_COMMON_FLAGS="${LIBAV_COMMON_FLAGS} --disable-inline-asm"
+    # The bundled FFmpeg/libav x86 asm is rejected by some newer toolchains.
+    LIBAV_COMMON_FLAGS="${LIBAV_COMMON_FLAGS} --disable-inline-asm --disable-x86asm"
   ;;
 esac
 

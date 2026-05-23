@@ -15,6 +15,8 @@ The `movian6` branch includes:
 - raw screenshot HTTP API support;
 - WSL2 GLX runtime compatibility;
 - WebP probing, loading, decoding, and `/api/image` content type support;
+- bundled FFmpeg 4.4.7 media backend with existing `libav` option names kept
+  for compatibility;
 - local SteamOS/Steam Deck Flatpak packaging;
 - a documented plugin debug workflow.
 
@@ -105,8 +107,10 @@ More details:
 - `/api/screenshot?raw=1` and `/api/screenshot?raw=true` use the same raw PNG
   path.
 - Existing `/api/screenshot` upload behavior is preserved.
-- WebP images are recognized by RIFF/WEBP magic, decoded through libav, and
+- WebP images are recognized by RIFF/WEBP magic, decoded through FFmpeg, and
   served from `/api/image` as `image/webp`.
+- Existing command-line names such as `--libav-log` are preserved while the
+  bundled backend uses FFmpeg 4.4.7.
 - Steam launches avoid the X11 fullscreen path that can bounce back to the
   Steam loading screen.
 

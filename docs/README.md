@@ -13,6 +13,8 @@ The current branch includes:
 - raw screenshot HTTP API on top of the existing screenshot code;
 - WebP probing, image loading, libav decode mapping, and `/api/image` WebP
   content type;
+- bundled FFmpeg 4.4.7 as the media backend, while keeping existing `libav`
+  option names and internal build variables for compatibility;
 - local SteamOS/Steam Deck Flatpak packaging and small Linux runtime fixes used
   by that package;
 - a plugin debug workflow for route smoke tests against `build.debug/movian`.
@@ -69,6 +71,8 @@ The public stack currently includes these user-visible changes:
 - WebP files are recognized by RIFF/WEBP magic in file probing and image
   loading. The libav image decoder maps WebP, and `/api/image` returns
   `image/webp` for WebP payloads.
+- The bundled media backend is FFmpeg 4.4.7. Existing command-line and helper
+  names such as `--libav-log` remain unchanged.
 - Steam launches avoid the X11 fullscreen `override_redirect` path when
   `SteamGameId` or `SteamAppId` is set. `XK_Menu` maps to Movian's menu action
   for Steam Input keyboard layouts.
