@@ -267,6 +267,37 @@ encode_vframe(glw_rec_t *gr, struct pixmap *pm)
 /**
  *
  */
+static void
+rec_close_output(glw_rec_t *gr, int write_trailer)
+{
+  if(gr->oc == NULL)
+    return;
+
+  if(write_trailer)
+    av_write_trailer(gr->oc);
+
+  for(int i = 0; i < gr->oc->nb_streams; i++) {
+    AVStream *st = gr->oc->streams[i];
+    avcodec_close(st->codec);
+    free(st->codec);
+    free(st);
+  }
+
+  if(gr->oc->pb != NULL)
+    avio_close(gr->oc->pb);
+
+  free(gr->oc);
+  gr->oc = NULL;
+  gr->v_ctx = NULL;
+  gr->a_ctx = NULL;
+  gr->v_st = NULL;
+  gr->a_st = NULL;
+}
+
+
+/**
+ *
+ */
 static void *
 rec_thread(void *aux)
 {
@@ -350,6 +381,7 @@ rec_thread(void *aux)
     TRACE(TRACE_ERROR, "REC",
           "Unable to record to %s -- Unable to write stream header",
           gr->filename);
+    rec_close_output(gr, 0);
     return NULL;
   }
 
@@ -373,17 +405,7 @@ rec_thread(void *aux)
 
   hts_mutex_unlock(&glw_rec_mutex);
 
-  av_write_trailer(gr->oc);
-
-  for(int i = 0; i < gr->oc->nb_streams; i++) {
-    AVStream *st = gr->oc->streams[i];
-    avcodec_close(st->codec);
-    free(st->codec);
-    free(st);
-  }
-
-  avio_close(gr->oc->pb);
-  free(gr->oc);
+  rec_close_output(gr, 1);
   free(gr);
   return NULL;
 }
