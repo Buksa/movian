@@ -2439,12 +2439,14 @@ glw_dispatch_event(glw_root_t *gr, event_t *e)
     return;
   }
 
-#if CONFIG_GLW_REC
   if(event_is_action(e, ACTION_RECORD_UI)) {
+#if CONFIG_GLW_REC
     glw_rec_toggle(gr);
+#else
+    TRACE(TRACE_DEBUG, "GLW", "Recording is disabled in this build");
+#endif
     return;
   }
-#endif
 
   if(e->e_type == EVENT_KEYDESC) {
 

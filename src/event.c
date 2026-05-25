@@ -195,6 +195,7 @@ static struct strtab actionnames[] = {
   { "ReloadData",            ACTION_RELOAD_DATA },
   { "Playqueue",             ACTION_PLAYQUEUE },
   { "Sysinfo",               ACTION_SYSINFO },
+  { "RecordUI",              ACTION_RECORD_UI },
 
 };
 
