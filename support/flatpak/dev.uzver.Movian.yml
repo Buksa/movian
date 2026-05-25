@@ -52,6 +52,7 @@ modules:
         --disable-libxss
         --disable-libxxf86vm
         --disable-librtmp
+        --disable-glw-rec
       - make BUILD=flatpak "$PWD/build.flatpak/movian.bundle" -j${FLATPAK_BUILDER_N_JOBS}
       - install -Dm755 build.flatpak/movian.bundle /app/bin/showtime
       - install -Dm644 support/flatpak/dev.uzver.Movian.desktop /app/share/applications/dev.uzver.Movian.desktop

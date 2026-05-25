@@ -346,7 +346,9 @@ if enabled glw_frontend_x11; then
     fi
 
     enable glw_backend_opengl
-    enable glw_rec
+    if [ "x${glw_rec}" != "xno" ]; then
+	enable glw_rec
+    fi
     enable glw
 else
     disable vdpau
