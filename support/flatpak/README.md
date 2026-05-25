@@ -65,6 +65,15 @@ flatpak info --user --show-permissions dev.uzver.Movian
 
 ## Manifest Notes
 
+The manifest disables the hidden GLW recorder:
+
+```text
+--disable-glw-rec
+```
+
+That keeps the release-oriented Flatpak from writing large debug
+`capture.mkv` files. The `Alt+F12` recorder hotkey is a no-op in this build.
+
 The package persists Movian's legacy state and cache:
 
 ```text

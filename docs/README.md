@@ -76,6 +76,9 @@ The public stack currently includes these user-visible changes:
 - Steam launches avoid the X11 fullscreen `override_redirect` path when
   `SteamGameId` or `SteamAppId` is set. `XK_Menu` maps to Movian's menu action
   for Steam Input keyboard layouts.
+- The hidden GLW recorder is kept as a developer/debug aid. Linux debug builds
+  enable it by default; release and Flatpak builds disable it unless
+  `--enable-glw-rec` is passed explicitly.
 
 ## Flatpak / SteamOS
 
@@ -92,6 +95,9 @@ The package installs the bundled Movian binary as `/app/bin/showtime`, keeps
 state through `--persist=.hts` and `--persist=.cache/movian`, and generates
 AppStream metadata from the current `git describe` version so Discover matches
 Movian's About/log output.
+
+The Flatpak package disables the GLW recorder hotkey. Use
+`/api/screenshot/raw` for smoke/debug captures in that profile.
 
 ## Out Of Scope
 

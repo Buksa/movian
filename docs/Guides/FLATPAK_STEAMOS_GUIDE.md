@@ -28,6 +28,7 @@ deferred subsystems:
 --disable-libxss
 --disable-libxxf86vm
 --disable-librtmp
+--disable-glw-rec
 ```
 
 The manifest also sets:
@@ -49,6 +50,10 @@ AppStream metadata is generated during the build from `git describe`, which
 keeps Discover's version aligned with Movian's About/log output.
 The app icon is installed from `res/showtime/showtime.png` as a hicolor
 `256x256` PNG under the Flatpak app id.
+
+The hidden GLW recorder is disabled in this release-oriented profile. It is a
+developer/debug aid that writes large `capture.mkv` files in builds where it is
+enabled. Use `/api/screenshot/raw` for Flatpak smoke captures.
 
 ## Sandbox
 
@@ -157,6 +162,7 @@ Minimum smoke checklist:
 - Installed plugins and settings survive a restart.
 - A direct WebP URL opens as an image.
 - `/api/screenshot/raw` returns a PNG when the HTTP API is enabled.
+- Pressing `Alt+F12` does not start recording or crash the Flatpak build.
 
 ## Steam Input
 
