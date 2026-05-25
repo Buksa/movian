@@ -113,6 +113,9 @@ More details:
   bundled backend uses FFmpeg 4.4.7.
 - Steam launches avoid the X11 fullscreen path that can bounce back to the
   Steam loading screen.
+- The hidden GLW recorder is treated as a developer/debug aid. Linux debug
+  builds keep it enabled by default; release and Flatpak builds disable it
+  unless `--enable-glw-rec` is passed explicitly.
 
 ## Flatpak / SteamOS
 
@@ -146,6 +149,9 @@ The package installs the bundled Movian binary as `/app/bin/showtime`, persists
 legacy state with `--persist=.hts` and `--persist=.cache/movian`, generates
 AppStream metadata from the current git version, and installs the PNG icon from
 `res/showtime/showtime.png`.
+
+The GLW recorder hotkey is disabled in the Flatpak package. Use
+`/api/screenshot/raw` or a direct debug build for runtime smoke/debug captures.
 
 More details:
 
