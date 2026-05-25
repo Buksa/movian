@@ -42,6 +42,8 @@ show_help(){
   echo "  --glw-frontend=FRONTEND  Build GLW for FRONTEND [$GLWFRONTEND]"
   echo "                            x11      X11 Windows"
   echo "                            none     Disable GLW"
+  echo "  --enable-glw-rec         Enable GLW recorder, including release builds"
+  echo "  --disable-glw-rec        Disable GLW recorder"
   echo "  --pkg-config-path=PATH   Extra paths for pkg-config"
   exit 1
 }
@@ -172,6 +174,12 @@ case "$ARCH" in
 esac
 
 setup_env "$@"
+
+# Keep the hidden GLW recorder as a developer/debug aid unless explicitly
+# requested in a release build.
+if enabled release && disabled glw_rec; then
+    disable glw_rec
+fi
 
 
 #
