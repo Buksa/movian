@@ -59,6 +59,14 @@ The reusable runner lives under:
 
 - `support/plugin-smoke/`
 
+## Smoke Checklist
+
+Use the Linux/Flatpak smoke checklist when preparing public branches that touch
+build, packaging, media, image, screenshot, plugin runtime, WSL, or Flatpak
+behavior:
+
+- `Guides/LINUX_FLATPAK_SMOKE_CHECKLIST.md`
+
 ## Runtime Changes
 
 The public stack currently includes these user-visible changes:
