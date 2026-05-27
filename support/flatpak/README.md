@@ -52,6 +52,12 @@ flatpak build build.flatpak-builder ldd /app/bin/showtime | \
 
 The dependency grep should be empty for this MVP profile.
 
+The full smoke checklist for Linux, Flatpak, runtime, and Steam Deck checks is:
+
+```text
+docs/Guides/LINUX_FLATPAK_SMOKE_CHECKLIST.md
+```
+
 ## Install
 
 ```sh

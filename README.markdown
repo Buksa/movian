@@ -156,6 +156,7 @@ The GLW recorder hotkey is disabled in the Flatpak package. Use
 More details:
 
 - `docs/README.md`
+- `docs/Guides/LINUX_FLATPAK_SMOKE_CHECKLIST.md`
 - `docs/Guides/FLATPAK_STEAMOS_GUIDE.md`
 - `docs/Guides/PLUGIN_DEBUG_WORKFLOW.md`
 - `support/flatpak/README.md`
