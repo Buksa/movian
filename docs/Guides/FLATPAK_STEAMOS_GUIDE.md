@@ -114,6 +114,12 @@ sha256sum build.flatpak/dev.uzver.Movian.flatpak
 
 The dependency grep should print nothing for the current MVP profile.
 
+For the full Linux, Flatpak, runtime, and manual Steam Deck checklist, see:
+
+```text
+docs/Guides/LINUX_FLATPAK_SMOKE_CHECKLIST.md
+```
+
 ## Install And Run
 
 Install the generated bundle:

@@ -1,23 +1,23 @@
 # Movian Public Branch Notes
 
-This directory documents the public branch stack in this checkout. The notes
-are based on code, scripts, and packaging files present in this repository.
+This directory documents the public `movian6` branch in this checkout. The
+notes are based on code, scripts, and packaging files present in this
+repository.
 
-## Branch Stack
+## Current Public Baseline
 
-The current public work is organized as small reviewable branches:
+The current branch includes:
 
-- `public/gcc-modernize` - modern GCC and Ubuntu build fixes only.
-- `public/linux-build-cleanup` - reproducible Linux debug configure helper and
-  README build notes.
-- `public/screenshot-api` - raw screenshot HTTP API on top of the existing
-  screenshot code.
-- `public/webp-image-support` - WebP probing, image loading, libav decode
-  mapping, and `/api/image` WebP content type.
-- `public/flatpak-steamos` - local SteamOS/Steam Deck Flatpak packaging and
-  small Linux runtime fixes needed by that package.
-
-Each branch is intended to stay narrow and easy to review.
+- modern GCC and Ubuntu build fixes;
+- reproducible Linux debug configure helper and README build notes;
+- raw screenshot HTTP API on top of the existing screenshot code;
+- WebP probing, image loading, libav decode mapping, and `/api/image` WebP
+  content type;
+- bundled FFmpeg 4.4.7 as the media backend, while keeping existing `libav`
+  option names and internal build variables for compatibility;
+- local SteamOS/Steam Deck Flatpak packaging and small Linux runtime fixes used
+  by that package;
+- a plugin debug workflow for route smoke tests against `build.debug/movian`.
 
 ## Linux Build
 
@@ -38,6 +38,35 @@ The helper runs:
 
 Extra configure flags can be appended to the helper command.
 
+## Plugin Debug Workflow
+
+Use the direct debug binary for plugin development and route smoke tests:
+
+```sh
+PLUGIN_PATH=/path/to/plugin \
+START_URL=plugin:start \
+EXPECTED_TITLE="Plugin Title" \
+support/plugin-smoke/run-plugin-smoke.sh
+```
+
+The main guides are:
+
+- `Guides/PLUGIN_DEBUG_WORKFLOW.md`
+- `Guides/PLUGIN_DEVELOPMENT_NOTES.md`
+- `Guides/PLUGIN_API_REFERENCE.md`
+
+The reusable runner lives under:
+
+- `support/plugin-smoke/`
+
+## Smoke Checklist
+
+Use the Linux/Flatpak smoke checklist when preparing public branches that touch
+build, packaging, media, image, screenshot, plugin runtime, WSL, or Flatpak
+behavior:
+
+- `Guides/LINUX_FLATPAK_SMOKE_CHECKLIST.md`
+
 ## Runtime Changes
 
 The public stack currently includes these user-visible changes:
@@ -50,9 +79,14 @@ The public stack currently includes these user-visible changes:
 - WebP files are recognized by RIFF/WEBP magic in file probing and image
   loading. The libav image decoder maps WebP, and `/api/image` returns
   `image/webp` for WebP payloads.
+- The bundled media backend is FFmpeg 4.4.7. Existing command-line and helper
+  names such as `--libav-log` remain unchanged.
 - Steam launches avoid the X11 fullscreen `override_redirect` path when
   `SteamGameId` or `SteamAppId` is set. `XK_Menu` maps to Movian's menu action
   for Steam Input keyboard layouts.
+- The hidden GLW recorder is kept as a developer/debug aid. Linux debug builds
+  enable it by default; release and Flatpak builds disable it unless
+  `--enable-glw-rec` is passed explicitly.
 
 ## Flatpak / SteamOS
 
@@ -69,6 +103,9 @@ The package installs the bundled Movian binary as `/app/bin/showtime`, keeps
 state through `--persist=.hts` and `--persist=.cache/movian`, and generates
 AppStream metadata from the current `git describe` version so Discover matches
 Movian's About/log output.
+
+The Flatpak package disables the GLW recorder hotkey. Use
+`/api/screenshot/raw` for smoke/debug captures in that profile.
 
 ## Out Of Scope
 

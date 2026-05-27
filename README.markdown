@@ -1,107 +1,194 @@
-Movian mediaplayer
-==================
+# Movian Public Fork
 
-(c) 2006 - 2018 Lonelycoder AB
+Movian is a media player for plugins, streams, and local files. This repository
+is a clean public fork based on `andoma/movian:movian6`.
 
-[![Build status](https://doozer.io/badge/andoma/movian/buildstatus/master)](https://doozer.io/user/andoma/movian)
+The goal of this fork is to keep changes small, reviewable, and based on public
+upstream source.
 
-For more information and latest versions, please visit:
+## Current Public Baseline
 
-[https://movian.tv/](https://movian.tv/)
+The `movian6` branch includes:
 
-## How to build for Linux
+- modern GCC and Ubuntu build fixes;
+- a reproducible Linux debug configure helper;
+- raw screenshot HTTP API support;
+- WSL2 GLX runtime compatibility;
+- WebP probing, loading, decoding, and `/api/image` content type support;
+- bundled FFmpeg 4.4.7 media backend with existing `libav` option names kept
+  for compatibility;
+- local SteamOS/Steam Deck Flatpak packaging;
+- a documented plugin debug workflow.
 
-First you need to satisfy some dependencies (for Ubuntu 16.04.3 LTS)
+## Linux Debug Build
 
-	sudo apt-get install libfreetype6-dev libfontconfig1-dev libxext-dev libgl1-mesa-dev libasound2-dev libgtk2.0-dev libxss-dev libxxf86vm-dev libxv-dev libvdpau-dev yasm libpulse-dev libssl-dev curl libwebkitgtk-dev libsqlite3-dev libavahi-client-dev
+Install the usual build tools and development headers. Package names vary by
+distribution; on Ubuntu the useful starting point is:
 
-Then you need to configure:
+```sh
+sudo apt-get update
+sudo apt-get install -y \
+  build-essential \
+  pkg-config \
+  git \
+  curl \
+  yasm \
+  python-is-python3 \
+  libsqlite3-dev \
+  libfreetype6-dev \
+  libfontconfig1-dev \
+  libx11-dev \
+  libxext-dev \
+  libgl1-mesa-dev \
+  libpulse-dev \
+  libssl-dev \
+  libavahi-client-dev \
+  libxss-dev \
+  libxxf86vm-dev
+```
 
-	./configure
+Configure and build:
 
-On newer Ubuntu releases, including WSL environments where VDPAU headers are
-not installed and the system OpenSSL is too new for bundled librtmp, use the
-built-in PolarSSL and disable VDPAU:
-
-	sudo apt-get install build-essential pkg-config git curl yasm python-is-python3 libfreetype6-dev libfontconfig1-dev libxext-dev libgl1-mesa-dev libasound2-dev libgtk2.0-dev libxss-dev libxxf86vm-dev libxv-dev libpulse-dev libssl-dev libsqlite3-dev libavahi-client-dev libwebkitgtk-dev
-	./support/configure-linux-debug.sh
-	make BUILD=debug -j$(nproc)
+```sh
+./support/configure-linux-debug.sh
+make BUILD=debug -j$(nproc)
+./build.debug/movian --help
+```
 
 The helper runs:
 
-	./configure.linux --build=debug --disable-vdpau --enable-polarssl
+```sh
+./configure.linux --build=debug --disable-vdpau --enable-polarssl
+```
 
-The debug binary is written to `./build.debug/movian`. Extra configure
-options can be appended to the helper command; for example, use
-`./support/configure-linux-debug.sh --disable-webkit` if WebKitGTK is not
-available on your distribution.
+Extra configure flags can be appended. For example, if your distribution no
+longer packages legacy WebKitGTK development headers:
 
-If your system lacks libwebkitgtk or some other lib you can configure like this:
+```sh
+./support/configure-linux-debug.sh --disable-webkit
+```
 
-	./configure --disable-webkit
+The debug binary is written to:
 
-If any dependencies are missing the configure script will complain.
-You then have the option to disable that particular module/subsystem.
+```text
+build.debug/movian
+```
 
-	make
+Movian stores legacy settings under:
 
-Build the binary, after build the binary resides in `./build.linux/`.
-Thus, to start it, just type:
+```text
+~/.hts/showtime
+```
 
-	./build.linux/movian
+## Plugin Debug Workflow
 
-Settings are stored in `~/.hts/showtime`
+For plugin development, use the direct debug binary instead of a packaged app:
 
-If you want to build with extra debugging options for development these options might be of interest:
+```sh
+PLUGIN_PATH=/path/to/plugin \
+START_URL=plugin:start \
+EXPECTED_TITLE="Plugin Title" \
+support/plugin-smoke/run-plugin-smoke.sh
+```
 
-	--cc=gcc-5 --extra-cflags=-fno-omit-frame-pointer --optlevel=g --sanitize=address --enable-bughunt
+The runner starts Movian with an isolated profile, opens the requested route
+through the HTTP API, checks page state, captures logs, and attempts a raw
+screenshot.
 
+More details:
 
-## How to build for Mac OS X
+- `docs/Guides/PLUGIN_DEBUG_WORKFLOW.md`
+- `support/plugin-smoke/run-plugin-smoke.sh`
 
-To build for Mac OS X you need Xcode and yasm. Xcode should be installed from Mac Appstore.
+## Runtime Features In This Stack
 
-To install yasm, install [Brew](http://brew.sh/) and then
+- WSL2 GLX handling is detected at runtime; there is no WSL configure option.
+- `/api/screenshot/raw` returns a PNG directly.
+- `/api/screenshot?raw=1` and `/api/screenshot?raw=true` use the same raw PNG
+  path.
+- Existing `/api/screenshot` upload behavior is preserved.
+- WebP images are recognized by RIFF/WEBP magic, decoded through FFmpeg, and
+  served from `/api/image` as `image/webp`.
+- Existing command-line names such as `--libav-log` are preserved while the
+  bundled backend uses FFmpeg 4.4.7.
+- Steam launches avoid the X11 fullscreen path that can bounce back to the
+  Steam loading screen.
+- The hidden GLW recorder is treated as a developer/debug aid. Linux debug
+  builds keep it enabled by default; release and Flatpak builds disable it
+  unless `--enable-glw-rec` is passed explicitly.
 
-	$ brew install yasm
+## Flatpak / SteamOS
 
-Now run configure
+The Flatpak work is a local sideload package for SteamOS and Desktop Linux
+testing. It is not a Flathub-ready manifest.
 
-	$ ./configure
+Build from the repository root:
 
-Or if you build for release
+```sh
+support/flatpak/build-local.sh
+```
 
-	$ ./configure --release
+The bundle is written to:
 
-If configured successfully run:
+```text
+build.flatpak/dev.uzver.Movian.flatpak
+```
 
-	$ make
+Install and run:
 
-Run Movian binary from build directory
+```sh
+flatpak install --user --reinstall --bundle \
+  build.flatpak/dev.uzver.Movian.flatpak
 
-	$ build.osx/Movian.app/Contents/MacOS/movian
+flatpak run --user dev.uzver.Movian
+flatpak run --user --command=showtime dev.uzver.Movian --help
+flatpak info --user dev.uzver.Movian
+```
 
-Note that in this case Movian loads all resources from current directory
-so this binary can't be run elsewhere.
+The package installs the bundled Movian binary as `/app/bin/showtime`, persists
+legacy state with `--persist=.hts` and `--persist=.cache/movian`, generates
+AppStream metadata from the current git version, and installs the PNG icon from
+`res/showtime/showtime.png`.
 
-If you want a build that can be run as a normal Mac Application you shold do
+The GLW recorder hotkey is disabled in the Flatpak package. Use
+`/api/screenshot/raw` or a direct debug build for runtime smoke/debug captures.
 
-	$ make dist
+More details:
 
-This will generate a DMG
+- `docs/README.md`
+- `docs/Guides/LINUX_FLATPAK_SMOKE_CHECKLIST.md`
+- `docs/Guides/FLATPAK_STEAMOS_GUIDE.md`
+- `docs/Guides/PLUGIN_DEBUG_WORKFLOW.md`
+- `support/flatpak/README.md`
 
-## How to build for PS3 with PSL1GHT
+## Project Scope
 
-$ ./Autobuild.sh -t ps3 -v 5.0.500
+This fork is developed from public upstream source. New behavior should be
+implemented as small patches on top of that public base.
 
-## How to build for Raspberry Pi
+Out of scope for the current stack:
 
-First you need to satisfy some dependencies (for Ubuntu 16.04.3 LTS 64bit):
+- Flathub-ready pinned source archives and hashes.
+- VAAPI or other hardware decode paths.
+- Native `/dev/input/event*` controller input in the Flatpak sandbox.
+- DVD and RTMP support in the Flatpak profile.
+- Broad filesystem access beyond common read-only XDG media folders.
 
-	sudo apt-get install git-core build-essential autoconf bison flex libelf-dev libtool pkg-config texinfo libncurses5-dev libz-dev python-dev libssl-dev libgmp3-dev ccache zip squashfs-tools
+## Upstream
 
-$ ./Autobuild.sh -t rpi -v 5.0.500
+Original project:
 
-To update Movian on rpi with compiled one, enable Binreplace in settings:dev and issue:
+```text
+https://github.com/andoma/movian
+```
 
-	curl --data-binary @build.rpi/showtime.sqfs http://rpi_ip_address:42000/api/replace
+Upstream branch used here:
+
+```text
+https://github.com/andoma/movian/tree/movian6
+```
+
+## License
+
+Movian is distributed under the GNU General Public License version 3 or later.
+See `LICENSE` for the full license text.
