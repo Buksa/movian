@@ -217,6 +217,36 @@ system libraries at configure time.
 Use the normal Flatpak build checks as well when RTMP behavior changed in the
 Flatpak profile.
 
+### Local RTMPS Smoke
+
+Use this after Flatpak RTMP-family changes, or when validating TLS-backed RTMP
+playback. The helper starts MediaMTX in Docker with a temporary self-signed
+certificate, publishes a synthetic RTMP stream with `ffmpeg`, then opens it from
+Movian through `rtmps://`.
+
+```sh
+support/flatpak/build-local.sh
+
+support/rtmp-smoke/run-rtmps-mediamtx-smoke.sh
+```
+
+If `MOVIAN_BIN` is unset, the helper uses a temporary wrapper around:
+
+```sh
+flatpak build build.flatpak-builder /app/bin/showtime
+```
+
+Expected result:
+
+- MediaMTX starts from `bluenviron/mediamtx:1`;
+- playback starts for `rtmps://127.0.0.1:19397/live/test`;
+- the detected streams include H.264 video and AAC audio;
+- the current media URL property points at the RTMPS URL.
+
+Artifacts are stored under `/tmp/movian-rtmps-smoke` by default. Keep
+`summary.txt`, `mediamtx.log`, `ffmpeg-publisher.log`, and the nested Movian
+artifacts when the smoke is used as PR evidence.
+
 ## Steam Deck Manual Smoke
 
 Use this when the branch affects Flatpak launch behavior, fullscreen, Steam
