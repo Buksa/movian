@@ -17,7 +17,9 @@ The current branch includes:
   option names and internal build variables for compatibility;
 - local SteamOS/Steam Deck Flatpak packaging and small Linux runtime fixes used
   by that package;
-- a plugin debug workflow for route smoke tests against `build.debug/movian`.
+- a plugin debug workflow for route smoke tests against `build.debug/movian`;
+- repeatable public-branch patterns for build, packaging, media, and smoke
+  work.
 
 ## Linux Build
 
@@ -67,6 +69,11 @@ behavior:
 
 - `Guides/LINUX_FLATPAK_SMOKE_CHECKLIST.md`
 
+For branch structure, compatibility, feature gating, Flatpak validation, and
+runtime smoke patterns, use:
+
+- `Guides/PUBLIC_WORK_PATTERNS.md`
+
 ## Bundled Modules
 
 Use the bundled module update plan before changing submodule pointers or
@@ -89,6 +96,9 @@ The public stack currently includes these user-visible changes:
   `image/webp` for WebP payloads.
 - The bundled media backend is FFmpeg 4.4.7. Existing command-line and helper
   names such as `--libav-log` remain unchanged.
+- Flatpak builds use FFmpeg's RTMP-family protocols with SDK `gmp` and
+  `gnutls`, while leaving the old external `librtmp` backend disabled in that
+  profile.
 - Steam launches avoid the X11 fullscreen `override_redirect` path when
   `SteamGameId` or `SteamAppId` is set. `XK_Menu` maps to Movian's menu action
   for Steam Input keyboard layouts.
@@ -122,5 +132,5 @@ These are intentionally left for later branches:
 - Flathub-ready pinned source archives and hashes.
 - VAAPI or other hardware decode paths.
 - Native `/dev/input/event*` controller input in the Flatpak sandbox.
-- DVD and RTMP support in the Flatpak profile.
+- DVD support in the Flatpak profile.
 - Broader filesystem permissions such as removable media paths.
