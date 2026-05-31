@@ -47,10 +47,12 @@ appstreamcli validate --no-net \
 flatpak build build.flatpak-builder /app/bin/showtime --help
 
 flatpak build build.flatpak-builder ldd /app/bin/showtime | \
-  grep -Ei 'gtk|gdk|webkit|rtmp|dvd|vaapi|vdpau|libva|nvidia' || true
+  grep -Ei 'gtk|gdk|webkit|librtmp|dvd|vaapi|vdpau|libva|nvidia|gmp|gnutls' || true
 ```
 
-The dependency grep should be empty for this MVP profile.
+The dependency grep should not show GTK/WebKit, DVD, VAAPI, VDPAU, Nvidia,
+or external `librtmp` dependencies. `libgmp` and `libgnutls` are expected
+because they enable FFmpeg's native RTMP-family protocol support.
 
 The full smoke checklist for Linux, Flatpak, runtime, and Steam Deck checks is:
 
@@ -79,6 +81,20 @@ The manifest disables the hidden GLW recorder:
 
 That keeps the release-oriented Flatpak from writing large debug
 `capture.mkv` files. The `Alt+F12` recorder hotkey is a no-op in this build.
+
+The manifest enables bundled FFmpeg protocol helpers:
+
+```text
+--enable-version3
+--enable-gmp
+--enable-gnutls
+```
+
+`gmp` enables FFmpeg's RTMPE crypt helper, while `gnutls` enables FFmpeg TLS
+and HTTPS protocols. `--enable-version3` is required by FFmpeg when `gmp` is
+enabled. Together these flags allow native FFmpeg support for `rtmpe://`,
+`rtmps://`, `rtmpte://`, and `rtmpts://` without enabling the old external
+`librtmp` backend.
 
 The package persists Movian's legacy state and cache:
 
