@@ -67,6 +67,14 @@ behavior:
 
 - `Guides/LINUX_FLATPAK_SMOKE_CHECKLIST.md`
 
+## Bundled Modules
+
+Use the bundled module update plan before changing submodule pointers or
+vendored third-party code:
+
+- `Guides/BUNDLED_MODULE_UPDATE_PLAN.md`
+- `support/check-submodules.sh`
+
 ## Runtime Changes
 
 The public stack currently includes these user-visible changes:
