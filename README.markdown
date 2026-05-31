@@ -18,7 +18,9 @@ The `movian6` branch includes:
 - bundled FFmpeg 4.4.7 media backend with existing `libav` option names kept
   for compatibility;
 - local SteamOS/Steam Deck Flatpak packaging;
-- a documented plugin debug workflow.
+- a documented plugin debug workflow;
+- documented public-branch patterns for build, packaging, media, and smoke
+  work.
 
 ## Linux Debug Build
 
@@ -111,6 +113,8 @@ More details:
   served from `/api/image` as `image/webp`.
 - Existing command-line names such as `--libav-log` are preserved while the
   bundled backend uses FFmpeg 4.4.7.
+- Flatpak builds use FFmpeg's RTMP-family protocols through SDK `gmp` and
+  `gnutls`, while the old external `librtmp` backend remains disabled there.
 - Steam launches avoid the X11 fullscreen path that can bounce back to the
   Steam loading screen.
 - The hidden GLW recorder is treated as a developer/debug aid. Linux debug
@@ -157,6 +161,7 @@ More details:
 
 - `docs/README.md`
 - `docs/Guides/BUNDLED_MODULE_UPDATE_PLAN.md`
+- `docs/Guides/PUBLIC_WORK_PATTERNS.md`
 - `docs/Guides/LINUX_FLATPAK_SMOKE_CHECKLIST.md`
 - `docs/Guides/FLATPAK_STEAMOS_GUIDE.md`
 - `docs/Guides/PLUGIN_DEBUG_WORKFLOW.md`
@@ -172,7 +177,7 @@ Out of scope for the current stack:
 - Flathub-ready pinned source archives and hashes.
 - VAAPI or other hardware decode paths.
 - Native `/dev/input/event*` controller input in the Flatpak sandbox.
-- DVD and RTMP support in the Flatpak profile.
+- DVD support in the Flatpak profile.
 - Broad filesystem access beyond common read-only XDG media folders.
 
 ## Upstream
