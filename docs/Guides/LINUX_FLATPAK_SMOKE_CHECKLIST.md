@@ -175,6 +175,30 @@ Expected result:
 - if the change is Flatpak-specific, repeat the same input through the Flatpak
   package when practical.
 
+### Local RTMP Smoke
+
+Use this when RTMP handling or the FFmpeg-backed RTMP fallback changes. The
+script starts a local synthetic RTMP stream with `ffmpeg`, opens it through the
+HTTP API, and keeps the Movian/server logs as artifacts:
+
+```sh
+./support/configure-linux-debug.sh --build=debug-ffrtmp-smoke --disable-librtmp
+make BUILD=debug-ffrtmp-smoke -j$(nproc)
+
+MOVIAN_BIN=./build.debug-ffrtmp-smoke/movian \
+  support/rtmp-smoke/run-rtmp-smoke.sh
+```
+
+Expected result:
+
+- the log contains `Probed as flv`;
+- playback starts for the local `rtmp://127.0.0.1:.../live/test` URL;
+- the detected streams include H.264 video and AAC audio;
+- the current media URL property points at the local RTMP URL.
+
+Use the normal Flatpak build checks as well when RTMP behavior changed in the
+Flatpak profile.
+
 ## Steam Deck Manual Smoke
 
 Use this when the branch affects Flatpak launch behavior, fullscreen, Steam
