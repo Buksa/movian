@@ -32,6 +32,7 @@
 #include "main.h"
 #include "backend/backend.h"
 #include "fileaccess.h"
+#include "fa_audio.h"
 #include "fa_proto.h"
 #include "fa_video.h"
 
@@ -249,6 +250,7 @@ FAP_REGISTER(ffmpeg_rtmp);
 static backend_t be_ffmpeg_rtmp = {
   .be_canhandle = ffmpeg_rtmp_canhandle,
   .be_open = ffmpeg_rtmp_backend_open,
+  .be_play_audio = be_file_playaudio,
   .be_play_video = ffmpeg_rtmp_backend_playvideo,
 };
 
