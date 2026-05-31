@@ -30,8 +30,10 @@
 #include <libavformat/avformat.h>
 
 #include "main.h"
+#include "backend/backend.h"
 #include "fileaccess.h"
 #include "fa_proto.h"
+#include "fa_video.h"
 
 typedef struct ffmpeg_rtmp_handle {
   fa_handle_t h;
@@ -59,6 +61,20 @@ ffmpeg_rtmp_match_proto(const char *prefix)
       return 0;
 
   return 1;
+}
+
+
+static int
+ffmpeg_rtmp_canhandle(const char *url)
+{
+  for(int i = 0; ffmpeg_rtmp_protocols[i] != NULL; i++) {
+    const char *proto = ffmpeg_rtmp_protocols[i];
+    size_t len = strlen(proto);
+    if(!strncmp(url, proto, len) && !strncmp(url + len, "://", 3))
+      return 10;
+  }
+
+  return 0;
 }
 
 
@@ -100,10 +116,7 @@ ffmpeg_rtmp_open(fa_protocol_t *fap, const char *url, char *errbuf,
   ffmpeg_rtmp_handle_t *fh = calloc(1, sizeof(ffmpeg_rtmp_handle_t));
   fh->h.fh_proto = fap;
   fh->avio = avio;
-
-  fh->size = avio_size(avio);
-  if(fh->size < 0)
-    fh->size = -1;
+  fh->size = -1;
 
   return &fh->h;
 }
@@ -130,15 +143,12 @@ ffmpeg_rtmp_read(fa_handle_t *handle, void *buf, size_t size)
 static int64_t
 ffmpeg_rtmp_seek(fa_handle_t *handle, int64_t pos, int whence, int lazy)
 {
+  (void)handle;
+  (void)pos;
+  (void)whence;
   (void)lazy;
 
-  ffmpeg_rtmp_handle_t *fh = (ffmpeg_rtmp_handle_t *)handle;
-
-  if(whence == SEEK_END && fh->size < 0)
-    return -1;
-
-  int64_t r = avio_seek(fh->avio, pos, whence);
-  return r < 0 ? -1 : r;
+  return -1;
 }
 
 
@@ -199,6 +209,26 @@ ffmpeg_rtmp_get_last_component(fa_protocol_t *fap, const char *url,
 }
 
 
+static int
+ffmpeg_rtmp_backend_open(prop_t *page, const char *url, int sync)
+{
+  return backend_open_video(page, url, sync);
+}
+
+
+static event_t *
+ffmpeg_rtmp_backend_playvideo(const char *url, media_pipe_t *mp,
+                              char *errbuf, size_t errlen,
+                              video_queue_t *vq, struct vsource_list *vsl,
+                              const video_args_t *va0)
+{
+  video_args_t va = *va0;
+
+  va.flags |= BACKEND_VIDEO_NO_FS_SCAN | BACKEND_VIDEO_NO_SUBTITLE_SCAN;
+  return be_file_playvideo(url, mp, errbuf, errlen, vq, vsl, &va);
+}
+
+
 static fa_protocol_t fa_protocol_ffmpeg_rtmp = {
   .fap_init  = ffmpeg_rtmp_init,
   .fap_flags = FAP_INCLUDE_PROTO_IN_URL,
@@ -214,5 +244,14 @@ static fa_protocol_t fa_protocol_ffmpeg_rtmp = {
 };
 
 FAP_REGISTER(ffmpeg_rtmp);
+
+
+static backend_t be_ffmpeg_rtmp = {
+  .be_canhandle = ffmpeg_rtmp_canhandle,
+  .be_open = ffmpeg_rtmp_backend_open,
+  .be_play_video = ffmpeg_rtmp_backend_playvideo,
+};
+
+BE_REGISTER(ffmpeg_rtmp);
 
 #endif // !ENABLE_LIBRTMP
