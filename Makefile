@@ -243,6 +243,7 @@ SRCS-$(CONFIG_FTPCLIENT) += src/fileaccess/fa_ftp.c \
 
 SRCS-$(CONFIG_LIBAV) += \
 	src/fileaccess/fa_libav.c \
+	src/fileaccess/fa_ffmpeg_rtmp.c \
 	src/fileaccess/fa_backend.c \
 	src/fileaccess/fa_video.c \
 	src/fileaccess/fa_audio.c \
