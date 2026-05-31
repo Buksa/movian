@@ -571,6 +571,8 @@ EOF
 
     if enabled libav; then
 	echo >>${CONFIG_MAK} "LDFLAGS_cfg += -lavresample -lswscale -lavformat -lavcodec -lswresample -lavutil"
+	libav_extra_libs=$(sed -n 's/^EXTRALIBS-\(avformat\|avcodec\|avresample\|swresample\|swscale\|avutil\)=//p' "${LIBAV_BUILD_DIR}/ffbuild/config.mak" | tr '\n' ' ')
+	echo >>${CONFIG_MAK} "LDFLAGS_cfg += ${libav_extra_libs}"
     fi
 
     if enabled libcec; then

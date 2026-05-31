@@ -37,6 +37,9 @@ modules:
           --disable-ffnvcodec
           --disable-nvdec
           --disable-v4l2-m2m
+          --enable-version3
+          --enable-gmp
+          --enable-gnutls
     build-commands:
       - rm -rf build.flatpak
       - >-
