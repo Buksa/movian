@@ -196,6 +196,24 @@ Expected result:
 - the detected streams include H.264 video and AAC audio;
 - the current media URL property points at the local RTMP URL.
 
+For a manual external RTMP-family smoke, pass a live URL through the environment
+instead of committing it into the repository:
+
+```sh
+RTMP_URL='rtmp://example.invalid/live/stream' \
+MOVIAN_BIN=./build.debug-ffrtmp-smoke/movian \
+  support/rtmp-smoke/run-rtmp-smoke.sh
+```
+
+Optional external URLs are useful PR evidence, but they should not be treated as
+stable CI inputs. Keep the exact URL and artifacts in the PR or issue notes when
+the source is temporary.
+
+For `rtmpe`, `rtmps`, `rtmpte`, or `rtmpts`, use the Flatpak profile or another
+build whose bundled FFmpeg config enables `gmp` and `gnutls`. The ordinary host
+debug profile may only cover plain `rtmp` and `rtmpt`, depending on available
+system libraries at configure time.
+
 Use the normal Flatpak build checks as well when RTMP behavior changed in the
 Flatpak profile.
 
