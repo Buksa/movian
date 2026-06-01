@@ -182,10 +182,10 @@ script starts a local synthetic RTMP stream with `ffmpeg`, opens it through the
 HTTP API, and keeps the Movian/server logs as artifacts:
 
 ```sh
-./support/configure-linux-debug.sh --build=debug-ffrtmp-smoke --disable-librtmp
-make BUILD=debug-ffrtmp-smoke -j$(nproc)
+./support/configure-linux-debug.sh
+make BUILD=debug -j$(nproc)
 
-MOVIAN_BIN=./build.debug-ffrtmp-smoke/movian \
+MOVIAN_BIN=./build.debug/movian \
   support/rtmp-smoke/run-rtmp-smoke.sh
 ```
 
@@ -201,7 +201,7 @@ instead of committing it into the repository:
 
 ```sh
 RTMP_URL='rtmp://example.invalid/live/stream' \
-MOVIAN_BIN=./build.debug-ffrtmp-smoke/movian \
+MOVIAN_BIN=./build.debug/movian \
   support/rtmp-smoke/run-rtmp-smoke.sh
 ```
 
@@ -209,10 +209,17 @@ Optional external URLs are useful PR evidence, but they should not be treated as
 stable CI inputs. Keep the exact URL and artifacts in the PR or issue notes when
 the source is temporary.
 
+The standard Linux debug helper disables the old external `librtmp` backend, so
+plain `rtmp` and `rtmpt` exercise Movian's FFmpeg-backed path. Re-enable
+`librtmp` only for comparison builds:
+
+```sh
+./support/configure-linux-debug.sh --build=debug-librtmp-compare --enable-librtmp
+make BUILD=debug-librtmp-compare -j$(nproc)
+```
+
 For `rtmpe`, `rtmps`, `rtmpte`, or `rtmpts`, use the Flatpak profile or another
-build whose bundled FFmpeg config enables `gmp` and `gnutls`. The ordinary host
-debug profile may only cover plain `rtmp` and `rtmpt`, depending on available
-system libraries at configure time.
+build whose bundled FFmpeg config enables `gmp` and `gnutls`.
 
 Use the normal Flatpak build checks as well when RTMP behavior changed in the
 Flatpak profile.

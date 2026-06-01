@@ -20,7 +20,7 @@ make BUILD=debug -j$(nproc)
 The helper configures the Linux debug build with:
 
 ```sh
-./configure.linux --build=debug --disable-vdpau --enable-polarssl
+./configure.linux --build=debug --disable-vdpau --enable-polarssl --disable-librtmp
 ```
 
 Append extra configure flags when needed:
@@ -183,6 +183,7 @@ LIBAV_COMMON_FLAGS="--disable-inline-asm" ./configure.linux \
   --disable-avahi \
   --disable-webkit \
   --enable-polarssl \
+  --disable-librtmp \
   --optlevel=g \
   --extra-cflags=-fno-omit-frame-pointer \
   --enable-bughunt
