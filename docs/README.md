@@ -33,10 +33,12 @@ make BUILD=debug -j$(nproc)
 The helper runs:
 
 ```sh
-./configure.linux --build=debug --disable-vdpau --enable-polarssl
+./configure.linux --build=debug --disable-vdpau --enable-polarssl --disable-librtmp
 ```
 
-Extra configure flags can be appended to the helper command.
+Extra configure flags can be appended to the helper command. The old external
+`librtmp` backend can still be re-enabled explicitly for comparison builds with
+`--enable-librtmp`.
 
 ## Plugin Debug Workflow
 
@@ -89,6 +91,12 @@ The public stack currently includes these user-visible changes:
   `image/webp` for WebP payloads.
 - The bundled media backend is FFmpeg 4.4.7. Existing command-line and helper
   names such as `--libav-log` remain unchanged.
+- Linux debug builds created by `support/configure-linux-debug.sh` disable the
+  old external `librtmp` backend so ordinary RTMP playback uses the
+  FFmpeg-backed path.
+- Flatpak builds use FFmpeg's RTMP-family protocols with SDK `gmp` and
+  `gnutls`, while leaving the old external `librtmp` backend disabled in that
+  profile.
 - Steam launches avoid the X11 fullscreen `override_redirect` path when
   `SteamGameId` or `SteamAppId` is set. `XK_Menu` maps to Movian's menu action
   for Steam Input keyboard layouts.
