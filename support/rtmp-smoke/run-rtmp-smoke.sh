@@ -15,7 +15,7 @@ EXPECT_AUDIO=${EXPECT_AUDIO:-aac}
 usage() {
   cat <<'USAGE'
 Usage:
-  MOVIAN_BIN=./build.debug-ffrtmp-smoke/movian \
+  MOVIAN_BIN=./build.debug/movian \
     support/rtmp-smoke/run-rtmp-smoke.sh
 
 Environment:
@@ -32,7 +32,8 @@ Environment:
   EXPECT_AUDIO            Expected audio codec in the playback log (default: aac)
 
 The target Movian build should be configured without the old librtmp backend
-when validating the FFmpeg-backed RTMP fallback path.
+when validating the FFmpeg-backed RTMP path. The standard Linux debug helper
+does this by default.
 USAGE
 }
 

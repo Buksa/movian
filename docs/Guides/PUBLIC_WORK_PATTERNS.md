@@ -61,7 +61,7 @@ make BUILD=debug -j$(nproc)
 - Use separate build names for risky checks:
 
 ```sh
-./support/configure-linux-debug.sh --build=debug-feature-smoke --disable-librtmp
+./support/configure-linux-debug.sh --build=debug-feature-smoke
 make BUILD=debug-feature-smoke -j$(nproc)
 ```
 
@@ -77,7 +77,9 @@ make BUILD=debug-feature-smoke -j$(nproc)
 
 - Preserve the old implementation when it is enabled and add new fallback code
   only behind the inverse feature gate. For example, the FFmpeg RTMP fallback is
-  compiled only when `ENABLE_LIBRTMP` is false.
+  compiled only when `ENABLE_LIBRTMP` is false; the standard Linux debug helper
+  now uses that path, while `--enable-librtmp` remains available for comparison
+  builds.
 - Disabled runtime actions should be safe no-ops, not crashes. The GLW recorder
   hotkey is the model: debug builds can keep the tool, while release/Flatpak
   builds consume the hotkey without recording.
