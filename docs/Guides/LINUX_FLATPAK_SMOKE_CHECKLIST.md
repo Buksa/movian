@@ -20,6 +20,10 @@ Expected result:
 
 - `git diff --check` prints nothing.
 - configure completes with the current bundled FFmpeg/libav submodule.
+- `build.debug/libav/build/config.h` shows `CONFIG_GMP 1`,
+  `CONFIG_GNUTLS 1`, `CONFIG_FFRTMPCRYPT_PROTOCOL 1`, `CONFIG_TLS_PROTOCOL 1`,
+  and the `rtmp`, `rtmpt`, `rtmpe`, `rtmps`, `rtmpte`, and `rtmpts` protocol
+  symbols enabled.
 - `make` produces `build.debug/movian`.
 - `--help` prints the Movian version and option list.
 
@@ -209,8 +213,10 @@ Optional external URLs are useful PR evidence, but they should not be treated as
 stable CI inputs. Keep the exact URL and artifacts in the PR or issue notes when
 the source is temporary.
 
-The standard Linux debug helper disables the old external `librtmp` backend, so
-plain `rtmp` and `rtmpt` exercise Movian's FFmpeg-backed path. Re-enable
+The standard Linux debug helper disables the old external `librtmp` backend and
+enables FFmpeg's `gmp`/`gnutls` RTMP-family support, so `rtmp`, `rtmpt`,
+`rtmpe`, `rtmps`, `rtmpte`, and `rtmpts` all route through Movian's
+FFmpeg-backed path when the local server supports the scheme. Re-enable
 `librtmp` only for comparison builds:
 
 ```sh
@@ -218,11 +224,17 @@ plain `rtmp` and `rtmpt` exercise Movian's FFmpeg-backed path. Re-enable
 make BUILD=debug-librtmp-compare -j$(nproc)
 ```
 
-For `rtmpe`, `rtmps`, `rtmpte`, or `rtmpts`, use the Flatpak profile or another
-build whose bundled FFmpeg config enables `gmp` and `gnutls`.
-
 Use the normal Flatpak build checks as well when RTMP behavior changed in the
 Flatpak profile.
+
+For encrypted or tunneled RTMP-family variants, prove playback with a server
+that really supports the target scheme. MediaMTX is a good local baseline for
+`rtmp` and `rtmps`, but it does not cover the full legacy family. Red5 2.x can
+serve as a positive local `rtmpe` source when a live app is available: publish a
+synthetic `testsrc2` + `sine` stream with `ffmpeg`, open the `rtmpe://` URL in
+Movian, and keep both the direct FFmpeg probe and Movian screenshot/log. Red5
+1.0.x and MonaServer2 were useful comparison candidates, but were not reliable
+positive `rtmpe` sources in local smoke.
 
 ### Local RTMPS Smoke
 
