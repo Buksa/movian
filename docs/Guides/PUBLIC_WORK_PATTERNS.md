@@ -98,9 +98,15 @@ make BUILD=debug-feature-smoke -j$(nproc)
   - return unsupported for seek;
   - skip filesystem and subtitle scans;
   - avoid probing size with APIs that may consume stream data.
+- For protocols natively owned by FFmpeg, prefer a direct
+  `avformat_open_input()` playback path when the protocol has its own
+  handshake, encryption, tunnel, or buffering semantics. A generic fileaccess
+  wrapper can prove network connect while still starving the demuxer of video
+  packets.
 - Verify that the playback path reaches media decode, not just network connect.
-  Useful log anchors are `Probed as`, `Starting playback`, stream summaries,
-  and `global/media/current/url`.
+  Useful log anchors are `Opened directly as`, `Probed as`,
+  `Starting playback`, stream summaries, codec creation, screenshots, and
+  `global/media/current/url`.
 
 ## FFmpeg And Static Linking
 
@@ -112,7 +118,8 @@ make BUILD=debug-feature-smoke -j$(nproc)
 - When enabling optional FFmpeg libraries in a static build, import FFmpeg's
   generated `EXTRALIBS-*` values from `ffbuild/config.mak`. Otherwise optional
   dependencies may configure successfully and fail only at final link.
-- For Flatpak RTMP-family protocol support, the successful SDK flags are:
+- For Flatpak RTMP-family protocol support, and Linux debug builds where the
+  old external `librtmp` backend is disabled, use:
 
 ```text
 --enable-version3

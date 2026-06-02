@@ -114,11 +114,14 @@ void media_register_codec(codec_def_t *cd);
 typedef struct media_format {
   atomic_t refcount;
   struct AVFormatContext *fctx;
+  int direct;
 } media_format_t;
 
 #if ENABLE_LIBAV
 
 media_format_t *media_format_create(struct AVFormatContext *fctx);
+
+media_format_t *media_format_create_direct(struct AVFormatContext *fctx);
 
 void media_format_deref(media_format_t *fw);
 

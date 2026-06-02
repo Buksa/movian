@@ -39,4 +39,9 @@ event_t *be_file_playvideo_fh(const char *url, media_pipe_t *mp,
                               struct fa_handle *fh,
 			      const struct video_args *va);
 
+event_t *be_file_playvideo_ffmpeg_url(const char *url, media_pipe_t *mp,
+                                      char *errbuf, size_t errlen,
+                                      struct video_queue *vq,
+                                      const struct video_args *va);
+
 #endif /* FA_VIDEO_H */
