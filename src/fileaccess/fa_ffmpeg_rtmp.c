@@ -225,8 +225,9 @@ ffmpeg_rtmp_backend_playvideo(const char *url, media_pipe_t *mp,
 {
   video_args_t va = *va0;
 
+  (void)vsl;
   va.flags |= BACKEND_VIDEO_NO_FS_SCAN | BACKEND_VIDEO_NO_SUBTITLE_SCAN;
-  return be_file_playvideo(url, mp, errbuf, errlen, vq, vsl, &va);
+  return be_file_playvideo_ffmpeg_url(url, mp, errbuf, errlen, vq, &va);
 }
 
 

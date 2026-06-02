@@ -466,6 +466,21 @@ media_format_create(AVFormatContext *fctx)
   media_format_t *fw = malloc(sizeof(media_format_t));
   atomic_set(&fw->refcount, 1);
   fw->fctx = fctx;
+  fw->direct = 0;
+  return fw;
+}
+
+
+/**
+ *
+ */
+media_format_t *
+media_format_create_direct(AVFormatContext *fctx)
+{
+  media_format_t *fw = malloc(sizeof(media_format_t));
+  atomic_set(&fw->refcount, 1);
+  fw->fctx = fctx;
+  fw->direct = 1;
   return fw;
 }
 
@@ -478,7 +493,10 @@ media_format_deref(media_format_t *fw)
 {
   if(atomic_dec(&fw->refcount))
     return;
-  fa_libav_close_format(fw->fctx, 0);
+  if(fw->direct)
+    avformat_close_input(&fw->fctx);
+  else
+    fa_libav_close_format(fw->fctx, 0);
   free(fw);
 }
 
@@ -561,4 +579,3 @@ mp_set_mq_meta(media_queue_t *mq, const AVCodec *codec,
   metadata_from_libav(buf, sizeof(buf), codec, avctx);
   prop_set_string(mq->mq_prop_codec, buf);
 }
-
