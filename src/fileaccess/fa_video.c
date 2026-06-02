@@ -216,8 +216,9 @@ video_player_loop(AVFormatContext *fctx, media_codec_t **cwvec,
 
       mp->mp_eof = 0;
 
-      fa_deadline(fh, mp->mp_buffer_delay != INT32_MAX ?
-		  mp->mp_buffer_delay / 3 : 0);
+      if(fh != NULL)
+	fa_deadline(fh, mp->mp_buffer_delay != INT32_MAX ?
+		    mp->mp_buffer_delay / 3 : 0);
 
       r = av_read_frame(fctx, &pkt);
 
@@ -650,32 +651,15 @@ be_file_playvideo(const char *url, media_pipe_t *mp,
 /**
  *
  */
-event_t *
-be_file_playvideo_fh(const char *url, media_pipe_t *mp,
-                     char *errbuf, size_t errlen,
-                     video_queue_t *vq, fa_handle_t *fh,
-		     const video_args_t *va0)
+static event_t *
+be_file_playvideo_fctx(const char *url, media_pipe_t *mp,
+                       char *errbuf, size_t errlen,
+                       video_queue_t *vq, fa_handle_t *fh,
+                       AVFormatContext *fctx, const video_args_t *va0,
+                       int direct)
 {
   sub_scanner_t *ss = NULL;
   video_args_t va = *va0;
-
-  if(!(va.flags & BACKEND_VIDEO_NO_SUBTITLE_SCAN)) {
-    compute_hash(fh, &va);
-    if(!va.hash_valid)
-      TRACE(TRACE_DEBUG, "Video",
-            "Unable to compute opensub hash, stream probably not seekable");
-  }
-
-  int strategy = fa_libav_get_strategy_for_file(fh);
-  AVIOContext *avio = fa_libav_reopen(fh, 0);
-  va.filesize = avio_size(avio);
-
-  AVFormatContext *fctx;
-  if((fctx = fa_libav_open_format(avio, url, errbuf, errlen,
-				  va.mimetype, strategy)) == NULL) {
-    fa_libav_close(avio);
-    return NULL;
-  }
 
   usage_event("Play video", 1, USAGE_SEG("format", fctx->iformat->name));
 
@@ -748,7 +732,8 @@ be_file_playvideo_fh(const char *url, media_pipe_t *mp,
   memset(cwvec, 0, sizeof(void *) * fctx->nb_streams);
 
   int cwvec_size = fctx->nb_streams;
-  media_format_t *fw = media_format_create(fctx);
+  media_format_t *fw = direct ? media_format_create_direct(fctx) :
+    media_format_create(fctx);
 
 
   // Scan all streams and select defaults
@@ -915,6 +900,119 @@ be_file_playvideo_fh(const char *url, media_pipe_t *mp,
     metadata_destroy(md);
 #endif
 
+  return e;
+}
+
+
+/**
+ *
+ */
+event_t *
+be_file_playvideo_fh(const char *url, media_pipe_t *mp,
+                     char *errbuf, size_t errlen,
+                     video_queue_t *vq, fa_handle_t *fh,
+		     const video_args_t *va0)
+{
+  video_args_t va = *va0;
+
+  if(!(va.flags & BACKEND_VIDEO_NO_SUBTITLE_SCAN)) {
+    compute_hash(fh, &va);
+    if(!va.hash_valid)
+      TRACE(TRACE_DEBUG, "Video",
+            "Unable to compute opensub hash, stream probably not seekable");
+  }
+
+  int strategy = fa_libav_get_strategy_for_file(fh);
+  AVIOContext *avio = fa_libav_reopen(fh, 0);
+  va.filesize = avio_size(avio);
+
+  AVFormatContext *fctx;
+  if((fctx = fa_libav_open_format(avio, url, errbuf, errlen,
+				  va.mimetype, strategy)) == NULL) {
+    fa_libav_close(avio);
+    return NULL;
+  }
+
+  return be_file_playvideo_fctx(url, mp, errbuf, errlen, vq, fh, fctx, &va, 0);
+}
+
+
+/**
+ *
+ */
+event_t *
+be_file_playvideo_ffmpeg_url(const char *url, media_pipe_t *mp,
+                             char *errbuf, size_t errlen,
+                             video_queue_t *vq, const video_args_t *va0)
+{
+  rstr_t *title = NULL;
+  video_args_t va = *va0;
+  AVFormatContext *fctx = NULL;
+  int err;
+
+  mp_set_url(mp, va0->canonical_url, va0->parent_url, va0->parent_title);
+
+  prop_set(mp->mp_prop_root, "loading", PROP_SET_INT, 1);
+
+  if(!(va.flags & BACKEND_VIDEO_NO_AUDIO))
+    mp_become_primary(mp);
+
+  prop_set(mp->mp_prop_root, "type", PROP_SET_STRING, "video");
+
+  if(va.flags & BACKEND_VIDEO_SET_TITLE) {
+    char tmp[1024];
+
+    fa_url_get_last_component(tmp, sizeof(tmp), va.canonical_url);
+    char *x = strrchr(tmp, '.');
+    if(x)
+      *x = 0;
+
+    title = rstr_from_bytes(tmp, NULL, 0);
+    va.title = rstr_get(title);
+
+    prop_set(mp->mp_prop_metadata, "title", PROP_SET_RSTRING, title);
+  }
+
+  fctx = avformat_alloc_context();
+  if(fctx == NULL) {
+    snprintf(errbuf, errlen, "Unable to allocate input context");
+    rstr_release(title);
+    return NULL;
+  }
+
+  fctx->fps_probe_size = 2;
+  fctx->max_analyze_duration = 1;
+
+  err = avformat_open_input(&fctx, url, NULL, NULL);
+  if(err < 0) {
+    char msg[256];
+    fa_libav_error_to_txt(err, msg, sizeof(msg));
+    snprintf(errbuf, errlen, "Unable to open RTMP URL: %s", msg);
+    avformat_close_input(&fctx);
+    rstr_release(title);
+    return NULL;
+  }
+
+  fctx->fps_probe_size = 2;
+  fctx->max_analyze_duration = 1;
+
+  err = avformat_find_stream_info(fctx, NULL);
+  if(err < 0) {
+    char msg[256];
+    fa_libav_error_to_txt(err, msg, sizeof(msg));
+    snprintf(errbuf, errlen, "Unable to handle RTMP URL: %s", msg);
+    avformat_close_input(&fctx);
+    rstr_release(title);
+    return NULL;
+  }
+
+  TRACE(TRACE_DEBUG, "probe", "%s: Opened directly as %s",
+        url, fctx->iformat->name);
+
+  va.filesize = -1;
+  event_t *e = be_file_playvideo_fctx(url, mp, errbuf, errlen, vq, NULL,
+                                      fctx, &va, 1);
+  rstr_release(title);
   return e;
 }
 
