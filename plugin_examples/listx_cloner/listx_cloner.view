@@ -1,0 +1,73 @@
+#define Card() {
+  widget(container_z, {
+    focusable: true;
+    width: 8em;
+    height: 4.5em;
+    margin: [0, 0, 0.7em, 0];
+
+    widget(quad, {
+      color: 0.08;
+      alpha: 0.9;
+    });
+
+    widget(quad, {
+      alpha: 0.3 * iir(isNavFocused() + isHovered(), 4);
+      color: "#3366cc";
+    });
+
+    widget(label, {
+      padding: [0.4em, 0.2em, 0.4em, 0.2em];
+      caption: $self.title;
+      align: center;
+      color: 0.95;
+    });
+  });
+}
+
+#define SectionScrollBar() {
+  widget(container_y, {
+    height: 0.8em;
+    padding: [2em, 0, 2em, 0];
+
+    widget(slider_x, {
+      bind("section-row");
+      height: 0.5em;
+      focusable: canScroll();
+      alpha: iir(canScroll(), 16);
+      alwaysGrabKnob: true;
+
+      widget(quad, {
+        alpha: 0.8 + isHovered();
+      });
+    });
+  });
+}
+
+widget(list_y, {
+  padding: [2em, 0.6em, 2em, 0.6em];
+  spacing: 0.7em;
+  navWrap: false;
+
+  cloner($self.model.nodes, container_y, {
+    spacing: 0.25em;
+
+    widget(label, {
+      caption: $self.metadata.title;
+      sizeScale: 1.2;
+    });
+
+    widget(list_x, {
+      id: "section-row";
+      height: 5em;
+      focusable: 1;
+      chaseFocus: 0;
+      navWrap: false;
+
+      cloner($self.data, container_z, {
+        Card();
+      });
+    });
+
+    SectionScrollBar();
+  });
+});

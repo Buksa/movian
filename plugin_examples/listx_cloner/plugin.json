@@ -1,0 +1,10 @@
+{
+  "type": "ecmascript",
+  "id": "example_listx_cloner",
+  "title": "list_x Cloner Example",
+  "version": "1.0.0",
+  "category": "other",
+  "synopsis": "Multiple independently scrollable horizontal rows",
+  "file": "listx_cloner.js",
+  "apiversion": 2
+}

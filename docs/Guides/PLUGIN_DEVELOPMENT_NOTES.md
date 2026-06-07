@@ -129,6 +129,9 @@ or simulated touch can drag the row horizontally, while a vertical swipe over
 a card continues to scroll the outer `list_y`. On Linux/WSL this can be tested
 with `--pointer-is-touch`.
 
+A complete runnable implementation is available in
+`plugin_examples/listx_cloner`.
+
 ## Developer Guide Roadmap
 
 A fuller plugin guide should eventually cover:
