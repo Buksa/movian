@@ -21,6 +21,12 @@
 #include "glw_scroll.h"
 #include "glw_navigation.h"
 
+enum {
+  GLW_LIST_TOUCH_AXIS_UNDECIDED,
+  GLW_LIST_TOUCH_AXIS_HORIZONTAL,
+  GLW_LIST_TOUCH_AXIS_VERTICAL,
+};
+
 typedef struct glw_list {
   glw_t w;
 
@@ -31,6 +37,11 @@ typedef struct glw_list {
   int16_t padding[4];
 
   glw_scroll_control_t gsc;
+
+  glw_t *touch_parent_scroll;
+  float touch_start_screen_x;
+  float touch_start_screen_y;
+  char touch_axis;
 
 } glw_list_t;
 
@@ -646,6 +657,78 @@ handle_pointer_event_filter(struct glw *w, const glw_pointer_event_t *gpe)
 }
 
 
+static int
+deliver_pointer_event(glw_t *w, const glw_pointer_event_t *gpe)
+{
+  if(w == NULL || w->glw_matrix == NULL)
+    return 0;
+
+  Vec3 p, dir;
+  glw_vec3_copy(p, glw_vec3_make(gpe->screen_x, gpe->screen_y, -2.41));
+  glw_vec3_sub(dir, p, glw_vec3_make(gpe->screen_x * 42.38,
+                                    gpe->screen_y * 42.38,
+                                    -100));
+
+  glw_pointer_event_t gpe0 = *gpe;
+  if(!glw_widget_unproject(w->glw_matrix, &gpe0.local_x, &gpe0.local_y,
+                           p, dir))
+    return 0;
+  return glw_send_pointer_event(w, &gpe0);
+}
+
+
+static int
+handle_pointer_event_filter_x(struct glw *w,
+                              const glw_pointer_event_t *gpe)
+{
+  glw_list_t *l = (glw_list_t *)w;
+
+  if(gpe->type == GLW_POINTER_TOUCH_START) {
+    l->touch_parent_scroll = w->glw_root->gr_pointer_grab_scroll;
+    l->touch_start_screen_x = gpe->screen_x;
+    l->touch_start_screen_y = gpe->screen_y;
+    l->touch_axis = GLW_LIST_TOUCH_AXIS_UNDECIDED;
+  } else if(gpe->type == GLW_POINTER_TOUCH_END) {
+    l->touch_parent_scroll = NULL;
+    l->touch_axis = GLW_LIST_TOUCH_AXIS_UNDECIDED;
+  }
+
+  return glw_scroll_handle_pointer_event_filter(&l->gsc, w, gpe);
+}
+
+
+static int
+handle_pointer_event_x(struct glw *w, const glw_pointer_event_t *gpe)
+{
+  glw_list_t *l = (glw_list_t *)w;
+
+  if(gpe->type == GLW_POINTER_FOCUS_MOTION &&
+     l->touch_axis == GLW_LIST_TOUCH_AXIS_UNDECIDED) {
+    glw_root_t *gr = w->glw_root;
+    const float dx = fabsf(gpe->screen_x - l->touch_start_screen_x) *
+      gr->gr_width;
+    const float dy = fabsf(gpe->screen_y - l->touch_start_screen_y) *
+      gr->gr_height;
+
+    if(GLW_MAX(dx, dy) < 8)
+      return 0;
+
+    if(l->touch_parent_scroll != NULL && dy > dx) {
+      l->touch_axis = GLW_LIST_TOUCH_AXIS_VERTICAL;
+      gr->gr_pointer_grab_scroll = l->touch_parent_scroll;
+      return deliver_pointer_event(l->touch_parent_scroll, gpe);
+    }
+    l->touch_axis = GLW_LIST_TOUCH_AXIS_HORIZONTAL;
+  }
+
+  if(gpe->type == GLW_POINTER_TOUCH_CANCEL) {
+    l->touch_parent_scroll = NULL;
+    l->touch_axis = GLW_LIST_TOUCH_AXIS_UNDECIDED;
+  }
+
+  return glw_scroll_handle_pointer_event_x(&l->gsc, w, gpe);
+}
+
 
 static glw_class_t glw_list_y = {
   .gc_name = "list_y",
@@ -684,9 +767,12 @@ static glw_class_t glw_list_x = {
   .gc_signal_handler = glw_list_callback,
   .gc_suggest_focus = glw_list_suggest_focus,
   .gc_set_int16_4 = glw_list_set_int16_4,
+  .gc_pointer_event = handle_pointer_event_x,
+  .gc_pointer_event_filter = handle_pointer_event_filter_x,
   .gc_bubble_event = glw_navigate_horizontal,
   .gc_set_int_unresolved = glw_list_set_int_unresolved,
   .gc_set_float_unresolved = glw_list_set_float_unresolved,
+  .gc_find_visible_child = glw_list_find_visible_child,
 };
 
 GLW_REGISTER_CLASS(glw_list_x);
