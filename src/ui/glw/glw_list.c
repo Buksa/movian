@@ -189,16 +189,7 @@ glw_list_layout_x(glw_t *w, const glw_rctx_t *rc)
       l->gsc.scroll_to_me = w->glw_focused;
   }
 
-  l->gsc.target_pos = GLW_MAX(0, GLW_MIN(l->gsc.target_pos,
-                                         l->gsc.total_size - l->gsc.page_size));
-
-  if(fabsf(l->gsc.target_pos - l->gsc.filtered_pos) > rc->rc_width * 2) {
-    l->gsc.filtered_pos = l->gsc.target_pos;
-  } else {
-    glw_lp(&l->gsc.filtered_pos, w->glw_root, l->gsc.target_pos, 0.25);
-  }
-
-  l->gsc.rounded_pos = l->gsc.filtered_pos;
+  glw_scroll_layout(&l->gsc, w, rc->rc_width);
 
   TAILQ_FOREACH(c, &w->glw_childs, glw_parent_link) {
     if(c->glw_flags & GLW_HIDDEN)
