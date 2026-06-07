@@ -49,12 +49,13 @@ glw_scroll_handle_pointer_event_filter(glw_scroll_control_t *gs,
     return 0;
 
   case GLW_POINTER_TOUCH_END:
+    if(!grabbed)
+      return 0;
     if(fabsf(gs->touch_velocity) > 10) {
       gs->kinetic_scroll = gs->touch_velocity;
       glw_schedule_refresh(w->glw_root, 0);
     }
-    if(grabbed)
-      gr->gr_pointer_grab_scroll = NULL;
+    gr->gr_pointer_grab_scroll = NULL;
     return 0;
   }
 
