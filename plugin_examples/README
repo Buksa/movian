@@ -41,8 +41,13 @@ Useful routes:
 - `plugin_examples/music` -> `example:music:`
 - `plugin_examples/subscriptions` -> `example:subscriptions:`
 - `plugin_examples/async_page_load` -> `asyncPageLoad:test:demo`
+- `plugin_examples/listx_cloner` -> `example:listx-cloner:`
 - `plugin_examples/webpopupplugin` -> `devplug:webtest`
 
 Some examples demonstrate APIs that need user interaction, network services, or
 specific media playback state. For those, use the manual command and inspect the
 Movian log instead of expecting a fully automated smoke.
+
+The `listx_cloner` example demonstrates multiple horizontal `list_x` rows,
+per-row scrollbars, keyboard focus, pointer hover, and touch scrolling. Add
+`--pointer-is-touch` when testing touch gestures with a mouse on Linux or WSL.

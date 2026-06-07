@@ -2263,6 +2263,24 @@ glw_pointer_event(glw_root_t *gr, glw_pointer_event_t *gpe)
     return;
   }
 
+  if((gpe->type == GLW_POINTER_TOUCH_END ||
+      gpe->type == GLW_POINTER_TOUCH_CANCEL) &&
+     (w = gr->gr_pointer_grab_scroll) != NULL) {
+    if(w->glw_matrix != NULL) {
+      glw_widget_unproject(w->glw_matrix, &x, &y, p, dir);
+      gpe0 = *gpe;
+      gpe0.local_x = x;
+      gpe0.local_y = y;
+
+      const glw_class_t *gc = w->glw_class;
+      if(gc->gc_pointer_event_filter != NULL)
+        gc->gc_pointer_event_filter(w, &gpe0);
+      glw_send_pointer_event(w, &gpe0);
+    }
+    if(gr->gr_pointer_grab_scroll == w)
+      gr->gr_pointer_grab_scroll = NULL;
+  }
+
   if(gpe->type == GLW_POINTER_GONE) {
     // Mouse pointer left our screen
     glw_root_set_hover(gr, NULL);
