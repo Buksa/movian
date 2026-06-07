@@ -230,8 +230,6 @@ glw_list_layout_x(glw_t *w, const glw_rctx_t *rc)
     xpos += l->spacing;
   }
 
-  xpos += l->gsc.scroll_threshold_post;
-
   if(l->gsc.total_size != xpos) {
     l->gsc.total_size = xpos;
     l->w.glw_flags |= GLW_UPDATE_METRICS;

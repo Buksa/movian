@@ -149,6 +149,8 @@ glw_scroll_handle_pointer_event_x(glw_scroll_control_t *gs,
   switch(gpe->type) {
 
   case GLW_POINTER_SCROLL:
+    if(gpe->delta_x == 0)
+      return 0;
     gs->bottom_anchored = 0;
     gs->target_pos -= gs->page_size * gpe->delta_x;
     w->glw_flags |= GLW_UPDATE_METRICS;
@@ -156,6 +158,8 @@ glw_scroll_handle_pointer_event_x(glw_scroll_control_t *gs,
     return 1;
 
   case GLW_POINTER_FINE_SCROLL:
+    if(gpe->delta_x == 0)
+      return 0;
     gs->bottom_anchored = 0;
     gs->target_pos -= gpe->delta_x;
     w->glw_flags |= GLW_UPDATE_METRICS;
@@ -163,8 +167,9 @@ glw_scroll_handle_pointer_event_x(glw_scroll_control_t *gs,
     return 1;
 
   case GLW_POINTER_TOUCH_CANCEL:
-    if(grabbed)
-      gr->gr_pointer_grab_scroll = NULL;
+    if(!grabbed)
+      return 0;
+    gr->gr_pointer_grab_scroll = NULL;
     return 1;
 
   case GLW_POINTER_FOCUS_MOTION:
