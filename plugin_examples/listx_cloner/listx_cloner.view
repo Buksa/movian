@@ -68,6 +68,7 @@ widget(list_y, {
       });
     });
 
-    SectionScrollBar();
+    // Optional pointer scrollbar for desktop and WSL; uncomment per section.
+    // SectionScrollBar();
   });
 });
