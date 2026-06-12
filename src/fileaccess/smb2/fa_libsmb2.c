@@ -426,7 +426,7 @@ movian_smb2_scan_host(fa_dir_t *fd, const char *url,
         &shares->Buffer->share_info_1[i];
       const char *name = share->netname.utf8;
 
-      if(share->type != SHARE_TYPE_DISKTREE || name == NULL)
+      if((share->type & 3) != SHARE_TYPE_DISKTREE || name == NULL)
         continue;
 
       char *child = movian_smb2_child_url(url, name);
