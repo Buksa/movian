@@ -69,6 +69,7 @@ CONFIG_LIST="
  libogc
  libpthread
  libpulse
+ libsmb2
  librtmp
  libx11
  libxext
@@ -463,6 +464,44 @@ ext_setup() {
     rtmpdump_setup
     gumbo_setup
     vmir_setup
+    libsmb2_setup
+}
+
+
+libsmb2_setup() {
+    if disabled libsmb2; then
+        return
+    fi
+
+    which >/dev/null 2>&1 cmake || die
+    update_ext_submodule libsmb2
+
+    LIBSMB2_BUILD_DIR=${BUILDDIR}/libsmb2/build
+    mkdir -p "${LIBSMB2_BUILD_DIR}"
+
+    LIBSMB2_CC="${CC}"
+    LIBSMB2_CMAKE_LAUNCHER=
+    if enabled ccache; then
+        LIBSMB2_CC="${CC#ccache }"
+        LIBSMB2_CMAKE_LAUNCHER="-DCMAKE_C_COMPILER_LAUNCHER=ccache"
+    fi
+
+    cmake \
+        -S "${TOPDIR}/ext/libsmb2" \
+        -B "${LIBSMB2_BUILD_DIR}" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_COMPILER="${LIBSMB2_CC}" \
+        ${LIBSMB2_CMAKE_LAUNCHER} \
+        -DCMAKE_INSTALL_PREFIX="${EXT_INSTALL_DIR}" \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DENABLE_EXAMPLES=OFF \
+        -DENABLE_LIBKRB5=OFF \
+        -DENABLE_GSSAPI=OFF || die
+
+    echo >>${CONFIG_MAK} "LIBSMB2_BUILD_DIR=${LIBSMB2_BUILD_DIR}"
+    echo >>${CONFIG_MAK} "LDFLAGS_cfg += -lsmb2"
+    add_stamp libsmb2
 }
 
 
