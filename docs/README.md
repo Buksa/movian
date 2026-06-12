@@ -15,6 +15,8 @@ The current branch includes:
   content type;
 - bundled FFmpeg 4.4.7 as the media backend, while keeping existing `libav`
   option names and internal build variables for compatibility;
+- a bundled read-only SMB2/SMB3 backend for Linux and Flatpak, exposed through
+  temporary `smb2://` URLs alongside the existing `smb://` backend;
 - local SteamOS/Steam Deck Flatpak packaging and small Linux runtime fixes used
   by that package;
 - a plugin debug workflow for route smoke tests against `build.debug/movian`;
@@ -117,6 +119,10 @@ The public stack currently includes these user-visible changes:
   names such as `--libav-log` remain unchanged.
 - Linux debug and Flatpak builds disable the old external `librtmp` backend by
   default and use FFmpeg's RTMP-family protocols with `gmp` and `gnutls`.
+- Linux debug and Flatpak builds include pinned static libsmb2 support.
+  `smb2://` provides read-only SMB2/SMB3 browsing and playback while the
+  existing `smb://` backend remains available for compatibility. See
+  `Guides/LINUX_SMB2_BACKEND.md`.
 - Steam launches avoid the X11 fullscreen `override_redirect` path when
   `SteamGameId` or `SteamAppId` is set. `XK_Menu` maps to Movian's menu action
   for Steam Input keyboard layouts.
