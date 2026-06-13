@@ -18,7 +18,8 @@ case "${1:-}" in
     cat <<EOF
 Usage: support/check-submodules.sh [--fail-on-outdated]
 
-Compare submodule gitlinks in HEAD with their configured upstream branches.
+Compare submodule gitlinks in HEAD with their configured upstream branches or
+exact refs.
 By default this is an informational check and exits 0 even when a submodule is
 outdated. Use --fail-on-outdated to make outdated or unresolved entries fail.
 EOF
@@ -46,10 +47,10 @@ short_sha() {
 status_code=0
 entries=$(git config --file .gitmodules --get-regexp '^submodule\..*\.path$')
 
-printf '%-28s %-14s %-12s %-12s %s\n' \
-  "Submodule" "Branch" "Pinned" "Upstream" "Status"
-printf '%-28s %-14s %-12s %-12s %s\n' \
-  "---------" "------" "------" "--------" "------"
+printf '%-28s %-24s %-12s %-12s %s\n' \
+  "Submodule" "Tracking" "Pinned" "Upstream" "Status"
+printf '%-28s %-24s %-12s %-12s %s\n' \
+  "---------" "--------" "------" "--------" "------"
 
 while read -r key path; do
   name=${key#submodule.}
@@ -57,16 +58,28 @@ while read -r key path; do
 
   url=$(git config --file .gitmodules --get "submodule.$name.url")
   branch=$(git config --file .gitmodules --get "submodule.$name.branch" || true)
+  exact_ref=$(git config --file .gitmodules --get "submodule.$name.ref" || true)
 
-  if [ -z "$branch" ]; then
+  if [ -n "$exact_ref" ]; then
+    tracking=${exact_ref#refs/}
+    upstream=$(git ls-remote "$url" "${exact_ref}^{}" |
+      awk 'NR == 1 { print $1 }')
+    if [ -z "$upstream" ]; then
+      upstream=$(git ls-remote "$url" "$exact_ref" |
+        awk 'NR == 1 { print $1 }')
+    fi
+  elif [ -z "$branch" ]; then
+    tracking=HEAD
     branch=HEAD
     ref=HEAD
+    upstream=$(git ls-remote "$url" "$ref" | awk 'NR == 1 { print $1 }')
   else
+    tracking=$branch
     ref=refs/heads/$branch
+    upstream=$(git ls-remote "$url" "$ref" | awk 'NR == 1 { print $1 }')
   fi
 
   pinned=$(git ls-tree HEAD "$path" | awk '$1 == "160000" { print $3 }')
-  upstream=$(git ls-remote "$url" "$ref" | awk 'NR == 1 { print $1 }')
 
   if [ -z "$pinned" ]; then
     status=missing-gitlink
@@ -89,8 +102,8 @@ while read -r key path; do
     status_code=1
   fi
 
-  printf '%-28s %-14s %-12s %-12s %s\n' \
-    "$path" "$branch" "$pinned_short" "$upstream_short" "$status"
+  printf '%-28s %-24s %-12s %-12s %s\n' \
+    "$path" "$tracking" "$pinned_short" "$upstream_short" "$status"
 done <<EOF
 $entries
 EOF

@@ -26,3 +26,7 @@
 	path = ext/libyuv
 	url = https://chromium.googlesource.com/libyuv/libyuv
 	branch = main
+[submodule "ext/libsmb2"]
+	path = ext/libsmb2
+	url = https://github.com/sahlberg/libsmb2.git
+	ref = refs/tags/libsmb2-6.2

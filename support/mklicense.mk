@@ -10,6 +10,9 @@ LICENSEDEPS = \
 ifeq ($(CONFIG_LIBNTFS), yes)
 LICENSEDEPS += ext/libntfs_ext/LICENSE_LIBNTFS
 endif
+ifeq ($(CONFIG_LIBSMB2), yes)
+LICENSEDEPS += ext/libsmb2/COPYING
+endif
 
 ${BUILDDIR}/LICENSE: ${LICENSEDEPS}
 	echo >$@ "=================================================="
@@ -44,6 +47,11 @@ ifeq ($(CONFIG_LIBNTFS), yes)
 	echo >>$@ "libntfs\n============================"
 	cat >>$@ ext/libntfs_ext/LICENSE_LIBNTFS
 endif
+ifeq ($(CONFIG_LIBSMB2), yes)
+	echo >>$@ "\f\n============================"
+	echo >>$@ "libsmb2\n============================"
+	cat >>$@ ext/libsmb2/COPYING
+endif
 ifeq ($(CONFIG_BSPATCH), yes)
 	echo >>$@ "\f\n============================"
 	echo >>$@ "bspatch\n============================"
@@ -58,5 +66,4 @@ ${BUILDDIR}/LICENSE.ps: ${BUILDDIR}/LICENSE support/mklicense.mk
 
 ${BUILDDIR}/LICENSE.pdf: ${BUILDDIR}/LICENSE.ps support/mklicense.mk
 	ps2pdfwr -sPAPERSIZE=a4 -dOptimize=true -dEmbedAllFonts=true $< $@
-
 
