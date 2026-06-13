@@ -20,6 +20,11 @@ Opening `smb2://server/` enumerates disk shares exposed by the server.
 Passwords are requested through Movian's authentication dialog and keyring;
 they are not part of the URL.
 
+Linux builds discover `_smb._tcp` services through Avahi. Discovered servers
+appear under Local network and preserve the advertised port in their
+`smb2://server:port/` URL. Flatpak builds use the host Avahi daemon through
+its system D-Bus service.
+
 ## Supported Operations
 
 The initial backend supports:

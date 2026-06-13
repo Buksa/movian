@@ -103,6 +103,15 @@ The package persists Movian's legacy state and cache:
 --persist=.cache/movian
 ```
 
+Avahi service discovery uses the host daemon over the system D-Bus:
+
+```text
+--system-talk-name=org.freedesktop.Avahi
+```
+
+This allows `_smb._tcp` servers to appear under Local network without
+granting broader system bus access.
+
 AppStream metadata is generated from `dev.uzver.Movian.metainfo.xml.in`
 during the build. The version comes from:
 
