@@ -27,6 +27,7 @@ LIST_HEAD(service_instance_list, service_instance);
 
 typedef enum {
   SERVICE_HTSP,
+  SERVICE_SMB,
   SERVICE_WEBDAV,
 } service_class_t;
 
@@ -59,6 +60,9 @@ void si_destroy(service_instance_t *si);
 
 void sd_add_service_htsp(service_instance_t *si, const char *name,
                          const char *host, int port);
+
+void sd_add_service_smb(service_instance_t *si, const char *name,
+                        const char *host, int port);
 
 void sd_add_service_webdav(service_instance_t *si, const char *name, 
                            const char *host, int port, const char *path,
