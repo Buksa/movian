@@ -35,7 +35,8 @@ Always run `git diff --check`. Scale additional tests to the changed behavior.
 
 ## Recovery
 
-Run `support/codex/context.sh check` at the start of a resumed session and
-`support/codex/context.sh refresh` after a merge. Local state belongs under
+When `.codex/context.sh` exists, run its `check` command at the start of a
+resumed session and `refresh` after a merge so local integrations are updated.
+Otherwise use `support/codex/context.sh` directly. Local state belongs under
 ignored `.codex/`; never commit generated handoff files, indexes, credentials,
 machine-specific paths, or test artifacts.
