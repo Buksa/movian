@@ -58,7 +58,7 @@ check() {
 }
 
 refresh() {
-  local generated branch head upstream origin merge status commits
+  local generated branch head upstream origin merge status commits recovery
   mkdir -p "${STATE_DIR}"
 
   generated=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
@@ -69,6 +69,11 @@ refresh() {
   merge=$(git log --merges -1 --format='%H %s' 2>/dev/null || echo none)
   status=$(git status --short)
   commits=$(git log --oneline --decorate -8)
+  if [[ -x "${ROOT}/.codex/context.sh" ]]; then
+    recovery=".codex/context.sh"
+  else
+    recovery="support/codex/context.sh"
+  fi
 
   {
     echo "# Repository State"
@@ -97,7 +102,7 @@ refresh() {
     echo "## Resume"
     echo
     echo "1. Read AGENTS.md."
-    echo "2. Run .codex/context.sh doctor."
+    echo "2. Run ${recovery} doctor."
     echo "3. Read .codex/STATE.md and inspect git diff."
     echo "4. Use CodeGraph before broad code exploration."
     echo
