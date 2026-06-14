@@ -21,10 +21,16 @@ codegraph_cmd() {
     2>/dev/null | sort -V | tail -1
 }
 
+sanitize_remote_url() {
+  printf '%s\n' "$1" |
+    sed -E 's#^([[:alpha:]][[:alnum:]+.-]*://)[^/@]*@#\1#'
+}
+
 print_state() {
   local upstream origin
   upstream=$(git rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || echo none)
   origin=$(git remote get-url origin 2>/dev/null || echo none)
+  origin=$(sanitize_remote_url "${origin}")
 
   echo "Repository: ${ROOT}"
   echo "Branch:     $(git branch --show-current)"
@@ -66,6 +72,7 @@ refresh() {
   head=$(git rev-parse HEAD)
   upstream=$(git rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || echo none)
   origin=$(git remote get-url origin 2>/dev/null || echo none)
+  origin=$(sanitize_remote_url "${origin}")
   merge=$(git log --merges -1 --format='%H %s' 2>/dev/null || echo none)
   status=$(git status --short)
   commits=$(git log --oneline --decorate -8)
