@@ -151,6 +151,27 @@ sd_add_service_htsp(service_instance_t *si, const char *name,
 
 
 /**
+ * SMB service creator
+ */
+void
+sd_add_service_smb(service_instance_t *si, const char *name,
+                   const char *host, int port)
+{
+  char url[URL_MAX];
+  char buf[256];
+#ifdef CONFIG_LIBSMB2
+  const char *scheme = "smb2";
+#else
+  const char *scheme = "smb";
+#endif
+
+  snprintf(url, sizeof(url), "%s://%s:%d/", scheme, host, port);
+  snprintf(buf, sizeof(buf), "SMB server on %s:%d", host, port);
+  sd_add_service(si, name, url, "server", 0, buf);
+}
+
+
+/**
  * Webdav service creator
  */
 void

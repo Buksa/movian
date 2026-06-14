@@ -24,7 +24,6 @@ deferred subsystems:
 --disable-webkit
 --disable-dvd
 --disable-vdpau
---disable-avahi
 --disable-libxss
 --disable-libxxf86vm
 --disable-librtmp
@@ -65,10 +64,13 @@ sockets=x11;wayland;pulseaudio;
 devices=dri;
 filesystems=xdg-download:ro;xdg-pictures:ro;xdg-videos:ro;xdg-music:ro;
 persistent=.hts;.cache/movian;
+system-talk-name=org.freedesktop.Avahi;
 ```
 
 The persisted directories preserve Movian's legacy settings, plugin state, and
 image cache inside the Flatpak app home.
+The Avahi system-bus permission allows Local network discovery while service
+traffic continues to use the shared network namespace.
 
 ## Host Setup
 
@@ -208,7 +210,7 @@ and writes environment and launch diagnostics to:
 - The manifest uses local `type: dir` sources; Flathub needs pinned source
   archives and hashes.
 - Hardware acceleration is disabled for this first package profile.
-- DVD, RTMP, GU/WebKit, Avahi, VDPAU, libXss, and libXxf86vm are disabled.
+- DVD, RTMP, GU/WebKit, VDPAU, libXss, and libXxf86vm are disabled.
 - The sandbox exposes common XDG media folders read-only, not every removable
   media path.
 - Native `/dev/input/event*` controller access is not requested; use Steam
