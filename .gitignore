@@ -1,4 +1,7 @@
 /build.*
+/.codex/
+/.codegraph/
+/.codex-session.md
 config.default
 *~
 ps3support
