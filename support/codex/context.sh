@@ -118,7 +118,9 @@ refresh() {
     echo "## Resume"
     echo
     echo "1. Read AGENTS.md."
-    echo "2. Run \`${recovery}\`."
+    echo "2. Run:"
+    echo
+    echo "       ${recovery}"
     echo "3. Read .codex/STATE.md and inspect git diff."
     echo "4. Use CodeGraph before broad code exploration."
     echo
