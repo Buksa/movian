@@ -26,6 +26,18 @@ sanitize_remote_url() {
     sed -E 's#^([[:alpha:]][[:alnum:]+.-]*://)[^/@]*@#\1#'
 }
 
+recovery_command() {
+  local action=$1 script
+
+  if [[ -x "${ROOT}/.codex/context.sh" ]]; then
+    script="${ROOT}/.codex/context.sh"
+  else
+    script="${ROOT}/support/codex/context.sh"
+  fi
+
+  printf '%q %q\n' "${script}" "${action}"
+}
+
 print_state() {
   local upstream origin
   upstream=$(git rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || echo none)
@@ -43,14 +55,15 @@ print_state() {
 check() {
   print_state
 
-  local current recorded codegraph
+  local current recorded codegraph recovery
   current=$(git rev-parse HEAD)
   recorded=$(sed -n 's/^- HEAD: //p' "${STATE_DIR}/STATE.md" 2>/dev/null |
     head -1 || true)
   if [[ "${recorded}" == "${current}" ]]; then
     echo "Local state HEAD: current"
   else
-    echo "Local state HEAD: stale or missing; run '$0 refresh'"
+    recovery=$(recovery_command refresh)
+    echo "Local state HEAD: stale or missing; run ${recovery}"
   fi
 
   codegraph=$(codegraph_cmd || true)
@@ -76,11 +89,7 @@ refresh() {
   merge=$(git log --merges -1 --format='%H %s' 2>/dev/null || echo none)
   status=$(git status --short)
   commits=$(git log --oneline --decorate -8)
-  if [[ -x "${ROOT}/.codex/context.sh" ]]; then
-    recovery=".codex/context.sh"
-  else
-    recovery="support/codex/context.sh"
-  fi
+  recovery=$(recovery_command check)
 
   {
     echo "# Repository State"
@@ -109,7 +118,9 @@ refresh() {
     echo "## Resume"
     echo
     echo "1. Read AGENTS.md."
-    echo "2. Run ${recovery} doctor."
+    echo "2. Run:"
+    echo
+    echo "       ${recovery}"
     echo "3. Read .codex/STATE.md and inspect git diff."
     echo "4. Use CodeGraph before broad code exploration."
     echo
