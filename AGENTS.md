@@ -21,6 +21,15 @@ file reads:
 Use the equivalent MCP tools when available. Fall back to `rg` when the index
 does not cover the question or reports pending changes.
 
+## WSL Workspace Guardrail
+
+When working from Windows tooling against this WSL checkout, open the workspace
+through the WSL UNC path (`\\wsl.localhost\<Distro>\...`) instead of a Windows
+mirror such as `C:\home\...`. Run compound shell commands inside one WSL bash
+invocation, for example `wsl -d Ubuntu --cd /path/to/repo -- bash -lc '...'`,
+so pipes, redirects, `$(...)`, `&&`, and tools such as `sed` execute in Linux
+rather than PowerShell.
+
 ## Build And Validation
 
 For Linux debug changes:
