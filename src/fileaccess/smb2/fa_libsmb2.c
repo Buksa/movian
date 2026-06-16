@@ -196,9 +196,49 @@ movian_smb2_apply_target_identity(const movian_smb2_target_t *target,
 static int
 movian_smb2_is_auth_error(int status, const char *reason)
 {
-  return status == -EACCES || status == -EPERM ||
-    (status == -ECONNREFUSED && reason != NULL &&
-     strstr(reason, "STATUS_LOGON_FAILURE") != NULL);
+  if(status == -EACCES || status == -EPERM)
+    return 1;
+  if(reason == NULL)
+    return 0;
+  return strstr(reason, "STATUS_LOGON_FAILURE") != NULL ||
+    strstr(reason, "STATUS_ACCESS_DENIED") != NULL ||
+    strstr(reason, "STATUS_NETWORK_ACCESS_DENIED") != NULL ||
+    strstr(reason, "STATUS_INVALID_PARAMETER") != NULL ||
+    strstr(reason, "STATUS_INVALID_ACCOUNT_NAME") != NULL ||
+    strstr(reason, "STATUS_WRONG_PASSWORD") != NULL ||
+    strstr(reason, "STATUS_ACCOUNT_RESTRICTION") != NULL ||
+    strstr(reason, "STATUS_INVALID_LOGON_HOURS") != NULL ||
+    strstr(reason, "STATUS_PASSWORD_EXPIRED") != NULL ||
+    strstr(reason, "STATUS_PASSWORD_MUST_CHANGE") != NULL ||
+    strstr(reason, "STATUS_ACCOUNT_DISABLED") != NULL ||
+    strstr(reason, "STATUS_ACCOUNT_EXPIRED") != NULL ||
+    strstr(reason, "STATUS_ACCOUNT_LOCKED_OUT") != NULL ||
+    strstr(reason, "STATUS_LOGON_NOT_GRANTED") != NULL ||
+    strstr(reason, "STATUS_LOGON_TYPE_NOT_GRANTED") != NULL;
+}
+
+
+static fa_err_code_t
+movian_smb2_errno_to_fap(int status)
+{
+  int err = -status;
+  if(status < -4096)
+    err = nterror_to_errno((uint32_t)status);
+
+  switch(err) {
+  case 0:
+    return FAP_OK;
+  case ENOENT:
+    return FAP_NOENT;
+  case EEXIST:
+    return FAP_EXIST;
+  case EACCES:
+  case EPERM:
+  case EROFS:
+    return FAP_PERMISSION_DENIED;
+  default:
+    return FAP_ERROR;
+  }
 }
 
 
@@ -237,12 +277,16 @@ movian_smb2_connect_once(const movian_smb2_target_t *target,
 
 
 static struct smb2_context *
-movian_smb2_connect(const movian_smb2_target_t *target, const char *share,
-                    int flags, int timeout, char *errbuf, size_t errlen)
+movian_smb2_connect_impl(const movian_smb2_target_t *target, const char *share,
+                         int flags, int timeout, int *auth_needed,
+                         char *errbuf, size_t errlen)
 {
   movian_smb2_credentials_t credentials = {};
   char *keyring_id = movian_smb2_keyring_id(target);
   int status;
+
+  if(auth_needed != NULL)
+    *auth_needed = 0;
 
   if(keyring_id == NULL) {
     snprintf(errbuf, errlen, "Out of memory while preparing SMB2 login");
@@ -271,8 +315,12 @@ movian_smb2_connect(const movian_smb2_target_t *target, const char *share,
     return smb2;
   }
 
+  int auth_error = movian_smb2_is_auth_error(status, reason);
+  if(auth_error && auth_needed != NULL)
+    *auth_needed = 1;
+
   if(flags & (FA_NON_INTERACTIVE | FA_DISABLE_AUTH) ||
-     !movian_smb2_is_auth_error(status, reason)) {
+     !auth_error) {
     snprintf(errbuf, errlen, "Unable to connect to SMB2 share: %s", reason);
     movian_smb2_credentials_fini(&credentials);
     free(keyring_id);
@@ -321,6 +369,15 @@ movian_smb2_connect(const movian_smb2_target_t *target, const char *share,
   movian_smb2_credentials_fini(&credentials);
   free(keyring_id);
   return smb2;
+}
+
+
+static struct smb2_context *
+movian_smb2_connect(const movian_smb2_target_t *target, const char *share,
+                    int flags, int timeout, char *errbuf, size_t errlen)
+{
+  return movian_smb2_connect_impl(target, share, flags, timeout, NULL,
+                                  errbuf, errlen);
 }
 
 
@@ -537,7 +594,14 @@ movian_smb2_open(fa_protocol_t *fap, const char *url,
     return NULL;
   }
 
-  struct smb2fh *fh = smb2_open(smb2, target.path, O_RDONLY);
+  int open_flags = O_RDONLY;
+  if(flags & FA_WRITE) {
+    open_flags = O_RDWR | O_CREAT;
+    if(!(flags & FA_APPEND))
+      open_flags |= O_TRUNC;
+  }
+
+  struct smb2fh *fh = smb2_open(smb2, target.path, open_flags);
   if(fh == NULL) {
     snprintf(errbuf, errlen, "Unable to open SMB2 file: %s",
              smb2_get_error(smb2));
@@ -572,6 +636,19 @@ movian_smb2_open(fa_protocol_t *fap, const char *url,
   file->size = statbuf.smb2_size;
   hts_mutex_init(&file->mutex);
 
+  if(flags & FA_APPEND) {
+    if(smb2_lseek(file->smb2, file->fh, 0, SEEK_END, NULL) < 0) {
+      snprintf(errbuf, errlen, "Unable to seek SMB2 file: %s",
+               smb2_get_error(smb2));
+      hts_mutex_destroy(&file->mutex);
+      free(file);
+      smb2_close(smb2, fh);
+      movian_smb2_disconnect(smb2);
+      movian_smb2_target_fini(&target);
+      return NULL;
+    }
+  }
+
   movian_smb2_target_fini(&target);
   return &file->h;
 }
@@ -604,6 +681,24 @@ movian_smb2_read(fa_handle_t *fh, void *buf, size_t size)
 }
 
 
+static int
+movian_smb2_write(fa_handle_t *fh, const void *buf, size_t size)
+{
+  movian_smb2_file_t *file = (movian_smb2_file_t *)fh;
+  uint32_t count = size > INT_MAX ? INT_MAX : size;
+
+  hts_mutex_lock(&file->mutex);
+  int status = smb2_write(file->smb2, file->fh, buf, count);
+  if(status > 0) {
+    int64_t pos = smb2_lseek(file->smb2, file->fh, 0, SEEK_CUR, NULL);
+    if(pos > file->size)
+      file->size = pos;
+  }
+  hts_mutex_unlock(&file->mutex);
+  return status;
+}
+
+
 static int64_t
 movian_smb2_seek(fa_handle_t *fh, int64_t pos, int whence, int lazy)
 {
@@ -621,6 +716,21 @@ movian_smb2_fsize(fa_handle_t *fh)
 {
   movian_smb2_file_t *file = (movian_smb2_file_t *)fh;
   return file->size;
+}
+
+
+static fa_err_code_t
+movian_smb2_ftruncate(fa_handle_t *fh, uint64_t newsize)
+{
+  movian_smb2_file_t *file = (movian_smb2_file_t *)fh;
+
+  hts_mutex_lock(&file->mutex);
+  int status = smb2_ftruncate(file->smb2, file->fh, newsize);
+  if(status == 0)
+    file->size = newsize;
+  hts_mutex_unlock(&file->mutex);
+
+  return status < 0 ? movian_smb2_errno_to_fap(status) : FAP_OK;
 }
 
 
@@ -651,12 +761,14 @@ movian_smb2_stat(fa_protocol_t *fap, const char *url, struct fa_stat *fs,
     return FAP_OK;
   }
 
+  int auth_needed = 0;
   struct smb2_context *smb2 =
-    movian_smb2_connect(&target, target.share, flags, SMB2_DEFAULT_TIMEOUT,
-                        errbuf, errlen);
+    movian_smb2_connect_impl(&target, target.share, flags,
+                             SMB2_DEFAULT_TIMEOUT, &auth_needed,
+                             errbuf, errlen);
   if(smb2 == NULL) {
     movian_smb2_target_fini(&target);
-    return FAP_ERROR;
+    return auth_needed ? FAP_NEED_AUTH : FAP_ERROR;
   }
 
   int status = FAP_OK;
@@ -683,6 +795,193 @@ movian_smb2_stat(fa_protocol_t *fap, const char *url, struct fa_stat *fs,
 
 
 static int
+movian_smb2_unlink(const fa_protocol_t *fap, const char *url,
+                   char *errbuf, size_t errlen)
+{
+  movian_smb2_target_t target = {};
+  if(movian_smb2_target_parse(url, &target, errbuf, errlen))
+    return -1;
+
+  if(target.share == NULL || target.share[0] == '\0' ||
+     target.path[0] == '\0') {
+    snprintf(errbuf, errlen, "SMB2 URL does not identify a file");
+    movian_smb2_target_fini(&target);
+    return -1;
+  }
+
+  struct smb2_context *smb2 =
+    movian_smb2_connect(&target, target.share, 0, SMB2_DEFAULT_TIMEOUT,
+                        errbuf, errlen);
+  if(smb2 == NULL) {
+    movian_smb2_target_fini(&target);
+    return -1;
+  }
+
+  int status = smb2_unlink(smb2, target.path);
+  if(status < 0)
+    snprintf(errbuf, errlen, "Unable to delete SMB2 file: %s",
+             smb2_get_error(smb2));
+
+  movian_smb2_disconnect(smb2);
+  movian_smb2_target_fini(&target);
+  return status < 0 ? -1 : 0;
+}
+
+
+static int
+movian_smb2_rmdir(const fa_protocol_t *fap, const char *url,
+                  char *errbuf, size_t errlen)
+{
+  movian_smb2_target_t target = {};
+  if(movian_smb2_target_parse(url, &target, errbuf, errlen))
+    return -1;
+
+  if(target.share == NULL || target.share[0] == '\0' ||
+     target.path[0] == '\0') {
+    snprintf(errbuf, errlen, "SMB2 URL does not identify a directory");
+    movian_smb2_target_fini(&target);
+    return -1;
+  }
+
+  struct smb2_context *smb2 =
+    movian_smb2_connect(&target, target.share, 0, SMB2_DEFAULT_TIMEOUT,
+                        errbuf, errlen);
+  if(smb2 == NULL) {
+    movian_smb2_target_fini(&target);
+    return -1;
+  }
+
+  int status = smb2_rmdir(smb2, target.path);
+  if(status < 0)
+    snprintf(errbuf, errlen, "Unable to remove SMB2 directory: %s",
+             smb2_get_error(smb2));
+
+  movian_smb2_disconnect(smb2);
+  movian_smb2_target_fini(&target);
+  return status < 0 ? -1 : 0;
+}
+
+
+static int
+movian_smb2_rename(const fa_protocol_t *fap, const char *old_url,
+                   const char *new_url, char *errbuf, size_t errlen)
+{
+  movian_smb2_target_t old_target = {};
+  movian_smb2_target_t new_target = {};
+
+  if(movian_smb2_target_parse(old_url, &old_target, errbuf, errlen))
+    return -1;
+
+  if(movian_smb2_target_parse(new_url, &new_target, errbuf, errlen)) {
+    movian_smb2_target_fini(&old_target);
+    return -1;
+  }
+
+  if(old_target.share == NULL || old_target.share[0] == '\0' ||
+     new_target.share == NULL || new_target.share[0] == '\0' ||
+     old_target.path[0] == '\0' || new_target.path[0] == '\0') {
+    snprintf(errbuf, errlen, "SMB2 URL does not identify a path");
+    movian_smb2_target_fini(&old_target);
+    movian_smb2_target_fini(&new_target);
+    return -1;
+  }
+
+  if(strcmp(old_target.server, new_target.server) != 0 ||
+     strcmp(old_target.share, new_target.share) != 0) {
+    snprintf(errbuf, errlen, "Cross-share SMB2 rename not supported");
+    movian_smb2_target_fini(&old_target);
+    movian_smb2_target_fini(&new_target);
+    return -2;
+  }
+
+  struct smb2_context *smb2 =
+    movian_smb2_connect(&old_target, old_target.share, 0,
+                        SMB2_DEFAULT_TIMEOUT, errbuf, errlen);
+  if(smb2 == NULL) {
+    movian_smb2_target_fini(&old_target);
+    movian_smb2_target_fini(&new_target);
+    return -1;
+  }
+
+  int status = smb2_rename(smb2, old_target.path, new_target.path);
+  if(status < 0)
+    snprintf(errbuf, errlen, "Unable to rename SMB2 path: %s",
+             smb2_get_error(smb2));
+
+  movian_smb2_disconnect(smb2);
+  movian_smb2_target_fini(&old_target);
+  movian_smb2_target_fini(&new_target);
+  return status == -EXDEV ? -2 : status < 0 ? -1 : 0;
+}
+
+
+static fa_err_code_t
+movian_smb2_makedir(fa_protocol_t *fap, const char *url)
+{
+  char errbuf[256];
+  movian_smb2_target_t target = {};
+  if(movian_smb2_target_parse(url, &target, errbuf, sizeof(errbuf)))
+    return FAP_ERROR;
+
+  if(target.share == NULL || target.share[0] == '\0' ||
+     target.path[0] == '\0') {
+    movian_smb2_target_fini(&target);
+    return FAP_ERROR;
+  }
+
+  struct smb2_context *smb2 =
+    movian_smb2_connect(&target, target.share, 0, SMB2_DEFAULT_TIMEOUT,
+                        errbuf, sizeof(errbuf));
+  if(smb2 == NULL) {
+    movian_smb2_target_fini(&target);
+    return FAP_ERROR;
+  }
+
+  int status = smb2_mkdir(smb2, target.path);
+  movian_smb2_disconnect(smb2);
+  movian_smb2_target_fini(&target);
+  return status < 0 ? movian_smb2_errno_to_fap(status) : FAP_OK;
+}
+
+
+static fa_err_code_t
+movian_smb2_fsinfo(fa_protocol_t *fap, const char *url, fa_fsinfo_t *ffi)
+{
+  char errbuf[256];
+  movian_smb2_target_t target = {};
+
+  memset(ffi, 0, sizeof(*ffi));
+
+  if(movian_smb2_target_parse(url, &target, errbuf, sizeof(errbuf)))
+    return FAP_ERROR;
+
+  if(target.share == NULL || target.share[0] == '\0') {
+    movian_smb2_target_fini(&target);
+    return FAP_ERROR;
+  }
+
+  struct smb2_context *smb2 =
+    movian_smb2_connect(&target, target.share, 0, SMB2_DEFAULT_TIMEOUT,
+                        errbuf, sizeof(errbuf));
+  if(smb2 == NULL) {
+    movian_smb2_target_fini(&target);
+    return FAP_ERROR;
+  }
+
+  struct smb2_statvfs vfs;
+  int status = smb2_statvfs(smb2, target.path[0] ? target.path : "", &vfs);
+  if(status == 0) {
+    ffi->ffi_size = (uint64_t)vfs.f_blocks * vfs.f_frsize;
+    ffi->ffi_avail = (uint64_t)vfs.f_bavail * vfs.f_frsize;
+  }
+
+  movian_smb2_disconnect(smb2);
+  movian_smb2_target_fini(&target);
+  return status < 0 ? movian_smb2_errno_to_fap(status) : FAP_OK;
+}
+
+
+static int
 movian_smb2_no_parking(fa_handle_t *fh)
 {
   return 1;
@@ -696,9 +995,16 @@ static fa_protocol_t fa_protocol_smb2 = {
   .fap_open = movian_smb2_open,
   .fap_close = movian_smb2_close,
   .fap_read = movian_smb2_read,
+  .fap_write = movian_smb2_write,
   .fap_seek = movian_smb2_seek,
   .fap_fsize = movian_smb2_fsize,
+  .fap_ftruncate = movian_smb2_ftruncate,
   .fap_stat = movian_smb2_stat,
+  .fap_unlink = movian_smb2_unlink,
+  .fap_rmdir = movian_smb2_rmdir,
+  .fap_rename = movian_smb2_rename,
+  .fap_makedir = movian_smb2_makedir,
+  .fap_fsinfo = movian_smb2_fsinfo,
   .fap_set_read_timeout = movian_smb2_set_read_timeout,
   .fap_no_parking = movian_smb2_no_parking,
 };
