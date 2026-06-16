@@ -362,7 +362,7 @@ Use Obsidian for:
 - checking backlinks, orphans, and Bases views;
 - editing durable notes when the CLI generated content needs human cleanup.
 
-Do not store credentials, private source paths, machine-specific workspace
+Do not store credentials, sensitive source locations, machine-specific workspace
 state, or temporary smoke artifacts in a vault.
 
 ## What Not To Do
