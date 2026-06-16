@@ -52,8 +52,60 @@ print_state() {
   git status --short --branch
 }
 
+print_knowledge_registry() {
+  local config_path
+  config_path="${PROJECT_KNOWLEDGE_CONFIG:-${HOME}/.config/project-knowledge/config.json}"
+
+  echo "Knowledge Registry:"
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "  not configured: python3 not found"
+    return 0
+  fi
+  if [[ ! -f "${config_path}" ]]; then
+    echo "  not configured: ${config_path} not found"
+    return 0
+  fi
+
+  python3 - "${ROOT}" "${config_path}" <<'PY' || \
+    echo "  not configured: registry unreadable"
+import json
+import os
+import sys
+
+root = os.path.realpath(sys.argv[1])
+config_path = sys.argv[2]
+
+try:
+    with open(config_path, "r", encoding="utf-8") as handle:
+        config = json.load(handle)
+except Exception:
+    raise SystemExit(1)
+
+projects = config.get("projects", {})
+match_name = None
+match_record = None
+for name, record in sorted(projects.items()):
+    checkout = record.get("checkout")
+    if checkout and os.path.realpath(os.path.expanduser(checkout)) == root:
+        match_name = name
+        match_record = record
+        break
+
+if not match_record:
+    print("  not configured: checkout not registered")
+    raise SystemExit(0)
+
+print(f"  Knowledge profile: {match_name}")
+print(f"  Knowledge vault: {match_record.get('vault') or 'not configured'}")
+print(f"  Obsidian vault: {match_record.get('obsidian_vault') or 'not configured'}")
+backup = config.get("backup", {}).get("repository") or "not configured"
+print(f"  Knowledge backup repo: {backup}")
+PY
+}
+
 check() {
   print_state
+  print_knowledge_registry
 
   local current recorded codegraph recovery
   current=$(git rev-parse HEAD)

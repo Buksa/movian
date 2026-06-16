@@ -90,6 +90,12 @@ movian-knowledge status
 project-knowledge backup status
 ```
 
+`./support/codex/context.sh check` prints a `Knowledge Registry` block. Treat
+that block as the source of truth for the working vault, Obsidian vault, and
+aggregate backup repository paths. Do not infer the working vault from
+`project-knowledge-vaults/vaults/<project-id>/`; that directory is the aggregate
+backup copy.
+
 For a project that has `project-knowledge.toml`:
 
 ```sh
@@ -390,6 +396,11 @@ movian-knowledge status        # Movian public checkout
 project-knowledge status       # project-knowledge.toml checkout
 project-knowledge backup status
 ```
+
+Use the `Knowledge Registry` block from `./support/codex/context.sh check`
+before opening vault files. The working vault comes from the local
+`project-knowledge` registry; `project-knowledge-vaults/vaults/<project-id>/` is
+only the aggregate backup copy.
 
 If the local handoff is stale:
 
