@@ -23,8 +23,14 @@
 #include "main.h"
 #include "keyring.h"
 #include "fileaccess/fa_proto.h"
+#include "misc/rstr.h"
 
 #define SMB2_DEFAULT_TIMEOUT 15
+
+#define SMB2TRACE(x, ...) do {                                 \
+    if(gconf.enable_smb_debug)                                 \
+      tracelog(0, TRACE_DEBUG, "SMB2", x, ##__VA_ARGS__);       \
+  } while(0)
 
 typedef struct {
   char *server;
@@ -161,7 +167,7 @@ movian_smb2_default_credentials(const movian_smb2_target_t *target,
   credentials->user = strdup(target->user != NULL ? target->user : "guest");
   credentials->password = NULL;
   credentials->domain =
-    target->domain != NULL ? strdup(target->domain) : NULL;
+    strdup(target->domain != NULL ? target->domain : "WORKGROUP");
 }
 
 
@@ -218,6 +224,17 @@ movian_smb2_is_auth_error(int status, const char *reason)
 }
 
 
+static int
+movian_smb2_can_query_user(int flags)
+{
+  if(flags & (FA_NON_INTERACTIVE | FA_DISABLE_AUTH))
+    return 0;
+
+  char name[64];
+  return strcmp(hts_thread_name(name, sizeof(name)), "asyncio");
+}
+
+
 static fa_err_code_t
 movian_smb2_errno_to_fap(int status)
 {
@@ -256,8 +273,15 @@ movian_smb2_connect_once(const movian_smb2_target_t *target,
   if(smb2 == NULL) {
     *status = -ENOMEM;
     snprintf(errbuf, errlen, "Unable to initialize SMB2");
+    SMB2TRACE("Unable to initialize SMB2 context");
     return NULL;
   }
+
+  SMB2TRACE("Connecting to %s/%s timeout=%d",
+            target->server, share != NULL ? share : "", timeout);
+  SMB2TRACE("SETUP %s:%s:%s", user,
+            credentials->password != NULL ? "<set>" : "<unset>",
+            credentials->domain != NULL ? credentials->domain : "<unset>");
 
   smb2_set_timeout(smb2, timeout);
   smb2_set_security_mode(smb2, SMB2_NEGOTIATE_SIGNING_ENABLED);
@@ -267,10 +291,14 @@ movian_smb2_connect_once(const movian_smb2_target_t *target,
     smb2_set_domain(smb2, credentials->domain);
 
   *status = smb2_connect_share(smb2, target->server, share, user);
-  if(*status == 0)
+  if(*status == 0) {
+    SMB2TRACE("%s/%s Session setup", target->server,
+              share != NULL ? share : "");
     return smb2;
+  }
 
   snprintf(errbuf, errlen, "%s", smb2_get_error(smb2));
+  SMB2TRACE("SETUP status=%d reason=%s", *status, errbuf);
   smb2_destroy_context(smb2);
   return NULL;
 }
@@ -296,6 +324,9 @@ movian_smb2_connect_impl(const movian_smb2_target_t *target, const char *share,
   int keyring_status =
     keyring_lookup(keyring_id, &credentials.user, &credentials.password,
                    &credentials.domain, NULL, NULL, NULL, 0);
+  int have_saved_credentials = keyring_status == KEYRING_OK;
+  SMB2TRACE("Keyring lookup %s for %s",
+            have_saved_credentials ? "hit" : "miss", keyring_id);
   if(keyring_status != KEYRING_OK) {
     movian_smb2_default_credentials(target, &credentials);
   } else if(movian_smb2_apply_target_identity(target, &credentials,
@@ -319,8 +350,15 @@ movian_smb2_connect_impl(const movian_smb2_target_t *target, const char *share,
   if(auth_error && auth_needed != NULL)
     *auth_needed = 1;
 
-  if(flags & (FA_NON_INTERACTIVE | FA_DISABLE_AUTH) ||
-     !auth_error) {
+  int can_query_user = movian_smb2_can_query_user(flags);
+  char thread_name[64];
+  SMB2TRACE("Auth retry auth_error=%d can_query=%d flags=0x%x "
+            "thread=%s status=%d reason=%s",
+            auth_error, can_query_user, flags,
+            hts_thread_name(thread_name, sizeof(thread_name)), status,
+            reason);
+
+  if(!can_query_user || !auth_error) {
     snprintf(errbuf, errlen, "Unable to connect to SMB2 share: %s", reason);
     movian_smb2_credentials_fini(&credentials);
     free(keyring_id);
@@ -333,6 +371,14 @@ movian_smb2_connect_impl(const movian_smb2_target_t *target, const char *share,
                                        errbuf, errlen)) {
     free(keyring_id);
     return NULL;
+  }
+  if(credentials.domain == NULL) {
+    credentials.domain = strdup("WORKGROUP");
+    if(credentials.domain == NULL) {
+      snprintf(errbuf, errlen, "Out of memory while preparing SMB2 login");
+      free(keyring_id);
+      return NULL;
+    }
   }
 
   size_t source_len = strlen(target->server) + 16;
@@ -349,17 +395,20 @@ movian_smb2_connect_impl(const movian_smb2_target_t *target, const char *share,
                    target->user != NULL ? NULL : &credentials.user,
                    &credentials.password,
                    target->domain != NULL ? NULL : &credentials.domain,
-                   NULL, source, reason,
+                   NULL, source,
+                   have_saved_credentials ? reason : "Login required",
                    KEYRING_QUERY_USER | KEYRING_SHOW_REMEMBER_ME |
                    KEYRING_REMEMBER_ME_SET);
   free(source);
 
   if(keyring_status != KEYRING_OK) {
+    SMB2TRACE("Credential query rejected status=%d", keyring_status);
     snprintf(errbuf, errlen, "Authentication rejected by user");
     movian_smb2_credentials_fini(&credentials);
     free(keyring_id);
     return NULL;
   }
+  SMB2TRACE("Credential query accepted");
 
   smb2 = movian_smb2_connect_once(target, share, &credentials, timeout,
                                   &status, reason, sizeof(reason));
@@ -403,6 +452,23 @@ movian_smb2_child_url(const char *parent, const char *name)
   if(url != NULL)
     snprintf(url, len, "%.*s/%s", (int)parent_len, parent, name);
   return url;
+}
+
+
+static rstr_t *
+movian_smb2_redirect(fa_protocol_t *fap, const char *url)
+{
+  const char *path = url + strlen("smb2://");
+  if(*path == '\0' || strchr(path, '/') != NULL)
+    return NULL;
+
+  char redirected[URL_MAX];
+  if(snprintf(redirected, sizeof(redirected), "%s/", url) >=
+     sizeof(redirected))
+    return NULL;
+
+  SMB2TRACE("Redirecting %s -> %s", url, redirected);
+  return rstr_alloc(redirected);
 }
 
 
@@ -456,6 +522,7 @@ movian_smb2_scan_host(fa_dir_t *fd, const char *url,
                       const movian_smb2_target_t *target, int flags,
                       char *errbuf, size_t errlen)
 {
+  SMB2TRACE("Enumerating shares on %s", target->server);
   struct smb2_context *smb2 =
     movian_smb2_connect(target, "IPC$", flags, SMB2_DEFAULT_TIMEOUT,
                         errbuf, errlen);
@@ -469,6 +536,8 @@ movian_smb2_scan_host(fa_dir_t *fd, const char *url,
      state.status != 0 || state.reply == NULL) {
     snprintf(errbuf, errlen, "Unable to enumerate SMB2 shares: %s",
              smb2_get_error(smb2));
+    SMB2TRACE("Share enumeration failed status=%d reason=%s",
+              state.status, errbuf);
     if(state.reply != NULL)
       smb2_free_data(smb2, state.reply);
     movian_smb2_disconnect(smb2);
@@ -482,8 +551,13 @@ movian_smb2_scan_host(fa_dir_t *fd, const char *url,
       struct srvsvc_SHARE_INFO_1 *share =
         &shares->Buffer->share_info_1[i];
       const char *name = share->netname.utf8;
+      int add = name != NULL && share->type == SHARE_TYPE_DISKTREE;
 
-      if((share->type & 3) != SHARE_TYPE_DISKTREE || name == NULL)
+      SMB2TRACE("Enumerated share %s type=0x%x -> %s",
+                name != NULL ? name : "<null>", share->type,
+                add ? "add" : "filtered");
+
+      if(!add)
         continue;
 
       char *child = movian_smb2_child_url(url, name);
@@ -756,7 +830,7 @@ movian_smb2_stat(fa_protocol_t *fap, const char *url, struct fa_stat *fs,
 
   memset(fs, 0, sizeof(*fs));
   if(target.share == NULL || target.share[0] == '\0') {
-    fs->fs_type = CONTENT_DIR;
+    fs->fs_type = CONTENT_SHARE;
     movian_smb2_target_fini(&target);
     return FAP_OK;
   }
@@ -1007,6 +1081,7 @@ static fa_protocol_t fa_protocol_smb2 = {
   .fap_fsinfo = movian_smb2_fsinfo,
   .fap_set_read_timeout = movian_smb2_set_read_timeout,
   .fap_no_parking = movian_smb2_no_parking,
+  .fap_redirect = movian_smb2_redirect,
 };
 
 FAP_REGISTER(smb2);
