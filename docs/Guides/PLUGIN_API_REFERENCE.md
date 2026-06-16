@@ -528,6 +528,10 @@ Minimal synchronous filesystem helper:
 
 - `fs.writeFileSync(filename, data, opts)`
 - `fs.readFileSync(filename, opts)`
+- `fs.readdirSync(path)`
+- `fs.unlinkSync(filename)`
+- `fs.mkdirSync(path)`
+- `fs.rmdirSync(path)`
 
 ### `require('http')` / `require('https')`
 
@@ -663,9 +667,13 @@ Supported algorithms are `md5`, `sha1`, `sha256`, and `sha512`.
 - `read(handle, buffer, offset, length, position)`
 - `write(handle, buffer, offset, length, position)`
 - `fsize(handle)`
-- `ftrunctae(handle, size)` - spelling is as registered in C.
+- `ftruncate(handle, size)`
+- `ftrunctae(handle, size)` - legacy compatibility alias for the old misspelling.
 - `rename(from, to)`
 - `mkdirs(path, reserved)`
+- `unlink(path)`
+- `rmdir(path)`
+- `readdir(path)`
 - `dirname(path)`
 - `basename(path)`
 - `copyfile(from, to)`
