@@ -40,3 +40,5 @@ resumed session and `refresh` after a merge so local integrations are updated.
 Otherwise use `support/codex/context.sh` directly. Local state belongs under
 ignored `.codex/`; never commit generated handoff files, indexes, credentials,
 machine-specific paths, or test artifacts.
+Use the `Knowledge Registry` block from `support/codex/context.sh check` before
+inspecting vault files.
