@@ -70,10 +70,15 @@ print_knowledge_registry() {
     echo "  not configured: registry unreadable"
 import json
 import os
+import re
 import sys
 
 root = os.path.realpath(sys.argv[1])
 config_path = sys.argv[2]
+
+
+def sanitize_remote_url(value):
+    return re.sub(r"^([A-Za-z][A-Za-z0-9+.-]*://)[^/@]*@", r"\1", value)
 
 try:
     with open(config_path, "r", encoding="utf-8") as handle:
@@ -99,6 +104,8 @@ print(f"  Knowledge profile: {match_name}")
 print(f"  Knowledge vault: {match_record.get('vault') or 'not configured'}")
 print(f"  Obsidian vault: {match_record.get('obsidian_vault') or 'not configured'}")
 backup = config.get("backup", {}).get("repository") or "not configured"
+if backup != "not configured":
+    backup = sanitize_remote_url(backup)
 print(f"  Knowledge backup repo: {backup}")
 PY
 }
