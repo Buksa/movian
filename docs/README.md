@@ -94,6 +94,7 @@ For branch structure, compatibility, feature gating, Flatpak validation, and
 runtime smoke patterns, use:
 
 - `Guides/PUBLIC_WORK_PATTERNS.md`
+- `Guides/CODEX_PROJECT_KNOWLEDGE_WORKFLOW.md`
 
 ## Bundled Modules
 
