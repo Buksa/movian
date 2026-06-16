@@ -210,12 +210,17 @@ movian-knowledge capture-merge
 ./support/codex/context.sh refresh
 movian-knowledge lint
 
+project-knowledge backup status
+```
+
+If the user explicitly wants to push the private aggregate backup, run:
+
+```sh
 project-knowledge backup sync
 project-knowledge backup status
 ```
 
-Use `project-knowledge backup sync` only when the user explicitly wants to push
-the private aggregate backup. Normal capture and refresh are local.
+Normal capture and refresh are local.
 
 ### Generic Project Or Plugin
 
@@ -228,6 +233,12 @@ project-knowledge capture-merge
 project-knowledge context refresh
 project-knowledge lint
 
+project-knowledge backup status
+```
+
+If the user explicitly wants to push the private aggregate backup, run:
+
+```sh
 project-knowledge backup sync
 project-knowledge backup status
 ```
