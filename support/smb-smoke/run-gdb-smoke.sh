@@ -33,16 +33,26 @@ summarize() {
   local target="$2"
   local rc="$3"
   local log="$4"
+  local crash=0
+  local exited=0
+
+  if grep -Eq "Program received signal SIG(SEGV|ABRT|BUS|ILL)|AddressSanitizer|stack smashing|buffer overflow" "$log"; then
+    crash=1
+  fi
+  if grep -q "Inferior 1.*exited normally" "$log"; then
+    exited=1
+  fi
+
   {
     echo "[$name]"
     echo "target=$target"
     echo "gdb_exit=$rc"
-    if grep -Eq "Program received signal SIG(SEGV|ABRT|BUS|ILL)|AddressSanitizer|stack smashing|buffer overflow" "$log"; then
+    if [ "$crash" -ne 0 ]; then
       echo "crash_signal=yes"
     else
       echo "crash_signal=no"
     fi
-    if grep -q "Inferior 1.*exited normally" "$log"; then
+    if [ "$exited" -ne 0 ]; then
       echo "exited_normally=yes"
     else
       echo "exited_normally=no"
@@ -51,6 +61,15 @@ summarize() {
     grep -E "Program received signal|exited normally|SMB2_GDB|SMB2|navigator|ERROR|AddressSanitizer|stack smashing|buffer overflow|Unable|TRACE" "$log" | tail -120 || true
     echo
   } | tee -a "$ART/summary.txt"
+
+  if [ "$crash" -ne 0 ]; then
+    return 1
+  fi
+
+  case "$rc" in
+    0|124) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 run_nav_case() {
@@ -133,6 +152,10 @@ JS
   smb_smoke_sanitize_file "$log"
   smb_smoke_sanitize_file "$script"
   summarize "$name" "$script" "$rc" "$log"
+  if ! grep -q "SMB2_GDB done" "$log"; then
+    echo "SMB2_GDB done marker missing" | tee -a "$ART/summary.txt"
+    return 1
+  fi
 }
 
 cd "$SMB_SMOKE_ROOT"

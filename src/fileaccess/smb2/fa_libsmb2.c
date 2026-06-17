@@ -590,10 +590,13 @@ movian_smb2_scan_host(fa_dir_t *fd, const char *url,
       struct srvsvc_SHARE_INFO_1 *share =
         &shares->Buffer->share_info_1[i];
       const char *name = share->netname.utf8;
-      int add = name != NULL && share->type == SHARE_TYPE_DISKTREE;
+      uint32_t share_type = share->type;
+      int add = name != NULL &&
+        (share_type & 3) == SHARE_TYPE_DISKTREE &&
+        !(share_type & SHARE_TYPE_HIDDEN);
 
       SMB2TRACE("Enumerated share %s type=0x%x -> %s",
-                name != NULL ? name : "<null>", share->type,
+                name != NULL ? name : "<null>", share_type,
                 add ? "add" : "filtered");
 
       if(!add)
