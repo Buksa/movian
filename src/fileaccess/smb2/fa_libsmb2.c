@@ -106,16 +106,23 @@ movian_smb2_target_parse(const char *url, movian_smb2_target_t *target,
     return -1;
   }
 
+  int has_share = parsed->share != NULL;
+  int has_user = parsed->user != NULL;
+  int has_domain = parsed->domain != NULL;
+
   target->server = strdup(parsed->server);
-  target->share = parsed->share != NULL ? strdup(parsed->share) : NULL;
+  target->share = has_share ? strdup(parsed->share) : NULL;
   target->path = parsed->path != NULL ? strdup(parsed->path) : strdup("");
-  target->user = parsed->user != NULL ? strdup(parsed->user) : NULL;
-  target->domain = parsed->domain != NULL ? strdup(parsed->domain) : NULL;
+  target->user = has_user ? strdup(parsed->user) : NULL;
+  target->domain = has_domain ? strdup(parsed->domain) : NULL;
 
   smb2_destroy_url(parsed);
   smb2_destroy_context(smb2);
 
-  if(target->server == NULL || target->path == NULL) {
+  if(target->server == NULL || target->path == NULL ||
+     (has_share && target->share == NULL) ||
+     (has_user && target->user == NULL) ||
+     (has_domain && target->domain == NULL)) {
     snprintf(errbuf, errlen, "Out of memory while parsing SMB2 URL");
     movian_smb2_target_fini(target);
     memset(target, 0, sizeof(*target));
@@ -447,10 +454,17 @@ movian_smb2_child_url(const char *parent, const char *name)
   while(parent_len > 0 && parent[parent_len - 1] == '/')
     parent_len--;
 
-  size_t len = parent_len + strlen(name) + 2;
+  size_t name_len = strlen(name);
+  if(parent_len > SIZE_MAX - name_len - 2)
+    return NULL;
+
+  size_t len = parent_len + name_len + 2;
   char *url = malloc(len);
-  if(url != NULL)
-    snprintf(url, len, "%.*s/%s", (int)parent_len, parent, name);
+  if(url != NULL) {
+    memcpy(url, parent, parent_len);
+    url[parent_len] = '/';
+    memcpy(url + parent_len + 1, name, name_len + 1);
+  }
   return url;
 }
 
@@ -463,12 +477,37 @@ movian_smb2_redirect(fa_protocol_t *fap, const char *url)
     return NULL;
 
   char redirected[URL_MAX];
-  if(snprintf(redirected, sizeof(redirected), "%s/", url) >=
-     sizeof(redirected))
+  int len = snprintf(redirected, sizeof(redirected), "%s/", url);
+  if(len < 0 || (size_t)len >= sizeof(redirected))
     return NULL;
 
   SMB2TRACE("Redirecting %s -> %s", url, redirected);
   return rstr_alloc(redirected);
+}
+
+
+static int
+movian_smb2_normalize(fa_protocol_t *fap, const char *url,
+                      char *dst, size_t dstlen)
+{
+  movian_smb2_target_t target = {};
+  char errbuf[128];
+
+  if(movian_smb2_target_parse(url, &target, errbuf, sizeof(errbuf)))
+    return -1;
+
+  int host_root = target.share == NULL || target.share[0] == '\0';
+  movian_smb2_target_fini(&target);
+
+  if(!host_root)
+    return -1;
+
+  size_t len = strlen(url);
+  if(dstlen == 0 || len >= dstlen)
+    return -1;
+
+  memcpy(dst, url, len + 1);
+  return 0;
 }
 
 
@@ -801,7 +840,7 @@ movian_smb2_ftruncate(fa_handle_t *fh, uint64_t newsize)
   hts_mutex_lock(&file->mutex);
   int status = smb2_ftruncate(file->smb2, file->fh, newsize);
   if(status == 0)
-    file->size = newsize;
+    file->size = newsize > INT64_MAX ? INT64_MAX : (int64_t)newsize;
   hts_mutex_unlock(&file->mutex);
 
   return status < 0 ? movian_smb2_errno_to_fap(status) : FAP_OK;
@@ -1045,8 +1084,11 @@ movian_smb2_fsinfo(fa_protocol_t *fap, const char *url, fa_fsinfo_t *ffi)
   struct smb2_statvfs vfs;
   int status = smb2_statvfs(smb2, target.path[0] ? target.path : "", &vfs);
   if(status == 0) {
-    ffi->ffi_size = (uint64_t)vfs.f_blocks * vfs.f_frsize;
-    ffi->ffi_avail = (uint64_t)vfs.f_bavail * vfs.f_frsize;
+    uint64_t frsize = vfs.f_frsize;
+    ffi->ffi_size = frsize != 0 && vfs.f_blocks > UINT64_MAX / frsize ?
+      UINT64_MAX : (uint64_t)vfs.f_blocks * frsize;
+    ffi->ffi_avail = frsize != 0 && vfs.f_bavail > UINT64_MAX / frsize ?
+      UINT64_MAX : (uint64_t)vfs.f_bavail * frsize;
   }
 
   movian_smb2_disconnect(smb2);
@@ -1082,6 +1124,7 @@ static fa_protocol_t fa_protocol_smb2 = {
   .fap_set_read_timeout = movian_smb2_set_read_timeout,
   .fap_no_parking = movian_smb2_no_parking,
   .fap_redirect = movian_smb2_redirect,
+  .fap_normalize = movian_smb2_normalize,
 };
 
 FAP_REGISTER(smb2);
