@@ -94,6 +94,17 @@ add/filter decisions.
 - Wait for the expected page URL before asserting `loading=0` or node content.
   Without the URL check, tests can sample the previous page and produce false
   failures during fast route transitions.
+- Drive automated browser-navigation parity tests through
+  `support/smb-smoke/run-http-nav-smoke.sh`. It opens `search:smb2://...` via
+  `/api/open`, waits for the canonical final SMB2 URL, and records the root
+  node list for comparison.
+- Use `support/smb-smoke/run-gdb-smoke.sh` for native safety checks around SMB2
+  navigation and writable operations. A timeout exit is expected because Movian
+  keeps running; the useful signal is `crash_signal=no` plus the JS smoke
+  reaching its final `done` line.
+- Keep SMB smoke credentials outside the repository in environment variables.
+  The support scripts seed an isolated keyring, sanitize logs, and remove seeded
+  keyring files from reusable artifacts.
 
 ## Rejected Or Failed Approaches
 
@@ -125,6 +136,15 @@ add/filter decisions.
 - Do not treat `loading=0` alone as a route-ready signal after `/api/open`.
   One failed run sampled the previous page before the user-directory navigation
   had settled. Use current URL plus title/nodes/loading.
+- Do not send the first `/api/open` immediately after the HTTP port appears.
+  Wait for `/api/diag`, then allow a short UI settle; otherwise the request can
+  return without any `navigator Opening ...` log line.
+- Do not use `--no-ui` for HTTP prop navigation parity tests. In this harness it
+  left `/api/open` on `page:home`. Use `--no-ui` only for command-line URL or
+  GDB smokes where the URL is passed directly to Movian.
+- Do not open raw `smb2://...` when testing the in-app browser path. The user
+  flow opens `search:smb2://...`, which then resolves to the canonical SMB2
+  page.
 - Do not change SMB2 directory-entry type mapping in this pass. The current
   code maps `entry->st.smb2_type`; a later raw attribute test is needed before
   claiming a Movian-side metadata bug.
@@ -154,3 +174,6 @@ When investigating a new SMB navigation report, collect:
   seeded keyring for deterministic auth tests, use STPP propref-relative field
   writes when the test must exercise the dialog, and fall back to real X11
   keypress navigation when property writes do not match visible UI behavior.
+- For repeatable runtime checks, prefer the opt-in scripts in `support/smb-smoke`
+  over ad hoc one-liners. Pass host/share/path/user/password/domain through the
+  `SMB_SMOKE_*` environment variables and keep artifacts under `/tmp`.
