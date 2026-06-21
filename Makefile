@@ -294,6 +294,7 @@ SRCS += src/networking/net_common.c \
 	src/networking/websocket.c \
 
 SRCS-$(CONFIG_FTPSERVER) += src/networking/ftp_server.c
+SRCS-$(CONFIG_LIBSMB2) += src/networking/smb2_server.c
 
 SRCS-$(CONFIG_POLARSSL) += src/networking/net_polarssl.c
 SRCS-$(CONFIG_OPENSSL)  += src/networking/net_openssl.c
