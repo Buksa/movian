@@ -59,6 +59,7 @@ typedef struct smb2srv_state {
   struct smb2_server server;
   int enabled;
   int thread_running;
+  int restart_requested;
   int port;
   uint64_t next_file_id;
   char *username;
@@ -817,6 +818,7 @@ static void *
 smb2srv_thread(void *aux)
 {
   int err;
+  int restart = 0;
 
   hts_mutex_lock(&smb2srv.mutex);
   smb2srv.thread_running = 1;
@@ -839,8 +841,16 @@ smb2srv_thread(void *aux)
 
   hts_mutex_lock(&smb2srv.mutex);
   smb2srv.thread_running = 0;
+  smb2srv.server.fd = -1;
+  if(smb2srv.restart_requested) {
+    smb2srv.restart_requested = 0;
+    restart = smb2srv.enabled && smb2srv_config_ready_locked();
+  }
   hts_mutex_unlock(&smb2srv.mutex);
 
+  if(restart)
+    hts_thread_create_detached("SMB2-server", smb2srv_thread, NULL,
+                               THREAD_PRIO_BGTASK);
   return NULL;
 }
 
@@ -857,12 +867,17 @@ smb2srv_config_ready_locked(void)
 
 
 static void
-smb2srv_stop_locked(void)
+smb2srv_stop_locked(int restart)
 {
   if(smb2srv.server.fd > 0) {
-    shutdown(smb2srv.server.fd, SHUT_RDWR);
-    close(smb2srv.server.fd);
-    smb2srv.server.fd = -1;
+    if(smb2srv.thread_running) {
+      if(restart)
+        smb2srv.restart_requested = 1;
+      shutdown(smb2srv.server.fd, SHUT_RDWR);
+    } else {
+      close(smb2srv.server.fd);
+      smb2srv.server.fd = -1;
+    }
   }
 }
 
@@ -874,7 +889,8 @@ smb2srv_enable_disable(void)
 
   hts_mutex_lock(&smb2srv.mutex);
   if(!smb2srv.enabled) {
-    smb2srv_stop_locked();
+    smb2srv.restart_requested = 0;
+    smb2srv_stop_locked(0);
   } else if(!smb2srv.thread_running && smb2srv_config_ready_locked()) {
     start = 1;
   } else if(smb2srv.enabled && !smb2srv_config_ready_locked()) {
@@ -908,7 +924,7 @@ smb2srv_set_port(void *opaque, const char *str)
   if(port < 1 || port > 65535)
     port = SMB2SRV_DEFAULT_PORT;
   if(smb2srv.port != port && smb2srv.thread_running)
-    smb2srv_stop_locked();
+    smb2srv_stop_locked(1);
   smb2srv.port = port;
   hts_mutex_unlock(&smb2srv.mutex);
   smb2srv_enable_disable();
