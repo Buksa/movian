@@ -93,3 +93,7 @@ Successful findings to preserve in future smokes:
 - If TCP `445` cannot be bound from Flatpak/Linux while higher ports work,
   keep handler correctness and privileged-port packaging/forwarding as separate
   test results.
+- A failed switch to an unavailable port must leave the previous working SMB2
+  server listener alive. Verify this by attempting a privileged or occupied
+  port, then checking that the previous high port still accepts TCP and SMB2
+  session setup.

@@ -143,6 +143,10 @@ If setting port `445` is accepted but no listener remains on `445`, classify the
 result as privileged-port packaging/forwarding work unless request-handler
 smokes also fail on a high port.
 
+If an unavailable port is rejected, the previous working listener should remain
+alive. Verify the old high port still accepts TCP and SMB2 session setup before
+continuing.
+
 Before leaving the Deck, restore the last known working development port and
 confirm it listens.
 

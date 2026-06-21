@@ -866,6 +866,34 @@ smb2srv_config_ready_locked(void)
 }
 
 
+static int
+smb2srv_port_available(int port)
+{
+  int fd = -1;
+  int err = smb2_bind_and_listen(port, SMB2SRV_MAX_CONNECTIONS, &fd);
+
+  if(fd >= 0)
+    close(fd);
+
+  return err == 0;
+}
+
+
+static void
+smb2srv_trace_port_unavailable(int port)
+{
+  if(port < 1024 && geteuid() != 0) {
+    TRACE(TRACE_ERROR, "SMB2-SERVER",
+          "Cannot listen on privileged port %d as uid %d",
+          port, (int)geteuid());
+  } else {
+    TRACE(TRACE_ERROR, "SMB2-SERVER",
+          "Cannot listen on port %d; it may be unavailable or already in use",
+          port);
+  }
+}
+
+
 static void
 smb2srv_stop_locked(int restart)
 {
@@ -892,7 +920,18 @@ smb2srv_enable_disable(void)
     smb2srv.restart_requested = 0;
     smb2srv_stop_locked(0);
   } else if(!smb2srv.thread_running && smb2srv_config_ready_locked()) {
-    start = 1;
+    if(smb2srv_port_available(smb2srv.port)) {
+      start = 1;
+    } else if(smb2srv.port != SMB2SRV_DEFAULT_PORT &&
+              smb2srv_port_available(SMB2SRV_DEFAULT_PORT)) {
+      smb2srv_trace_port_unavailable(smb2srv.port);
+      TRACE(TRACE_INFO, "SMB2-SERVER", "Falling back to port %d",
+            SMB2SRV_DEFAULT_PORT);
+      smb2srv.port = SMB2SRV_DEFAULT_PORT;
+      start = 1;
+    } else {
+      smb2srv_trace_port_unavailable(smb2srv.port);
+    }
   } else if(smb2srv.enabled && !smb2srv_config_ready_locked()) {
     SMB2SRV_TRACE(TRACE_DEBUG,
                   "not starting: username, password, share and path are required");
@@ -923,6 +962,11 @@ smb2srv_set_port(void *opaque, const char *str)
   hts_mutex_lock(&smb2srv.mutex);
   if(port < 1 || port > 65535)
     port = SMB2SRV_DEFAULT_PORT;
+  if(smb2srv.port != port && !smb2srv_port_available(port)) {
+    smb2srv_trace_port_unavailable(port);
+    hts_mutex_unlock(&smb2srv.mutex);
+    return;
+  }
   if(smb2srv.port != port && smb2srv.thread_running)
     smb2srv_stop_locked(1);
   smb2srv.port = port;
