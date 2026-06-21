@@ -60,6 +60,12 @@ The full smoke checklist for Linux, Flatpak, runtime, and Steam Deck checks is:
 docs/Guides/LINUX_FLATPAK_SMOKE_CHECKLIST.md
 ```
 
+The SSH-assisted Steam Deck copy/install/log workflow is:
+
+```text
+docs/Guides/STEAM_DECK_REMOTE_TESTING.md
+```
+
 ## Install
 
 ```sh

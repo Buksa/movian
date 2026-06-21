@@ -130,6 +130,12 @@ For the full Linux, Flatpak, runtime, and manual Steam Deck checklist, see:
 docs/Guides/LINUX_FLATPAK_SMOKE_CHECKLIST.md
 ```
 
+For SSH-assisted copy/install/log collection on a real Steam Deck, see:
+
+```text
+docs/Guides/STEAM_DECK_REMOTE_TESTING.md
+```
+
 ## Install And Run
 
 Install the generated bundle:
@@ -159,6 +165,11 @@ Mode through Discover or CLI:
 flatpak install --user --reinstall --bundle \
   ~/Downloads/dev.uzver.Movian.flatpak
 ```
+
+For repeat remote cycles, copy the bundle to `~/Downloads` with a unique
+filename, verify its SHA-256 hash, install it over SSH, then ask the Deck user
+to launch Movian manually if `flatpak run` from SSH exits without opening the
+GLW UI.
 
 Minimum smoke checklist:
 

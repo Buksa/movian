@@ -137,6 +137,7 @@ The Flatpak work is a local sideload package, not a Flathub recipe. The main
 guide is:
 
 - `Guides/FLATPAK_STEAMOS_GUIDE.md`
+- `Guides/STEAM_DECK_REMOTE_TESTING.md`
 
 The source-of-truth packaging files live under:
 

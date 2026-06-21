@@ -69,6 +69,9 @@ seeded keyring before exit. Logs are also sanitized for the password string.
 The SMB2 server lives under Movian network settings and should be tested as a
 runtime setting, not only as a process-start option.
 
+For the full SSH-assisted Steam Deck copy/install/log workflow, see
+`docs/Guides/STEAM_DECK_REMOTE_TESTING.md`.
+
 Successful findings to preserve in future smokes:
 
 - Use STPP dot paths and real child proprefs for settings writes. HTTP paths
