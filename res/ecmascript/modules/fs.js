@@ -22,3 +22,19 @@ exports.readFileSync = function(filename, opts) {
     Core.resourceDestroy(fd);
   }
 }
+
+exports.readdirSync = function(path) {
+  return require('native/fs').readdir(path);
+}
+
+exports.unlinkSync = function(filename) {
+  require('native/fs').unlink(filename);
+}
+
+exports.mkdirSync = function(path) {
+  require('native/fs').mkdirs(path);
+}
+
+exports.rmdirSync = function(path) {
+  require('native/fs').rmdir(path);
+}

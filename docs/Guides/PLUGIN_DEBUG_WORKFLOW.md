@@ -91,6 +91,23 @@ Optional environment variables:
 - `ALLOW_EXISTING_MOVIAN=1` - allow another Movian process to already be
   running.
 
+Harness rules that prevented false failures during SMB/SMB2 navigation work:
+
+- Wait until `/api/diag` responds, then allow a short UI settle before the
+  first `/api/open`. A request sent immediately after the HTTP port appears can
+  return success while the navigator remains on `page:home`.
+- Do not use `--no-ui` for HTTP prop navigation harnesses. Reserve it for
+  command-line URL smokes or GDB smokes where the URL is passed as an argv
+  route.
+- For browser-style protocol roots such as `smb://host` or `smb2://host`, open
+  `search:<url>` through `/api/open` and assert the final protocol URL from
+  `currentpage.url`.
+- Assert both the expected URL and `loading=0` before reading node content.
+  `loading=0` alone can still describe the previous page.
+- Kill only the test-owned Movian PID during cleanup. If graceful shutdown
+  stalls, escalate that PID to `SIGKILL` rather than using broad process
+  cleanup.
+
 The runner saves:
 
 - `movian.log`
@@ -122,6 +139,11 @@ is set. This keeps non-visual route checks usable in headless or GL-limited
 environments.
 
 ## HTTP And Prop Surface
+
+`/api/open` accepts the target in the `url` request argument. For normal plugin
+routes, open the route directly. For SMB/SMB2 browser navigation, open the
+search wrapper (`search:smb2://host/`) and then verify that the navigator lands
+on the canonical protocol URL.
 
 Useful endpoints during manual diagnosis:
 
@@ -167,7 +189,11 @@ example:
 [1, 2, 0, "navigators.current.currentpage.model.loading"]
 ```
 
-Do not use slash-separated paths for JSON STPP subscriptions.
+Do not use slash-separated paths for JSON STPP subscriptions. For popup fields,
+inspect `/api/prop/global/popups/*0` first; `*0` is an HTTP display alias, not a
+valid STPP dot-path segment. Subscribe to `popups`, recover the child propref,
+and write fields relative to that propref. If that does not update the visible
+dialog reliably, fall back to real X11 input.
 
 ## Escalation
 

@@ -35,6 +35,8 @@ typedef struct es_fd_t {
   es_resource_t super;
   char *efd_path;
   fa_handle_t *efd_fh;
+  char efd_can_read;
+  char efd_can_write;
 } es_fd_t;
 
 /**
@@ -78,31 +80,42 @@ const es_resource_class_t es_resource_fd = {
 /**
  *
  */
+static int
+filename_is_allowed(duk_context *ctx, const char *filename,
+                    const es_context_t *ec, int for_write, int fail)
+{
+  if(strstr(filename, "../") || strstr(filename, "/.."))
+    duk_error(ctx, DUK_ERR_ERROR,
+              "Bad filename %s -- Contains parent references", filename);
+
+  if(gconf.bypass_ecmascript_acl)
+    return 1;
+
+  if(for_write && ec->ec_bypass_file_acl_write)
+    return 1;
+
+  if(!for_write && ec->ec_bypass_file_acl_read)
+    return 1;
+
+  if((ec->ec_storage != NULL && mystrbegins(filename, ec->ec_storage)) ||
+     (ec->ec_path    != NULL && mystrbegins(filename, ec->ec_path)))
+    return 1;
+
+  if(fail)
+    duk_error(ctx, DUK_ERR_ERROR, "Bad filename %s -- Access not allowed",
+              filename);
+
+  return 0;
+}
+
+
 static const char *
 get_filename(duk_context *ctx, int index, const es_context_t *ec,
              int for_write)
 {
   const char *filename = duk_to_string(ctx, index);
-
-  if(gconf.bypass_ecmascript_acl)
-    return filename;
-
-  if(for_write && ec->ec_bypass_file_acl_write)
-    return filename;
-
-  if(!for_write && ec->ec_bypass_file_acl_read)
-    return filename;
-
-  if(strstr(filename, "../") || strstr(filename, "/.."))
-    duk_error(ctx, DUK_ERR_ERROR,
-              "Bad filename %s -- Contains parent references", filename);
-
-  if((ec->ec_storage != NULL && mystrbegins(filename, ec->ec_storage)) ||
-     (ec->ec_path    != NULL && mystrbegins(filename, ec->ec_path)))
-    return filename;
-
-  duk_error(ctx, DUK_ERR_ERROR, "Bad filename %s -- Access not allowed",
-            filename);
+  filename_is_allowed(ctx, filename, ec, for_write, 1);
+  return filename;
 }
 
 /**
@@ -119,19 +132,28 @@ es_file_open(duk_context *ctx)
   //  int mode = duk_to_int(ctx, 2);
 
   int flags;
-
+  int can_read;
+  int can_write;
+  const char *filename = duk_to_string(ctx, 0);
 
   if(!strcmp(flagsstr, "r")) {
     flags = 0;
+    filename_is_allowed(ctx, filename, ec, 0, 1);
+    can_read = 1;
+    can_write = 0;
   } else if(!strcmp(flagsstr, "w")) {
     flags = FA_WRITE;
+    filename_is_allowed(ctx, filename, ec, 1, 1);
+    can_read = filename_is_allowed(ctx, filename, ec, 0, 0);
+    can_write = 1;
   } else if(!strcmp(flagsstr, "a")) {
     flags = FA_WRITE | FA_APPEND;
+    filename_is_allowed(ctx, filename, ec, 1, 1);
+    can_read = filename_is_allowed(ctx, filename, ec, 0, 0);
+    can_write = 1;
   } else {
     duk_error(ctx, DUK_ERR_ERROR, "Invalid flags '%s' to open", flagsstr);
   }
-
-  const char *filename = get_filename(ctx, 0, ec, !!flags);
 
   fa_handle_t *fh = fa_open_ex(filename, errbuf, sizeof(errbuf), flags, NULL);
   if(fh == NULL)
@@ -141,6 +163,8 @@ es_file_open(duk_context *ctx)
   es_fd_t *efd = es_resource_create(ec, &es_resource_fd, 0);
   efd->efd_path = strdup(filename);
   efd->efd_fh = fh;
+  efd->efd_can_read = can_read;
+  efd->efd_can_write = can_write;
 
   es_resource_push(ctx, &efd->super);
   return 1;
@@ -168,6 +192,9 @@ static int
 es_file_read(duk_context *ctx)
 {
   es_fd_t *efd = es_fd_get(ctx, 0);
+  if(!efd->efd_can_read)
+    duk_error(ctx, DUK_ERR_ERROR, "Read access denied for '%s'",
+              efd->efd_path);
   duk_size_t bufsize;
   char *buf = duk_require_buffer_data(ctx, 1, &bufsize);
 
@@ -200,6 +227,9 @@ static int
 es_file_write(duk_context *ctx)
 {
   es_fd_t *efd = es_fd_get(ctx, 0);
+  if(!efd->efd_can_write)
+    duk_error(ctx, DUK_ERR_ERROR, "Write access denied for '%s'",
+              efd->efd_path);
   duk_size_t bufsize;
   char *buf = duk_to_buffer(ctx, 1, &bufsize);
   int len;
@@ -252,7 +282,13 @@ static int
 es_file_ftruncate(duk_context *ctx)
 {
   es_fd_t *efd = es_fd_get(ctx, 0);
-  fa_ftruncate(efd->efd_fh, duk_to_number(ctx, 1));
+  if(!efd->efd_can_write)
+    duk_error(ctx, DUK_ERR_ERROR, "Write access denied for '%s'",
+              efd->efd_path);
+  int status = fa_ftruncate(efd->efd_fh, duk_to_number(ctx, 1));
+  if(status < 0)
+    duk_error(ctx, DUK_ERR_ERROR, "Unable to truncate '%s' -- %s",
+              efd->efd_path, fa_err_code_str(status));
   return 0;
 }
 
@@ -293,6 +329,76 @@ es_file_mkdirs(duk_context *ctx)
               filename, errbuf);
 
   return 0;
+}
+
+
+/**
+ * filename
+ */
+static int
+es_file_unlink(duk_context *ctx)
+{
+  es_context_t *ec = es_get(ctx);
+
+  const char *filename = get_filename(ctx, 0, ec, 1);
+  char errbuf[512];
+
+  if(fa_unlink(filename, errbuf, sizeof(errbuf)))
+    duk_error(ctx, DUK_ERR_ERROR, "Unable to remove '%s' -- %s",
+              filename, errbuf);
+
+  return 0;
+}
+
+
+/**
+ * path
+ */
+static int
+es_file_rmdir(duk_context *ctx)
+{
+  es_context_t *ec = es_get(ctx);
+
+  const char *path = get_filename(ctx, 0, ec, 1);
+  char errbuf[512];
+
+  if(fa_rmdir(path, errbuf, sizeof(errbuf)))
+    duk_error(ctx, DUK_ERR_ERROR, "Unable to remove directory '%s' -- %s",
+              path, errbuf);
+
+  return 0;
+}
+
+
+/**
+ * path
+ */
+static int
+es_file_readdir(duk_context *ctx)
+{
+  es_context_t *ec = es_get(ctx);
+
+  const char *path = get_filename(ctx, 0, ec, 0);
+  char errbuf[512];
+
+  fa_dir_t *fd = fa_scandir(path, errbuf, sizeof(errbuf));
+  if(fd == NULL)
+    duk_error(ctx, DUK_ERR_ERROR, "Unable to scan directory '%s' -- %s",
+              path, errbuf);
+
+  duk_push_array(ctx);
+  int idx = 0;
+  fa_dir_entry_t *fde;
+  RB_FOREACH(fde, &fd->fd_entries, fde_link) {
+    const char *name = rstr_get(fde->fde_filename);
+    if(!strcmp(name, ".") || !strcmp(name, ".."))
+      continue;
+    duk_push_string(ctx, name);
+    duk_put_prop_index(ctx, -2, idx++);
+  }
+
+  fa_dir_free(fd);
+  return 1;
 }
 
 
@@ -364,9 +470,13 @@ static const duk_function_list_entry fnlist_fs[] = {
   { "read",             es_file_read,             5 },
   { "write",            es_file_write,            5 },
   { "fsize",            es_file_fsize,            1 },
+  { "ftruncate",        es_file_ftruncate,        2 },
   { "ftrunctae",        es_file_ftruncate,        2 },
   { "rename",           es_file_rename,           2 },
   { "mkdirs",           es_file_mkdirs,           2 },
+  { "unlink",           es_file_unlink,           1 },
+  { "rmdir",            es_file_rmdir,            1 },
+  { "readdir",          es_file_readdir,          1 },
   { "dirname",          es_file_dirname,          1 },
   { "basename",         es_file_basename,         1 },
   { "copyfile",         es_file_copy,             2 },
