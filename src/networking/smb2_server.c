@@ -7,6 +7,7 @@
  *  (at your option) any later version.
  */
 
+#include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <stdint.h>
@@ -43,6 +44,7 @@ typedef struct smb2srv_handle {
   fa_handle_t *fh;
   fa_dir_t *dir;
   uint8_t *dir_info;
+  char *dir_pattern;
   int dir_sent;
   int is_dir;
   int64_t size;
@@ -137,8 +139,24 @@ smb2srv_handle_close(smb2srv_handle_t *h)
   if(h->dir != NULL)
     fa_dir_free(h->dir);
   free(h->dir_info);
+  free(h->dir_pattern);
   free(h->vfs_url);
   free(h);
+}
+
+
+static void
+smb2srv_handles_close_for_context_locked(struct smb2_context *smb2)
+{
+  smb2srv_handle_t *h, *next;
+
+  for(h = LIST_FIRST(&smb2srv.handles); h != NULL; h = next) {
+    next = LIST_NEXT(h, link);
+    if(h->smb2 != smb2)
+      continue;
+    LIST_REMOVE(h, link);
+    smb2srv_handle_close(h);
+  }
 }
 
 
@@ -172,6 +190,45 @@ smb2srv_handle_make_id_locked(smb2srv_handle_t *h)
 
   memset(h->file_id, 0, sizeof(h->file_id));
   memcpy(h->file_id, &id, sizeof(id));
+}
+
+
+static int
+smb2srv_pattern_match(const char *pattern, const char *name)
+{
+  if(name == NULL)
+    name = "";
+
+  if(pattern == NULL || pattern[0] == '\0' ||
+     (pattern[0] == '*' && pattern[1] == '\0') ||
+     !strcmp(pattern, "*.*"))
+    return 1;
+
+  while(*pattern != '\0') {
+    if(*pattern == '*') {
+      while(*pattern == '*')
+        pattern++;
+      if(*pattern == '\0')
+        return 1;
+      while(*name != '\0') {
+        if(smb2srv_pattern_match(pattern, name))
+          return 1;
+        name++;
+      }
+      return 0;
+    }
+
+    if(*name == '\0')
+      return 0;
+
+    if(*pattern != '?' &&
+       tolower((unsigned char)*pattern) != tolower((unsigned char)*name))
+      return 0;
+
+    pattern++;
+    name++;
+  }
+  return *name == '\0';
 }
 
 
@@ -267,6 +324,17 @@ smb2srv_request_share_name(const char *path)
 
 
 static int
+smb2srv_destruction_event(struct smb2_server *srvr, struct smb2_context *smb2)
+{
+  SMB2SRV_TRACE(TRACE_DEBUG, "session destroyed");
+  hts_mutex_lock(&smb2srv.mutex);
+  smb2srv_handles_close_for_context_locked(smb2);
+  hts_mutex_unlock(&smb2srv.mutex);
+  return 0;
+}
+
+
+static int
 smb2srv_authorize(struct smb2_server *srvr, struct smb2_context *smb2,
                   const char *user, const char *domain, const char *workstation)
 {
@@ -349,6 +417,9 @@ smb2srv_tree_disconnect(struct smb2_server *srvr, struct smb2_context *smb2,
                         const uint32_t tree_id)
 {
   SMB2SRV_TRACE(TRACE_DEBUG, "tree disconnect 0x%x", tree_id);
+  hts_mutex_lock(&smb2srv.mutex);
+  smb2srv_handles_close_for_context_locked(smb2);
+  hts_mutex_unlock(&smb2srv.mutex);
   return 0;
 }
 
@@ -562,12 +633,33 @@ smb2srv_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
     return smb2srv_queue_status(smb2, SMB2_QUERY_DIRECTORY,
                                 SMB2_STATUS_INVALID_HANDLE);
 
+  if(req->file_information_class != SMB2_FILE_ID_FULL_DIRECTORY_INFORMATION &&
+     req->file_information_class != SMB2_FILE_ID_BOTH_DIRECTORY_INFORMATION) {
+    SMB2SRV_TRACE(TRACE_DEBUG, "unsupported query-directory class=%u",
+                  req->file_information_class);
+    return smb2srv_queue_status(smb2, SMB2_QUERY_DIRECTORY,
+                                SMB2_STATUS_INVALID_INFO_CLASS);
+  }
+
   if(req->flags & SMB2_RESTART_SCANS)
     h->dir_sent = 0;
+
+  if(req->name != NULL && req->name[0] != '\0') {
+    if(h->dir_pattern == NULL || strcmp(h->dir_pattern, req->name)) {
+      char *pattern = strdup(req->name);
+      if(pattern == NULL)
+        return smb2srv_queue_status(smb2, SMB2_QUERY_DIRECTORY,
+                                    SMB2_STATUS_NO_MEMORY);
+      free(h->dir_pattern);
+      h->dir_pattern = pattern;
+      h->dir_sent = 0;
+    }
+  }
+
   SMB2SRV_TRACE(TRACE_DEBUG,
-                "query-directory class=%u flags=0x%x sent=%d path=%s",
+                "query-directory class=%u flags=0x%x sent=%d pattern=%s path=%s",
                 req->file_information_class, req->flags, h->dir_sent,
-                h->vfs_url);
+                h->dir_pattern != NULL ? h->dir_pattern : "*", h->vfs_url);
 
   if(h->dir == NULL) {
     h->dir = fa_scandir(h->vfs_url, errbuf, sizeof(errbuf));
@@ -579,6 +671,8 @@ smb2srv_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
   }
 
   RB_FOREACH(fde, &h->dir->fd_entries, fde_link) {
+    if(!smb2srv_pattern_match(h->dir_pattern, rstr_get(fde->fde_filename)))
+      continue;
     if(seen++ < (size_t)h->dir_sent)
       continue;
     selected = fde;
@@ -784,7 +878,7 @@ smb2srv_echo(struct smb2_server *srvr, struct smb2_context *smb2)
 
 
 static struct smb2_server_request_handlers smb2srv_handlers = {
-  NULL,
+  smb2srv_destruction_event,
   smb2srv_authorize,
   smb2srv_session_established,
   smb2srv_logoff,
