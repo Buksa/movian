@@ -64,6 +64,7 @@ typedef struct smb2srv_state {
   setting_t *port_setting;
   int enabled;
   int thread_running;
+  int stop_requested;
   int restart_requested;
   int reverting_port_setting;
   int port;
@@ -384,8 +385,15 @@ smb2srv_tree_connect(struct smb2_server *srvr, struct smb2_context *smb2,
 {
   char *path = req != NULL && req->path != NULL && req->path_length > 0 ?
     (char *)smb2_utf16_to_utf8(req->path, req->path_length / 2) : NULL;
-  const char *name = smb2srv_request_share_name(path);
+  const char *name;
   int ok;
+
+  if(path == NULL) {
+    SMB2SRV_TRACE(TRACE_ERROR, "tree-connect missing path");
+    return -1;
+  }
+
+  name = smb2srv_request_share_name(path);
 
   hts_mutex_lock(&smb2srv.mutex);
   ok = smb2srv.share_name != NULL && !strcmp(name, smb2srv.share_name);
@@ -600,7 +608,7 @@ smb2srv_read(struct smb2_server *srvr, struct smb2_context *smb2,
   }
 
   r = fa_read(h->fh, buf, count);
-  if(r < 0) {
+  if(r <= 0 || (req->minimum_count != 0 && r < req->minimum_count)) {
     free(buf);
     return smb2srv_queue_status(smb2, SMB2_READ, SMB2_STATUS_END_OF_FILE);
   }
@@ -703,9 +711,12 @@ smb2srv_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
     struct fa_stat *st = &selected->fde_stat;
     const char *name = rstr_get(selected->fde_filename);
     uint32_t name_len = smb2srv_name_utf16_len(name);
+    int type = selected->fde_type;
 
     if(!selected->fde_statdone && fa_dir_entry_stat(selected))
       memset(st, 0, sizeof(*st));
+    if(selected->fde_statdone)
+      type = st->fs_type;
 
     di->file_index = h->dir_sent;
     smb2srv_fill_time(&di->creation_time, st->fs_mtime);
@@ -714,14 +725,14 @@ smb2srv_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
     smb2srv_fill_time(&di->change_time, st->fs_mtime);
     di->end_of_file = st->fs_size > 0 ? st->fs_size : 0;
     di->allocation_size = di->end_of_file;
-    di->file_attributes = smb2srv_attrs_from_type(st->fs_type);
+    di->file_attributes = smb2srv_attrs_from_type(type);
     di->file_name_length = name_len;
     di->short_name_length = name_len < sizeof(di->short_name) ?
       name_len : sizeof(di->short_name);
     di->name = name;
     SMB2SRV_TRACE(TRACE_DEBUG,
                   "dir-entry name=%s type=%d size=%"PRId64" name_len=%u",
-                  name, st->fs_type, di->end_of_file, name_len);
+                  name, type, di->end_of_file, name_len);
   }
 
   h->dir_sent++;
@@ -935,7 +946,9 @@ smb2srv_thread(void *aux)
 
   hts_mutex_lock(&smb2srv.mutex);
   smb2srv.thread_running = 1;
+  smb2srv.stop_requested = 0;
   memset(&smb2srv.server, 0, sizeof(smb2srv.server));
+  smb2srv.server.fd = -1;
   smb2srv.server.handlers = &smb2srv_handlers;
   smb2srv.server.signing_enabled = 1;
   smb2srv.server.allow_anonymous = 0;
@@ -943,6 +956,20 @@ smb2srv_thread(void *aux)
   snprintf(smb2srv.server.hostname, sizeof(smb2srv.server.hostname),
            "%s", gconf.system_name[0] != '\0' ? gconf.system_name : "Movian");
   snprintf(smb2srv.server.domain, sizeof(smb2srv.server.domain), "WORKGROUP");
+  if(smb2srv.stop_requested || !smb2srv.enabled ||
+     !smb2srv_config_ready_locked()) {
+    if(smb2srv.restart_requested) {
+      smb2srv.restart_requested = 0;
+      restart = smb2srv.enabled && smb2srv_config_ready_locked();
+    }
+    smb2srv.stop_requested = 0;
+    smb2srv.thread_running = 0;
+    hts_mutex_unlock(&smb2srv.mutex);
+    if(restart)
+      hts_thread_create_detached("SMB2-server", smb2srv_thread, NULL,
+                                 THREAD_PRIO_BGTASK);
+    return NULL;
+  }
   hts_mutex_unlock(&smb2srv.mutex);
 
   TRACE(TRACE_INFO, "SMB2-SERVER", "Listening on port %d",
@@ -954,6 +981,7 @@ smb2srv_thread(void *aux)
 
   hts_mutex_lock(&smb2srv.mutex);
   smb2srv.thread_running = 0;
+  smb2srv.stop_requested = 0;
   smb2srv.server.fd = -1;
   if(smb2srv.restart_requested) {
     smb2srv.restart_requested = 0;
@@ -1032,33 +1060,37 @@ smb2srv_sync_port_setting(int port)
 static void
 smb2srv_stop_locked(int restart)
 {
-  if(smb2srv.server.fd >= 0) {
-    int fd = smb2srv.server.fd;
+  int fd = smb2srv.server.fd;
 
-    if(smb2srv.thread_running) {
-      int wake_fd = open("/dev/null", O_RDONLY);
+  if(smb2srv.thread_running) {
+    int wake_fd;
 
-      if(restart)
-        smb2srv.restart_requested = 1;
+    smb2srv.stop_requested = 1;
+    if(restart)
+      smb2srv.restart_requested = 1;
 
-      /*
-       * libsmb2 owns server.fd once smb2_serve_port() is running and closes
-       * that descriptor on exit. Close the real listener here so the TCP port
-       * stops accepting immediately, then hand libsmb2 a harmless readable fd
-       * so its select()/accept() loop wakes and exits without double-closing a
-       * descriptor that the process may have already reused.
-       */
-      if(wake_fd >= 0) {
-        smb2srv.server.fd = wake_fd;
-        shutdown(fd, SHUT_RDWR);
-        close(fd);
-      } else {
-        shutdown(fd, SHUT_RDWR);
-      }
-    } else {
+    if(fd < 0)
+      return;
+
+    wake_fd = open("/dev/null", O_RDONLY);
+
+    /*
+     * libsmb2 owns server.fd once smb2_serve_port() is running and closes
+     * that descriptor on exit. Close the real listener here so the TCP port
+     * stops accepting immediately, then hand libsmb2 a harmless readable fd
+     * so its select()/accept() loop wakes and exits without double-closing a
+     * descriptor that the process may have already reused.
+     */
+    if(wake_fd >= 0) {
+      smb2srv.server.fd = wake_fd;
+      shutdown(fd, SHUT_RDWR);
       close(fd);
-      smb2srv.server.fd = -1;
+    } else {
+      shutdown(fd, SHUT_RDWR);
     }
+  } else if(fd >= 0) {
+    close(fd);
+    smb2srv.server.fd = -1;
   }
 }
 
