@@ -118,6 +118,12 @@ Avahi service discovery uses the host daemon over the system D-Bus:
 This allows `_smb._tcp` servers to appear under Local network without
 granting broader system bus access.
 
+Flatpak 1.14 does not accept Linux capability finish args such as
+`--cap-add=NET_BIND_SERVICE`; `flatpak build-finish --cap-add=...` fails with
+`Unknown option`. Do not use Docker/Podman capability syntax in this manifest.
+For SMB2 server Windows acceptance, keep TCP `445` exposure as a separate
+packaging or host-forwarding problem from high-port request-handler smokes.
+
 AppStream metadata is generated from `dev.uzver.Movian.metainfo.xml.in`
 during the build. The version comes from:
 

@@ -1207,7 +1207,10 @@ setting_set(setting_t *s, int type, ...)
     break;
 
   case SETTING_STRING:
-    abort();
+    str = va_arg(ap, const char *);
+    rstr_t *rstr = rstr_alloc(str);
+    prop_set_rstring(s->s_val, rstr);
+    rstr_release(rstr);
     break;
 
   case SETTING_MULTIOPT:

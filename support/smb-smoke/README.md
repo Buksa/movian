@@ -97,3 +97,7 @@ Successful findings to preserve in future smokes:
   server listener alive. Verify this by attempting a privileged or occupied
   port, then checking that the previous high port still accepts TCP and SMB2
   session setup.
+- If a persisted startup port such as `445` is unavailable, the server should
+  fall back to the default high port and the Network settings row should also
+  show the effective fallback port. A stale UI value is a failed smoke even when
+  the listener itself survived.

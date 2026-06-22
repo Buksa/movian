@@ -57,9 +57,11 @@ typedef struct smb2srv_handle {
 typedef struct smb2srv_state {
   hts_mutex_t mutex;
   struct smb2_server server;
+  setting_t *port_setting;
   int enabled;
   int thread_running;
   int restart_requested;
+  int reverting_port_setting;
   int port;
   uint64_t next_file_id;
   char *username;
@@ -895,6 +897,28 @@ smb2srv_trace_port_unavailable(int port)
 
 
 static void
+smb2srv_sync_port_setting(int port)
+{
+  char portbuf[16];
+
+  hts_mutex_lock(&smb2srv.mutex);
+  if(smb2srv.port_setting == NULL || smb2srv.reverting_port_setting) {
+    hts_mutex_unlock(&smb2srv.mutex);
+    return;
+  }
+  smb2srv.reverting_port_setting = 1;
+  hts_mutex_unlock(&smb2srv.mutex);
+
+  snprintf(portbuf, sizeof(portbuf), "%d", port);
+  setting_set(smb2srv.port_setting, SETTING_STRING, portbuf);
+
+  hts_mutex_lock(&smb2srv.mutex);
+  smb2srv.reverting_port_setting = 0;
+  hts_mutex_unlock(&smb2srv.mutex);
+}
+
+
+static void
 smb2srv_stop_locked(int restart)
 {
   if(smb2srv.server.fd > 0) {
@@ -928,6 +952,9 @@ smb2srv_enable_disable(void)
       TRACE(TRACE_INFO, "SMB2-SERVER", "Falling back to port %d",
             SMB2SRV_DEFAULT_PORT);
       smb2srv.port = SMB2SRV_DEFAULT_PORT;
+      hts_mutex_unlock(&smb2srv.mutex);
+      smb2srv_sync_port_setting(SMB2SRV_DEFAULT_PORT);
+      hts_mutex_lock(&smb2srv.mutex);
       start = 1;
     } else {
       smb2srv_trace_port_unavailable(smb2srv.port);
@@ -958,13 +985,23 @@ static void
 smb2srv_set_port(void *opaque, const char *str)
 {
   int port = atoi(str);
+  int revert_port = 0;
 
   hts_mutex_lock(&smb2srv.mutex);
   if(port < 1 || port > 65535)
     port = SMB2SRV_DEFAULT_PORT;
+
+  if(smb2srv.reverting_port_setting) {
+    smb2srv.port = port;
+    hts_mutex_unlock(&smb2srv.mutex);
+    return;
+  }
+
   if(smb2srv.port != port && !smb2srv_port_available(port)) {
     smb2srv_trace_port_unavailable(port);
+    revert_port = smb2srv.port;
     hts_mutex_unlock(&smb2srv.mutex);
+    smb2srv_sync_port_setting(revert_port);
     return;
   }
   if(smb2srv.port != port && smb2srv.thread_running)
@@ -1034,14 +1071,16 @@ smb2_server_init(void)
                  SETTING_COURIER(asyncio_courier),
                  NULL);
 
-  setting_create(SETTING_STRING, gconf.settings_network,
-                 SETTINGS_INITIAL_UPDATE,
-                 SETTING_TITLE(_p("Server TCP port")),
-                 SETTING_VALUE("1445"),
-                 SETTING_CALLBACK(smb2srv_set_port, NULL),
-                 SETTING_STORE("smb2server", "port"),
-                 SETTING_COURIER(asyncio_courier),
-                 NULL);
+  smb2srv.port_setting =
+    setting_create(SETTING_STRING, gconf.settings_network,
+                   SETTINGS_INITIAL_UPDATE,
+                   SETTING_TITLE(_p("Server TCP port")),
+                   SETTING_VALUE("1445"),
+                   SETTING_CALLBACK(smb2srv_set_port, NULL),
+                   SETTING_STORE("smb2server", "port"),
+                   SETTING_COURIER(asyncio_courier),
+                   NULL);
+  smb2srv_sync_port_setting(smb2srv.port);
 
   setting_create(SETTING_STRING, gconf.settings_network,
                  SETTINGS_INITIAL_UPDATE,

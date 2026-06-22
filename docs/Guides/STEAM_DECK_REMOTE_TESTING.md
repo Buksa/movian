@@ -70,9 +70,13 @@ scp -i ~/.ssh/movian_deck \
 Install remotely:
 
 ```sh
-ssh -i ~/.ssh/movian_deck deck@<deck-ip> \
+ssh -n -i ~/.ssh/movian_deck deck@<deck-ip> \
   'flatpak install --user -y /home/deck/Downloads/dev.uzver.Movian-<short-sha>.flatpak'
 ```
+
+Use `ssh -n` in scripted workflows where more local commands follow the SSH
+call. Without it, OpenSSH can consume the rest of a here-doc or pipeline as
+remote stdin.
 
 If `flatpak install` appears to hang, check whether it is still working in the
 Flatpak repository:
@@ -85,15 +89,30 @@ ssh -i ~/.ssh/movian_deck deck@<deck-ip> \
 Verify the installed commit and version:
 
 ```sh
-ssh -i ~/.ssh/movian_deck deck@<deck-ip> \
+ssh -n -i ~/.ssh/movian_deck deck@<deck-ip> \
   'flatpak info --user dev.uzver.Movian | sed -n "1,80p"'
 ```
 
 ## Launch And Observe
 
-Launching the GLW UI through SSH can exit immediately in some Deck desktop
-sessions. If this happens, ask the Deck user to start Movian normally, then
-continue the remote smoke through SSH and HTTP.
+Launching the GLW UI through a plain SSH command can exit when the SSH session
+ends. In Desktop Mode, prefer a transient user systemd unit with the Plasma X11
+display and the current random `xauth_*` file:
+
+```sh
+ssh -n -i ~/.ssh/movian_deck deck@<deck-ip> '
+  flatpak kill dev.uzver.Movian 2>/dev/null || true
+  systemctl --user stop movian-codex-test.service 2>/dev/null || true
+  XAUTH=$(find /run/user/1000 -maxdepth 1 -name "xauth_*" | head -1)
+  systemd-run --user --unit=movian-codex-test --collect \
+    --setenv=DISPLAY=:0 --setenv=XAUTHORITY="$XAUTH" \
+    flatpak run dev.uzver.Movian
+'
+```
+
+`xauth_*` changes after reboot. Resolve it dynamically. If this still fails,
+ask the Deck user to start Movian normally, then continue the remote smoke
+through SSH and HTTP.
 
 Useful probes:
 
@@ -142,6 +161,12 @@ no CRASH / Signal lines in /api/logfile/0 or /api/logfile/1
 If setting port `445` is accepted but no listener remains on `445`, classify the
 result as privileged-port packaging/forwarding work unless request-handler
 smokes also fail on a high port.
+
+Do not add Docker/Podman-style capability arguments to the Flatpak manifest.
+Flatpak 1.14 `build-finish`, `run`, and `override` do not support
+`--cap-add=NET_BIND_SERVICE`; a test run reports `Unknown option
+--cap-add=NET_BIND_SERVICE`. Keep high-port handler smokes separate from the
+product/packaging work needed to expose TCP `445` to ordinary Windows clients.
 
 If an unavailable port is rejected, the previous working listener should remain
 alive. Verify the old high port still accepts TCP and SMB2 session setup before
