@@ -92,9 +92,11 @@ Successful findings to preserve in future smokes:
   `1445` is acceptable. For ordinary Windows Explorer or `net use` acceptance,
   the service must be reachable on TCP `445`; Windows `\\host@port\share` and
   `\\host:port\share` are not reliable user-facing connection forms.
-- If TCP `445` cannot be bound from Flatpak/Linux while higher ports work,
+- If TCP `445` cannot be bound on the target platform while higher ports work,
   keep handler correctness and privileged-port packaging/forwarding as separate
-  test results.
+  test results. This applies beyond Flatpak: native Linux, SteamOS, Android,
+  macOS, and other targets need their own host integration story for Windows
+  SMB clients.
 - A failed switch to an unavailable port must leave the previous working SMB2
   server listener alive. Verify this by attempting a privileged or occupied
   port, then checking that the previous high port still accepts TCP and SMB2

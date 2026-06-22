@@ -5,8 +5,8 @@ from ordinary Windows clients.
 
 ## Current State
 
-The Movian SMB2 server MVP runs inside the local Flatpak and serves a read-only
-share on a non-privileged development port. On the Steam Deck test host:
+The Movian SMB2 server MVP currently serves a read-only share on a
+non-privileged development port. On the Steam Deck Flatpak test host:
 
 - `192.168.1.56:1445` is open and accepts libsmb2 session setup.
 - `192.168.1.56:445` is closed.
@@ -16,6 +16,10 @@ share on a non-privileged development port. On the Steam Deck test host:
 
 The MVP request handlers are therefore usable on high ports, but Windows
 Explorer and `net use` still need a way to reach the server on TCP `445`.
+
+This is not only a Flatpak problem. It is a general host-platform exposure
+problem: Windows SMB clients expect TCP `445`, while many platforms reserve or
+heavily restrict that port for privileged/system services.
 
 ## Windows Requirements
 
@@ -30,6 +34,33 @@ This is separate from network-neighborhood visibility. Even after TCP `445`
 works, auto-appearance under Explorer's Network view may require a Windows
 discovery layer such as WS-Discovery. The first acceptance target should be
 manual UNC access by IP address.
+
+## Platform Scope
+
+The SMB2 request handlers can be portable, but Windows-visible service exposure
+is platform-specific:
+
+- Linux and SteamOS reserve TCP ports below `1024` for privileged processes by
+  default. A regular Movian process cannot bind TCP `445` without root,
+  `CAP_NET_BIND_SERVICE`, a host redirect/proxy, socket activation, or a global
+  privileged-port policy change.
+- Flatpak adds sandbox constraints on top of the normal Linux rule. The current
+  local Flatpak does not receive Linux capabilities, so the host must expose or
+  forward TCP `445`.
+- Android uses a Linux kernel but runs apps inside an application sandbox.
+  Binding TCP `445` should be treated as a platform integration problem that
+  would require Android-specific privileges, service lifecycle, and foreground
+  networking policy. A normal Android app should not be assumed able to expose
+  a Windows SMB server on TCP `445`.
+- macOS and other Unix-like systems also treat low ports as privileged or
+  otherwise system-managed. A native package would need a helper, launchd/system
+  service, pf redirect, or equivalent host integration.
+- Windows as a server platform is different again: TCP `445` may already be
+  owned by the OS SMB Server service, and firewall/service ownership must be
+  handled through Windows packaging and service policy.
+
+Therefore, keep the core SMB2 server on an unprivileged configurable port, and
+solve TCP `445` exposure with a platform-specific host helper.
 
 ## Flatpak Capability Result
 
@@ -50,6 +81,9 @@ Unknown option --cap-add=NET_BIND_SERVICE
 not a Linux capability grant. Inside the running Flatpak sandbox, capability
 sets were empty (`CapEff`, `CapBnd`, and `CapAmb` all zero). Treat TCP `445`
 exposure as host packaging or forwarding work, not as a manifest finish-arg.
+Native non-Flatpak Linux builds may use normal host mechanisms such as
+`setcap cap_net_bind_service=+ep` on the binary, but that is still a host
+installation decision rather than SMB2 handler logic.
 
 ## Option A: Host Port Redirect
 
@@ -76,7 +110,7 @@ Cons:
 - Needs careful persistence and removal scripts.
 - Port ownership and firewall behavior are outside the Flatpak manifest.
 
-This is a strong candidate for a Steam Deck helper once the exact rule is
+This is a strong candidate for a Linux/SteamOS helper once the exact rule is
 validated.
 
 ## Option B: systemd Socket Proxy
@@ -119,6 +153,10 @@ Cons:
 This is the recommended next experiment because it is reversible and does not
 require changing Movian's SMB2 server internals.
 
+The same pattern applies to native Linux packages and Flatpak installations:
+the host service manager owns privileged TCP `445`; Movian continues to run as
+an unprivileged process on a high port.
+
 ## Option C: Direct systemd Socket Activation
 
 In direct socket activation, systemd binds TCP `445`, starts Movian, and passes
@@ -136,8 +174,9 @@ the current MVP:
 - Flatpak fd inheritance through the launcher must be verified separately.
 - Stop/restart lifecycle must avoid shutting down a systemd-owned listening fd.
 
-This is a plausible v2/v3 design if we want to remove the proxy layer, but it is
-more invasive than a host redirect or systemd socket proxy.
+This is a plausible v2/v3 design if we want to remove the proxy layer. It
+applies to native Linux too, but it is more invasive than a host redirect or
+systemd socket proxy.
 
 ## Option D: Lower `ip_unprivileged_port_start`
 
@@ -149,7 +188,8 @@ Linux can allow unprivileged processes to bind low ports by changing:
 
 The tested Steam Deck uses the normal value `1024`. Lowering it to `0` would let
 ordinary user processes bind TCP `445`, but this is a global host security
-change. It is not recommended as the default product path.
+change. It affects all unprivileged processes, not only Movian. It is not
+recommended as the default product path.
 
 ## Discovery Layer
 
@@ -167,7 +207,8 @@ cmd /c "net use \\192.168.1.56\Media /user:movian 123 /persistent:no"
 
 ## Recommended Next Step
 
-Validate a reversible systemd socket proxy on the Steam Deck:
+Validate a reversible systemd socket proxy on Linux/SteamOS, starting with the
+Steam Deck test host:
 
 1. Keep Movian SMB2 serving on `127.0.0.1:1445` / `0.0.0.0:1445`.
 2. Install temporary root-owned `movian-smb2-forward.socket` and
@@ -180,7 +221,6 @@ Test-NetConnection 192.168.1.56 -Port 445
 cmd /c "net use \\192.168.1.56\Media /user:movian 123 /persistent:no"
 ```
 
-If this passes, document the unit files as the first Steam Deck Windows-access
-helper. If it fails, capture the Windows error, Movian log tail, and the proxy
-service journal before trying nftables.
-
+If this passes, document the unit files as the first Linux/SteamOS
+Windows-access helper. If it fails, capture the Windows error, Movian log tail,
+and the proxy service journal before trying nftables.
