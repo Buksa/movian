@@ -70,6 +70,7 @@ CONFIG_LIST="
  libpthread
  libpulse
  libsmb2
+ libsmb2_server
  librtmp
  libx11
  libxext
@@ -470,11 +471,15 @@ ext_setup() {
 
 libsmb2_setup() {
     if disabled libsmb2; then
+        disable libsmb2_server
         return
     fi
 
     which >/dev/null 2>&1 cmake || die
     update_ext_submodule libsmb2
+
+    LIBSMB2_SERVER_REQUESTED=${libsmb2_server}
+    disable libsmb2_server
 
     LIBSMB2_BUILD_DIR=${BUILDDIR}/libsmb2/build
     mkdir -p "${LIBSMB2_BUILD_DIR}"
@@ -499,9 +504,43 @@ libsmb2_setup() {
         -DENABLE_LIBKRB5=OFF \
         -DENABLE_GSSAPI=OFF || die
 
+    if [ "x${LIBSMB2_SERVER_REQUESTED}" != "xno" ] && check_libsmb2_server_api; then
+        enable libsmb2_server
+        echo "Using libsmb2 server API: yes"
+    else
+        echo "Using libsmb2 server API: no"
+    fi
+
     echo >>${CONFIG_MAK} "LIBSMB2_BUILD_DIR=${LIBSMB2_BUILD_DIR}"
     echo >>${CONFIG_MAK} "LDFLAGS_cfg += -lsmb2"
     add_stamp libsmb2
+}
+
+
+check_libsmb2_server_api() {
+    mkdir -p "${TMPDIR}"
+    cat >"${TMPDIR}/libsmb2_server_api.c" <<EOF
+#include <stdint.h>
+#include <time.h>
+#include <smb2/smb2.h>
+#include <smb2/libsmb2.h>
+#include <smb2/libsmb2-raw.h>
+
+int main(void)
+{
+    struct smb2_server server;
+    struct smb2_server_request_handlers handlers;
+    int (*bind_fn)(const uint16_t, const int, int *) = smb2_bind_and_listen;
+    int (*serve_fn)(struct smb2_server *, const int,
+                    smb2_client_connection, void *) = smb2_serve_port;
+    server.handlers = &handlers;
+    return bind_fn != 0 && serve_fn != 0 ? 0 : 1;
+}
+EOF
+
+    ${CC} -I"${TOPDIR}/ext/libsmb2/include" \
+        -c "${TMPDIR}/libsmb2_server_api.c" \
+        -o "${TMPDIR}/libsmb2_server_api.o" >/dev/null 2>&1
 }
 
 
