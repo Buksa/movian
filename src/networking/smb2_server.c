@@ -9,6 +9,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -456,8 +457,10 @@ smb2srv_create(struct smb2_server *srvr, struct smb2_context *smb2,
   hts_mutex_lock(&smb2srv.mutex);
   root = smb2srv.share_root != NULL ? strdup(smb2srv.share_root) : NULL;
   hts_mutex_unlock(&smb2srv.mutex);
-  if(root == NULL)
+  if(root == NULL || root[0] == '\0') {
+    free(root);
     return smb2srv_queue_status(smb2, SMB2_CREATE, SMB2_STATUS_ACCESS_DENIED);
+  }
 
   url = smb2srv_map_path(root, req->name);
   free(root);
@@ -580,8 +583,11 @@ smb2srv_read(struct smb2_server *srvr, struct smb2_context *smb2,
   if(h == NULL || h->fh == NULL)
     return smb2srv_queue_status(smb2, SMB2_READ, SMB2_STATUS_INVALID_HANDLE);
 
-  if(count == 0)
-    count = 1;
+  if(count == 0) {
+    memset(rep, 0, sizeof(*rep));
+    return 0;
+  }
+
   buf = malloc(count);
   if(buf == NULL)
     return smb2srv_queue_status(smb2, SMB2_READ, SMB2_STATUS_NO_MEMORY);
@@ -622,7 +628,7 @@ smb2srv_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
   smb2srv_handle_t *h;
   fa_dir_entry_t *fde, *selected = NULL;
   struct smb2_fileidbothdirectoryinformation *out;
-  size_t seen = 0, stride, bytes = 0;
+  size_t seen = 0, stride;
   char errbuf[512];
 
   hts_mutex_lock(&smb2srv.mutex);
@@ -684,10 +690,8 @@ smb2srv_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
   }
 
   stride = (sizeof(*out) + 7) & ~7;
-  bytes = (sizeof(*out) +
-           smb2srv_name_utf16_len(rstr_get(selected->fde_filename)) + 7) & ~7;
   free(h->dir_info);
-  h->dir_info = calloc(1, bytes);
+  h->dir_info = calloc(1, stride);
   if(h->dir_info == NULL)
     return smb2srv_queue_status(smb2, SMB2_QUERY_DIRECTORY,
                                 SMB2_STATUS_NO_MEMORY);
@@ -721,10 +725,10 @@ smb2srv_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
 
   h->dir_sent++;
   rep->output_buffer = (uint8_t *)out;
-  rep->output_buffer_length = bytes;
+  rep->output_buffer_length = stride;
   SMB2SRV_TRACE(TRACE_DEBUG,
-                "query-directory reply entries=1 bytes=%zu stride=%zu",
-                bytes, stride);
+                "query-directory reply entries=1 stride=%zu",
+                stride);
   return 0;
 }
 
@@ -836,8 +840,8 @@ smb2srv_query_info(struct smb2_server *srvr, struct smb2_context *smb2,
   TRACE(TRACE_ERROR, "SMB2-SERVER",
         "Unsupported query-info type=%u class=%u for %s",
         req->info_type, req->file_info_class, h->vfs_url);
-  rep->output_buffer_length = -1;
-  return 0;
+  return smb2srv_queue_status(smb2, SMB2_QUERY_INFO,
+                              SMB2_STATUS_INVALID_INFO_CLASS);
 }
 
 
@@ -1015,13 +1019,31 @@ smb2srv_sync_port_setting(int port)
 static void
 smb2srv_stop_locked(int restart)
 {
-  if(smb2srv.server.fd > 0) {
+  if(smb2srv.server.fd >= 0) {
+    int fd = smb2srv.server.fd;
+
     if(smb2srv.thread_running) {
+      int wake_fd = open("/dev/null", O_RDONLY);
+
       if(restart)
         smb2srv.restart_requested = 1;
-      shutdown(smb2srv.server.fd, SHUT_RDWR);
+
+      /*
+       * libsmb2 owns server.fd once smb2_serve_port() is running and closes
+       * that descriptor on exit. Close the real listener here so the TCP port
+       * stops accepting immediately, then hand libsmb2 a harmless readable fd
+       * so its select()/accept() loop wakes and exits without double-closing a
+       * descriptor that the process may have already reused.
+       */
+      if(wake_fd >= 0) {
+        smb2srv.server.fd = wake_fd;
+        shutdown(fd, SHUT_RDWR);
+        close(fd);
+      } else {
+        shutdown(fd, SHUT_RDWR);
+      }
     } else {
-      close(smb2srv.server.fd);
+      close(fd);
       smb2srv.server.fd = -1;
     }
   }
@@ -1054,8 +1076,9 @@ smb2srv_enable_disable(void)
       smb2srv_trace_port_unavailable(smb2srv.port);
     }
   } else if(smb2srv.enabled && !smb2srv_config_ready_locked()) {
+    smb2srv_stop_locked(0);
     SMB2SRV_TRACE(TRACE_DEBUG,
-                  "not starting: username, password, share and path are required");
+                  "not running: username, password, share and path are required");
   }
   hts_mutex_unlock(&smb2srv.mutex);
 
