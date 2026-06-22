@@ -167,6 +167,8 @@ Flatpak 1.14 `build-finish`, `run`, and `override` do not support
 `--cap-add=NET_BIND_SERVICE`; a test run reports `Unknown option
 --cap-add=NET_BIND_SERVICE`. Keep high-port handler smokes separate from the
 product/packaging work needed to expose TCP `445` to ordinary Windows clients.
+For the current Windows-access research and candidate host-side forwarding
+options, see `docs/Guides/SMB2_WINDOWS_VISIBILITY_RESEARCH.md`.
 
 If an unavailable port is rejected, the previous working listener should remain
 alive. Verify the old high port still accepts TCP and SMB2 session setup before

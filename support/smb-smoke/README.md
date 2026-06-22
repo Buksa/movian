@@ -71,6 +71,8 @@ runtime setting, not only as a process-start option.
 
 For the full SSH-assisted Steam Deck copy/install/log workflow, see
 `docs/Guides/STEAM_DECK_REMOTE_TESTING.md`.
+For Windows visibility, TCP `445`, and systemd/nft forwarding research, see
+`docs/Guides/SMB2_WINDOWS_VISIBILITY_RESEARCH.md`.
 
 Successful findings to preserve in future smokes:
 
