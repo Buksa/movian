@@ -29,4 +29,4 @@
 [submodule "ext/libsmb2"]
 	path = ext/libsmb2
 	url = https://github.com/Buksa/libsmb2.git
-	ref = refs/tags/libsmb2-6.2
+	branch = codex/movian-server-isolation

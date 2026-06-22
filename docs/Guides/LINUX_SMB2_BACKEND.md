@@ -1,7 +1,10 @@
 # Linux SMB2 and SMB3 Backend
 
-Linux builds include a bundled, read-only SMB2/SMB3 backend based on
-`libsmb2-6.2`. It is available through the temporary `smb2://` scheme while
+Linux builds include a bundled SMB2/SMB3 backend based on a pinned
+`ext/libsmb2` submodule commit. The current Movian branch tracks the
+`Buksa/libsmb2` `codex/movian-server-isolation` branch, rebased on current
+upstream `sahlberg/libsmb2` master, with a small Movian embedding hardening
+patch. It is available through the temporary `smb2://` scheme while
 the existing `smb://` backend remains unchanged for compatibility and A/B
 testing.
 
@@ -27,16 +30,17 @@ its system D-Bus service.
 
 ## Supported Operations
 
-The initial backend supports:
+The backend supports:
 
 - host share enumeration;
 - directory browsing;
 - path metadata;
 - file open, read, seek, size, and close;
+- write, append, truncate, rename, unlink, rmdir, mkdir, and filesystem
+  free-space queries where the remote share permits them;
 - guest and authenticated sessions.
 
-It is intentionally read-only. Write, create, rename, delete, directory
-mutation, and extended-attribute operations are not implemented.
+Extended-attribute operations are not implemented.
 
 Each open file or directory operation owns its own libsmb2 context. This keeps
 parallel resources independent and avoids sharing mutable connection state

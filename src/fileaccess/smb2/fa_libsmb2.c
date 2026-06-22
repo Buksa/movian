@@ -584,12 +584,12 @@ movian_smb2_scan_host(fa_dir_t *fd, const char *url,
   }
 
   struct srvsvc_SHARE_INFO_1_CONTAINER *shares =
-    &state.reply->ses.ShareInfo.Level1;
-  if(shares->Buffer != NULL) {
+    &state.reply->ses.ShareEnum.Level1;
+  if(shares->share_info_1 != NULL) {
     for(uint32_t i = 0; i < shares->EntriesRead; i++) {
       struct srvsvc_SHARE_INFO_1 *share =
-        &shares->Buffer->share_info_1[i];
-      const char *name = share->netname.utf8;
+        &shares->share_info_1[i];
+      const char *name = share->netname;
       uint32_t share_type = share->type;
       int add = name != NULL &&
         (share_type & 3) == SHARE_TYPE_DISKTREE &&

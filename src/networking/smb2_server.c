@@ -934,7 +934,12 @@ static void
 smb2srv_client_connected(struct smb2_context *smb2, void *cb_data)
 {
   SMB2SRV_TRACE(TRACE_DEBUG, "client connected");
-  smb2_set_version(smb2, SMB2_VERSION_ANY);
+  /*
+   * The embedded read-only server only needs SMB 2.0.2 for the MVP.
+   * Newer libsmb2 negotiates signing for authenticated SMB 3.1.1 sessions,
+   * and the server-side signing path is not ready for Movian yet.
+   */
+  smb2_set_version(smb2, SMB2_VERSION_0202);
 }
 
 
