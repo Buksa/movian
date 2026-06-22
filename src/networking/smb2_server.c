@@ -60,6 +60,7 @@ typedef struct smb2srv_handle {
 typedef struct smb2srv_state {
   hts_mutex_t mutex;
   struct smb2_server server;
+  struct smb2_ioctl_validate_negotiate_info validate_info;
   setting_t *port_setting;
   int enabled;
   int thread_running;
@@ -177,7 +178,7 @@ smb2srv_handle_find_locked(struct smb2_context *smb2, const smb2_file_id file_id
   LIST_FOREACH(h, &smb2srv.handles, link) {
     if(compound && h->smb2 == smb2)
       return h;
-    if(!memcmp(h->file_id, file_id, SMB2_FD_SIZE))
+    if(h->smb2 == smb2 && !memcmp(h->file_id, file_id, SMB2_FD_SIZE))
       return h;
   }
   return NULL;
@@ -857,12 +858,24 @@ static int
 smb2srv_ioctl(struct smb2_server *srvr, struct smb2_context *smb2,
               struct smb2_ioctl_request *req, struct smb2_ioctl_reply *rep)
 {
+  struct smb2_ioctl_validate_negotiate_info *out = &smb2srv.validate_info;
+  struct smb2_ioctl_validate_negotiate_info *in = req->input;
+
   if(req->ctl_code != SMB2_FSCTL_VALIDATE_NEGOTIATE_INFO)
     return smb2srv_queue_status(smb2, SMB2_IOCTL, SMB2_STATUS_NOT_SUPPORTED);
+
+  memset(out, 0, sizeof(*out));
+  out->capabilities = srvr->capabilities;
+  memcpy(out->guid, srvr->guid, sizeof(out->guid));
+  out->security_mode = srvr->security_mode;
+  out->dialect = req->input_count >= sizeof(*in) && in != NULL ?
+    in->dialect : SMB2_VERSION_0311;
 
   memset(rep, 0, sizeof(*rep));
   rep->ctl_code = req->ctl_code;
   memcpy(rep->file_id, req->file_id, SMB2_FD_SIZE);
+  rep->output = out;
+  rep->output_count = sizeof(*out);
   return 0;
 }
 
