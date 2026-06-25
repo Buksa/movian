@@ -1444,10 +1444,28 @@ enable_disable(void)
     }
 }
 
+static int enable_disable_pending = 0;
+
+static void
+deferred_enable_disable(void *aux)
+{
+    enable_disable_pending = 0;
+    enable_disable();
+}
+
+static void
+queue_enable_disable(void)
+{
+    if(!enable_disable_pending) {
+        enable_disable_pending = 1;
+        asyncio_run_task(deferred_enable_disable, NULL);
+    }
+}
+
 static void set_enable(void *opaque, int v)
 {
     smb_enable = v;
-    enable_disable();
+    queue_enable_disable();
 }
 
 static void set_port(void *opaque, const char *str)
@@ -1456,7 +1474,7 @@ static void set_port(void *opaque, const char *str)
     /* Port change only takes effect on next start — note in trace */
     SMBTRACE("Port changed to %d%s", smb_port,
              smb_thread_running ? " (restart required to apply)" : "");
-    enable_disable();
+    queue_enable_disable();
 }
 
 static void set_username(void *opaque, const char *str)
