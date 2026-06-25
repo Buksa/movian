@@ -37,6 +37,7 @@
 #include "usage.h"
 
 #include "smb_server.h"
+#include "misc/str.h"
 
 #include <smb2/smb2.h>
 #include <smb2/libsmb2.h>
@@ -59,10 +60,10 @@
  *   SMBTRACE — gated on enable_smb_debug (TRACE_DEBUG): per-request detail
  */
 #define SMBINFO(x, ...)  tracelog(0, TRACE_INFO,  "SMB2", x, ##__VA_ARGS__)
-#define SMBTRACE(x, ...) do {                                           \
-    if(gconf.enable_smb_debug)                                          \
-        tracelog(0, TRACE_DEBUG, "SMB2", x, ##__VA_ARGS__);            \
-} while(0)
+#define SMBTRACE(x, ...) tracelog(0, TRACE_INFO, "SMB2", x, ##__VA_ARGS__)
+//
+//
+//
 
 /* ------------------------------------------------------------------ */
 /* File handle table                                                    */
@@ -86,6 +87,7 @@ typedef struct {
     fa_dir_t    *fa_dir;           /* non-NULL if directory open        */
     char        *path;             /* absolute vfs path (malloc'd)      */
     int64_t     size;              /* cached file size (from stat)      */
+    time_t      mtime;             /* mtime timestamp                   */
     int         is_dir;
     int         delete_on_close;   /* set from SMB2_FILE_DELETE_ON_CLOSE */
     int         dir_done;          /* set after first full dir listing  */
@@ -120,52 +122,43 @@ extern fa_protocol_t fa_protocol_vfs;
 static int
 vfs_stat(const char *url, struct fa_stat *fs, char *errbuf, size_t errlen)
 {
-    return fa_protocol_vfs.fap_stat(&fa_protocol_vfs, url, fs,
-                                    FA_NON_INTERACTIVE, errbuf, errlen);
+    return fa_stat_ex(url, fs, errbuf, errlen, FA_NON_INTERACTIVE);
 }
 
 static fa_handle_t *
 vfs_open(const char *url, char *errbuf, size_t errlen, int flags)
 {
-    return fa_protocol_vfs.fap_open(&fa_protocol_vfs, url, errbuf, errlen,
-                                    flags, NULL);
+    return fa_open_ex(url, errbuf, errlen, flags, NULL);
 }
 
 static int
 vfs_makedir(const char *url)
 {
-    return fa_protocol_vfs.fap_makedir(&fa_protocol_vfs, url);
+    return fa_makedir(url);
 }
 
 static int
 vfs_unlink(const char *url, char *errbuf, size_t errlen)
 {
-    return fa_protocol_vfs.fap_unlink(&fa_protocol_vfs, url, errbuf, errlen);
+    return fa_unlink(url, errbuf, errlen);
 }
 
 static int
 vfs_rmdir(const char *url, char *errbuf, size_t errlen)
 {
-    return fa_protocol_vfs.fap_rmdir(&fa_protocol_vfs, url, errbuf, errlen);
+    return fa_rmdir(url, errbuf, errlen);
 }
 
 static int
 vfs_rename(const char *old, const char *newp, char *errbuf, size_t errlen)
 {
-    return fa_protocol_vfs.fap_rename(&fa_protocol_vfs, old, newp,
-                                      errbuf, errlen);
+    return fa_rename(old, newp, errbuf, errlen);
 }
 
 static fa_dir_t *
 vfs_scandir(const char *url, char *errbuf, size_t errlen)
 {
-    fa_dir_t *fd = fa_dir_alloc();
-    if(fa_protocol_vfs.fap_scan(&fa_protocol_vfs, fd, url, errbuf, errlen,
-                                FA_NON_INTERACTIVE)) {
-        fa_dir_free(fd);
-        return NULL;
-    }
-    return fd;
+    return fa_scandir(url, errbuf, errlen);
 }
 
 /* ------------------------------------------------------------------ */
@@ -197,6 +190,17 @@ smb_build_path(smb_connection_t *sc, const char *name)
     const char *rel = n;
     while(*rel == '/')
         rel++;
+
+    /* Reject path traversal */
+    const char *p = rel;
+    while(*p) {
+        if(p[0] == '.' && p[1] == '.' && (p[2] == '/' || p[2] == '\0')) {
+            free(n);
+            return NULL;
+        }
+        const char *next = strchr(p, '/');
+        p = next ? next + 1 : p + strlen(p);
+    }
 
     size_t rlen = strlen(root);
     /* Ensure root has trailing slash */
@@ -415,7 +419,10 @@ smb_session_established(struct smb2_server *srvr, struct smb2_context *smb2)
     smb_connection_t *sc = calloc(1, sizeof(smb_connection_t));
     if(sc == NULL)
         return -1;
-    sc->sc_share_root = strdup(smb_share_root ? smb_share_root : "/");
+    const char *root = smb_share_root && smb_share_root[0] ? smb_share_root : "/";
+    char root_buf[512];
+    snprintf(root_buf, sizeof(root_buf), "file://%s", root);
+    sc->sc_share_root = strdup(root_buf);
     smb2_set_opaque(smb2, sc);
     return 0;
 }
@@ -457,6 +464,21 @@ smb_destruction(struct smb2_server *srvr, struct smb2_context *smb2)
 /* Handler: TREE CONNECT / DISCONNECT                                   */
 /* ------------------------------------------------------------------ */
 
+static const char *
+smb_get_share_name(const char *path)
+{
+    if(path == NULL)
+        return NULL;
+    /* Skip leading backslashes */
+    while(*path == '\\')
+        path++;
+    /* Find next backslash */
+    const char *slash = strchr(path, '\\');
+    if(slash == NULL)
+        return path; /* if there is no server name, just share name */
+    return slash + 1;
+}
+
 static int
 smb_tree_connect(struct smb2_server *srvr, struct smb2_context *smb2,
                  struct smb2_tree_connect_request *req,
@@ -469,6 +491,13 @@ smb_tree_connect(struct smb2_server *srvr, struct smb2_context *smb2,
     rep->share_flags    = 0;
     rep->capabilities   = 0;
     const char *path_utf8 = req->path ? smb2_utf16_to_utf8(req->path, req->path_length / 2) : NULL;
+    const char *share = smb_get_share_name(path_utf8);
+    const char *expected = smb_share_name ? smb_share_name : "share";
+    if(share == NULL || strcmp(share, expected) != 0) {
+        SMBTRACE("Tree connect: bad network name '%s' (expected '%s')", share ? share : "?", expected);
+        free((void *)path_utf8);
+        return SMB2_STATUS_BAD_NETWORK_NAME;
+    }
     SMBTRACE("Tree connect: share_type=DISK access=0x%08x path='%s'",
              rep->maximal_access, path_utf8 ? path_utf8 : "?");
     free((void *)path_utf8);
@@ -568,16 +597,27 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
         break;
 
     case SMB2_FILE_OPEN_IF:
-        if(!exists && (req->create_options & SMB2_FILE_DIRECTORY_FILE)) {
-            vfs_makedir(path);
-            exists = 1; is_dir = 1;
+        if(!exists) {
+            if(req->create_options & SMB2_FILE_DIRECTORY_FILE) {
+                if(vfs_makedir(path)) {
+                    smb_free_file(sc, fe);
+                    return SMB2_STATUS_ACCESS_DENIED;
+                }
+                is_dir = 1; exists = 1;
+            }
+        }
+        break;
+
+    case SMB2_FILE_OVERWRITE:
+        if(!exists) {
+            SMBTRACE("Create: '%s' not found (FILE_OVERWRITE)", path);
+            smb_free_file(sc, fe);
+            return SMB2_STATUS_OBJECT_NAME_NOT_FOUND;
         }
         break;
 
     case SMB2_FILE_SUPERSEDE:
-    case SMB2_FILE_OVERWRITE:
     case SMB2_FILE_OVERWRITE_IF:
-        /* Fall through to open; truncation is client's problem */
         break;
 
     default:
@@ -587,17 +627,28 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
 
     fe->is_dir = is_dir;
     fe->delete_on_close = !!(req->create_options & SMB2_FILE_DELETE_ON_CLOSE);
+    fe->mtime = exists ? fs.fs_mtime : time(NULL);
 
     if(is_dir) {
         fe->size    = 0;
-        fe->fa_dir  = vfs_scandir(path, errbuf, sizeof(errbuf));
-        /* fa_dir may be NULL for empty / permission-denied dir; tolerate it */
+        fe->fa_dir  = NULL;  /* lazy scan in query_directory */
     } else {
         int flags = 0;
-        if(req->desired_access & (SMB2_FILE_WRITE_DATA |
-                                  SMB2_FILE_APPEND_DATA |
-                                  SMB2_FILE_WRITE_ATTRIBUTES))
+        int want_write = !!(req->desired_access & (SMB2_FILE_WRITE_DATA |
+                                                   SMB2_FILE_APPEND_DATA |
+                                                   SMB2_FILE_WRITE_ATTRIBUTES));
+
+        if(!exists) {
             flags |= FA_WRITE;
+        } else {
+            if(want_write) {
+                flags |= FA_WRITE;
+                if(req->create_disposition == SMB2_FILE_OPEN ||
+                   req->create_disposition == SMB2_FILE_OPEN_IF) {
+                    flags |= FA_APPEND;
+                }
+            }
+        }
 
         fe->fa_fh = vfs_open(path, errbuf, sizeof(errbuf), flags);
         if(fe->fa_fh == NULL) {
@@ -605,13 +656,42 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
             smb_free_file(sc, fe);
             return SMB2_STATUS_ACCESS_DENIED;
         }
-        fe->size = exists ? fs.fs_size : 0;
+
+        // Handle overwrite/supersede truncation via fa_ftruncate
+        if(exists && (req->create_disposition == SMB2_FILE_OVERWRITE ||
+                      req->create_disposition == SMB2_FILE_OVERWRITE_IF ||
+                      req->create_disposition == SMB2_FILE_SUPERSEDE)) {
+            fa_ftruncate(fe->fa_fh, 0);
+            fe->size = 0;
+        } else {
+            fe->size = exists ? fs.fs_size : 0;
+        }
     }
+
+#ifndef SMB2_FILE_SUPERSEDED
+#define SMB2_FILE_SUPERSEDED 0
+#endif
+#ifndef SMB2_FILE_OVERWRITTEN
+#define SMB2_FILE_OVERWRITTEN 3
+#endif
 
     memcpy(rep->file_id, fe->file_id, SMB2_FD_SIZE);
     rep->file_attributes = is_dir ? SMB2_FILE_ATTRIBUTE_DIRECTORY
                                   : SMB2_FILE_ATTRIBUTE_NORMAL;
-    rep->create_action   = exists ? SMB2_FILE_OPENED : SMB2_FILE_CREATED;
+
+    if(exists) {
+        if(req->create_disposition == SMB2_FILE_OVERWRITE ||
+           req->create_disposition == SMB2_FILE_OVERWRITE_IF) {
+            rep->create_action = SMB2_FILE_OVERWRITTEN;
+        } else if(req->create_disposition == SMB2_FILE_SUPERSEDE) {
+            rep->create_action = SMB2_FILE_SUPERSEDED;
+        } else {
+            rep->create_action = SMB2_FILE_OPENED;
+        }
+    } else {
+        rep->create_action = SMB2_FILE_CREATED;
+    }
+
     rep->end_of_file     = fe->size;
     rep->allocation_size = fe->size;
 
@@ -782,6 +862,9 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
     if(sc == NULL)
         return SMB2_STATUS_INTERNAL_ERROR;
 
+    if(req->file_information_class != SMB2_FILE_ID_BOTH_DIRECTORY_INFORMATION)
+        return SMB2_STATUS_INVALID_INFO_CLASS;
+
     smb_file_entry_t *fe = smb_find_file(sc, req->file_id);
     if(fe == NULL || !fe->is_dir)
         return SMB2_STATUS_INVALID_HANDLE;
@@ -812,7 +895,7 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
         return 0;
     }
 
-    SMBTRACE("QueryDir: '%s' flags=0x%02x idx=%u", fe->path, req->flags, req->file_index);
+    SMBTRACE("QueryDir: '%s' flags=0x%02x idx=%u class=%u", fe->path, req->flags, req->file_index, req->file_information_class);
 
     /* Lazy scan */
     if(fe->fa_dir == NULL) {
@@ -846,20 +929,30 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
         if(name == NULL)
             continue;
 
-        /* Stat entries that haven't been statted yet */
-        if(!fde->fde_statdone)
+        if(req->name && req->name[0] != '\0') {
+            if(!pattern_match(name, req->name))
+                continue;
+        }
+
+        int entry_is_dir = content_dirish(fde->fde_type);
+
+        SMBTRACE("QueryDir: entry name='%s' url='%s' is_dir=%d", name, rstr_get(fde->fde_url), entry_is_dir);
+
+        /* Stat entries that haven't been statted yet (files only, skip dirs to avoid loopback deadlocks) */
+        if(!fde->fde_statdone && !entry_is_dir) {
+            SMBTRACE("QueryDir: statting '%s'", rstr_get(fde->fde_url));
             fa_stat_ex(rstr_get(fde->fde_url), &fde->fde_stat, NULL, 0,
                        FA_NON_INTERACTIVE);
+            SMBTRACE("QueryDir: statted '%s'", rstr_get(fde->fde_url));
+        }
 
         /*
          * smb2_fileidbothdirectoryinformation.name is const char* (UTF-8).
          * libsmb2 re-encodes to UTF-16 when building the wire PDU.
-         * We must keep 'name' alive until after the PDU is sent, so we
-         * copy it into the info buffer (right after the struct).
+         * The string pointer name remains valid as long as fe->fa_dir is alive.
          */
         size_t name_bytes = strlen(name);
-        size_t entry_size = PAD_TO_64BIT(
-            sizeof(struct smb2_fileidbothdirectoryinformation) + name_bytes + 1);
+        size_t entry_size = PAD_TO_64BIT(sizeof(struct smb2_fileidbothdirectoryinformation));
 
         uint8_t *new_info = realloc(info, info_len + entry_size);
         if(new_info == NULL) {
@@ -872,8 +965,6 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
         struct smb2_fileidbothdirectoryinformation *fsb =
             (struct smb2_fileidbothdirectoryinformation *)(info + info_len);
 
-        int entry_is_dir = content_dirish(fde->fde_type);
-
         fsb->file_index       = n_added;
         fsb->file_attributes  = entry_is_dir ? SMB2_FILE_ATTRIBUTE_DIRECTORY
                                               : SMB2_FILE_ATTRIBUTE_NORMAL;
@@ -881,22 +972,25 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
             fsb->end_of_file      = fde->fde_stat.fs_size;
             fsb->allocation_size  = fde->fde_stat.fs_size;
         }
+
+        time_t mtime = fde->fde_statdone ? fde->fde_stat.fs_mtime : fe->mtime;
+        fsb->creation_time.tv_sec     = mtime;
+        fsb->creation_time.tv_usec    = 0;
+        fsb->last_access_time.tv_sec  = mtime;
+        fsb->last_access_time.tv_usec = 0;
+        fsb->last_write_time.tv_sec   = mtime;
+        fsb->last_write_time.tv_usec  = 0;
+        fsb->change_time.tv_sec       = mtime;
+        fsb->change_time.tv_usec      = 0;
+
         fsb->file_name_length = name_bytes;  /* UTF-8 byte count */
 
         /*
-         * Short name: populate with same UTF-8 name truncated to 24 bytes.
-         * Most clients ignore this field.
+         * Short name: leave empty (modern clients ignore this legacy field).
          */
-        uint8_t short_len = (uint8_t)(name_bytes < sizeof(fsb->short_name)
-                                      ? name_bytes : sizeof(fsb->short_name));
-        memcpy(fsb->short_name, name, short_len);
-        fsb->short_name_length = short_len;
+        fsb->short_name_length = 0;
 
-        /* Copy name string immediately after the struct for lifetime safety */
-        char *name_copy = (char *)(info + info_len +
-            sizeof(struct smb2_fileidbothdirectoryinformation));
-        memcpy(name_copy, name, name_bytes + 1);
-        fsb->name = name_copy;
+        fsb->name = name;
 
         info_len += entry_size;
         n_added++;
@@ -951,7 +1045,10 @@ smb_query_info(struct smb2_server *srvr, struct smb2_context *smb2,
             if(!fs) return SMB2_STATUS_INSUFFICIENT_RESOURCES;
             /* Try to get real values via statvfs */
             struct statvfs sv;
-            if(fe && fe->path && statvfs(fe->path, &sv) == 0) {
+            const char *real_path = fe ? fe->path : NULL;
+            if(real_path && strncmp(real_path, "file://", 7) == 0)
+                real_path += 7;
+            if(real_path && statvfs(real_path, &sv) == 0) {
                 fs->total_allocation_units     = sv.f_blocks;
                 fs->available_allocation_units = sv.f_bavail;
                 fs->sectors_per_allocation_unit = 1;
@@ -969,7 +1066,10 @@ smb_query_info(struct smb2_server *srvr, struct smb2_context *smb2,
             struct smb2_file_fs_full_size_info *fs = calloc(1, sizeof(*fs));
             if(!fs) return SMB2_STATUS_INSUFFICIENT_RESOURCES;
             struct statvfs sv;
-            if(fe && fe->path && statvfs(fe->path, &sv) == 0) {
+            const char *real_path = fe ? fe->path : NULL;
+            if(real_path && strncmp(real_path, "file://", 7) == 0)
+                real_path += 7;
+            if(real_path && statvfs(real_path, &sv) == 0) {
                 fs->total_allocation_units              = sv.f_blocks;
                 fs->caller_available_allocation_units   = sv.f_bavail;
                 fs->actual_available_allocation_units   = sv.f_bfree;
@@ -1020,6 +1120,14 @@ smb_query_info(struct smb2_server *srvr, struct smb2_context *smb2,
             if(!fs) return SMB2_STATUS_INSUFFICIENT_RESOURCES;
             fs->file_attributes = fe->is_dir ? SMB2_FILE_ATTRIBUTE_DIRECTORY
                                              : SMB2_FILE_ATTRIBUTE_NORMAL;
+            fs->creation_time.tv_sec     = fe->mtime;
+            fs->creation_time.tv_usec    = 0;
+            fs->last_access_time.tv_sec  = fe->mtime;
+            fs->last_access_time.tv_usec = 0;
+            fs->last_write_time.tv_sec   = fe->mtime;
+            fs->last_write_time.tv_usec  = 0;
+            fs->change_time.tv_sec       = fe->mtime;
+            fs->change_time.tv_usec      = 0;
             info = fs; len = sizeof(*fs);
             break;
         }
@@ -1040,6 +1148,14 @@ smb_query_info(struct smb2_server *srvr, struct smb2_context *smb2,
             fs->basic.file_attributes      = fe->is_dir
                                              ? SMB2_FILE_ATTRIBUTE_DIRECTORY
                                              : SMB2_FILE_ATTRIBUTE_NORMAL;
+            fs->basic.creation_time.tv_sec      = fe->mtime;
+            fs->basic.creation_time.tv_usec     = 0;
+            fs->basic.last_access_time.tv_sec   = fe->mtime;
+            fs->basic.last_access_time.tv_usec  = 0;
+            fs->basic.last_write_time.tv_sec    = fe->mtime;
+            fs->basic.last_write_time.tv_usec   = 0;
+            fs->basic.change_time.tv_sec        = fe->mtime;
+            fs->basic.change_time.tv_usec       = 0;
             fs->standard.end_of_file       = fe->size;
             fs->standard.allocation_size   = fe->size;
             fs->standard.number_of_links   = 1;
@@ -1056,6 +1172,14 @@ smb_query_info(struct smb2_server *srvr, struct smb2_context *smb2,
             if(!fs) return SMB2_STATUS_INSUFFICIENT_RESOURCES;
             fs->file_attributes  = fe->is_dir ? SMB2_FILE_ATTRIBUTE_DIRECTORY
                                               : SMB2_FILE_ATTRIBUTE_NORMAL;
+            fs->creation_time.tv_sec     = fe->mtime;
+            fs->creation_time.tv_usec    = 0;
+            fs->last_access_time.tv_sec  = fe->mtime;
+            fs->last_access_time.tv_usec = 0;
+            fs->last_write_time.tv_sec   = fe->mtime;
+            fs->last_write_time.tv_usec  = 0;
+            fs->change_time.tv_sec       = fe->mtime;
+            fs->change_time.tv_usec      = 0;
             fs->end_of_file      = fe->size;
             fs->allocation_size  = fe->size;
             info = fs; len = sizeof(*fs);

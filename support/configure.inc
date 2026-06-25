@@ -489,7 +489,7 @@ libsmb2_setup() {
     cmake \
         -S "${TOPDIR}/ext/libsmb2" \
         -B "${LIBSMB2_BUILD_DIR}" \
-        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_BUILD_TYPE=Debug \
         -DCMAKE_C_COMPILER="${LIBSMB2_CC}" \
         ${LIBSMB2_CMAKE_LAUNCHER} \
         -DCMAKE_INSTALL_PREFIX="${EXT_INSTALL_DIR}" \

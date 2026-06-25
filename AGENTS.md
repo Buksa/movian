@@ -40,6 +40,12 @@ make BUILD=debug -j$(nproc)
 ./build.debug/movian --help
 ```
 
+When running Movian, always launch it from the repository root directory to ensure relative paths for resources (skins, fonts, translations, etc.) are resolved correctly:
+
+```sh
+cd ~/repos/movian_ag && ./build.debug/movian -d
+```
+
 Always run `git diff --check`. Scale additional tests to the changed behavior.
 
 ## Recovery

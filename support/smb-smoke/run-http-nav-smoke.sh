@@ -12,6 +12,23 @@ rm -rf "$ART"
 mkdir -p "$ART/profile/persistent/settings" "$ART/profile/cache"
 smb_smoke_write_profile "$ART/profile"
 
+cat <<EOF >"$ART/profile/persistent/settings/smbserver"
+{
+	"share": "${SMB_SMOKE_SHARE}",
+	"port": "1445",
+	"username": "",
+	"password": "",
+	"enable": 1,
+	"root": "${SMB_SMOKE_ROOT:-$(pwd)}"
+}
+EOF
+
+cat <<EOF >"$ART/profile/persistent/settings/network"
+{
+	"smbdebug": 1
+}
+EOF
+
 cleanup() {
   if [ -n "${PID:-}" ]; then
     kill "$PID" 2>/dev/null || true
@@ -31,7 +48,7 @@ cleanup() {
 trap cleanup EXIT
 
 cd "$SMB_SMOKE_ROOT"
-"$SMB_SMOKE_MOVIAN" -d --disable-upgrades \
+gdb -ex r -ex "thread apply all bt full" -ex q --args "$SMB_SMOKE_MOVIAN" -d --disable-upgrades \
   --persistent "$ART/profile/persistent" \
   --cache "$ART/profile/cache" \
   >"$ART/movian.log" 2>&1 &
