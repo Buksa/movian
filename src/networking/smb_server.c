@@ -378,6 +378,8 @@ smb_authorize(struct smb2_server *srvr, struct smb2_context *smb2,
      */
     if(smb_username == NULL) {
         /* Anonymous mode: accept any connection */
+        SMBINFO("Auth: anonymous access granted (user='%s', domain='%s', workstation='%s')",
+                user ? user : "guest", domain ? domain : "", workstation ? workstation : "");
         if(user)
             smb2_set_user(smb2, user);
         return 0;
