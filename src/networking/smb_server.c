@@ -334,15 +334,22 @@ static int
 smb_errno_to_ntstatus(int err)
 {
     switch(err > 0 ? err : -err) {
-    case ENOENT:  return SMB2_STATUS_OBJECT_NAME_NOT_FOUND;
-    case EACCES:  return SMB2_STATUS_ACCESS_DENIED;
-    case EEXIST:  return SMB2_STATUS_OBJECT_NAME_COLLISION;
-    case ENOTDIR: return SMB2_STATUS_NOT_A_DIRECTORY;
-    case EISDIR:  return SMB2_STATUS_FILE_IS_A_DIRECTORY;
-    case ENOSPC:  return SMB2_STATUS_INSUFFICIENT_RESOURCES;
-    case ENOMEM:  return SMB2_STATUS_INSUFFICIENT_RESOURCES;
-    case EROFS:   return SMB2_STATUS_MEDIA_WRITE_PROTECTED;
-    default:      return SMB2_STATUS_INTERNAL_ERROR;
+    case ENOENT:    return SMB2_STATUS_OBJECT_NAME_NOT_FOUND;
+    case EACCES:    return SMB2_STATUS_ACCESS_DENIED;
+    case EEXIST:    return SMB2_STATUS_OBJECT_NAME_COLLISION;
+    case ENOTDIR:   return SMB2_STATUS_NOT_A_DIRECTORY;
+    case EISDIR:    return SMB2_STATUS_FILE_IS_A_DIRECTORY;
+    case ENOSPC:    return SMB2_STATUS_INSUFFICIENT_RESOURCES;
+    case ENOMEM:    return SMB2_STATUS_INSUFFICIENT_RESOURCES;
+    case EROFS:     return SMB2_STATUS_MEDIA_WRITE_PROTECTED;
+    case ENOTEMPTY: return SMB2_STATUS_DIRECTORY_NOT_EMPTY;
+    case EINVAL:    return SMB2_STATUS_INVALID_PARAMETER;
+    case ENOTSUP:
+#if ENOTSUP != EOPNOTSUPP
+    case EOPNOTSUPP:
+#endif
+                    return SMB2_STATUS_NOT_SUPPORTED;
+    default:        return SMB2_STATUS_INTERNAL_ERROR;
     }
 }
 
@@ -1320,7 +1327,7 @@ smb_set_info(struct smb2_server *srvr, struct smb2_context *smb2,
         if(r) {
             SMBINFO("Rename FAILED: '%s' → '%s': %s", fe->path, new_path, errbuf);
             free(new_path);
-            return smb_errno_to_ntstatus(errno);
+            return smb_errno_to_ntstatus(r);
         }
         free(fe->path);
         fe->path = new_path;
