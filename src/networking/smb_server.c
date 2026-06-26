@@ -698,6 +698,16 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
     rep->end_of_file     = fe->size;
     rep->allocation_size = fe->size;
 
+    struct smb2_timeval tv;
+    tv.tv_sec = exists ? fs.fs_mtime : time(NULL);
+    tv.tv_usec = 0;
+    uint64_t win_time = smb2_timeval_to_win(&tv);
+
+    rep->creation_time    = win_time;
+    rep->last_access_time = win_time;
+    rep->last_write_time  = win_time;
+    rep->change_time      = win_time;
+
     SMBTRACE("Create OK: '%s' %s size=%lld delete_on_close=%d",
              path, is_dir ? "DIR" : "FILE", (long long)fe->size, fe->delete_on_close);
     return 0;
