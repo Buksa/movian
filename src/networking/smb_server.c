@@ -64,10 +64,6 @@
     if(gconf.enable_smb_debug) \
       tracelog(0, TRACE_DEBUG, "SMB2", x, ##__VA_ARGS__); \
 } while(0)
-//
-//
-//
-
 /* ------------------------------------------------------------------ */
 /* File handle table                                                    */
 /* ------------------------------------------------------------------ */
@@ -116,8 +112,6 @@ static char          *smb_password   = NULL;   /* NULL = allow anonymous  */
 static char          *smb_share_name  = NULL;
 static char          *smb_share_root  = NULL;   /* configurable root  */
 static int            smb_thread_running = 0;
-
-extern fa_protocol_t fa_protocol_vfs;
 
 /* ------------------------------------------------------------------ */
 /* VFS helpers                                                          */
@@ -265,19 +259,13 @@ smb_decode_file_idx(const uint8_t *file_id)
            ((uint32_t)file_id[2] <<  8) |  (uint32_t)file_id[3];
 }
 
-static uint32_t
-smb_decode_file_gen(const uint8_t *file_id)
-{
-    return ((uint32_t)file_id[4] << 24) | ((uint32_t)file_id[5] << 16) |
-           ((uint32_t)file_id[6] <<  8) |  (uint32_t)file_id[7];
-}
+
 
 /* Returns NULL if file_id is invalid or slot is free */
 static smb_file_entry_t *
 smb_find_file(smb_connection_t *sc, const uint8_t *file_id)
 {
     uint32_t idx = smb_decode_file_idx(file_id);
-    uint32_t gen = smb_decode_file_gen(file_id);
 
     /* idx is 1-based */
     if(idx == 0 || idx > SMB2_MAX_FILES)
@@ -285,23 +273,21 @@ smb_find_file(smb_connection_t *sc, const uint8_t *file_id)
 
     smb_file_entry_t *fe = &sc->sc_files[idx - 1];
 
-    /* Slot must be active and generation must match */
-    if(memcmp(fe->file_id, file_id, SMB2_FD_SIZE) != 0)
-        return NULL;
-    /* Paranoia: also check the generation field we decoded */
-    if(smb_decode_file_gen(fe->file_id) != gen)
+    /* Slot must be active and file_id must match */
+    if(fe->path == NULL || memcmp(fe->file_id, file_id, SMB2_FD_SIZE) != 0)
         return NULL;
 
     return fe;
 }
 
 static smb_file_entry_t *
-smb_alloc_file(smb_connection_t *sc)
+smb_alloc_file(smb_connection_t *sc, char *path)
 {
     for(int i = 0; i < SMB2_MAX_FILES; i++) {
         smb_file_entry_t *fe = &sc->sc_files[i];
         /* free slot: path is NULL */
         if(fe->path == NULL) {
+            fe->path = path;
             sc->sc_gen++;
             smb_encode_file_id(fe->file_id, (uint32_t)(i + 1), sc->sc_gen);
             return fe;
@@ -436,7 +422,7 @@ smb_session_established(struct smb2_server *srvr, struct smb2_context *smb2)
     if(sc == NULL)
         return -1;
     const char *root = smb_share_root && smb_share_root[0] ? smb_share_root : "/";
-    char root_buf[4096 + 8];
+    char root_buf[512];
     snprintf(root_buf, sizeof(root_buf), "file://%s", root);
     sc->sc_share_root = strdup(root_buf);
     smb2_set_opaque(smb2, sc);
@@ -503,7 +489,7 @@ smb_tree_connect(struct smb2_server *srvr, struct smb2_context *smb2,
     if(req == NULL || rep == NULL)
         return -1;
     rep->share_type     = SMB2_SHARE_TYPE_DISK;
-    rep->maximal_access = 0x001f01ff;
+    rep->maximal_access = 0x101f01ff;
     rep->share_flags    = 0;
     rep->capabilities   = 0;
     const char *path_utf8 = req->path ? smb2_utf16_to_utf8(req->path, req->path_length / 2) : NULL;
@@ -561,12 +547,11 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
              req->create_disposition == SMB2_FILE_SUPERSEDE    ? "SUPERSEDE" : "?",
              req->create_options, req->desired_access);
 
-    smb_file_entry_t *fe = smb_alloc_file(sc);
+    smb_file_entry_t *fe = smb_alloc_file(sc, path);
     if(fe == NULL) {
         free(path);
         return SMB2_STATUS_INSUFFICIENT_RESOURCES;
     }
-    fe->path = path;
 
     struct fa_stat fs;
     char errbuf[256];
@@ -654,16 +639,8 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
                                                    SMB2_FILE_APPEND_DATA |
                                                    SMB2_FILE_WRITE_ATTRIBUTES));
 
-        if(!exists) {
+        if(!exists || want_write) {
             flags |= FA_WRITE;
-        } else {
-            if(want_write) {
-                flags |= FA_WRITE;
-                if(req->create_disposition == SMB2_FILE_OPEN ||
-                   req->create_disposition == SMB2_FILE_OPEN_IF) {
-                    flags |= FA_APPEND;
-                }
-            }
         }
 
         fe->fa_fh = vfs_open(path, errbuf, sizeof(errbuf), flags);
@@ -950,11 +927,9 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
     int single_entry = !!(req->flags & SMB2_RETURN_SINGLE_ENTRY);
 
     size_t entry_size = PAD_TO_64BIT(sizeof(struct smb2_fileidbothdirectoryinformation));
-    int max_entries = single_entry ? 1 : fe->fa_dir->fd_count;
-    if(max_entries <= 0)
-        max_entries = 1;
+    int capacity = single_entry ? 1 : 16;
 
-    uint8_t *info = malloc(max_entries * entry_size);
+    uint8_t *info = malloc(capacity * entry_size);
     if(info == NULL)
         return SMB2_STATUS_INSUFFICIENT_RESOURCES;
 
@@ -979,6 +954,17 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
             continue;
         }
         cur_match_idx++;
+
+        if(n_added >= capacity) {
+            int new_capacity = capacity * 2;
+            void *new_info = realloc(info, new_capacity * entry_size);
+            if(new_info == NULL) {
+                free(info);
+                return SMB2_STATUS_INSUFFICIENT_RESOURCES;
+            }
+            info = new_info;
+            capacity = new_capacity;
+        }
 
         int entry_is_dir = content_dirish(fde->fde_type);
 
@@ -1048,7 +1034,7 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
     }
 
     /* Shrink buffer to fit actual serialized entries if necessary */
-    if(n_added < max_entries) {
+    if(n_added < capacity) {
         void *new_info = realloc(info, info_len);
         if(new_info)
             info = new_info;
@@ -1449,6 +1435,12 @@ static struct smb2_server_request_handlers smb_handlers = {
  *
  * max_connections=0 means unlimited (serve_port uses SOMAXCONN internally).
  */
+static void
+reset_thread_running(void *aux)
+{
+    smb_thread_running = 0;
+}
+
 static void *
 smb_server_thread(void *aux)
 {
@@ -1460,6 +1452,7 @@ smb_server_thread(void *aux)
     int err = smb2_serve_port(srv, 0, NULL, NULL);
     SMBINFO("Server stopped (err=%d)", err);
     free(srv);
+    asyncio_run_task(reset_thread_running, NULL);
     return NULL;
 }
 
