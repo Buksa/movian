@@ -875,7 +875,8 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
     if(sc == NULL)
         return SMB2_STATUS_INTERNAL_ERROR;
 
-    if(req->file_information_class != SMB2_FILE_ID_BOTH_DIRECTORY_INFORMATION)
+    if(req->file_information_class != SMB2_FILE_ID_BOTH_DIRECTORY_INFORMATION &&
+       req->file_information_class != SMB2_FILE_ID_FULL_DIRECTORY_INFORMATION)
         return SMB2_STATUS_INVALID_INFO_CLASS;
 
     smb_file_entry_t *fe = smb_find_file(sc, req->file_id);
@@ -944,6 +945,7 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
     int      n_added  = 0;
     int      skip     = fe->dir_idx;
     int      cur_match_idx = 0;
+    uint32_t serialized_wire_len = 0;
 
     fa_dir_entry_t *fde;
     RB_FOREACH(fde, &fe->fa_dir->fd_entries, fde_link) {
@@ -961,6 +963,15 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
             continue;
         }
         cur_match_idx++;
+
+        /* Check client buffer limit on wire */
+        size_t name_bytes = strlen(name);
+        size_t wire_hdr = (req->file_information_class == SMB2_FILE_ID_BOTH_DIRECTORY_INFORMATION) ? 104 : 80;
+        size_t wire_size = PAD_TO_64BIT(wire_hdr + name_bytes);
+
+        if(n_added > 0 && serialized_wire_len + wire_size > req->output_buffer_length) {
+            break;
+        }
 
         if(n_added >= capacity) {
             int new_capacity = capacity * 2;
@@ -990,8 +1001,6 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
          * libsmb2 re-encodes to UTF-16 when building the wire PDU.
          * The string pointer name remains valid as long as fe->fa_dir is alive.
          */
-        size_t name_bytes = strlen(name);
-
         struct smb2_fileidbothdirectoryinformation *fsb =
             (struct smb2_fileidbothdirectoryinformation *)(info + info_len);
         memset(fsb, 0, entry_size);
@@ -1024,6 +1033,7 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
         fsb->name = name;
 
         info_len += entry_size;
+        serialized_wire_len += wire_size;
         n_added++;
         fe->dir_idx++;
 
@@ -1047,12 +1057,12 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
             info = new_info;
     }
 
-    /* Mark as done so next call returns NO_MORE_FILES */
-    fe->dir_done = single_entry ? 0 : 1;
+    /* Mark as done only when we ran out of matching files (n_added == 0 above) */
+    fe->dir_done = 0;
 
     rep->output_buffer        = info;
     rep->output_buffer_length = info_len;
-    SMBTRACE("QueryDir: returning %d entries (%u bytes)", n_added, info_len);
+    SMBTRACE("QueryDir: returning %d entries (%u bytes, wire=%u)", n_added, info_len, serialized_wire_len);
     return 0;
 }
 
@@ -1385,9 +1395,25 @@ smb_ioctl(struct smb2_server *srvr, struct smb2_context *smb2,
     memcpy(rep->file_id, req->file_id, SMB2_FD_SIZE);
 
     switch(req->ctl_code) {
-    case SMB2_FSCTL_VALIDATE_NEGOTIATE_INFO:
+    case SMB2_FSCTL_VALIDATE_NEGOTIATE_INFO: {
         SMBTRACE("IOCTL: VALIDATE_NEGOTIATE_INFO");
+        static struct smb2_ioctl_validate_negotiate_info vni;
+        memset(&vni, 0, sizeof(vni));
+        vni.capabilities = 0;
+        vni.security_mode = 0;
+        uint8_t server_guid[16] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+                                   0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00};
+        memcpy(vni.guid, server_guid, 16);
+        vni.dialect = smb2_get_dialect(smb2);
+
+        rep->output = &vni;
+        rep->output_count = sizeof(vni);
         return 0;
+    }
+    case SMB2_FSCTL_DFS_GET_REFERRALS:
+    case SMB2_FSCTL_DFS_GET_REFERRALS_EX:
+        SMBTRACE("IOCTL: DFS_GET_REFERRALS (not a DFS server)");
+        return SMB2_STATUS_BAD_NETWORK_NAME;
     default:
         SMBTRACE("IOCTL: unsupported ctl_code=0x%08x", req->ctl_code);
         return SMB2_STATUS_NOT_SUPPORTED;
