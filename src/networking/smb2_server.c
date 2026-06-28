@@ -37,6 +37,8 @@
     TRACE((level), "SMB2-SERVER", fmt, ##__VA_ARGS__);              \
 } while(0)
 
+extern fa_protocol_t fa_protocol_vfs;
+
 typedef struct smb2srv_handle {
   LIST_ENTRY(smb2srv_handle) link;
   smb2_file_id file_id;
@@ -323,6 +325,32 @@ smb2srv_request_share_name(const char *path)
   if(slash != NULL)
     name = slash + 1;
   return name;
+}
+
+
+static fa_dir_t *
+smb2srv_scandir(const char *url, char *errbuf, size_t errlen)
+{
+  const char *vfs_path;
+  fa_dir_t *fd;
+
+  if(strncmp(url, "vfs:", 4))
+    return fa_scandir(url, errbuf, errlen);
+
+  if(!strncmp(url, "vfs://", 6))
+    vfs_path = url + 6;
+  else
+    vfs_path = url + 4;
+  if(vfs_path[0] == '\0')
+    vfs_path = "/";
+
+  fd = fa_dir_alloc();
+  if(fa_protocol_vfs.fap_scan(&fa_protocol_vfs, fd, vfs_path,
+                              errbuf, errlen, FA_NON_INTERACTIVE)) {
+    fa_dir_free(fd);
+    return NULL;
+  }
+  return fd;
 }
 
 
@@ -677,7 +705,7 @@ smb2srv_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
                 h->dir_pattern != NULL ? h->dir_pattern : "*", h->vfs_url);
 
   if(h->dir == NULL) {
-    h->dir = fa_scandir(h->vfs_url, errbuf, sizeof(errbuf));
+    h->dir = smb2srv_scandir(h->vfs_url, errbuf, sizeof(errbuf));
     if(h->dir == NULL) {
       SMB2SRV_TRACE(TRACE_ERROR, "scan failed for %s: %s", h->vfs_url, errbuf);
       return smb2srv_queue_status(smb2, SMB2_QUERY_DIRECTORY,
@@ -694,8 +722,9 @@ smb2srv_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
     break;
   }
   if(selected == NULL) {
-    return smb2srv_queue_status(smb2, SMB2_QUERY_DIRECTORY,
-                                SMB2_STATUS_NO_MORE_FILES);
+    rep->output_buffer = NULL;
+    rep->output_buffer_length = 0;
+    return 0;
   }
 
   stride = (sizeof(*out) + 7) & ~7;

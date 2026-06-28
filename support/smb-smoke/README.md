@@ -76,6 +76,22 @@ For Windows visibility, TCP `445`, and systemd/nft forwarding research, see
 
 Successful findings to preserve in future smokes:
 
+- For SMB/SMB2 authentication there are three valid test paths. Prefer an
+  isolated keyring seed when the credential values are known and the test is
+  protocol-level. Use STPP against `global.popups` child proprefs when the test
+  must validate the real auth popup tree and remembered-credential behavior.
+  Use X11 keypress fallback only when the popup must be exercised visually or
+  STPP child proprefs are unavailable. Always remove temporary keyring entries
+  after a non-isolated-profile run.
+- The auth popup is visible through HTTP at `/api/prop/global/popups/*0`, but
+  writes should use STPP child proprefs from a popup subscription. The HTTP
+  `*0` segment is an inspection alias, not a stable STPP path segment.
+- FTP server browse/list is a useful reference for SMB2 server VFS listing:
+  FTP calls `fa_protocol_vfs.fap_scan(..., FA_NON_INTERACTIVE)` directly for
+  VFS paths instead of going through generic `fa_scandir()`. For SMB2 server
+  directory listing, prefer the same direct VFS scan when the configured share
+  root is `vfs:` and keep generic `fa_scandir()` only as a fallback for other
+  URL roots.
 - Use STPP dot paths and real child proprefs for settings writes. HTTP paths
   such as `/api/prop/.../*0` are display aliases and are useful for inspection,
   but `*0` is not a valid STPP path segment.
@@ -85,6 +101,9 @@ Successful findings to preserve in future smokes:
 - A port-change smoke passes only when logs show the old server loop exiting
   and a new `SMB2-SERVER Listening on port ...` line, the old TCP port refuses
   connections, and the new port accepts a browse/read probe.
+  Keep a separate remote SMB2 client context alive during at least one
+  stop/restart smoke; unlike FTP's isolated per-session connections, libsmb2
+  keeps client and embedded-server contexts in one active list.
 - If the app aborts in thread `SMB2-server` during a port edit, preserve
   `/api/logfile/0` and `/api/logfile/1` and treat it as a server lifecycle
   bug before repeating the write against the same build.
