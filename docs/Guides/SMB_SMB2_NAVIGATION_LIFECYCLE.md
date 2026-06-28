@@ -38,10 +38,11 @@ SMB2 navigation is implemented in `src/fileaccess/smb2/fa_libsmb2.c`.
 - Directory scans connect to the target share and use `smb2_opendir()` /
   `smb2_readdir()`.
 
-For parity with SMB1, SMB2 now traces the key lifecycle points under the `SMB2`
+For parity with SMB1, SMB2 client-side fileaccess traces use the `SMB2-CLIENT`
 debug component: keyring hit/miss, setup identity with password redacted,
 connect result, auth retry decision, prompt result, redirect, and share enum
-add/filter decisions.
+add/filter decisions. Embedded SMB2 server request handling uses `SMB2-SERVER`,
+so client/server logs can be grepped independently.
 
 ## Navigation Parity Notes
 
@@ -80,6 +81,17 @@ add/filter decisions.
 - Preseed `persistent/settings/dev` with `{ "smbdebug": 1 }` for runtime
   lifecycle tests. `-d` enables verbose process logging, but SMB/SMB2 trace
   lines still require the developer `smbdebug` setting.
+- Embedded SMB2 server host-root navigation must be tested through real
+  `IPC$`/`srvsvc` enumeration. A valid log contains `PIPE_TRANSCEIVE` and the
+  configured share name; do not replace this with a Movian-only root fallback.
+- Deep VFS navigation depends on related compound `stat()` support. If
+  `smb2://host:port/share/zona/` reaches `Create OK` for a directory but never
+  reaches `QueryDir`, check whether all-`FF` related File IDs are being mapped
+  to the just-created server handle and look for `QueryInfo: FILE/ALL`.
+- Keep password SMB3 signing diagnostics separate from navigation parity.
+  Password SMB2 read/write and anonymous SMB2/SMB3 root/VFS navigation are the
+  stable baseline; make password SMB3 strict only when explicitly testing that
+  signing path.
 - Seed runtime credentials for automation through
   `persistent/settings/keyring` using the real keyring JSON shape. This gives a
   deterministic profile without relying on old `/tmp` state or manual popup
@@ -164,7 +176,7 @@ When investigating a new SMB navigation report, collect:
 - URL opened and whether it has a trailing slash.
 - Isolated profile/keyring state: no credentials, saved credentials, or
   user-entered credentials.
-- `SMB` and `SMB2` debug lines around connect/setup/share enum.
+- `SMB`, `SMB2-CLIENT`, and `SMB2-SERVER` debug lines around connect/setup/share enum.
 - Page title, loading state, popup type/reason/domain, and node list.
 - Screenshots for the SMB1 and SMB2 host roots.
 - For automated authenticated navigation, create a fresh isolated profile and

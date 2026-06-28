@@ -9,6 +9,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <poll.h>
 #include <stdint.h>
@@ -27,9 +28,9 @@
 
 #define SMB2_DEFAULT_TIMEOUT 15
 
-#define SMB2TRACE(x, ...) do {                                 \
-    if(gconf.enable_smb_debug)                                 \
-      tracelog(0, TRACE_DEBUG, "SMB2", x, ##__VA_ARGS__);       \
+#define SMB2TRACE(x, ...) do {                                  \
+    if(gconf.enable_smb_debug)                                  \
+      tracelog(0, TRACE_DEBUG, "SMB2-CLIENT", x, ##__VA_ARGS__); \
   } while(0)
 
 typedef struct {
@@ -584,12 +585,12 @@ movian_smb2_scan_host(fa_dir_t *fd, const char *url,
   }
 
   struct srvsvc_SHARE_INFO_1_CONTAINER *shares =
-    &state.reply->ses.ShareInfo.Level1;
-  if(shares->Buffer != NULL) {
+    &state.reply->ses.ShareEnum.Level1;
+  if(shares->share_info_1 != NULL) {
     for(uint32_t i = 0; i < shares->EntriesRead; i++) {
       struct srvsvc_SHARE_INFO_1 *share =
-        &shares->Buffer->share_info_1[i];
-      const char *name = share->netname.utf8;
+        &shares->share_info_1[i];
+      const char *name = share->netname;
       uint32_t share_type = share->type;
       int add = name != NULL &&
         (share_type & 3) == SHARE_TYPE_DISKTREE &&
@@ -626,20 +627,28 @@ movian_smb2_scan_directory(fa_dir_t *fd, const char *url,
                            const movian_smb2_target_t *target, int flags,
                            char *errbuf, size_t errlen)
 {
+  SMB2TRACE("scan directory url=%s share=%s path='%s' flags=0x%x",
+            url, target->share, target->path, flags);
+
   struct smb2_context *smb2 =
     movian_smb2_connect(target, target->share, flags, SMB2_DEFAULT_TIMEOUT,
                         errbuf, errlen);
-  if(smb2 == NULL)
+  if(smb2 == NULL) {
+    SMB2TRACE("scan directory connect failed url=%s reason=%s", url, errbuf);
     return -1;
+  }
 
   struct smb2dir *dir = smb2_opendir(smb2, target->path);
   if(dir == NULL) {
     snprintf(errbuf, errlen, "Unable to open SMB2 directory: %s",
              smb2_get_error(smb2));
+    SMB2TRACE("scan directory opendir failed url=%s path='%s' reason=%s",
+              url, target->path, errbuf);
     movian_smb2_disconnect(smb2);
     return -1;
   }
 
+  int entries = 0;
   struct smb2dirent *entry;
   while((entry = smb2_readdir(smb2, dir)) != NULL) {
     if(!strcmp(entry->name, ".") || !strcmp(entry->name, ".."))
@@ -651,16 +660,21 @@ movian_smb2_scan_directory(fa_dir_t *fd, const char *url,
     if(child == NULL)
       continue;
 
+    SMB2TRACE("scan directory entry url=%s name=%s child=%s smb2_type=%d type=%d",
+              url, entry->name, child, entry->st.smb2_type, type);
     fa_dir_entry_t *fde = fa_dir_add(fd, child, entry->name, type);
     if(fde != NULL) {
       fde->fde_stat.fs_type = type;
       fde->fde_stat.fs_size = entry->st.smb2_size;
       fde->fde_stat.fs_mtime = entry->st.smb2_mtime;
       fde->fde_statdone = 1;
+      entries++;
     }
     free(child);
   }
 
+  SMB2TRACE("scan directory done url=%s path='%s' entries=%d",
+            url, target->path, entries);
   smb2_closedir(smb2, dir);
   movian_smb2_disconnect(smb2);
   return 0;
@@ -672,12 +686,20 @@ movian_smb2_scan(fa_protocol_t *fap, fa_dir_t *fd, const char *url,
                  char *errbuf, size_t errlen, int flags)
 {
   movian_smb2_target_t target = {};
-  if(movian_smb2_target_parse(url, &target, errbuf, errlen))
+  if(movian_smb2_target_parse(url, &target, errbuf, errlen)) {
+    SMB2TRACE("scan parse failed url=%s reason=%s", url, errbuf);
     return -1;
+  }
 
+  SMB2TRACE("scan url=%s server=%s share=%s path='%s' flags=0x%x",
+            url, target.server,
+            target.share != NULL ? target.share : "<host>",
+            target.path, flags);
   int status = target.share == NULL || target.share[0] == '\0' ?
     movian_smb2_scan_host(fd, url, &target, flags, errbuf, errlen) :
     movian_smb2_scan_directory(fd, url, &target, flags, errbuf, errlen);
+  SMB2TRACE("scan done url=%s status=%d%s%s", url, status,
+            status ? " reason=" : "", status ? errbuf : "");
 
   movian_smb2_target_fini(&target);
   return status;
@@ -690,12 +712,18 @@ movian_smb2_open(fa_protocol_t *fap, const char *url,
                  fa_open_extra_t *foe)
 {
   movian_smb2_target_t target = {};
-  if(movian_smb2_target_parse(url, &target, errbuf, errlen))
+  if(movian_smb2_target_parse(url, &target, errbuf, errlen)) {
+    SMB2TRACE("open parse failed url=%s reason=%s", url, errbuf);
     return NULL;
+  }
 
+  SMB2TRACE("open url=%s share=%s path='%s' flags=0x%x",
+            url, target.share != NULL ? target.share : "<host>",
+            target.path, flags);
   if(target.share == NULL || target.share[0] == '\0' ||
      target.path[0] == '\0') {
     snprintf(errbuf, errlen, "SMB2 URL does not identify a file");
+    SMB2TRACE("open rejected url=%s reason=%s", url, errbuf);
     movian_smb2_target_fini(&target);
     return NULL;
   }
@@ -721,6 +749,8 @@ movian_smb2_open(fa_protocol_t *fap, const char *url,
   if(fh == NULL) {
     snprintf(errbuf, errlen, "Unable to open SMB2 file: %s",
              smb2_get_error(smb2));
+    SMB2TRACE("open failed url=%s path='%s' open_flags=0x%x reason=%s",
+              url, target.path, open_flags, errbuf);
     movian_smb2_disconnect(smb2);
     movian_smb2_target_fini(&target);
     return NULL;
@@ -731,11 +761,15 @@ movian_smb2_open(fa_protocol_t *fap, const char *url,
      statbuf.smb2_type == SMB2_TYPE_DIRECTORY) {
     snprintf(errbuf, errlen, "Unable to stat SMB2 file: %s",
              smb2_get_error(smb2));
+    SMB2TRACE("open fstat rejected url=%s path='%s' smb2_type=%d reason=%s",
+              url, target.path, statbuf.smb2_type, errbuf);
     smb2_close(smb2, fh);
     movian_smb2_disconnect(smb2);
     movian_smb2_target_fini(&target);
     return NULL;
   }
+  SMB2TRACE("open ok url=%s path='%s' size=%"PRId64, url, target.path,
+            statbuf.smb2_size);
 
   movian_smb2_file_t *file = calloc(1, sizeof(*file));
   if(file == NULL) {
@@ -867,12 +901,18 @@ movian_smb2_stat(fa_protocol_t *fap, const char *url, struct fa_stat *fs,
                  int flags, char *errbuf, size_t errlen)
 {
   movian_smb2_target_t target = {};
-  if(movian_smb2_target_parse(url, &target, errbuf, errlen))
+  if(movian_smb2_target_parse(url, &target, errbuf, errlen)) {
+    SMB2TRACE("stat parse failed url=%s reason=%s", url, errbuf);
     return FAP_ERROR;
+  }
 
+  SMB2TRACE("stat url=%s share=%s path='%s' flags=0x%x", url,
+            target.share != NULL ? target.share : "<host>", target.path,
+            flags);
   memset(fs, 0, sizeof(*fs));
   if(target.share == NULL || target.share[0] == '\0') {
     fs->fs_type = CONTENT_SHARE;
+    SMB2TRACE("stat host url=%s type=%d", url, fs->fs_type);
     movian_smb2_target_fini(&target);
     return FAP_OK;
   }
@@ -883,6 +923,8 @@ movian_smb2_stat(fa_protocol_t *fap, const char *url, struct fa_stat *fs,
                              SMB2_DEFAULT_TIMEOUT, &auth_needed,
                              errbuf, errlen);
   if(smb2 == NULL) {
+    SMB2TRACE("stat connect failed url=%s auth_needed=%d reason=%s",
+              url, auth_needed, errbuf);
     movian_smb2_target_fini(&target);
     return auth_needed ? FAP_NEED_AUTH : FAP_ERROR;
   }
@@ -895,15 +937,22 @@ movian_smb2_stat(fa_protocol_t *fap, const char *url, struct fa_stat *fs,
     if(smb2_stat(smb2, target.path, &statbuf) < 0) {
       snprintf(errbuf, errlen, "Unable to stat SMB2 path: %s",
                smb2_get_error(smb2));
+      SMB2TRACE("stat failed url=%s path='%s' reason=%s", url,
+                target.path, errbuf);
       status = FAP_ERROR;
     } else {
       fs->fs_type = statbuf.smb2_type == SMB2_TYPE_DIRECTORY ?
         CONTENT_DIR : CONTENT_FILE;
       fs->fs_size = statbuf.smb2_size;
       fs->fs_mtime = statbuf.smb2_mtime;
+      SMB2TRACE("stat ok url=%s path='%s' smb2_type=%d type=%d size=%"PRId64,
+                url, target.path, statbuf.smb2_type, fs->fs_type,
+                fs->fs_size);
     }
   }
 
+  SMB2TRACE("stat done url=%s status=%d type=%d", url, status,
+            fs->fs_type);
   movian_smb2_disconnect(smb2);
   movian_smb2_target_fini(&target);
   return status;

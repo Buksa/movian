@@ -43,6 +43,7 @@
 
 #include <smb2/smb2.h>
 #include <smb2/libsmb2.h>
+#include <smb2/libsmb2-dcerpc.h>
 #include <smb2/libsmb2-raw.h>
 
 #ifndef SMB2_FILE_OPENED
@@ -67,10 +68,10 @@
  *   SMBINFO  — always visible (TRACE_INFO):  server lifecycle, connections, auth results
  *   SMBTRACE — gated on enable_smb_debug (TRACE_DEBUG): per-request detail
  */
-#define SMBINFO(x, ...)  tracelog(0, TRACE_INFO,  "SMB2", x, ##__VA_ARGS__)
+#define SMBINFO(x, ...)  tracelog(0, TRACE_INFO,  "SMB2-SERVER", x, ##__VA_ARGS__)
 #define SMBTRACE(x, ...) do { \
     if(gconf.enable_smb_debug) \
-       tracelog(0, TRACE_DEBUG, "SMB2", x, ##__VA_ARGS__); \
+       tracelog(0, TRACE_DEBUG, "SMB2-SERVER", x, ##__VA_ARGS__); \
 } while(0)
 /* ------------------------------------------------------------------ */
 /* File handle table                                                    */
@@ -97,6 +98,7 @@ typedef struct {
     int64_t     pos;               /* cached file offset position       */
     time_t      mtime;             /* mtime timestamp                   */
     int         is_dir;
+    int         is_pipe;
     int         delete_on_close;   /* set from SMB2_FILE_DELETE_ON_CLOSE */
     int         dir_done;          /* set after first full dir listing  */
     fa_dir_entry_t *next_fde;      /* next entry to process in directory scan */
@@ -106,7 +108,10 @@ typedef struct smb_connection {
     char                *sc_share_root;   /* root path for this share   */
     smb_file_entry_t     sc_files[SMB2_MAX_FILES];
     uint32_t             sc_gen;          /* generation counter         */
+    uint8_t              sc_related_file_id[SMB2_FD_SIZE];
+    int                  sc_related_file_valid;
     struct smb2_ioctl_validate_negotiate_info sc_vni; /* for validate negotiate info ioctl */
+    void                *sc_ioctl_output;
 } smb_connection_t;
 
 typedef struct {
@@ -355,12 +360,26 @@ smb_decode_file_idx(const uint8_t *file_id)
            ((uint32_t)file_id[2] <<  8) |  (uint32_t)file_id[3];
 }
 
-
+static int
+smb_file_id_is_compound(const uint8_t *file_id)
+{
+    for(int i = 0; i < SMB2_FD_SIZE; i++) {
+        if(file_id[i] != 0xff)
+            return 0;
+    }
+    return 1;
+}
 
 /* Returns NULL if file_id is invalid or slot is free */
 static smb_file_entry_t *
 smb_find_file(smb_connection_t *sc, const uint8_t *file_id)
 {
+    if(smb_file_id_is_compound(file_id)) {
+        if(!sc->sc_related_file_valid)
+            return NULL;
+        file_id = sc->sc_related_file_id;
+    }
+
     uint32_t idx = smb_decode_file_idx(file_id);
 
     /* idx is 1-based */
@@ -395,6 +414,12 @@ smb_alloc_file(smb_connection_t *sc, char *path)
 static void
 smb_free_file(smb_connection_t *sc, smb_file_entry_t *fe)
 {
+    if(sc->sc_related_file_valid &&
+       !memcmp(sc->sc_related_file_id, fe->file_id, SMB2_FD_SIZE)) {
+        memset(sc->sc_related_file_id, 0, sizeof(sc->sc_related_file_id));
+        sc->sc_related_file_valid = 0;
+    }
+
     if(fe->is_dir) {
         if(fe->fa_dir)
             fa_dir_free(fe->fa_dir);
@@ -552,6 +577,7 @@ smb_cleanup_session(struct smb2_context *smb2, const char *reason)
     smb_connection_t *sc = smb2_get_opaque(smb2);
     if(sc) {
         smb_close_all_files(sc);
+        free(sc->sc_ioctl_output);
         free(sc->sc_share_root);
         free(sc);
         smb2_set_opaque(smb2, NULL);
@@ -594,6 +620,29 @@ smb_get_share_name(const char *path)
 }
 
 static int
+smb_is_ipc_share(const char *share)
+{
+    return share != NULL && !strcasecmp(share, "IPC$");
+}
+
+static int
+smb_is_srvsvc_pipe(const char *name)
+{
+    if(name == NULL)
+        return 0;
+
+    while(*name == '/' || *name == '\\')
+        name++;
+    if(!strncasecmp(name, "PIPE", 4) &&
+       (name[4] == '/' || name[4] == '\\')) {
+        name += 5;
+        while(*name == '/' || *name == '\\')
+            name++;
+    }
+    return !strcasecmp(name, "srvsvc");
+}
+
+static int
 smb_tree_connect(struct smb2_server *srvr, struct smb2_context *smb2,
                  struct smb2_tree_connect_request *req,
                  struct smb2_tree_connect_reply *rep)
@@ -601,7 +650,6 @@ smb_tree_connect(struct smb2_server *srvr, struct smb2_context *smb2,
     if(req == NULL || rep == NULL)
         return -1;
     smb_server_t *srv = (smb_server_t *)srvr;
-    rep->share_type     = SMB2_SHARE_TYPE_DISK;
     rep->maximal_access = 0x101f01ff;
     rep->share_flags    = 0;
     rep->capabilities   = 0;
@@ -609,11 +657,19 @@ smb_tree_connect(struct smb2_server *srvr, struct smb2_context *smb2,
     const char *path_utf8 = req->path ? smb2_utf16_to_utf8(req->path, req->path_length / 2) : NULL;
     const char *share = smb_get_share_name(path_utf8);
     const char *expected = srv->share_name ? srv->share_name : "share";
+    if(smb_is_ipc_share(share)) {
+        rep->share_type = SMB2_SHARE_TYPE_PIPE;
+        SMBTRACE("Tree connect: share_type=PIPE access=0x%08x path='%s'",
+                 rep->maximal_access, path_utf8 ? path_utf8 : "?");
+        free((void *)path_utf8);
+        return 0;
+    }
     if(share == NULL || strcmp(share, expected) != 0) {
         SMBTRACE("Tree connect: bad network name '%s' (expected '%s')", share ? share : "?", expected);
         free((void *)path_utf8);
         return SMB2_STATUS_BAD_NETWORK_NAME;
     }
+    rep->share_type = SMB2_SHARE_TYPE_DISK;
     SMBTRACE("Tree connect: share_type=DISK access=0x%08x path='%s'",
              rep->maximal_access, path_utf8 ? path_utf8 : "?");
     free((void *)path_utf8);
@@ -647,6 +703,33 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
      * req->name is UTF-8, already decoded by libsmb2.
      * An empty/NULL name means the share root itself.
      */
+    if(smb_is_srvsvc_pipe(req->name)) {
+        char *pipe = strdup("srvsvc");
+        if(pipe == NULL)
+            return SMB2_STATUS_INSUFFICIENT_RESOURCES;
+
+        smb_file_entry_t *fe = smb_alloc_file(sc, pipe);
+        if(fe == NULL) {
+            free(pipe);
+            return SMB2_STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        fe->is_pipe = 1;
+        fe->mtime = time(NULL);
+        memcpy(sc->sc_related_file_id, fe->file_id, SMB2_FD_SIZE);
+        sc->sc_related_file_valid = 1;
+        memcpy(rep->file_id, fe->file_id, SMB2_FD_SIZE);
+        rep->file_attributes = SMB2_FILE_ATTRIBUTE_NORMAL;
+        rep->create_action = SMB2_FILE_OPENED;
+        rep->end_of_file = 0;
+        rep->allocation_size = 0;
+        uint64_t win_time = smb_time_to_win(fe->mtime);
+        rep->creation_time = rep->last_access_time =
+            rep->last_write_time = rep->change_time = win_time;
+        SMBTRACE("Create OK: pipe '%s'", pipe);
+        return 0;
+    }
+
     char *path = NULL;
     int path_status = smb_build_path(sc, req->name, &path);
     if(path_status != 0)
@@ -779,6 +862,8 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
         }
     }
 
+    memcpy(sc->sc_related_file_id, fe->file_id, SMB2_FD_SIZE);
+    sc->sc_related_file_valid = 1;
     memcpy(rep->file_id, fe->file_id, SMB2_FD_SIZE);
     rep->file_attributes = is_dir ? SMB2_FILE_ATTRIBUTE_DIRECTORY
                                   : SMB2_FILE_ATTRIBUTE_NORMAL;
@@ -853,7 +938,8 @@ smb_close(struct smb2_server *srvr, struct smb2_context *smb2,
             vfs_unlink(fe->path, errbuf, sizeof(errbuf));
     }
 
-    SMBTRACE("Close: '%s' (%s)", fe->path, fe->is_dir ? "DIR" : "FILE");
+    SMBTRACE("Close: '%s' (%s)", fe->path,
+             fe->is_pipe ? "PIPE" : fe->is_dir ? "DIR" : "FILE");
     smb_free_file(sc, fe);
     return 0;
 }
@@ -1498,6 +1584,30 @@ smb_ioctl(struct smb2_server *srvr, struct smb2_context *smb2,
     memcpy(rep->file_id, req->file_id, SMB2_FD_SIZE);
 
     switch(req->ctl_code) {
+    case SMB2_FSCTL_PIPE_TRANSCEIVE: {
+        smb_server_t *srv = (smb_server_t *)srvr;
+        smb_file_entry_t *fe = smb_find_file(sc, req->file_id);
+        if(fe == NULL || !fe->is_pipe)
+            return SMB2_STATUS_INVALID_DEVICE_REQUEST;
+
+        SMBTRACE("IOCTL: PIPE_TRANSCEIVE pipe='%s' input=%u",
+                 fe->path, req->input_count);
+        free(sc->sc_ioctl_output);
+        sc->sc_ioctl_output = NULL;
+
+        int status = dcerpc_server_process_srvsvc(smb2, req->input,
+                                                  req->input_count,
+                                                  srv->share_name ?
+                                                  srv->share_name : "share",
+                                                  &sc->sc_ioctl_output,
+                                                  &rep->output_count);
+        if(status)
+            return status;
+
+        rep->output = sc->sc_ioctl_output;
+        SMBTRACE("IOCTL: srvsvc response %u bytes", rep->output_count);
+        return 0;
+    }
     case SMB2_FSCTL_VALIDATE_NEGOTIATE_INFO: {
         SMBTRACE("IOCTL: VALIDATE_NEGOTIATE_INFO");
         memset(&sc->sc_vni, 0, sizeof(sc->sc_vni));
