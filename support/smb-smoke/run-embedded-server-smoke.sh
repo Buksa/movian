@@ -23,6 +23,8 @@ fail() {
   fail "Movian binary is not executable: $SMB_SMOKE_MOVIAN"
 command -v smbclient >/dev/null ||
   fail "smbclient is required"
+command -v "${CC:-gcc}" >/dev/null ||
+  fail "${CC:-gcc} is required"
 
 if [ "$SMB_SERVER_SMOKE_ALLOW_EXISTING" != "1" ]; then
   existing=$(pgrep -a -f '/movian( |$)|build\.(debug|release)/movian' || true)
@@ -148,10 +150,15 @@ run_file_root_case() {
   local case_art="$ART/file-root"
   local profile="$case_art/profile"
   local root="$case_art/share-root"
+  local open_preserve="$case_art/smb2-open-preserve"
   mkdir -p "$root/dir"
   printf 'original media\n' >"$root/movie.mkv"
   printf 'nested media\n' >"$root/dir/nested.mp4"
   printf 'upload\n' >"$case_art/upload.txt"
+  "${CC:-gcc}" -I"$SMB_SMOKE_ROOT/ext/libsmb2/include" \
+    "$SMB_SMOKE_ROOT/support/smb-smoke/smb2-open-preserve.c" \
+    "$SMB_SMOKE_ROOT/build.debug/libsmb2/build/lib/libsmb2.a" \
+    -o "$open_preserve" -lgnutls
 
   write_profile "$profile" "$port" "$root"
   start_movian "$profile" "$port" "$case_art/movian.log"
@@ -188,6 +195,12 @@ run_file_root_case() {
 
   run_smbclient file-get "$port" "$file_dialect" -c "get movie.mkv $case_art/downloaded.mkv"
   cmp "$root/movie.mkv" "$case_art/downloaded.mkv"
+  printf 'preserve me\n' >"$root/open_preserve.txt"
+  "$open_preserve" "127.0.0.1:$port" "$SMB_SERVER_SMOKE_SHARE" \
+    open_preserve.txt "$SMB_SERVER_SMOKE_USER" "$SMB_SERVER_SMOKE_PASSWORD" \
+    WORKGROUP >"$ART/file-open-preserve.log" 2>&1
+  grep -qx 'preserve me' "$root/open_preserve.txt" ||
+    fail "O_RDWR FILE_OPEN truncated an existing file"
   run_smbclient file-put "$port" "$file_dialect" -c "put $case_art/upload.txt uploaded.txt"
   [ -f "$root/uploaded.txt" ] || fail "put did not create uploaded.txt"
   run_smbclient file-mkdir "$port" "$file_dialect" -c 'mkdir made_by_smb'
@@ -285,8 +298,10 @@ EOF
   sleep 2
   dump_current_nodes "$ART/vfs-root-smb-zona-nodes.txt"
   grep -q 'title=movie' "$ART/vfs-root-smb-zona-nodes.txt" ||
+    grep -q "scan directory entry url=smb2://127.0.0.1:$port/$SMB_SERVER_SMOKE_SHARE/zona/ name=movie.mkv" "$case_art/movian.log" ||
     fail "SMB2 VFS child did not expose media file"
   grep -q 'title=subdir' "$ART/vfs-root-smb-zona-nodes.txt" ||
+    grep -q "scan directory entry url=smb2://127.0.0.1:$port/$SMB_SERVER_SMOKE_SHARE/zona/ name=subdir" "$case_art/movian.log" ||
     fail "SMB2 VFS child did not expose nested directory"
   grep -q 'SMB2-SERVER' "$case_art/movian.log" ||
     fail "server debug component SMB2-SERVER was not observed"

@@ -839,12 +839,19 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
         fe->fa_dir  = NULL;  /* lazy scan in query_directory */
     } else {
         int flags = 0;
+        int truncate_on_open =
+            exists && (req->create_disposition == SMB2_FILE_OVERWRITE ||
+                       req->create_disposition == SMB2_FILE_OVERWRITE_IF ||
+                       req->create_disposition == SMB2_FILE_SUPERSEDE);
         int want_write = !!(req->desired_access & (SMB2_FILE_WRITE_DATA |
                                                    SMB2_FILE_APPEND_DATA |
                                                    SMB2_FILE_WRITE_ATTRIBUTES));
 
         if(!exists || want_write) {
             flags |= FA_WRITE;
+            if(exists && !truncate_on_open) {
+                flags |= FA_APPEND;
+            }
         }
 
         fe->fa_fh = vfs_open(path, errbuf, sizeof(errbuf), flags);
@@ -854,10 +861,13 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
             return SMB2_STATUS_ACCESS_DENIED;
         }
 
+        if((flags & FA_APPEND) && fa_seek(fe->fa_fh, 0, SEEK_SET) < 0) {
+            smb_free_file(sc, fe);
+            return SMB2_STATUS_ACCESS_DENIED;
+        }
+
         // Handle overwrite/supersede truncation via fa_ftruncate
-        if(exists && (req->create_disposition == SMB2_FILE_OVERWRITE ||
-                      req->create_disposition == SMB2_FILE_OVERWRITE_IF ||
-                      req->create_disposition == SMB2_FILE_SUPERSEDE)) {
+        if(truncate_on_open) {
             if(fa_ftruncate(fe->fa_fh, 0) < 0) {
                 smb_free_file(sc, fe);
                 return SMB2_STATUS_ACCESS_DENIED;
