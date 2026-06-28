@@ -230,6 +230,24 @@ vfs_scandir(const char *url, char *errbuf, size_t errlen)
     return fa_scandir(url, errbuf, errlen);
 }
 
+static char *
+smb_normalize_share_root(const char *root)
+{
+    if(root == NULL || root[0] == '\0' || !strcmp(root, "/"))
+        return strdup("vfs:///");
+
+    if(!strncmp(root, "vfs://", 6) || !strncmp(root, "file://", 7))
+        return strdup(root);
+
+    size_t len = strlen(root) + sizeof("file://");
+    char *url = malloc(len);
+    if(url == NULL)
+        return NULL;
+
+    snprintf(url, len, "file://%s", root);
+    return url;
+}
+
 /* ------------------------------------------------------------------ */
 /* Path resolution                                                      */
 /* ------------------------------------------------------------------ */
@@ -239,34 +257,40 @@ vfs_scandir(const char *url, char *errbuf, size_t errlen)
  * req->name from libsmb2 server API is already UTF-8; backslashes are
  * converted to forward slashes by us.
  */
-static char *
-smb_build_path(smb_connection_t *sc, const char *name)
+static int
+smb_build_path(smb_connection_t *sc, const char *name, char **pathp)
 {
     const char *root = sc->sc_share_root;
 
-    if(name == NULL || *name == '\0')
-        return strdup(root);
+    *pathp = NULL;
+
+    if(name == NULL || *name == '\0') {
+        *pathp = strdup(root);
+        return *pathp != NULL ? 0 : SMB2_STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    const char *src = name;
+    while(*src == '/' || *src == '\\')
+        src++;
+
+    if(*src == '\0') {
+        *pathp = strdup(root);
+        return *pathp != NULL ? 0 : SMB2_STATUS_INSUFFICIENT_RESOURCES;
+    }
 
     size_t rlen = strlen(root);
-    size_t nlen = strlen(name);
-    int need_slash = (rlen > 0 && root[rlen-1] != '/');
+    size_t nlen = strlen(src);
+    int need_slash = (rlen > 0 && root[rlen - 1] != '/');
     size_t plen = rlen + need_slash + nlen + 1;
 
     char *path = malloc(plen);
     if(path == NULL)
-        return NULL;
+        return SMB2_STATUS_INSUFFICIENT_RESOURCES;
 
     memcpy(path, root, rlen);
     char *dest = path + rlen;
     if(need_slash) {
         *dest++ = '/';
-    }
-
-    /* Copy name while converting backslash to slash and collapsing multiple slashes */
-    const char *src = name;
-    /* Strip leading slashes/backslashes */
-    while(*src == '/' || *src == '\\') {
-        src++;
     }
 
     char *rel_start = dest;
@@ -295,13 +319,14 @@ smb_build_path(smb_connection_t *sc, const char *name)
     while(*p) {
         if(p[0] == '.' && p[1] == '.' && (p[2] == '/' || p[2] == '\0')) {
             free(path);
-            return NULL;
+            return SMB2_STATUS_OBJECT_PATH_SYNTAX_BAD;
         }
         const char *next = strchr(p, '/');
         p = next ? next + 1 : p + strlen(p);
     }
 
-    return path;
+    *pathp = path;
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -471,9 +496,13 @@ smb_authorize(struct smb2_server *srvr, struct smb2_context *smb2,
     }
 
     /*
-     * Username matches. Provide password so libsmb2 can verify NTLMv2.
-     * smb2_set_password() makes a copy internally.
+     * Username matches. Keep the context identity in sync with the
+     * authenticated NTLM message, then provide the password so libsmb2 can
+     * verify NTLMv2. These setters make their own copies.
      */
+    smb2_set_user(smb2, user);
+    if(domain != NULL && domain[0] != '\0')
+        smb2_set_domain(smb2, domain);
     smb2_set_password(smb2, srv->password ? srv->password : "");
     SMBTRACE("Auth: user '%s' domain='%s' wks='%s' → NTLMv2 pending",
              user, domain ? domain : "", workstation ? workstation : "");
@@ -504,14 +533,11 @@ smb_session_established(struct smb2_server *srvr, struct smb2_context *smb2)
     smb_connection_t *sc = calloc(1, sizeof(smb_connection_t));
     if(sc == NULL)
         return -1;
-    const char *root = srv->share_root && srv->share_root[0] ? srv->share_root : "/";
-    char root_buf[512];
-    int r = snprintf(root_buf, sizeof(root_buf), "file://%s", root);
-    if(r < 0 || r >= (int)sizeof(root_buf)) {
+    sc->sc_share_root = smb_normalize_share_root(srv->share_root);
+    if(sc->sc_share_root == NULL) {
         free(sc);
         return -1;
     }
-    sc->sc_share_root = strdup(root_buf);
     smb2_set_opaque(smb2, sc);
     return 0;
 }
@@ -621,9 +647,10 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
      * req->name is UTF-8, already decoded by libsmb2.
      * An empty/NULL name means the share root itself.
      */
-    char *path = smb_build_path(sc, req->name);
-    if(path == NULL)
-        return SMB2_STATUS_INSUFFICIENT_RESOURCES;
+    char *path = NULL;
+    int path_status = smb_build_path(sc, req->name, &path);
+    if(path_status != 0)
+        return path_status;
 
     SMBTRACE("Create: '%s' disp=%s opts=0x%08x acc=0x%08x",
              path,
@@ -1362,9 +1389,10 @@ smb_decode_rename_path(smb_connection_t *sc, const uint8_t *buf, uint32_t buflen
     if(utf8 == NULL)
         return NULL;
 
-    char *path = smb_build_path(sc, utf8);
+    char *path = NULL;
+    int path_status = smb_build_path(sc, utf8, &path);
     free((void *)utf8);
-    return path;
+    return path_status == 0 ? path : NULL;
 }
 
 static int
@@ -1473,11 +1501,9 @@ smb_ioctl(struct smb2_server *srvr, struct smb2_context *smb2,
     case SMB2_FSCTL_VALIDATE_NEGOTIATE_INFO: {
         SMBTRACE("IOCTL: VALIDATE_NEGOTIATE_INFO");
         memset(&sc->sc_vni, 0, sizeof(sc->sc_vni));
-        sc->sc_vni.capabilities = 0;
-        sc->sc_vni.security_mode = 0;
-        uint8_t server_guid[16] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
-                                   0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00};
-        memcpy(sc->sc_vni.guid, server_guid, 16);
+        sc->sc_vni.capabilities = srvr->capabilities;
+        sc->sc_vni.security_mode = srvr->security_mode;
+        memcpy(sc->sc_vni.guid, srvr->guid, sizeof(sc->sc_vni.guid));
         sc->sc_vni.dialect = smb2_get_dialect(smb2);
 
         rep->output = &sc->sc_vni;
@@ -1579,7 +1605,7 @@ enable_disable(void)
             return;
         }
         srv->srv.handlers        = &smb_handlers;
-        srv->srv.signing_enabled = 0;
+        srv->srv.signing_enabled = smb_username != NULL ? 1 : 0;
         srv->srv.allow_anonymous = (smb_username == NULL) ? 1 : 0;
         srv->srv.port            = (uint16_t)smb_port;
         srv->username            = smb_username ? strdup(smb_username) : NULL;

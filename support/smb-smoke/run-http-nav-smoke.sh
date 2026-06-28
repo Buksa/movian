@@ -23,7 +23,7 @@ cat <<EOF >"$ART/profile/persistent/settings/smbserver"
 }
 EOF
 
-cat <<EOF >"$ART/profile/persistent/settings/network"
+cat <<EOF >"$ART/profile/persistent/settings/dev"
 {
 	"smbdebug": 1
 }

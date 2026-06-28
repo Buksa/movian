@@ -1,5 +1,5 @@
 diff --git a/lib/libsmb2.c b/lib/libsmb2.c
-index 606d767..0714bfa 100644
+index 606d767..132ef5f 100644
 --- a/lib/libsmb2.c
 +++ b/lib/libsmb2.c
 @@ -3184,6 +3184,9 @@ smb2_query_directory_request_cb(struct smb2_server *server, struct smb2_context
@@ -22,17 +22,73 @@ index 606d767..0714bfa 100644
          if (pdu != NULL) {
                  smb2_queue_pdu(smb2, pdu);
          }
-@@ -3842,7 +3848,7 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+@@ -3389,6 +3395,7 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
+         int response_length;
+         int is_spnego_wrapped;
+         int have_valid_session_key = 1;
++        int require_session_key = 0;
+         int ret;
+
+         if (status) {
+@@ -3478,6 +3485,17 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
+                                                     &smb2->session_key_size) < 0) {
+                                 have_valid_session_key = 0;
+                         }
++                        if (smb2->session_key == NULL ||
++                            smb2->session_key_size == 0) {
++                                have_valid_session_key = 0;
++                        } else {
++                                uint8_t zero_key[SMB2_KEY_SIZE] = {0};
++                                if (!memcmp(smb2->session_key, zero_key,
++                                            MIN(smb2->session_key_size,
++                                                SMB2_KEY_SIZE))) {
++                                        have_valid_session_key = 0;
++                                }
++                        }
+                 }
+         }
+ #ifdef HAVE_LIBKRB5
+@@ -3486,7 +3504,10 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
+                 have_valid_session_key = 0;
+         }
+ #endif
+-        if (smb2->sign && have_valid_session_key == 0) {
++        require_session_key = smb2->sign ||
++                (!server->allow_anonymous &&
++                 smb2->dialect == SMB2_VERSION_0311 && !smb2->seal);
++        if (require_session_key && have_valid_session_key == 0) {
+                 smb2_close_context(smb2);
+                 smb2_set_error(smb2, "Signing required by server. Session "
+                                "Key is not available %s",
+@@ -3494,7 +3515,7 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
+                 return;
+         }
+
+-        if (smb2->sign)  {
++        if (require_session_key)  {
+                 /* Derive the signing key from session key
+                 * This is based on negotiated protocol
+                 */
+@@ -3713,6 +3734,8 @@ smb2_negotiate_request_cb(struct smb2_context *smb2, int status, void *command_d
+         /* remember negotiated capabilites and security mode */
+         smb2->capabilities = rep.capabilities;
+         smb2->security_mode = rep.security_mode;
++        server->capabilities = rep.capabilities;
++        server->security_mode = rep.security_mode;
+
+         now.tv_sec = time(NULL);
+         now.tv_usec = 0;
+@@ -3842,7 +3865,7 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
                  maxfd = server->fd;
- 
+
                  for (smb2 = smb2_active_contexts(); smb2; smb2 = smb2->next) {
 -                        if (SMB2_VALID_SOCKET(smb2_get_fd(smb2))) {
 +                        if (smb2_is_server(smb2) && SMB2_VALID_SOCKET(smb2_get_fd(smb2))) {
                                  events = smb2_which_events(smb2);
                                  if (events) {
                                          if (events & POLLIN) {
-@@ -3875,28 +3881,30 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
- 
+@@ -3875,28 +3898,30 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+
                          /* for each client context ready to read, process that context */
                          for (smb2 = smb2_active_contexts(); smb2; smb2 = smb2->next) {
 -                                if (SMB2_VALID_SOCKET(smb2_get_fd(smb2)) && FD_ISSET(smb2_get_fd(smb2), &rfds)) {
@@ -80,11 +136,11 @@ index 606d767..0714bfa 100644
 +                                        }
                                  }
                          }
- 
-@@ -3952,9 +3960,16 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+
+@@ -3952,10 +3977,16 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
          close(server->fd);
          server->fd = -1;
- 
+
 -        while (smb2_active_contexts()) {
 -                smb2 = smb2_active_contexts();
 -                smb2_destroy_context(smb2);
@@ -101,13 +157,14 @@ index 606d767..0714bfa 100644
          }
          return err;
  }
+-
 diff --git a/lib/smb2-cmd-query-directory.c b/lib/smb2-cmd-query-directory.c
 index 3dbd2f4..5239121 100644
 --- a/lib/smb2-cmd-query-directory.c
 +++ b/lib/smb2-cmd-query-directory.c
 @@ -221,7 +221,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
          rep->output_buffer_offset = len + SMB2_HEADER_SIZE;
- 
+
          if (rep->output_buffer) {
 -                if (!smb2->passthrough) {
 +                if (1 /* !smb2->passthrough */) {
@@ -130,7 +187,7 @@ index 3dbd2f4..5239121 100644
 @@ -282,7 +282,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
          in_remain = fslen;
          offset = 0;
- 
+
 -        if (smb2->passthrough) {
 +        if (0 /* smb2->passthrough */) {
                  memcpy(buf, rep->output_buffer, rep->output_buffer_length);
@@ -183,13 +240,13 @@ index 8d2f381..3574c77 100644
 @@ -1289,6 +1289,9 @@ smb2_bind_and_listen(const uint16_t port, const int max_connections, int *out_fd
                  return -EIO;
          }
- 
+
 +        int reuse = 1;
 +        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 +
          set_nonblocking(fd);
          set_tcp_sockopt(fd, TCP_NODELAY, 1);
- 
+
 @@ -1300,8 +1303,10 @@ smb2_bind_and_listen(const uint16_t port, const int max_connections, int *out_fd
          if (bind(fd, (struct sockaddr *)&serv_addr, socksize) != 0
  #ifndef _MSC_VER

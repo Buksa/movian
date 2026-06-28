@@ -42,6 +42,26 @@ Checks:
 - the configured share/path reaches `loading=0`;
 - first page nodes are captured for comparison.
 
+## Embedded SMB2 Server Smoke
+
+```sh
+support/smb-smoke/run-embedded-server-smoke.sh
+```
+
+Checks a local Movian SMB2 server with an isolated profile:
+
+- password SMB2 and SMB3 `smbclient` listing;
+- wrong password rejection;
+- `get`, `put`, `mkdir`, `rename`, `del`, `rmdir`;
+- traversal upload attempts stay scoped below the exported root;
+- Movian can navigate its own `smb2://127.0.0.1:<port>/share/` URL and read a
+  media file;
+- the default `/` share root exports `vfs:///`, not the raw filesystem root.
+
+The Movian media browser may filter non-media files such as `.txt` from the UI
+node list even when `smbclient ls` shows them. Use media extensions for
+Movian self-navigation assertions and `smbclient` for protocol-level listings.
+
 ## GDB Smoke
 
 ```sh
