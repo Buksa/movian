@@ -1,0 +1,203 @@
+diff --git a/lib/libsmb2.c b/lib/libsmb2.c
+index 606d767..0714bfa 100644
+--- a/lib/libsmb2.c
++++ b/lib/libsmb2.c
+@@ -3184,6 +3184,9 @@ smb2_query_directory_request_cb(struct smb2_server *server, struct smb2_context
+                         pdu = smb2_cmd_query_directory_reply_async(smb2, req, &rep, NULL, cb_data);
+                 }
+         }
++        if (rep.output_buffer) {
++                free(rep.output_buffer);
++        }
+         if (req->name) {
+                 smb2_free_data(smb2, discard_const(req->name));
+         }
+@@ -3251,6 +3254,9 @@ smb2_query_info_request_cb(struct smb2_server *server, struct smb2_context *smb2
+                         pdu = smb2_cmd_query_info_reply_async(smb2, req, &rep, NULL, cb_data);
+                 }
+         }
++        if (rep.output_buffer) {
++                free(rep.output_buffer);
++        }
+         if (pdu != NULL) {
+                 smb2_queue_pdu(smb2, pdu);
+         }
+@@ -3842,7 +3848,7 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+                 maxfd = server->fd;
+ 
+                 for (smb2 = smb2_active_contexts(); smb2; smb2 = smb2->next) {
+-                        if (SMB2_VALID_SOCKET(smb2_get_fd(smb2))) {
++                        if (smb2_is_server(smb2) && SMB2_VALID_SOCKET(smb2_get_fd(smb2))) {
+                                 events = smb2_which_events(smb2);
+                                 if (events) {
+                                         if (events & POLLIN) {
+@@ -3875,28 +3881,30 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+ 
+                         /* for each client context ready to read, process that context */
+                         for (smb2 = smb2_active_contexts(); smb2; smb2 = smb2->next) {
+-                                if (SMB2_VALID_SOCKET(smb2_get_fd(smb2)) && FD_ISSET(smb2_get_fd(smb2), &rfds)) {
+-                                        if (smb2_service(smb2, POLLIN) < 0) {
+-                                                smb2_set_error(smb2, "smb2_service (in) failed with : "
+-                                                                "%s", smb2_get_error(smb2));
+-                                                smb2_close_context(smb2);
++                                if (smb2_is_server(smb2) && SMB2_VALID_SOCKET(smb2_get_fd(smb2))) {
++                                        if (FD_ISSET(smb2_get_fd(smb2), &rfds)) {
++                                                if (smb2_service(smb2, POLLIN) < 0) {
++                                                        smb2_set_error(smb2, "smb2_service (in) failed with : "
++                                                                        "%s", smb2_get_error(smb2));
++                                                        smb2_close_context(smb2);
++                                                }
++                                                err = 0;
+                                         }
+-                                        err = 0;
+-                                }
+-                                if (SMB2_VALID_SOCKET(smb2_get_fd(smb2)) && FD_ISSET(smb2_get_fd(smb2), &wfds)) {
+-                                        if (smb2_service(smb2, POLLOUT) < 0) {
+-                                                smb2_set_error(smb2, "smb2_service (out) failed with : "
+-                                                                "%s", smb2_get_error(smb2));
++                                        if (SMB2_VALID_SOCKET(smb2_get_fd(smb2)) && FD_ISSET(smb2_get_fd(smb2), &wfds)) {
++                                                if (smb2_service(smb2, POLLOUT) < 0) {
++                                                        smb2_set_error(smb2, "smb2_service (out) failed with : "
++                                                                        "%s", smb2_get_error(smb2));
++                                                        smb2_close_context(smb2);
++                                                }
++                                        }
++                                        if (!SMB2_VALID_SOCKET(smb2->fd) && ((time(NULL) - t) > (smb2->timeout)))
++                                        {
++                                                smb2_set_error(smb2, "Timeout expired and no connection exists\n");
+                                                 smb2_close_context(smb2);
+                                         }
+-                                }
+-                                if (!SMB2_VALID_SOCKET(smb2->fd) && ((time(NULL) - t) > (smb2->timeout)))
+-                                {
+-                                        smb2_set_error(smb2, "Timeout expired and no connection exists\n");
+-                                        smb2_close_context(smb2);
+-                                }
+-                                if (smb2->timeout) {
+-                                        smb2_timeout_pdus(smb2);
++                                        if (smb2->timeout) {
++                                                smb2_timeout_pdus(smb2);
++                                        }
+                                 }
+                         }
+ 
+@@ -3952,9 +3960,16 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+         close(server->fd);
+         server->fd = -1;
+ 
+-        while (smb2_active_contexts()) {
+-                smb2 = smb2_active_contexts();
+-                smb2_destroy_context(smb2);
++        int found_any = 1;
++        while (found_any) {
++                found_any = 0;
++                for (smb2 = smb2_active_contexts(); smb2; smb2 = smb2->next) {
++                        if (smb2_is_server(smb2)) {
++                                smb2_destroy_context(smb2);
++                                found_any = 1;
++                                break;
++                        }
++                }
+         }
+         return err;
+ }
+diff --git a/lib/smb2-cmd-query-directory.c b/lib/smb2-cmd-query-directory.c
+index 3dbd2f4..5239121 100644
+--- a/lib/smb2-cmd-query-directory.c
++++ b/lib/smb2-cmd-query-directory.c
+@@ -221,7 +221,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
+         rep->output_buffer_offset = len + SMB2_HEADER_SIZE;
+ 
+         if (rep->output_buffer) {
+-                if (!smb2->passthrough) {
++                if (1 /* !smb2->passthrough */) {
+                         rep->output_buffer_length = 0;
+                         in_offset = 0;
+                         in_remain = fslen;
+@@ -240,10 +240,10 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
+                                 switch (info_class)
+                                 {
+                                 case SMB2_FILE_ID_FULL_DIRECTORY_INFORMATION:
+-                                        fs_size = PAD_TO_32BIT(SMB2_FILEID_FULL_DIRECTORY_INFORMATION_SIZE + fname_len);
++                                        fs_size = PAD_TO_64BIT(SMB2_FILEID_FULL_DIRECTORY_INFORMATION_SIZE + fname_len);
+                                         break;
+                                 case SMB2_FILE_ID_BOTH_DIRECTORY_INFORMATION:
+-                                        fs_size = PAD_TO_32BIT(SMB2_FILEID_BOTH_DIRECTORY_INFORMATION_SIZE + fname_len);
++                                        fs_size = PAD_TO_64BIT(SMB2_FILEID_BOTH_DIRECTORY_INFORMATION_SIZE + fname_len);
+                                         break;
+                                 default:
+                                         fs_size = 0;
+@@ -282,7 +282,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
+         in_remain = fslen;
+         offset = 0;
+ 
+-        if (smb2->passthrough) {
++        if (0 /* smb2->passthrough */) {
+                 memcpy(buf, rep->output_buffer, rep->output_buffer_length);
+                 memset(buf + rep->output_buffer_length, 0, len - rep->output_buffer_length);
+                 iov->len = rep->output_buffer_length;
+@@ -303,10 +303,10 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
+                         switch (info_class)
+                         {
+                         case SMB2_FILE_ID_FULL_DIRECTORY_INFORMATION:
+-                                fs_size = PAD_TO_32BIT(SMB2_FILEID_FULL_DIRECTORY_INFORMATION_SIZE + fname_len);
++                                fs_size = PAD_TO_64BIT(SMB2_FILEID_FULL_DIRECTORY_INFORMATION_SIZE + fname_len);
+                                 break;
+                         case SMB2_FILE_ID_BOTH_DIRECTORY_INFORMATION:
+-                                fs_size = PAD_TO_32BIT(SMB2_FILEID_BOTH_DIRECTORY_INFORMATION_SIZE + fname_len);
++                                fs_size = PAD_TO_64BIT(SMB2_FILEID_BOTH_DIRECTORY_INFORMATION_SIZE + fname_len);
+                                 break;
+                         default:
+                                 fs_size = 0;
+@@ -315,7 +315,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
+                         in_offset += PAD_TO_64BIT(sizeof(struct smb2_fileidbothdirectoryinformation));
+                         in_remain -= PAD_TO_64BIT(sizeof(struct smb2_fileidbothdirectoryinformation));
+                         if (in_remain >= SMB2_FILEID_BOTH_DIRECTORY_INFORMATION_SIZE) {
+-                                smb2_set_uint32(iov, offset + 0, offset + fs_size);
++                                smb2_set_uint32(iov, offset + 0, fs_size);
+                         }
+                         else {
+                                 smb2_set_uint32(iov, offset + 0, 0);
+@@ -324,7 +324,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
+                         switch (info_class)
+                         {
+                         case SMB2_FILE_ID_FULL_DIRECTORY_INFORMATION:
+-                                fs_size = PAD_TO_32BIT(SMB2_FILEID_FULL_DIRECTORY_INFORMATION_SIZE + fname_len);
++                                fs_size = PAD_TO_64BIT(SMB2_FILEID_FULL_DIRECTORY_INFORMATION_SIZE + fname_len);
+                                 smb2_set_uint32(iov, offset + 4, fs->file_index);
+                                 smb2_set_uint64(iov, offset + 8, smb2_timeval_to_win(&fs->creation_time));
+                                 smb2_set_uint64(iov, offset + 16, smb2_timeval_to_win(&fs->last_access_time));
+@@ -342,7 +342,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
+                                 }
+                                 break;
+                         case SMB2_FILE_ID_BOTH_DIRECTORY_INFORMATION:
+-                                fs_size = PAD_TO_32BIT(SMB2_FILEID_BOTH_DIRECTORY_INFORMATION_SIZE + fname_len);
++                                fs_size = PAD_TO_64BIT(SMB2_FILEID_BOTH_DIRECTORY_INFORMATION_SIZE + fname_len);
+                                 smb2_set_uint32(iov, offset + 4, fs->file_index);
+                                 smb2_set_uint64(iov, offset + 8, smb2_timeval_to_win(&fs->creation_time));
+                                 smb2_set_uint64(iov, offset + 16, smb2_timeval_to_win(&fs->last_access_time));
+diff --git a/lib/socket.c b/lib/socket.c
+index 8d2f381..3574c77 100644
+--- a/lib/socket.c
++++ b/lib/socket.c
+@@ -1289,6 +1289,9 @@ smb2_bind_and_listen(const uint16_t port, const int max_connections, int *out_fd
+                 return -EIO;
+         }
+ 
++        int reuse = 1;
++        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
++
+         set_nonblocking(fd);
+         set_tcp_sockopt(fd, TCP_NODELAY, 1);
+ 
+@@ -1300,8 +1303,10 @@ smb2_bind_and_listen(const uint16_t port, const int max_connections, int *out_fd
+         if (bind(fd, (struct sockaddr *)&serv_addr, socksize) != 0
+ #ifndef _MSC_VER
+                   && errno != EINPROGRESS) {
++                fprintf(stderr, "bind() failed for port %d: errno=%d (%s)\n", port, errno, strerror(errno));
+ #else
+                   && WSAGetLastError() != WSAEWOULDBLOCK) {
++                fprintf(stderr, "bind() failed: wsaerr=%d\n", WSAGetLastError());
+ #endif
+                 close(fd);
+                 return -EIO;
