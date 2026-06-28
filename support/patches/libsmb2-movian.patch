@@ -71,7 +71,7 @@ index 91af61b..396b1da 100644
                  if (smb2->change_fd) {
                          smb2->change_fd(smb2, smb2->fd, SMB2_DEL_FD);
 diff --git a/lib/libsmb2.c b/lib/libsmb2.c
-index 9b21617..c51bca8 100644
+index 0b53fd0..dfbf1f9 100644
 --- a/lib/libsmb2.c
 +++ b/lib/libsmb2.c
 @@ -2011,6 +2011,10 @@ getinfo_cb_2(struct smb2_context *smb2, int status,
@@ -85,7 +85,7 @@ index 9b21617..c51bca8 100644
 
          if (stat_data->info_type == SMB2_0_INFO_FILE &&
              stat_data->file_info_class == SMB2_FILE_ALL_INFORMATION) {
-@@ -3407,6 +3411,9 @@ smb2_query_directory_request_cb(struct smb2_server *server, struct smb2_context
+@@ -3422,6 +3426,9 @@ smb2_query_directory_request_cb(struct smb2_server *server, struct smb2_context
                          pdu = smb2_cmd_query_directory_reply_async(smb2, req, &rep, NULL, cb_data);
                  }
          }
@@ -95,7 +95,7 @@ index 9b21617..c51bca8 100644
          if (req->name) {
                  smb2_free_data(smb2, discard_const(req->name));
          }
-@@ -3476,6 +3483,9 @@ smb2_query_info_request_cb(struct smb2_server *server, struct smb2_context *smb2
+@@ -3491,6 +3498,9 @@ smb2_query_info_request_cb(struct smb2_server *server, struct smb2_context *smb2
                          pdu = smb2_cmd_query_info_reply_async(smb2, req, &rep, NULL, cb_data);
                  }
          }
@@ -105,7 +105,7 @@ index 9b21617..c51bca8 100644
          if (pdu != NULL) {
                  smb2_set_pdu_message_id(smb2, pdu, smb2->message_id);
                  smb2_queue_pdu(smb2, pdu);
-@@ -3621,6 +3631,7 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
+@@ -3636,6 +3646,7 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
          int response_length;
          int is_spnego_wrapped;
          int have_valid_session_key = 1;
@@ -113,7 +113,7 @@ index 9b21617..c51bca8 100644
          int ret;
 
          if (status) {
-@@ -3728,6 +3739,17 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
+@@ -3743,6 +3754,17 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
                                                      &smb2->session_key_size) < 0) {
                                  have_valid_session_key = 0;
                          }
@@ -131,7 +131,7 @@ index 9b21617..c51bca8 100644
                  }
          }
  #ifdef HAVE_LIBKRB5
-@@ -3772,7 +3794,10 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
+@@ -3787,7 +3809,10 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
                  }
          }
  #endif
@@ -143,7 +143,7 @@ index 9b21617..c51bca8 100644
                  smb2_close_context(smb2);
                  smb2_set_error(smb2, "Signing required by server. Session "
                                 "Key is not available %s",
-@@ -3781,7 +3806,7 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
+@@ -3796,7 +3821,7 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
                  return;
          }
 
@@ -152,7 +152,7 @@ index 9b21617..c51bca8 100644
                  /* Derive the signing key from session key
                  * This is based on negotiated protocol
                  */
-@@ -4010,6 +4035,8 @@ smb2_negotiate_request_cb(struct smb2_context *smb2, int status, void *command_d
+@@ -4025,6 +4050,8 @@ smb2_negotiate_request_cb(struct smb2_context *smb2, int status, void *command_d
          /* remember negotiated capabilites and security mode */
          smb2->capabilities = rep.capabilities;
          smb2->security_mode = rep.security_mode;
@@ -161,7 +161,7 @@ index 9b21617..c51bca8 100644
 
          now.tv_sec = time(NULL);
          now.tv_usec = 0;
-@@ -4088,6 +4115,35 @@ int smb2_serve_port_async(const int fd, const int to_msecs, struct smb2_context
+@@ -4103,6 +4130,35 @@ int smb2_serve_port_async(const int fd, const int to_msecs, struct smb2_context
          return err;
  }
 
@@ -197,7 +197,7 @@ index 9b21617..c51bca8 100644
  int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_client_connection cb, void *cb_data)
  {
          struct smb2_context *smb2;
-@@ -4126,6 +4182,8 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+@@ -4141,6 +4197,8 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
                  return err;
          }
  #endif
@@ -206,7 +206,7 @@ index 9b21617..c51bca8 100644
          err = smb2_bind_and_listen(server->port, max_connections, &server->fd);
          if (err != 0) {
                  return err;
-@@ -4133,15 +4191,15 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+@@ -4148,15 +4206,15 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
          server->session_counter = 0x1234;
 
          do {
@@ -225,7 +225,7 @@ index 9b21617..c51bca8 100644
                          if (SMB2_VALID_SOCKET(smb2_get_fd(smb2))) {
                                  events = smb2_which_events(smb2);
                                  if (events) {
-@@ -4173,8 +4231,9 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+@@ -4188,8 +4246,9 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
                  if (ready > 0) {
                          now = time(NULL);
 
@@ -237,7 +237,7 @@ index 9b21617..c51bca8 100644
                                  if (SMB2_VALID_SOCKET(smb2_get_fd(smb2)) && FD_ISSET(smb2_get_fd(smb2), &rfds)) {
                                          if (smb2_service(smb2, POLLIN) < 0) {
                                                  smb2_set_error(smb2, "smb2_service (in) failed with : "
-@@ -4198,6 +4257,7 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+@@ -4213,6 +4272,7 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
                                  if (smb2->timeout) {
                                          smb2_timeout_pdus(smb2);
                                  }
@@ -245,7 +245,7 @@ index 9b21617..c51bca8 100644
                          }
 
                          if (FD_ISSET(server->fd, &rfds)) {
-@@ -4207,7 +4267,8 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+@@ -4222,7 +4282,8 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
                                          c_data = calloc(1, sizeof(struct connect_data));
                                          if (c_data == NULL) {
                                                  smb2_set_error(smb2, "Failed to allocate connect_data");
@@ -255,7 +255,7 @@ index 9b21617..c51bca8 100644
                                          }
                                          c_data->server_context = server;
                                          smb2->connect_data = c_data;
-@@ -4216,10 +4277,11 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+@@ -4231,10 +4292,11 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
                                          smb2->pdu = smb2_allocate_pdu(smb2, SMB2_NEGOTIATE, smb2_negotiate_request_cb, c_data);
                                          if (!smb2->pdu) {
                                                  smb2_set_error(smb2, "can not alloc pdu for request");
@@ -269,7 +269,7 @@ index 9b21617..c51bca8 100644
                                          smb2->max_transact_size = server->max_transact_size;
                                          smb2->max_read_size     = server->max_read_size;
                                          smb2->max_write_size    = server->max_write_size;
-@@ -4233,20 +4295,12 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+@@ -4248,20 +4310,12 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
                                  }
                          }
 
@@ -295,7 +295,7 @@ index 9b21617..c51bca8 100644
                          }
                  }
  #ifdef HAVE_LIBKRB5
-@@ -4265,13 +4319,9 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+@@ -4280,13 +4334,9 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
          close(server->fd);
          server->fd = -1;
 
