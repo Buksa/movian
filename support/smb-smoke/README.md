@@ -111,6 +111,12 @@ Successful findings to preserve in future smokes:
   `1445` is acceptable. For ordinary Windows Explorer or `net use` acceptance,
   the service must be reachable on TCP `445`; Windows `\\host@port\share` and
   `\\host:port\share` are not reliable user-facing connection forms.
+- Current Steam Deck/AG and local WSL runtime research shows a useful split:
+  anonymous read-only SMB2 browsing on a high port works with `smbclient` for
+  both SMB2 and SMB3 dialect selection, while password-protected NTLM sessions
+  fail before the first create/query request (`NT_STATUS_ACCESS_DENIED` or bad
+  SMB2 signature). Treat password auth/signing as a separate blocker from VFS
+  listing and high-port listener lifecycle.
 - If TCP `445` cannot be bound on the target platform while higher ports work,
   keep handler correctness and privileged-port packaging/forwarding as separate
   test results. This applies beyond Flatpak: native Linux, SteamOS, Android,

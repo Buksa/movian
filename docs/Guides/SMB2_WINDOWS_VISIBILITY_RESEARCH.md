@@ -17,6 +17,12 @@ non-privileged development port. On the Steam Deck Flatpak test host:
 The MVP request handlers are therefore usable on high ports, but Windows
 Explorer and `net use` still need a way to reach the server on TCP `445`.
 
+Authentication is a separate current blocker from TCP visibility. Runtime tests
+against the AG build on Steam Deck show anonymous high-port browsing succeeds
+with Samba `smbclient`, while password-protected NTLM sessions fail before the
+first directory create/query request. Do not treat anonymous high-port success
+as proof that ordinary Windows password-authenticated UNC access is complete.
+
 This is not only a Flatpak problem. It is a general host-platform exposure
 problem: Windows SMB clients expect TCP `445`, while many platforms reserve or
 heavily restrict that port for privileged/system services.

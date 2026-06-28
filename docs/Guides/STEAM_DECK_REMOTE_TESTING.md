@@ -138,6 +138,13 @@ For the SMB2 server MVP, test these as separate claims:
 - The SMB2 server logs `SMB2-SERVER Listening on port <port>`.
 - TCP connects to that port.
 - A libsmb2 client can perform session setup and browse/read.
+  Record whether the run is anonymous or password-protected; these are
+  different protocol claims. Current observed state: anonymous
+  `smbclient //deck/share -p 1445 -U "anonymous%" -m SMB2/SMB3 -c ls`
+  passes on the AG build, but switching that same build to username/password
+  fails with `NT_STATUS_ACCESS_DENIED` or a bad SMB2 signature before
+  listing. Keep password auth/signing work separate from read-only anonymous
+  browse/read smokes.
 - Read-only mutation attempts fail.
 - Runtime port changes through settings restart the server without crashing.
 - Windows native acceptance uses TCP `445`; non-445 ports are development-only
