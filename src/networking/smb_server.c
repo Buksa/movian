@@ -751,7 +751,7 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
         return SMB2_STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    struct fa_stat fs;
+    struct fa_stat fs = {};
     char errbuf[256];
     int exists = !vfs_stat(path, &fs, errbuf, sizeof(errbuf));
     int is_dir = exists && content_dirish(fs.fs_type);
@@ -784,6 +784,9 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
                 return SMB2_STATUS_ACCESS_DENIED;
             }
             is_dir = 1; exists = 1;
+            if(vfs_stat(path, &fs, errbuf, sizeof(errbuf))) {
+                fs.fs_mtime = time(NULL);
+            }
         }
         break;
 
@@ -803,6 +806,9 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
                     return SMB2_STATUS_ACCESS_DENIED;
                 }
                 is_dir = 1; exists = 1;
+                if(vfs_stat(path, &fs, errbuf, sizeof(errbuf))) {
+                    fs.fs_mtime = time(NULL);
+                }
             }
         }
         break;
@@ -1513,6 +1519,17 @@ smb_set_info(struct smb2_server *srvr, struct smb2_context *smb2,
                              req->buffer_length);
         if(new_path == NULL)
             return SMB2_STATUS_INVALID_PARAMETER;
+
+        int replace_if_exists = ((const uint8_t *)req->input_data)[0] != 0;
+        if(!replace_if_exists) {
+            struct fa_stat target_fs;
+            if(vfs_stat(new_path, &target_fs, errbuf, sizeof(errbuf)) == 0) {
+                SMBINFO("Rename collision: '%s' -> '%s' exists and replace is disabled",
+                        fe->path, new_path);
+                free(new_path);
+                return SMB2_STATUS_OBJECT_NAME_COLLISION;
+            }
+        }
 
         SMBINFO("Rename: '%s' → '%s'", fe->path, new_path);
         SMBTRACE("Rename: executing vfs_rename");

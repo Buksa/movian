@@ -194,6 +194,21 @@ run_file_root_case() {
   [ -d "$root/made_by_smb" ] || fail "mkdir did not create made_by_smb"
   run_smbclient file-rename "$port" "$file_dialect" -c 'rename uploaded.txt renamed.txt'
   [ -f "$root/renamed.txt" ] || fail "rename did not create renamed.txt"
+  printf 'src\n' >"$root/collision_src.txt"
+  printf 'dst\n' >"$root/collision_dst.txt"
+  set +e
+  smbclient "//127.0.0.1/$SMB_SERVER_SMOKE_SHARE" \
+    -p "$port" -U "$SMB_SERVER_SMOKE_USER%$SMB_SERVER_SMOKE_PASSWORD" \
+    -m "$file_dialect" -c 'rename collision_src.txt collision_dst.txt' \
+    >"$ART/file-rename-collision.log" 2>&1
+  rename_collision_rc=$?
+  set -e
+  [ "$rename_collision_rc" -ne 0 ] ||
+    fail "rename over an existing target unexpectedly succeeded"
+  grep -qx 'dst' "$root/collision_dst.txt" ||
+    fail "rename collision overwrote destination content"
+  grep -qx 'src' "$root/collision_src.txt" ||
+    fail "rename collision removed source content"
   run_smbclient file-del "$port" "$file_dialect" -c 'del renamed.txt'
   [ ! -e "$root/renamed.txt" ] || fail "del did not remove renamed.txt"
   run_smbclient file-rmdir "$port" "$file_dialect" -c 'rmdir made_by_smb'
