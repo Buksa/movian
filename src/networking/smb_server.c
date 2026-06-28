@@ -26,6 +26,8 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <stddef.h>
 
 #include "main.h"
 #include "asyncio.h"
@@ -49,6 +51,12 @@
 #ifndef SMB2_FILE_CREATED
 #define SMB2_FILE_CREATED 2
 #endif
+#ifndef SMB2_FILE_SUPERSEDED
+#define SMB2_FILE_SUPERSEDED 0
+#endif
+#ifndef SMB2_FILE_OVERWRITTEN
+#define SMB2_FILE_OVERWRITTEN 3
+#endif
 
 /* ------------------------------------------------------------------ */
 /* Tracing                                                              */
@@ -62,7 +70,7 @@
 #define SMBINFO(x, ...)  tracelog(0, TRACE_INFO,  "SMB2", x, ##__VA_ARGS__)
 #define SMBTRACE(x, ...) do { \
     if(gconf.enable_smb_debug) \
-      tracelog(0, TRACE_DEBUG, "SMB2", x, ##__VA_ARGS__); \
+       tracelog(0, TRACE_DEBUG, "SMB2", x, ##__VA_ARGS__); \
 } while(0)
 /* ------------------------------------------------------------------ */
 /* File handle table                                                    */
@@ -77,7 +85,7 @@
  *
  * Layout: file_id[0..3] = index (big-endian), file_id[4..7] = generation,
  *         file_id[8..15] = 0.
- * A zero file_id[0..7] means the slot is free.
+ * A NULL fe->path means the slot is free.
  */
 
 typedef struct {
@@ -91,15 +99,26 @@ typedef struct {
     int         is_dir;
     int         delete_on_close;   /* set from SMB2_FILE_DELETE_ON_CLOSE */
     int         dir_done;          /* set after first full dir listing  */
-    int         dir_idx;           /* count of returned dir entries     */
+    fa_dir_entry_t *next_fde;      /* next entry to process in directory scan */
 } smb_file_entry_t;
 
 typedef struct smb_connection {
-    struct smb2_server   sc_server;
     char                *sc_share_root;   /* root path for this share   */
     smb_file_entry_t     sc_files[SMB2_MAX_FILES];
     uint32_t             sc_gen;          /* generation counter         */
+    struct smb2_ioctl_validate_negotiate_info sc_vni; /* for validate negotiate info ioctl */
 } smb_connection_t;
+
+typedef struct {
+    struct smb2_server srv;
+    char *username;
+    char *password;
+    char *share_name;
+    char *share_root;
+} smb_server_t;
+
+_Static_assert(offsetof(smb_server_t, srv) == 0,
+               "srv must be the first member of smb_server_t for safe pointer casting");
 
 /* ------------------------------------------------------------------ */
 /* Server state (protected by asyncio courier)                          */
@@ -116,6 +135,49 @@ static int            smb_thread_running = 0;
 /* ------------------------------------------------------------------ */
 /* VFS helpers                                                          */
 /* ------------------------------------------------------------------ */
+
+static size_t
+utf8_to_utf16_bytes(const char *utf8)
+{
+    if (utf8 == NULL)
+        return 0;
+    size_t len = 0;
+    while (*utf8) {
+        unsigned char c = (unsigned char)*utf8;
+        if (c < 0x80) {
+            len++;
+            utf8++;
+        } else if ((c & 0xe0) == 0xc0) {
+            len++;
+            utf8 += 2;
+        } else if ((c & 0xf0) == 0xe0) {
+            len++;
+            utf8 += 3;
+        } else if ((c & 0xf8) == 0xf0) {
+            len += 2; /* Surrogate pair: 2 UTF-16 code units */
+            utf8 += 4;
+        } else {
+            utf8++; /* Invalid UTF-8 byte, skip */
+        }
+    }
+    return len * 2;
+}
+
+static uint64_t
+smb_time_to_win(time_t t)
+{
+    struct smb2_timeval tv = { .tv_sec = (uint32_t)t, .tv_usec = 0 };
+    return smb2_timeval_to_win(&tv);
+}
+
+static void
+smb_fill_timevals(struct smb2_timeval *tv, time_t mtime)
+{
+    for(int i = 0; i < 4; i++) {
+        tv[i].tv_sec  = (uint32_t)mtime;
+        tv[i].tv_usec = 0;
+    }
+}
 
 static int
 vfs_stat(const char *url, struct fa_stat *fs, char *errbuf, size_t errlen)
@@ -145,6 +207,15 @@ static int
 vfs_rmdir(const char *url, char *errbuf, size_t errlen)
 {
     return fa_rmdir(url, errbuf, errlen);
+}
+
+static int
+smb_get_statvfs(smb_connection_t *sc, smb_file_entry_t *fe, struct statvfs *sv)
+{
+    const char *p = fe ? fe->path : sc->sc_share_root;
+    if(p && strncmp(p, "file://", 7) == 0)
+        p += 7;
+    return (p && statvfs(p, sv) == 0) ? 0 : -1;
 }
 
 static int
@@ -361,6 +432,7 @@ static int
 smb_authorize(struct smb2_server *srvr, struct smb2_context *smb2,
               const char *user, const char *domain, const char *workstation)
 {
+    smb_server_t *srv = (smb_server_t *)srvr;
     /*
      * libsmb2 server NTLM auth flow (verified against ntlmssp.c):
      *
@@ -370,16 +442,17 @@ smb_authorize(struct smb2_server *srvr, struct smb2_context *smb2,
      * 3. Return 0 to proceed, -1 to reject immediately.
      *
      * Auth matrix:
-     *   smb_username == NULL → anonymous mode: accept everyone, no password check.
-     *   smb_username != NULL → require matching user + password.
+     *   srv->username == NULL → anonymous mode: accept everyone, no password check.
+     *   srv->username != NULL → require matching user + password.
      *     - If user doesn't match → return -1.
      *     - If user matches → call smb2_set_password() so NTLMv2 can be verified.
      *     - allow_anonymous on the server struct must be 0 to enforce this.
      */
-    if(smb_username == NULL) {
+    if(srv->username == NULL) {
         /* Anonymous mode: accept any connection */
-        SMBINFO("Auth: anonymous access granted (user='%s', domain='%s', workstation='%s')",
-                user ? user : "guest", domain ? domain : "", workstation ? workstation : "");
+        SMBINFO("Auth: anonymous access granted");
+        SMBTRACE("Auth: anonymous details (user='%s', domain='%s', workstation='%s')",
+                 user ? user : "guest", domain ? domain : "", workstation ? workstation : "");
         if(user)
             smb2_set_user(smb2, user);
         return 0;
@@ -392,7 +465,7 @@ smb_authorize(struct smb2_server *srvr, struct smb2_context *smb2,
         return -1;
     }
 
-    if(strcmp(user, smb_username) != 0) {
+    if(strcmp(user, srv->username) != 0) {
         SMBINFO("Auth: rejected unknown user '%s'", user);
         return -1;
     }
@@ -401,7 +474,7 @@ smb_authorize(struct smb2_server *srvr, struct smb2_context *smb2,
      * Username matches. Provide password so libsmb2 can verify NTLMv2.
      * smb2_set_password() makes a copy internally.
      */
-    smb2_set_password(smb2, smb_password ? smb_password : "");
+    smb2_set_password(smb2, srv->password ? srv->password : "");
     SMBTRACE("Auth: user '%s' domain='%s' wks='%s' → NTLMv2 pending",
              user, domain ? domain : "", workstation ? workstation : "");
     SMBINFO("Auth: NTLMv2 challenge for user '%s'", user);
@@ -415,6 +488,7 @@ smb_authorize(struct smb2_server *srvr, struct smb2_context *smb2,
 static int
 smb_session_established(struct smb2_server *srvr, struct smb2_context *smb2)
 {
+    smb_server_t *srv = (smb_server_t *)srvr;
     SMBINFO("Connection established: dialect=SMB%s",
              smb2_get_dialect(smb2) >= 0x0300 ? "3.x" :
              smb2_get_dialect(smb2) >= 0x0210 ? "2.1" : "2.0");
@@ -430,9 +504,13 @@ smb_session_established(struct smb2_server *srvr, struct smb2_context *smb2)
     smb_connection_t *sc = calloc(1, sizeof(smb_connection_t));
     if(sc == NULL)
         return -1;
-    const char *root = smb_share_root && smb_share_root[0] ? smb_share_root : "/";
+    const char *root = srv->share_root && srv->share_root[0] ? srv->share_root : "/";
     char root_buf[512];
-    snprintf(root_buf, sizeof(root_buf), "file://%s", root);
+    int r = snprintf(root_buf, sizeof(root_buf), "file://%s", root);
+    if(r < 0 || r >= (int)sizeof(root_buf)) {
+        free(sc);
+        return -1;
+    }
     sc->sc_share_root = strdup(root_buf);
     smb2_set_opaque(smb2, sc);
     return 0;
@@ -443,7 +521,7 @@ smb_session_established(struct smb2_server *srvr, struct smb2_context *smb2)
 /* ------------------------------------------------------------------ */
 
 static int
-smb_logoff(struct smb2_server *srvr, struct smb2_context *smb2)
+smb_cleanup_session(struct smb2_context *smb2, const char *reason)
 {
     smb_connection_t *sc = smb2_get_opaque(smb2);
     if(sc) {
@@ -451,24 +529,23 @@ smb_logoff(struct smb2_server *srvr, struct smb2_context *smb2)
         free(sc->sc_share_root);
         free(sc);
         smb2_set_opaque(smb2, NULL);
-    }
-    {
         const char *_u = smb2_get_user(smb2);
-        SMBINFO("Client (%s) logged off", _u ? _u : "anonymous");
+        SMBINFO("Client (%s) %s", _u ? _u : "anonymous", reason);
     }
-    SMBTRACE("Logoff: cleaned up all file handles");
     return 0;
+}
+
+static int
+smb_logoff(struct smb2_server *srvr, struct smb2_context *smb2)
+{
+    return smb_cleanup_session(smb2, "logged off");
 }
 
 static int
 smb_destruction(struct smb2_server *srvr, struct smb2_context *smb2)
 {
     /* Called on abrupt disconnect without LOGOFF */
-    {
-        const char *_u2 = smb2_get_user(smb2);
-        SMBINFO("Client (%s) disconnected (abrupt)", _u2 ? _u2 : "anonymous");
-    }
-    return smb_logoff(srvr, smb2);
+    return smb_cleanup_session(smb2, "disconnected (abrupt)");
 }
 
 /* ------------------------------------------------------------------ */
@@ -497,13 +574,15 @@ smb_tree_connect(struct smb2_server *srvr, struct smb2_context *smb2,
 {
     if(req == NULL || rep == NULL)
         return -1;
+    smb_server_t *srv = (smb_server_t *)srvr;
     rep->share_type     = SMB2_SHARE_TYPE_DISK;
     rep->maximal_access = 0x101f01ff;
     rep->share_flags    = 0;
     rep->capabilities   = 0;
+    /* Note: smb2_utf16_to_utf8 returns a malloc'd string that must be freed */
     const char *path_utf8 = req->path ? smb2_utf16_to_utf8(req->path, req->path_length / 2) : NULL;
     const char *share = smb_get_share_name(path_utf8);
-    const char *expected = smb_share_name ? smb_share_name : "share";
+    const char *expected = srv->share_name ? srv->share_name : "share";
     if(share == NULL || strcmp(share, expected) != 0) {
         SMBTRACE("Tree connect: bad network name '%s' (expected '%s')", share ? share : "?", expected);
         free((void *)path_utf8);
@@ -673,13 +752,6 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
         }
     }
 
-#ifndef SMB2_FILE_SUPERSEDED
-#define SMB2_FILE_SUPERSEDED 0
-#endif
-#ifndef SMB2_FILE_OVERWRITTEN
-#define SMB2_FILE_OVERWRITTEN 3
-#endif
-
     memcpy(rep->file_id, fe->file_id, SMB2_FD_SIZE);
     rep->file_attributes = is_dir ? SMB2_FILE_ATTRIBUTE_DIRECTORY
                                   : SMB2_FILE_ATTRIBUTE_NORMAL;
@@ -700,15 +772,8 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
     rep->end_of_file     = fe->size;
     rep->allocation_size = fe->size;
 
-    struct smb2_timeval tv;
-    tv.tv_sec = exists ? fs.fs_mtime : time(NULL);
-    tv.tv_usec = 0;
-    uint64_t win_time = smb2_timeval_to_win(&tv);
-
-    rep->creation_time    = win_time;
-    rep->last_access_time = win_time;
-    rep->last_write_time  = win_time;
-    rep->change_time      = win_time;
+    uint64_t win_time = smb_time_to_win(fe->mtime);
+    rep->creation_time = rep->last_access_time = rep->last_write_time = rep->change_time = win_time;
 
     SMBTRACE("Create OK: '%s' %s size=%lld delete_on_close=%d",
              path, is_dir ? "DIR" : "FILE", (long long)fe->size, fe->delete_on_close);
@@ -735,6 +800,21 @@ smb_close(struct smb2_server *srvr, struct smb2_context *smb2,
         return SMB2_STATUS_FILE_CLOSED;
 
     memset(rep, 0, sizeof(*rep));
+
+    if(req->flags & SMB2_CLOSE_FLAG_POSTQUERY_ATTRIB) {
+        time_t mt = fe->mtime;
+        int64_t sz = fe->size;
+        struct fa_stat fs;
+        if(fe->path && vfs_stat(fe->path, &fs, NULL, 0) == 0) {
+            mt = fs.fs_mtime;
+            sz = fs.fs_size;
+        }
+        uint64_t win_time = smb_time_to_win(mt);
+        rep->creation_time = rep->last_access_time = rep->last_write_time = rep->change_time = win_time;
+        rep->end_of_file = rep->allocation_size = sz;
+        rep->file_attributes = fe->is_dir ? SMB2_FILE_ATTRIBUTE_DIRECTORY
+                                          : SMB2_FILE_ATTRIBUTE_NORMAL;
+    }
 
     if(fe->delete_on_close && fe->path) {
         char errbuf[256];
@@ -912,7 +992,7 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
             fe->fa_dir  = NULL;
         }
         fe->dir_done = 0;
-        fe->dir_idx  = 0;
+        fe->next_fde = NULL;
     }
 
     if(fe->dir_done) {
@@ -931,10 +1011,12 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
         if(fe->fa_dir == NULL) {
             /* Empty or inaccessible dir — return 0 to signal no more files */
             fe->dir_done = 1;
+            fe->next_fde = NULL;
             rep->output_buffer        = NULL;
             rep->output_buffer_length = 0;
             return 0;
         }
+        fe->next_fde = RB_FIRST(&fe->fa_dir->fd_entries);
     }
 
     /*
@@ -955,12 +1037,15 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
 
     uint32_t info_len = 0;
     int      n_added  = 0;
-    int      skip     = fe->dir_idx;
-    int      cur_match_idx = 0;
     uint32_t serialized_wire_len = 0;
 
-    fa_dir_entry_t *fde;
-    RB_FOREACH(fde, &fe->fa_dir->fd_entries, fde_link) {
+    fa_dir_entry_t *fde = fe->next_fde;
+    if(fde == NULL && !fe->dir_done) {
+        fde = RB_FIRST(&fe->fa_dir->fd_entries);
+    }
+
+    for(; fde != NULL; fde = RB_NEXT(fde, fde_link)) {
+        fe->next_fde = fde;
         const char *name = rstr_get(fde->fde_filename);
         if(name == NULL)
             continue;
@@ -970,15 +1055,16 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
                 continue;
         }
 
-        if(cur_match_idx < skip) {
-            cur_match_idx++;
-            continue;
-        }
-        cur_match_idx++;
-
-        /* Check client buffer limit on wire */
-        size_t name_bytes = strlen(name);
-        size_t wire_hdr = (req->file_information_class == SMB2_FILE_ID_BOTH_DIRECTORY_INFORMATION) ? 104 : 80;
+        /*
+         * Check client buffer limit on wire.
+         * Note: req->output_buffer_length is the client's limit for the serialized
+         * network payload. We track serialized_wire_len which matches the wire format
+         * size that libsmb2 will compute and send.
+         */
+        size_t name_bytes = utf8_to_utf16_bytes(name);
+        size_t wire_hdr = (req->file_information_class == SMB2_FILE_ID_BOTH_DIRECTORY_INFORMATION)
+            ? SMB2_FILEID_BOTH_DIRECTORY_INFORMATION_SIZE
+            : SMB2_FILEID_FULL_DIRECTORY_INFORMATION_SIZE;
         size_t wire_size = PAD_TO_64BIT(wire_hdr + name_bytes);
 
         if(n_added > 0 && serialized_wire_len + wire_size > req->output_buffer_length) {
@@ -1026,14 +1112,7 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
         }
 
         time_t mtime = fde->fde_statdone ? fde->fde_stat.fs_mtime : fe->mtime;
-        fsb->creation_time.tv_sec     = mtime;
-        fsb->creation_time.tv_usec    = 0;
-        fsb->last_access_time.tv_sec  = mtime;
-        fsb->last_access_time.tv_usec = 0;
-        fsb->last_write_time.tv_sec   = mtime;
-        fsb->last_write_time.tv_usec  = 0;
-        fsb->change_time.tv_sec       = mtime;
-        fsb->change_time.tv_usec      = 0;
+        smb_fill_timevals(&fsb->creation_time, mtime);
 
         fsb->file_name_length = name_bytes;  /* UTF-8 byte count */
 
@@ -1047,7 +1126,8 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
         info_len += entry_size;
         serialized_wire_len += wire_size;
         n_added++;
-        fe->dir_idx++;
+
+        fe->next_fde = RB_NEXT(fde, fde_link);
 
         if(single_entry)
             break;
@@ -1057,6 +1137,7 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
         /* No entries at all or first call on empty dir */
         free(info);
         fe->dir_done = 1;
+        fe->next_fde = NULL;
         rep->output_buffer        = NULL;
         rep->output_buffer_length = 0;
         return 0;
@@ -1069,8 +1150,8 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
             info = new_info;
     }
 
-    /* Mark as done only when we ran out of matching files (n_added == 0 above) */
-    fe->dir_done = 0;
+    /* Mark as done only when we ran out of matching files */
+    fe->dir_done = (fe->next_fde == NULL);
 
     rep->output_buffer        = info;
     rep->output_buffer_length = info_len;
@@ -1104,12 +1185,8 @@ smb_query_info(struct smb2_server *srvr, struct smb2_context *smb2,
         case SMB2_FILE_FS_SIZE_INFORMATION: {
             struct smb2_file_fs_size_info *fs = calloc(1, sizeof(*fs));
             if(!fs) return SMB2_STATUS_INSUFFICIENT_RESOURCES;
-            /* Try to get real values via statvfs */
             struct statvfs sv;
-            const char *real_path = fe ? fe->path : NULL;
-            if(real_path && strncmp(real_path, "file://", 7) == 0)
-                real_path += 7;
-            if(real_path && statvfs(real_path, &sv) == 0) {
+            if(smb_get_statvfs(sc, fe, &sv) == 0) {
                 fs->total_allocation_units     = sv.f_blocks;
                 fs->available_allocation_units = sv.f_bavail;
                 fs->sectors_per_allocation_unit = 1;
@@ -1127,10 +1204,7 @@ smb_query_info(struct smb2_server *srvr, struct smb2_context *smb2,
             struct smb2_file_fs_full_size_info *fs = calloc(1, sizeof(*fs));
             if(!fs) return SMB2_STATUS_INSUFFICIENT_RESOURCES;
             struct statvfs sv;
-            const char *real_path = fe ? fe->path : NULL;
-            if(real_path && strncmp(real_path, "file://", 7) == 0)
-                real_path += 7;
-            if(real_path && statvfs(real_path, &sv) == 0) {
+            if(smb_get_statvfs(sc, fe, &sv) == 0) {
                 fs->total_allocation_units              = sv.f_blocks;
                 fs->caller_available_allocation_units   = sv.f_bavail;
                 fs->actual_available_allocation_units   = sv.f_bfree;
@@ -1181,14 +1255,7 @@ smb_query_info(struct smb2_server *srvr, struct smb2_context *smb2,
             if(!fs) return SMB2_STATUS_INSUFFICIENT_RESOURCES;
             fs->file_attributes = fe->is_dir ? SMB2_FILE_ATTRIBUTE_DIRECTORY
                                              : SMB2_FILE_ATTRIBUTE_NORMAL;
-            fs->creation_time.tv_sec     = fe->mtime;
-            fs->creation_time.tv_usec    = 0;
-            fs->last_access_time.tv_sec  = fe->mtime;
-            fs->last_access_time.tv_usec = 0;
-            fs->last_write_time.tv_sec   = fe->mtime;
-            fs->last_write_time.tv_usec  = 0;
-            fs->change_time.tv_sec       = fe->mtime;
-            fs->change_time.tv_usec      = 0;
+            smb_fill_timevals(&fs->creation_time, fe->mtime);
             info = fs; len = sizeof(*fs);
             break;
         }
@@ -1209,14 +1276,7 @@ smb_query_info(struct smb2_server *srvr, struct smb2_context *smb2,
             fs->basic.file_attributes      = fe->is_dir
                                              ? SMB2_FILE_ATTRIBUTE_DIRECTORY
                                              : SMB2_FILE_ATTRIBUTE_NORMAL;
-            fs->basic.creation_time.tv_sec      = fe->mtime;
-            fs->basic.creation_time.tv_usec     = 0;
-            fs->basic.last_access_time.tv_sec   = fe->mtime;
-            fs->basic.last_access_time.tv_usec  = 0;
-            fs->basic.last_write_time.tv_sec    = fe->mtime;
-            fs->basic.last_write_time.tv_usec   = 0;
-            fs->basic.change_time.tv_sec        = fe->mtime;
-            fs->basic.change_time.tv_usec       = 0;
+            smb_fill_timevals(&fs->basic.creation_time, fe->mtime);
             fs->standard.end_of_file       = fe->size;
             fs->standard.allocation_size   = fe->size;
             fs->standard.number_of_links   = 1;
@@ -1233,14 +1293,7 @@ smb_query_info(struct smb2_server *srvr, struct smb2_context *smb2,
             if(!fs) return SMB2_STATUS_INSUFFICIENT_RESOURCES;
             fs->file_attributes  = fe->is_dir ? SMB2_FILE_ATTRIBUTE_DIRECTORY
                                               : SMB2_FILE_ATTRIBUTE_NORMAL;
-            fs->creation_time.tv_sec     = fe->mtime;
-            fs->creation_time.tv_usec    = 0;
-            fs->last_access_time.tv_sec  = fe->mtime;
-            fs->last_access_time.tv_usec = 0;
-            fs->last_write_time.tv_sec   = fe->mtime;
-            fs->last_write_time.tv_usec  = 0;
-            fs->change_time.tv_sec       = fe->mtime;
-            fs->change_time.tv_usec      = 0;
+            smb_fill_timevals(&fs->creation_time, fe->mtime);
             fs->end_of_file      = fe->size;
             fs->allocation_size  = fe->size;
             info = fs; len = sizeof(*fs);
@@ -1300,8 +1353,12 @@ smb_decode_rename_path(smb_connection_t *sc, const uint8_t *buf, uint32_t buflen
         return NULL;
 
     uint32_t nchars = name_bytes / 2;
-    const uint16_t *utf16 = (const uint16_t *)(buf + 20);
-    const char *utf8 = smb2_utf16_to_utf8(utf16, nchars);
+    uint8_t *tmp = malloc(name_bytes);
+    if(tmp == NULL)
+        return NULL;
+    memcpy(tmp, buf + 20, name_bytes);
+    const char *utf8 = smb2_utf16_to_utf8((const uint16_t *)tmp, nchars);
+    free(tmp);
     if(utf8 == NULL)
         return NULL;
 
@@ -1344,7 +1401,7 @@ smb_set_info(struct smb2_server *srvr, struct smb2_context *smb2,
             return SMB2_STATUS_INVALID_PARAMETER;
 
         SMBINFO("Rename: '%s' → '%s'", fe->path, new_path);
-    SMBTRACE("Rename: executing vfs_rename");
+        SMBTRACE("Rename: executing vfs_rename");
         int r = vfs_rename(fe->path, new_path, errbuf, sizeof(errbuf));
         if(r) {
             SMBINFO("Rename FAILED: '%s' → '%s': %s", fe->path, new_path, errbuf);
@@ -1378,10 +1435,12 @@ smb_set_info(struct smb2_server *srvr, struct smb2_context *smb2,
         if(fe->fa_fh) {
             if(fa_ftruncate(fe->fa_fh, (int64_t)eof) < 0)
                 return SMB2_STATUS_ACCESS_DENIED;
+            fe->size = (int64_t)eof;
+            if(fe->pos > fe->size)
+                fe->pos = fe->size;
+        } else {
+            return SMB2_STATUS_INVALID_HANDLE;
         }
-        fe->size = (int64_t)eof;
-        if(fe->pos > fe->size)
-            fe->pos = fe->size;
         break;
     }
     default:
@@ -1402,6 +1461,10 @@ smb_ioctl(struct smb2_server *srvr, struct smb2_context *smb2,
 {
     if(req == NULL || rep == NULL)
         return SMB2_STATUS_INVALID_PARAMETER;
+    smb_connection_t *sc = smb2_get_opaque(smb2);
+    if(sc == NULL)
+        return SMB2_STATUS_INTERNAL_ERROR;
+
     memset(rep, 0, sizeof(*rep));
     rep->ctl_code = req->ctl_code;
     memcpy(rep->file_id, req->file_id, SMB2_FD_SIZE);
@@ -1409,17 +1472,16 @@ smb_ioctl(struct smb2_server *srvr, struct smb2_context *smb2,
     switch(req->ctl_code) {
     case SMB2_FSCTL_VALIDATE_NEGOTIATE_INFO: {
         SMBTRACE("IOCTL: VALIDATE_NEGOTIATE_INFO");
-        static struct smb2_ioctl_validate_negotiate_info vni;
-        memset(&vni, 0, sizeof(vni));
-        vni.capabilities = 0;
-        vni.security_mode = 0;
+        memset(&sc->sc_vni, 0, sizeof(sc->sc_vni));
+        sc->sc_vni.capabilities = 0;
+        sc->sc_vni.security_mode = 0;
         uint8_t server_guid[16] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
                                    0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00};
-        memcpy(vni.guid, server_guid, 16);
-        vni.dialect = smb2_get_dialect(smb2);
+        memcpy(sc->sc_vni.guid, server_guid, 16);
+        sc->sc_vni.dialect = smb2_get_dialect(smb2);
 
-        rep->output = &vni;
-        rep->output_count = sizeof(vni);
+        rep->output = &sc->sc_vni;
+        rep->output_count = sizeof(sc->sc_vni);
         return 0;
     }
     case SMB2_FSCTL_DFS_GET_REFERRALS:
@@ -1480,24 +1542,22 @@ static struct smb2_server_request_handlers smb_handlers = {
  *
  * max_connections=0 means unlimited (serve_port uses SOMAXCONN internally).
  */
-static void
-reset_thread_running(void *aux)
-{
-    smb_thread_running = 0;
-}
-
 static void *
 smb_server_thread(void *aux)
 {
-    struct smb2_server *srv = aux;
+    smb_server_t *srv = aux;
     SMBINFO("Listening on port %u (anonymous=%s)",
-            srv->port, srv->allow_anonymous ? "yes" : "no");
+            srv->srv.port, srv->srv.allow_anonymous ? "yes" : "no");
     usage_event("SMB Server", 1, NULL);
 
-    int err = smb2_serve_port(srv, 0, NULL, NULL);
+    int err = smb2_serve_port((struct smb2_server *)srv, 0, NULL, NULL);
     SMBINFO("Server stopped (err=%d)", err);
+    free(srv->username);
+    free(srv->password);
+    free(srv->share_name);
+    free(srv->share_root);
     free(srv);
-    asyncio_run_task(reset_thread_running, NULL);
+    __atomic_store_n(&smb_thread_running, 0, __ATOMIC_SEQ_CST);
     return NULL;
 }
 
@@ -1508,23 +1568,28 @@ smb_server_thread(void *aux)
 static void
 enable_disable(void)
 {
+    int running = __atomic_load_n(&smb_thread_running, __ATOMIC_SEQ_CST);
     if(smb_enable && smb_port > 0) {
-        if(smb_thread_running)
+        if(running)
             return;   /* already up; port changes require restart of Movian */
 
-        struct smb2_server *srv = calloc(1, sizeof(*srv));
+        smb_server_t *srv = calloc(1, sizeof(smb_server_t));
         if(srv == NULL) {
             SMBINFO("Failed to allocate SMB2 server context");
             return;
         }
-        srv->handlers        = &smb_handlers;
-        srv->signing_enabled = 0;
-        srv->allow_anonymous = (smb_username == NULL) ? 1 : 0;
-        srv->port            = (uint16_t)smb_port;
+        srv->srv.handlers        = &smb_handlers;
+        srv->srv.signing_enabled = 0;
+        srv->srv.allow_anonymous = (smb_username == NULL) ? 1 : 0;
+        srv->srv.port            = (uint16_t)smb_port;
+        srv->username            = smb_username ? strdup(smb_username) : NULL;
+        srv->password            = smb_password ? strdup(smb_password) : NULL;
+        srv->share_name          = smb_share_name ? strdup(smb_share_name) : NULL;
+        srv->share_root          = smb_share_root ? strdup(smb_share_root) : NULL;
 
+        __atomic_store_n(&smb_thread_running, 1, __ATOMIC_SEQ_CST);
         hts_thread_create_detached("smb2-server", smb_server_thread,
                                    srv, THREAD_PRIO_MODEL);
-        smb_thread_running = 1;
         SMBINFO("SMB2 server starting on port %d (anonymous=%s)",
                 smb_port, smb_username == NULL ? "yes" : "no");
     }
@@ -1532,7 +1597,7 @@ enable_disable(void)
      * which is private to libsmb2 after the call — not exposed.
      * For Movian's use case (toggle in settings) a restart of the app is
      * acceptable. Log a note if disabled while running. */
-    else if(!smb_enable && smb_thread_running) {
+    else if(!smb_enable && running) {
         SMBINFO("SMB2 server disable requested; restart required to stop listener");
     }
 }
@@ -1564,9 +1629,10 @@ static void set_enable(void *opaque, int v)
 static void set_port(void *opaque, const char *str)
 {
     smb_port = atoi(str);
+    int running = __atomic_load_n(&smb_thread_running, __ATOMIC_SEQ_CST);
     /* Port change only takes effect on next start — note in trace */
     SMBTRACE("Port changed to %d%s", smb_port,
-             smb_thread_running ? " (restart required to apply)" : "");
+             running ? " (restart required to apply)" : "");
     queue_enable_disable();
 }
 
