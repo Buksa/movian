@@ -34,6 +34,11 @@ The build log is written to:
 build.flatpak/flatpak-build.log
 ```
 
+`build-local.sh` removes old `build.flatpak/state/build` contents by default
+so repeated local builds do not grow without bound. Set
+`FLATPAK_KEEP_BUILD_DIRS=1` when debugging a failed Flatpak module build and
+you need to inspect the preserved builder work directories.
+
 ## Validate
 
 ```sh

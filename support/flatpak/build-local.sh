@@ -12,13 +12,20 @@ bundle_file="$log_dir/dev.uzver.Movian.flatpak"
 mkdir -p "$log_dir" "$repo_dir" "$state_dir"
 rm -f "$bundle_file"
 
+builder_keep_args=()
+if [ "${FLATPAK_KEEP_BUILD_DIRS:-0}" = "1" ]; then
+  builder_keep_args+=(--keep-build-dirs)
+else
+  rm -rf "$state_dir/build"
+fi
+
 cd "$script_dir"
 
 {
   flatpak-builder \
     --user \
     --verbose \
-    --keep-build-dirs \
+    "${builder_keep_args[@]}" \
     --force-clean \
     --state-dir="$state_dir" \
     --repo="$repo_dir" \
