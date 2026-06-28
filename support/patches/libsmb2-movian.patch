@@ -1,8 +1,91 @@
+diff --git a/include/libsmb2-private.h b/include/libsmb2-private.h
+index b44614b..1db4311 100644
+--- a/include/libsmb2-private.h
++++ b/include/libsmb2-private.h
+@@ -143,6 +143,7 @@ struct smb2_context {
+         t_socket fd;
+
+         struct smb2_server *owning_server;
++        struct smb2_context *server_next;
+
+         t_socket *connecting_fds;
+         size_t connecting_fds_count;
+diff --git a/include/smb2/libsmb2.h b/include/smb2/libsmb2.h
+index 3fde79a..1c3d09f 100644
+--- a/include/smb2/libsmb2.h
++++ b/include/smb2/libsmb2.h
+@@ -1365,6 +1365,7 @@ struct smb2_server {
+         int fd;
+         uint16_t port;
+         uint64_t session_counter;
++        struct smb2_context *contexts;
+         struct smb2_server_request_handlers *handlers;
+         uint32_t max_transact_size;
+         uint32_t max_read_size;
+diff --git a/lib/init.c b/lib/init.c
+index 91af61b..396b1da 100644
+--- a/lib/init.c
++++ b/lib/init.c
+@@ -283,6 +283,7 @@ struct smb2_context *smb2_init_context(void)
+         ret = getlogin_r(buf, sizeof(buf));
+         smb2_set_user(smb2, ret == 0 ? buf : "Guest");
+         smb2->fd = SMB2_INVALID_SOCKET;
++        smb2->server_next = NULL;
+         smb2->connecting_fds = NULL;
+         smb2->connecting_fds_count = 0;
+         smb2->addrinfos = NULL;
+@@ -307,12 +308,35 @@ struct smb2_context *smb2_init_context(void)
+         return smb2;
+ }
+
++static void
++smb2_detach_from_server(struct smb2_context *smb2)
++{
++        struct smb2_server *server;
++        struct smb2_context **ctx;
++
++        if (smb2 == NULL || smb2->owning_server == NULL) {
++                return;
++        }
++
++        server = smb2->owning_server;
++        for (ctx = &server->contexts; *ctx; ctx = &(*ctx)->server_next) {
++                if (*ctx == smb2) {
++                        *ctx = smb2->server_next;
++                        break;
++                }
++        }
++        smb2->owning_server = NULL;
++        smb2->server_next = NULL;
++}
++
+ void smb2_destroy_context(struct smb2_context *smb2)
+ {
+         if (smb2 == NULL) {
+                 return;
+         }
+
++        smb2_detach_from_server(smb2);
++
+         if (SMB2_VALID_SOCKET(smb2->fd)) {
+                 if (smb2->change_fd) {
+                         smb2->change_fd(smb2, smb2->fd, SMB2_DEL_FD);
 diff --git a/lib/libsmb2.c b/lib/libsmb2.c
-index 606d767..132ef5f 100644
+index 9b21617..c51bca8 100644
 --- a/lib/libsmb2.c
 +++ b/lib/libsmb2.c
-@@ -3184,6 +3184,9 @@ smb2_query_directory_request_cb(struct smb2_server *server, struct smb2_context
+@@ -2011,6 +2011,10 @@ getinfo_cb_2(struct smb2_context *smb2, int status,
+         if (stat_data->status != SMB2_STATUS_SUCCESS) {
+                 return;
+         }
++        if (rep == NULL || rep->output_buffer == NULL) {
++                stat_data->status = SMB2_STATUS_INVALID_PARAMETER;
++                return;
++        }
+
+         if (stat_data->info_type == SMB2_0_INFO_FILE &&
+             stat_data->file_info_class == SMB2_FILE_ALL_INFORMATION) {
+@@ -3407,6 +3411,9 @@ smb2_query_directory_request_cb(struct smb2_server *server, struct smb2_context
                          pdu = smb2_cmd_query_directory_reply_async(smb2, req, &rep, NULL, cb_data);
                  }
          }
@@ -12,7 +95,7 @@ index 606d767..132ef5f 100644
          if (req->name) {
                  smb2_free_data(smb2, discard_const(req->name));
          }
-@@ -3251,6 +3254,9 @@ smb2_query_info_request_cb(struct smb2_server *server, struct smb2_context *smb2
+@@ -3476,6 +3483,9 @@ smb2_query_info_request_cb(struct smb2_server *server, struct smb2_context *smb2
                          pdu = smb2_cmd_query_info_reply_async(smb2, req, &rep, NULL, cb_data);
                  }
          }
@@ -20,9 +103,9 @@ index 606d767..132ef5f 100644
 +                free(rep.output_buffer);
 +        }
          if (pdu != NULL) {
+                 smb2_set_pdu_message_id(smb2, pdu, smb2->message_id);
                  smb2_queue_pdu(smb2, pdu);
-         }
-@@ -3389,6 +3395,7 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
+@@ -3621,6 +3631,7 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
          int response_length;
          int is_spnego_wrapped;
          int have_valid_session_key = 1;
@@ -30,7 +113,7 @@ index 606d767..132ef5f 100644
          int ret;
 
          if (status) {
-@@ -3478,6 +3485,17 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
+@@ -3728,6 +3739,17 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
                                                      &smb2->session_key_size) < 0) {
                                  have_valid_session_key = 0;
                          }
@@ -48,8 +131,8 @@ index 606d767..132ef5f 100644
                  }
          }
  #ifdef HAVE_LIBKRB5
-@@ -3486,7 +3504,10 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
-                 have_valid_session_key = 0;
+@@ -3772,7 +3794,10 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
+                 }
          }
  #endif
 -        if (smb2->sign && have_valid_session_key == 0) {
@@ -60,7 +143,7 @@ index 606d767..132ef5f 100644
                  smb2_close_context(smb2);
                  smb2_set_error(smb2, "Signing required by server. Session "
                                 "Key is not available %s",
-@@ -3494,7 +3515,7 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
+@@ -3781,7 +3806,7 @@ smb2_session_setup_request_cb(struct smb2_context *smb2, int status, void *comma
                  return;
          }
 
@@ -69,7 +152,7 @@ index 606d767..132ef5f 100644
                  /* Derive the signing key from session key
                  * This is based on negotiated protocol
                  */
-@@ -3713,6 +3734,8 @@ smb2_negotiate_request_cb(struct smb2_context *smb2, int status, void *command_d
+@@ -4010,6 +4035,8 @@ smb2_negotiate_request_cb(struct smb2_context *smb2, int status, void *command_d
          /* remember negotiated capabilites and security mode */
          smb2->capabilities = rep.capabilities;
          smb2->security_mode = rep.security_mode;
@@ -78,91 +161,160 @@ index 606d767..132ef5f 100644
 
          now.tv_sec = time(NULL);
          now.tv_usec = 0;
-@@ -3842,7 +3865,7 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+@@ -4088,6 +4115,35 @@ int smb2_serve_port_async(const int fd, const int to_msecs, struct smb2_context
+         return err;
+ }
+
++static void
++smb2_server_context_attach(struct smb2_server *server, struct smb2_context *smb2)
++{
++        smb2->owning_server = server;
++        smb2->server_next = server->contexts;
++        server->contexts = smb2;
++}
++
++static int
++smb2_destroy_server_contexts(struct smb2_server *server, int only_closed)
++{
++        struct smb2_context *smb2;
++        int destroyed = 0;
++
++        for (smb2 = server->contexts; smb2; ) {
++                struct smb2_context *next = smb2->server_next;
++
++                if (!only_closed || !SMB2_VALID_SOCKET(smb2_get_fd(smb2))) {
++                        if (server->handlers && server->handlers->destruction_event) {
++                                server->handlers->destruction_event(server, smb2);
++                        }
++                        smb2_destroy_context(smb2);
++                        destroyed++;
++                }
++                smb2 = next;
++        }
++        return destroyed;
++}
++
+ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_client_connection cb, void *cb_data)
+ {
+         struct smb2_context *smb2;
+@@ -4126,6 +4182,8 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+                 return err;
+         }
+ #endif
++        server->contexts = NULL;
++
+         err = smb2_bind_and_listen(server->port, max_connections, &server->fd);
+         if (err != 0) {
+                 return err;
+@@ -4133,15 +4191,15 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+         server->session_counter = 0x1234;
+
+         do {
+-                /* select on the file descriptors of all active client connections and our server socket
+-                   for the first readable event
++                /* select on the file descriptors of all server-owned client
++                   connections and our server socket for the first readable event
+                 */
+                 FD_ZERO(&rfds);
+                 FD_ZERO(&wfds);
+                 FD_SET(server->fd, &rfds);
                  maxfd = server->fd;
 
-                 for (smb2 = smb2_active_contexts(); smb2; smb2 = smb2->next) {
--                        if (SMB2_VALID_SOCKET(smb2_get_fd(smb2))) {
-+                        if (smb2_is_server(smb2) && SMB2_VALID_SOCKET(smb2_get_fd(smb2))) {
+-                for (smb2 = smb2_active_contexts(); smb2; smb2 = smb2->next) {
++                for (smb2 = server->contexts; smb2; smb2 = smb2->server_next) {
+                         if (SMB2_VALID_SOCKET(smb2_get_fd(smb2))) {
                                  events = smb2_which_events(smb2);
                                  if (events) {
-                                         if (events & POLLIN) {
-@@ -3875,28 +3898,30 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+@@ -4173,8 +4231,9 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+                 if (ready > 0) {
+                         now = time(NULL);
 
-                         /* for each client context ready to read, process that context */
-                         for (smb2 = smb2_active_contexts(); smb2; smb2 = smb2->next) {
--                                if (SMB2_VALID_SOCKET(smb2_get_fd(smb2)) && FD_ISSET(smb2_get_fd(smb2), &rfds)) {
--                                        if (smb2_service(smb2, POLLIN) < 0) {
--                                                smb2_set_error(smb2, "smb2_service (in) failed with : "
--                                                                "%s", smb2_get_error(smb2));
+-                        /* for each client context ready to read, process that context */
+-                        for (smb2 = smb2_active_contexts(); smb2; smb2 = smb2->next) {
++                        /* for each server-owned context ready to read, process that context */
++                        for (smb2 = server->contexts; smb2; ) {
++                                struct smb2_context *next = smb2->server_next;
+                                 if (SMB2_VALID_SOCKET(smb2_get_fd(smb2)) && FD_ISSET(smb2_get_fd(smb2), &rfds)) {
+                                         if (smb2_service(smb2, POLLIN) < 0) {
+                                                 smb2_set_error(smb2, "smb2_service (in) failed with : "
+@@ -4198,6 +4257,7 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+                                 if (smb2->timeout) {
+                                         smb2_timeout_pdus(smb2);
+                                 }
++                                smb2 = next;
+                         }
+
+                         if (FD_ISSET(server->fd, &rfds)) {
+@@ -4207,7 +4267,8 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+                                         c_data = calloc(1, sizeof(struct connect_data));
+                                         if (c_data == NULL) {
+                                                 smb2_set_error(smb2, "Failed to allocate connect_data");
 -                                                smb2_close_context(smb2);
-+                                if (smb2_is_server(smb2) && SMB2_VALID_SOCKET(smb2_get_fd(smb2))) {
-+                                        if (FD_ISSET(smb2_get_fd(smb2), &rfds)) {
-+                                                if (smb2_service(smb2, POLLIN) < 0) {
-+                                                        smb2_set_error(smb2, "smb2_service (in) failed with : "
-+                                                                        "%s", smb2_get_error(smb2));
-+                                                        smb2_close_context(smb2);
-+                                                }
-+                                                err = 0;
++                                                smb2_destroy_context(smb2);
++                                                continue;
                                          }
--                                        err = 0;
--                                }
--                                if (SMB2_VALID_SOCKET(smb2_get_fd(smb2)) && FD_ISSET(smb2_get_fd(smb2), &wfds)) {
--                                        if (smb2_service(smb2, POLLOUT) < 0) {
--                                                smb2_set_error(smb2, "smb2_service (out) failed with : "
--                                                                "%s", smb2_get_error(smb2));
-+                                        if (SMB2_VALID_SOCKET(smb2_get_fd(smb2)) && FD_ISSET(smb2_get_fd(smb2), &wfds)) {
-+                                                if (smb2_service(smb2, POLLOUT) < 0) {
-+                                                        smb2_set_error(smb2, "smb2_service (out) failed with : "
-+                                                                        "%s", smb2_get_error(smb2));
-+                                                        smb2_close_context(smb2);
-+                                                }
-+                                        }
-+                                        if (!SMB2_VALID_SOCKET(smb2->fd) && ((time(NULL) - t) > (smb2->timeout)))
-+                                        {
-+                                                smb2_set_error(smb2, "Timeout expired and no connection exists\n");
-                                                 smb2_close_context(smb2);
+                                         c_data->server_context = server;
+                                         smb2->connect_data = c_data;
+@@ -4216,10 +4277,11 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+                                         smb2->pdu = smb2_allocate_pdu(smb2, SMB2_NEGOTIATE, smb2_negotiate_request_cb, c_data);
+                                         if (!smb2->pdu) {
+                                                 smb2_set_error(smb2, "can not alloc pdu for request");
+-                                                smb2_close_context(smb2);
++                                                smb2_destroy_context(smb2);
++                                                continue;
                                          }
--                                }
--                                if (!SMB2_VALID_SOCKET(smb2->fd) && ((time(NULL) - t) > (smb2->timeout)))
--                                {
--                                        smb2_set_error(smb2, "Timeout expired and no connection exists\n");
--                                        smb2_close_context(smb2);
--                                }
--                                if (smb2->timeout) {
--                                        smb2_timeout_pdus(smb2);
-+                                        if (smb2->timeout) {
-+                                                smb2_timeout_pdus(smb2);
-+                                        }
+                                         /* got a new smb2 context with a connection, enlist it and tell user */
+-                                        smb2->owning_server = server;
++                                        smb2_server_context_attach(server, smb2);
+                                         smb2->max_transact_size = server->max_transact_size;
+                                         smb2->max_read_size     = server->max_read_size;
+                                         smb2->max_write_size    = server->max_write_size;
+@@ -4233,20 +4295,12 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
                                  }
                          }
 
-@@ -3952,10 +3977,16 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
+-                        /* cull connection-less servers here (servers who's client has disconnected)
+-                         * do only one per iteration since active list changes on destroy
+-                         */
+-                        for (smb2 = smb2_active_contexts(); smb2; smb2 = smb2->next) {
+-                                if (smb2_is_server(smb2)) {
+-                                        if (!SMB2_VALID_SOCKET(smb2_get_fd(smb2))) {
+-                                                if (server->handlers && server->handlers->destruction_event) {
+-                                                        server->handlers->destruction_event(server, smb2);
+-                                                }
+-                                                smb2_destroy_context(smb2);
+-                                                break;
+-                                        }
++                        /* cull connection-less server contexts here */
++                        for (smb2 = server->contexts; smb2; smb2 = smb2->server_next) {
++                                if (!SMB2_VALID_SOCKET(smb2_get_fd(smb2))) {
++                                        smb2_destroy_server_contexts(server, 1);
++                                        break;
+                                 }
+-                                /* client connections are destroyed when they timeout or get disconnected */
+                         }
+                 }
+ #ifdef HAVE_LIBKRB5
+@@ -4265,13 +4319,9 @@ int smb2_serve_port(struct smb2_server *server, const int max_connections, smb2_
          close(server->fd);
          server->fd = -1;
 
 -        while (smb2_active_contexts()) {
 -                smb2 = smb2_active_contexts();
 -                smb2_destroy_context(smb2);
-+        int found_any = 1;
-+        while (found_any) {
-+                found_any = 0;
-+                for (smb2 = smb2_active_contexts(); smb2; smb2 = smb2->next) {
-+                        if (smb2_is_server(smb2)) {
-+                                smb2_destroy_context(smb2);
-+                                found_any = 1;
-+                                break;
-+                        }
-+                }
-         }
+-        }
++        smb2_destroy_server_contexts(server, 0);
+ #ifdef HAVE_LIBKRB5
+         krb5_free_server_credentials(server);
+ #endif
          return err;
  }
 -
 diff --git a/lib/smb2-cmd-query-directory.c b/lib/smb2-cmd-query-directory.c
-index 3dbd2f4..5239121 100644
+index c05f972..b805c91 100644
 --- a/lib/smb2-cmd-query-directory.c
 +++ b/lib/smb2-cmd-query-directory.c
-@@ -221,7 +221,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
+@@ -230,7 +230,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
          rep->output_buffer_offset = len + SMB2_HEADER_SIZE;
 
          if (rep->output_buffer) {
@@ -171,7 +323,7 @@ index 3dbd2f4..5239121 100644
                          rep->output_buffer_length = 0;
                          in_offset = 0;
                          in_remain = fslen;
-@@ -240,10 +240,10 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
+@@ -249,10 +249,10 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
                                  switch (info_class)
                                  {
                                  case SMB2_FILE_ID_FULL_DIRECTORY_INFORMATION:
@@ -184,7 +336,7 @@ index 3dbd2f4..5239121 100644
                                          break;
                                  default:
                                          fs_size = 0;
-@@ -282,7 +282,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
+@@ -295,7 +295,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
          in_remain = fslen;
          offset = 0;
 
@@ -193,7 +345,7 @@ index 3dbd2f4..5239121 100644
                  memcpy(buf, rep->output_buffer, rep->output_buffer_length);
                  memset(buf + rep->output_buffer_length, 0, len - rep->output_buffer_length);
                  iov->len = rep->output_buffer_length;
-@@ -303,10 +303,10 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
+@@ -316,10 +316,10 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
                          switch (info_class)
                          {
                          case SMB2_FILE_ID_FULL_DIRECTORY_INFORMATION:
@@ -206,7 +358,7 @@ index 3dbd2f4..5239121 100644
                                  break;
                          default:
                                  fs_size = 0;
-@@ -315,7 +315,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
+@@ -328,7 +328,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
                          in_offset += PAD_TO_64BIT(sizeof(struct smb2_fileidbothdirectoryinformation));
                          in_remain -= PAD_TO_64BIT(sizeof(struct smb2_fileidbothdirectoryinformation));
                          if (in_remain >= SMB2_FILEID_BOTH_DIRECTORY_INFORMATION_SIZE) {
@@ -215,7 +367,7 @@ index 3dbd2f4..5239121 100644
                          }
                          else {
                                  smb2_set_uint32(iov, offset + 0, 0);
-@@ -324,7 +324,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
+@@ -337,7 +337,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
                          switch (info_class)
                          {
                          case SMB2_FILE_ID_FULL_DIRECTORY_INFORMATION:
@@ -224,7 +376,7 @@ index 3dbd2f4..5239121 100644
                                  smb2_set_uint32(iov, offset + 4, fs->file_index);
                                  smb2_set_uint64(iov, offset + 8, smb2_timeval_to_win(&fs->creation_time));
                                  smb2_set_uint64(iov, offset + 16, smb2_timeval_to_win(&fs->last_access_time));
-@@ -342,7 +342,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
+@@ -355,7 +355,7 @@ smb2_encode_query_directory_reply(struct smb2_context *smb2,
                                  }
                                  break;
                          case SMB2_FILE_ID_BOTH_DIRECTORY_INFORMATION:
@@ -234,10 +386,10 @@ index 3dbd2f4..5239121 100644
                                  smb2_set_uint64(iov, offset + 8, smb2_timeval_to_win(&fs->creation_time));
                                  smb2_set_uint64(iov, offset + 16, smb2_timeval_to_win(&fs->last_access_time));
 diff --git a/lib/socket.c b/lib/socket.c
-index 8d2f381..3574c77 100644
+index d05ea16..d86b393 100644
 --- a/lib/socket.c
 +++ b/lib/socket.c
-@@ -1289,6 +1289,9 @@ smb2_bind_and_listen(const uint16_t port, const int max_connections, int *out_fd
+@@ -1420,6 +1420,9 @@ smb2_bind_and_listen(const uint16_t port, const int max_connections, int *out_fd
                  return -EIO;
          }
 
@@ -247,14 +399,14 @@ index 8d2f381..3574c77 100644
          set_nonblocking(fd);
          set_tcp_sockopt(fd, TCP_NODELAY, 1);
 
-@@ -1300,8 +1303,10 @@ smb2_bind_and_listen(const uint16_t port, const int max_connections, int *out_fd
+@@ -1431,8 +1434,10 @@ smb2_bind_and_listen(const uint16_t port, const int max_connections, int *out_fd
          if (bind(fd, (struct sockaddr *)&serv_addr, socksize) != 0
- #ifndef _MSC_VER
-                   && errno != EINPROGRESS) {
-+                fprintf(stderr, "bind() failed for port %d: errno=%d (%s)\n", port, errno, strerror(errno));
- #else
+ #if defined(_WIN32) || defined(_MSC_VER)
                    && WSAGetLastError() != WSAEWOULDBLOCK) {
 +                fprintf(stderr, "bind() failed: wsaerr=%d\n", WSAGetLastError());
+ #else
+                   && errno != EINPROGRESS) {
++                fprintf(stderr, "bind() failed for port %d: errno=%d (%s)\n", port, errno, strerror(errno));
  #endif
                  close(fd);
                  return -EIO;
