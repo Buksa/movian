@@ -136,6 +136,90 @@ static char          *smb_password   = NULL;   /* NULL = allow anonymous  */
 static char          *smb_share_name  = NULL;
 static char          *smb_share_root  = NULL;   /* configurable root  */
 static int            smb_thread_running = 0;
+static hts_mutex_t    smb_server_mutex;
+static smb_server_t  *smb_active_server = NULL;
+
+static char *
+smb_strdup_or_null(const char *str)
+{
+    return str != NULL ? strdup(str) : NULL;
+}
+
+static void
+smb_apply_active_auth(void)
+{
+    char *username = smb_strdup_or_null(smb_username);
+    char *password = smb_strdup_or_null(smb_password);
+
+    if((smb_username != NULL && username == NULL) ||
+       (smb_password != NULL && password == NULL)) {
+        free(username);
+        free(password);
+        SMBINFO("Unable to apply SMB2 auth settings: out of memory");
+        return;
+    }
+
+    hts_mutex_lock(&smb_server_mutex);
+    smb_server_t *srv = smb_active_server;
+    if(srv == NULL) {
+        hts_mutex_unlock(&smb_server_mutex);
+        free(username);
+        free(password);
+        return;
+    }
+
+    free(srv->username);
+    free(srv->password);
+    srv->username = username;
+    srv->password = password;
+    srv->srv.signing_enabled = srv->username != NULL ? 1 : 0;
+    srv->srv.allow_anonymous = srv->username == NULL ? 1 : 0;
+    hts_mutex_unlock(&smb_server_mutex);
+}
+
+static void
+smb_apply_active_share_name(void)
+{
+    char *share_name = smb_strdup_or_null(smb_share_name);
+    if(smb_share_name != NULL && share_name == NULL) {
+        SMBINFO("Unable to apply SMB2 share name: out of memory");
+        return;
+    }
+
+    hts_mutex_lock(&smb_server_mutex);
+    smb_server_t *srv = smb_active_server;
+    if(srv == NULL) {
+        hts_mutex_unlock(&smb_server_mutex);
+        free(share_name);
+        return;
+    }
+
+    free(srv->share_name);
+    srv->share_name = share_name;
+    hts_mutex_unlock(&smb_server_mutex);
+}
+
+static void
+smb_apply_active_share_root(void)
+{
+    char *share_root = smb_strdup_or_null(smb_share_root);
+    if(smb_share_root != NULL && share_root == NULL) {
+        SMBINFO("Unable to apply SMB2 share root: out of memory");
+        return;
+    }
+
+    hts_mutex_lock(&smb_server_mutex);
+    smb_server_t *srv = smb_active_server;
+    if(srv == NULL) {
+        hts_mutex_unlock(&smb_server_mutex);
+        free(share_root);
+        return;
+    }
+
+    free(srv->share_root);
+    srv->share_root = share_root;
+    hts_mutex_unlock(&smb_server_mutex);
+}
 
 /* ------------------------------------------------------------------ */
 /* VFS helpers                                                          */
@@ -483,6 +567,10 @@ smb_authorize(struct smb2_server *srvr, struct smb2_context *smb2,
               const char *user, const char *domain, const char *workstation)
 {
     smb_server_t *srv = (smb_server_t *)srvr;
+    char *expected_user = NULL;
+    char *expected_password = NULL;
+    int password_mode = 0;
+    int password_present = 0;
     /*
      * libsmb2 server NTLM auth flow (verified against ntlmssp.c):
      *
@@ -498,7 +586,24 @@ smb_authorize(struct smb2_server *srvr, struct smb2_context *smb2,
      *     - If user matches → call smb2_set_password() so NTLMv2 can be verified.
      *     - allow_anonymous on the server struct must be 0 to enforce this.
      */
-    if(srv->username == NULL) {
+    hts_mutex_lock(&smb_server_mutex);
+    if(srv->username != NULL) {
+        password_mode = 1;
+        password_present = srv->password != NULL;
+        expected_user = strdup(srv->username);
+        expected_password = smb_strdup_or_null(srv->password);
+    }
+    hts_mutex_unlock(&smb_server_mutex);
+
+    if(password_mode && (expected_user == NULL ||
+                         (password_present && expected_password == NULL))) {
+        SMBINFO("Auth: rejected connection while applying credentials");
+        free(expected_user);
+        free(expected_password);
+        return -1;
+    }
+
+    if(expected_user == NULL) {
         /* Anonymous mode: accept any connection */
         SMBINFO("Auth: anonymous access granted");
         SMBTRACE("Auth: anonymous details (user='%s', domain='%s', workstation='%s')",
@@ -512,11 +617,15 @@ smb_authorize(struct smb2_server *srvr, struct smb2_context *smb2,
     if(user == NULL || user[0] == '\0') {
         /* Client didn't send a username — reject */
         SMBINFO("Auth: rejected anonymous connection (server requires credentials)");
+        free(expected_user);
+        free(expected_password);
         return -1;
     }
 
-    if(strcmp(user, srv->username) != 0) {
+    if(strcmp(user, expected_user) != 0) {
         SMBINFO("Auth: rejected unknown user '%s'", user);
+        free(expected_user);
+        free(expected_password);
         return -1;
     }
 
@@ -528,10 +637,12 @@ smb_authorize(struct smb2_server *srvr, struct smb2_context *smb2,
     smb2_set_user(smb2, user);
     if(domain != NULL && domain[0] != '\0')
         smb2_set_domain(smb2, domain);
-    smb2_set_password(smb2, srv->password ? srv->password : "");
+    smb2_set_password(smb2, expected_password ? expected_password : "");
     SMBTRACE("Auth: user '%s' domain='%s' wks='%s' → NTLMv2 pending",
              user, domain ? domain : "", workstation ? workstation : "");
     SMBINFO("Auth: NTLMv2 challenge for user '%s'", user);
+    free(expected_user);
+    free(expected_password);
     return 0;
 }
 
@@ -558,7 +669,11 @@ smb_session_established(struct smb2_server *srvr, struct smb2_context *smb2)
     smb_connection_t *sc = calloc(1, sizeof(smb_connection_t));
     if(sc == NULL)
         return -1;
-    sc->sc_share_root = smb_normalize_share_root(srv->share_root);
+    hts_mutex_lock(&smb_server_mutex);
+    char *share_root = smb_strdup_or_null(srv->share_root);
+    hts_mutex_unlock(&smb_server_mutex);
+    sc->sc_share_root = smb_normalize_share_root(share_root);
+    free(share_root);
     if(sc->sc_share_root == NULL) {
         free(sc);
         return -1;
@@ -656,22 +771,31 @@ smb_tree_connect(struct smb2_server *srvr, struct smb2_context *smb2,
     /* Note: smb2_utf16_to_utf8 returns a malloc'd string that must be freed */
     const char *path_utf8 = req->path ? smb2_utf16_to_utf8(req->path, req->path_length / 2) : NULL;
     const char *share = smb_get_share_name(path_utf8);
-    const char *expected = srv->share_name ? srv->share_name : "share";
+    hts_mutex_lock(&smb_server_mutex);
+    char *expected = strdup(srv->share_name ? srv->share_name : "share");
+    hts_mutex_unlock(&smb_server_mutex);
+    if(expected == NULL) {
+        free((void *)path_utf8);
+        return SMB2_STATUS_INSUFFICIENT_RESOURCES;
+    }
     if(smb_is_ipc_share(share)) {
         rep->share_type = SMB2_SHARE_TYPE_PIPE;
         SMBTRACE("Tree connect: share_type=PIPE access=0x%08x path='%s'",
                  rep->maximal_access, path_utf8 ? path_utf8 : "?");
+        free(expected);
         free((void *)path_utf8);
         return 0;
     }
-    if(share == NULL || strcmp(share, expected) != 0) {
+    if(share == NULL || strcasecmp(share, expected) != 0) {
         SMBTRACE("Tree connect: bad network name '%s' (expected '%s')", share ? share : "?", expected);
+        free(expected);
         free((void *)path_utf8);
         return SMB2_STATUS_BAD_NETWORK_NAME;
     }
     rep->share_type = SMB2_SHARE_TYPE_DISK;
     SMBTRACE("Tree connect: share_type=DISK access=0x%08x path='%s'",
              rep->maximal_access, path_utf8 ? path_utf8 : "?");
+    free(expected);
     free((void *)path_utf8);
     return 0;
 }
@@ -1613,9 +1737,17 @@ smb_ioctl(struct smb2_server *srvr, struct smb2_context *smb2,
     switch(req->ctl_code) {
     case SMB2_FSCTL_PIPE_TRANSCEIVE: {
         smb_server_t *srv = (smb_server_t *)srvr;
+        hts_mutex_lock(&smb_server_mutex);
+        char *share_name = strdup(srv->share_name ? srv->share_name : "share");
+        hts_mutex_unlock(&smb_server_mutex);
+        if(share_name == NULL)
+            return SMB2_STATUS_INSUFFICIENT_RESOURCES;
+
         smb_file_entry_t *fe = smb_find_file(sc, req->file_id);
-        if(fe == NULL || !fe->is_pipe)
+        if(fe == NULL || !fe->is_pipe) {
+            free(share_name);
             return SMB2_STATUS_INVALID_DEVICE_REQUEST;
+        }
 
         SMBTRACE("IOCTL: PIPE_TRANSCEIVE pipe='%s' input=%u",
                  fe->path, req->input_count);
@@ -1624,10 +1756,10 @@ smb_ioctl(struct smb2_server *srvr, struct smb2_context *smb2,
 
         int status = dcerpc_server_process_srvsvc(smb2, req->input,
                                                   req->input_count,
-                                                  srv->share_name ?
-                                                  srv->share_name : "share",
+                                                  share_name,
                                                   &sc->sc_ioctl_output,
                                                   &rep->output_count);
+        free(share_name);
         if(status)
             return status;
 
@@ -1715,10 +1847,14 @@ smb_server_thread(void *aux)
 
     int err = smb2_serve_port((struct smb2_server *)srv, 0, NULL, NULL);
     SMBINFO("Server stopped (err=%d)", err);
+    hts_mutex_lock(&smb_server_mutex);
+    if(smb_active_server == srv)
+        smb_active_server = NULL;
     free(srv->username);
     free(srv->password);
     free(srv->share_name);
     free(srv->share_root);
+    hts_mutex_unlock(&smb_server_mutex);
     free(srv);
     __atomic_store_n(&smb_thread_running, 0, __ATOMIC_SEQ_CST);
     return NULL;
@@ -1749,6 +1885,10 @@ enable_disable(void)
         srv->password            = smb_password ? strdup(smb_password) : NULL;
         srv->share_name          = smb_share_name ? strdup(smb_share_name) : NULL;
         srv->share_root          = smb_share_root ? strdup(smb_share_root) : NULL;
+
+        hts_mutex_lock(&smb_server_mutex);
+        smb_active_server = srv;
+        hts_mutex_unlock(&smb_server_mutex);
 
         __atomic_store_n(&smb_thread_running, 1, __ATOMIC_SEQ_CST);
         hts_thread_create_detached("smb2-server", smb_server_thread,
@@ -1802,22 +1942,26 @@ static void set_port(void *opaque, const char *str)
 static void set_username(void *opaque, const char *str)
 {
     mystrset(&smb_username, (str && *str) ? str : NULL);
+    smb_apply_active_auth();
     SMBINFO("Auth mode: %s", smb_username ? "password-protected" : "anonymous");
 }
 
 static void set_password(void *opaque, const char *str)
 {
     mystrset(&smb_password, (str && *str) ? str : NULL);
+    smb_apply_active_auth();
 }
 
 static void set_share_name(void *opaque, const char *str)
 {
     mystrset(&smb_share_name, str);
+    smb_apply_active_share_name();
 }
 
 static void set_share_root(void *opaque, const char *str)
 {
     mystrset(&smb_share_root, str);
+    smb_apply_active_share_root();
 }
 
 /* ------------------------------------------------------------------ */
@@ -1827,6 +1971,8 @@ static void set_share_root(void *opaque, const char *str)
 void
 smb_server_init(void)
 {
+    hts_mutex_init(&smb_server_mutex);
+
     settings_create_separator(gconf.settings_network, _p("SMB server"));
 
     setting_create(SETTING_BOOL, gconf.settings_network,

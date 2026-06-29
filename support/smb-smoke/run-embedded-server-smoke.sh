@@ -166,6 +166,12 @@ run_file_root_case() {
   run_smbclient file-smb2-ls "$port" SMB2 -c 'ls; cd dir; ls'
   grep -q 'movie.mkv' "$ART/file-smb2-ls.log" || fail "SMB2 ls did not show movie.mkv"
   grep -q 'nested.mp4' "$ART/file-smb2-ls.log" || fail "SMB2 ls did not show nested.mp4"
+  local upper_share="${SMB_SERVER_SMOKE_SHARE^^}"
+  smbclient "//127.0.0.1/$upper_share" \
+    -p "$port" -U "$SMB_SERVER_SMOKE_USER%$SMB_SERVER_SMOKE_PASSWORD" \
+    -m SMB2 -c 'ls' >"$ART/file-uppercase-share.log" 2>&1
+  grep -q 'movie.mkv' "$ART/file-uppercase-share.log" ||
+    fail "SMB2 uppercase share name did not resolve configured share"
 
   set +e
   smbclient "//127.0.0.1/$SMB_SERVER_SMOKE_SHARE" \
