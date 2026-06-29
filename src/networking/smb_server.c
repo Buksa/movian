@@ -108,7 +108,7 @@ typedef struct smb_connection {
     char                *sc_share_root;   /* root path for this share   */
     smb_file_entry_t     sc_files[SMB2_MAX_FILES];
     uint32_t             sc_gen;          /* generation counter         */
-    uint32_t             sc_auth_generation;
+    uint32_t             sc_session_generation;
     uint8_t              sc_related_file_id[SMB2_FD_SIZE];
     int                  sc_related_file_valid;
     struct smb2_ioctl_validate_negotiate_info sc_vni; /* for validate negotiate info ioctl */
@@ -121,7 +121,7 @@ typedef struct {
     char *password;
     char *share_name;
     char *share_root;
-    uint32_t auth_generation;
+    uint32_t session_generation;
 } smb_server_t;
 
 _Static_assert(offsetof(smb_server_t, srv) == 0,
@@ -182,7 +182,7 @@ smb_apply_active_auth(void)
     srv->username = username;
     srv->password = password;
     if(auth_changed)
-        srv->auth_generation++;
+        srv->session_generation++;
     srv->srv.signing_enabled = srv->username != NULL ? 1 : 0;
     srv->srv.allow_anonymous = srv->username == NULL ? 1 : 0;
     hts_mutex_unlock(&smb_server_mutex);
@@ -205,8 +205,14 @@ smb_apply_active_share_name(void)
         return;
     }
 
+    int share_name_changed =
+        (srv->share_name == NULL) != (share_name == NULL) ||
+        (srv->share_name != NULL && share_name != NULL &&
+         strcmp(srv->share_name, share_name));
     free(srv->share_name);
     srv->share_name = share_name;
+    if(share_name_changed)
+        srv->session_generation++;
     hts_mutex_unlock(&smb_server_mutex);
 }
 
@@ -227,8 +233,14 @@ smb_apply_active_share_root(void)
         return;
     }
 
+    int share_root_changed =
+        (srv->share_root == NULL) != (share_root == NULL) ||
+        (srv->share_root != NULL && share_root != NULL &&
+         strcmp(srv->share_root, share_root));
     free(srv->share_root);
     srv->share_root = share_root;
+    if(share_root_changed)
+        srv->session_generation++;
     hts_mutex_unlock(&smb_server_mutex);
 }
 
@@ -682,7 +694,7 @@ smb_session_established(struct smb2_server *srvr, struct smb2_context *smb2)
         return -1;
     hts_mutex_lock(&smb_server_mutex);
     char *share_root = smb_strdup_or_null(srv->share_root);
-    uint32_t auth_generation = srv->auth_generation;
+    uint32_t session_generation = srv->session_generation;
     hts_mutex_unlock(&smb_server_mutex);
     sc->sc_share_root = smb_normalize_share_root(share_root);
     free(share_root);
@@ -690,7 +702,7 @@ smb_session_established(struct smb2_server *srvr, struct smb2_context *smb2)
         free(sc);
         return -1;
     }
-    sc->sc_auth_generation = auth_generation;
+    sc->sc_session_generation = session_generation;
     smb2_set_opaque(smb2, sc);
     return 0;
 }
@@ -724,7 +736,7 @@ smb_reject_stale_session(struct smb2_server *srvr, struct smb2_context *smb2)
 
     smb_server_t *srv = (smb_server_t *)srvr;
     hts_mutex_lock(&smb_server_mutex);
-    int stale = sc->sc_auth_generation != srv->auth_generation;
+    int stale = sc->sc_session_generation != srv->session_generation;
     hts_mutex_unlock(&smb_server_mutex);
 
     if(!stale)
