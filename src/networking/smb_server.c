@@ -110,6 +110,12 @@ typedef struct {
     int is_ipc;
 } smb_tree_entry_t;
 
+typedef enum {
+    SMB_TREE_UNKNOWN,
+    SMB_TREE_DISK,
+    SMB_TREE_IPC,
+} smb_tree_type_t;
+
 typedef struct smb_connection {
     char                *sc_share_root;   /* root path for this share   */
     smb_file_entry_t     sc_files[SMB2_MAX_FILES];
@@ -859,15 +865,15 @@ smb_unregister_tree(smb_connection_t *sc, uint32_t tree_id)
     }
 }
 
-static int
-smb_tree_is_ipc(smb_connection_t *sc, uint32_t tree_id)
+static smb_tree_type_t
+smb_tree_lookup(smb_connection_t *sc, uint32_t tree_id)
 {
     for(int i = 0; i < SMB2_MAX_TREES; i++) {
         smb_tree_entry_t *tree = &sc->sc_trees[i];
         if(tree->tree_id == tree_id)
-            return tree->is_ipc;
+            return tree->is_ipc ? SMB_TREE_IPC : SMB_TREE_DISK;
     }
-    return 0;
+    return SMB_TREE_UNKNOWN;
 }
 
 static int
@@ -964,8 +970,14 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
      * req->name is UTF-8, already decoded by libsmb2.
      * An empty/NULL name means the share root itself.
      */
-    int is_ipc_tree = smb_tree_is_ipc(sc, req->tree_id);
-    if(is_ipc_tree && smb_is_srvsvc_pipe(req->name)) {
+    smb_tree_type_t tree_type = smb_tree_lookup(sc, req->tree_id);
+    if(tree_type == SMB_TREE_UNKNOWN) {
+        SMBTRACE("Create: rejecting unknown tree_id=0x%08x name='%s'",
+                 req->tree_id, req->name ? req->name : "");
+        return SMB2_STATUS_NETWORK_NAME_DELETED;
+    }
+
+    if(tree_type == SMB_TREE_IPC && smb_is_srvsvc_pipe(req->name)) {
         char *pipe = strdup("srvsvc");
         if(pipe == NULL)
             return SMB2_STATUS_INSUFFICIENT_RESOURCES;
@@ -991,7 +1003,7 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
         SMBTRACE("Create OK: pipe '%s'", pipe);
         return 0;
     }
-    if(is_ipc_tree) {
+    if(tree_type == SMB_TREE_IPC) {
         SMBTRACE("Create: rejecting non-pipe IPC$ open '%s'",
                  req->name ? req->name : "");
         return SMB2_STATUS_OBJECT_NAME_NOT_FOUND;
