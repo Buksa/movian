@@ -1207,7 +1207,8 @@ setting_set(setting_t *s, int type, ...)
     break;
 
   case SETTING_STRING:
-    abort();
+    str = va_arg(ap, const char *);
+    prop_set_string(s->s_val, str);
     break;
 
   case SETTING_MULTIOPT:

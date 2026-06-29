@@ -149,6 +149,8 @@ _Static_assert(offsetof(smb_server_t, srv) == 0,
 
 static int            smb_port   = 1445;
 static int            smb_enable = 0;
+static setting_t     *smb_port_setting = NULL;
+static int            smb_port_revert_pending = 0;
 static char          *smb_username   = NULL;   /* NULL = allow anonymous  */
 static char          *smb_password   = NULL;   /* NULL = allow anonymous  */
 static char          *smb_share_name  = NULL;
@@ -1471,8 +1473,10 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
         }
         fe->dir_done = 0;
         fe->next_fde = NULL;
-        free(fe->dir_pattern);
-        fe->dir_pattern = NULL;
+        if(req->flags & SMB2_REOPEN) {
+            free(fe->dir_pattern);
+            fe->dir_pattern = NULL;
+        }
     }
 
     if(fe->dir_done) {
@@ -2182,18 +2186,51 @@ static void set_enable(void *opaque, int v)
     queue_enable_disable();
 }
 
-static void set_port(void *opaque, const char *str)
+static void
+deferred_revert_port_setting(void *aux)
 {
-    const char *input = str ? str : "";
+    char buf[16];
+
+    smb_port_revert_pending = 0;
+    if(smb_port_setting == NULL)
+        return;
+
+    snprintf(buf, sizeof(buf), "%d", smb_port);
+    setting_set(smb_port_setting, SETTING_STRING, buf);
+}
+
+static int
+parse_port(const char *input, int *portp)
+{
     char *end = NULL;
+
+    if(input == NULL || *input == '\0')
+        return -1;
+
     errno = 0;
     long port = strtol(input, &end, 10);
-    if(errno || end == input || *end != '\0' || port < 1 || port > 65535) {
+    if(errno || end == input || *end != '\0' || port < 1 || port > 65535)
+        return -1;
+
+    *portp = (int)port;
+    return 0;
+}
+
+static void set_port(void *opaque, const char *str)
+{
+    int port;
+
+    if(parse_port(str, &port)) {
         SMBINFO("Invalid SMB2 server port '%s'; keeping %d",
-                input, smb_port);
+                str ?: "", smb_port);
+        if(!smb_port_revert_pending) {
+            smb_port_revert_pending = 1;
+            asyncio_run_task(deferred_revert_port_setting, NULL);
+        }
         return;
     }
-    smb_port = (int)port;
+
+    smb_port = port;
     int running = __atomic_load_n(&smb_thread_running, __ATOMIC_SEQ_CST);
     /* Port change only takes effect on next start — note in trace */
     SMBTRACE("Port changed to %d%s", smb_port,
@@ -2246,14 +2283,15 @@ smb_server_init(void)
                    SETTING_COURIER(asyncio_courier),
                    NULL);
 
-    setting_create(SETTING_STRING, gconf.settings_network,
-                   SETTINGS_INITIAL_UPDATE,
-                   SETTING_TITLE(_p("Server TCP port")),
-                   SETTING_VALUE("1445"),
-                   SETTING_CALLBACK(set_port, NULL),
-                   SETTING_STORE("smbserver", "port"),
-                   SETTING_COURIER(asyncio_courier),
-                   NULL);
+    smb_port_setting =
+        setting_create(SETTING_STRING, gconf.settings_network,
+                       SETTINGS_INITIAL_UPDATE,
+                       SETTING_TITLE(_p("Server TCP port")),
+                       SETTING_VALUE("1445"),
+                       SETTING_CALLBACK(set_port, NULL),
+                       SETTING_STORE("smbserver", "port"),
+                       SETTING_COURIER(asyncio_courier),
+                       NULL);
 
     setting_create(SETTING_STRING, gconf.settings_network,
                    SETTINGS_INITIAL_UPDATE,
