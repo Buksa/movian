@@ -172,6 +172,17 @@ run_file_root_case() {
     -m SMB2 -c 'ls' >"$ART/file-uppercase-share.log" 2>&1
   grep -q 'movie.mkv' "$ART/file-uppercase-share.log" ||
     fail "SMB2 uppercase share name did not resolve configured share"
+  rm -f /tmp/movian-ipc-denied.bin
+  set +e
+  smbclient "//127.0.0.1/IPC\$" \
+    -p "$port" -U "$SMB_SERVER_SMOKE_USER%$SMB_SERVER_SMOKE_PASSWORD" \
+    -m SMB2 -c 'get movie.mkv /tmp/movian-ipc-denied.bin' \
+    >"$ART/file-ipc-nonpipe-create.log" 2>&1
+  set -e
+  grep -q 'NT_STATUS' "$ART/file-ipc-nonpipe-create.log" ||
+    fail "IPC$ non-pipe create did not report an SMB error"
+  [ ! -e /tmp/movian-ipc-denied.bin ] ||
+    fail "IPC$ non-pipe create unexpectedly read from the disk share"
 
   set +e
   smbclient "//127.0.0.1/$SMB_SERVER_SMOKE_SHARE" \

@@ -78,6 +78,7 @@
 /* ------------------------------------------------------------------ */
 
 #define SMB2_MAX_FILES 64
+#define SMB2_MAX_TREES 16
 
 /*
  * We encode handle index (1-based) + generation counter into 8 bytes of
@@ -104,10 +105,17 @@ typedef struct {
     fa_dir_entry_t *next_fde;      /* next entry to process in directory scan */
 } smb_file_entry_t;
 
+typedef struct {
+    uint32_t tree_id;
+    int is_ipc;
+} smb_tree_entry_t;
+
 typedef struct smb_connection {
     char                *sc_share_root;   /* root path for this share   */
     smb_file_entry_t     sc_files[SMB2_MAX_FILES];
+    smb_tree_entry_t     sc_trees[SMB2_MAX_TREES];
     uint32_t             sc_gen;          /* generation counter         */
+    uint32_t             sc_next_tree_id;
     uint32_t             sc_session_generation;
     uint8_t              sc_related_file_id[SMB2_FD_SIZE];
     int                  sc_related_file_valid;
@@ -720,6 +728,7 @@ smb_session_established(struct smb2_server *srvr, struct smb2_context *smb2)
         free(sc);
         return -1;
     }
+    sc->sc_next_tree_id = 0x1000;
     sc->sc_session_generation = session_generation;
     smb2_set_opaque(smb2, sc);
     return 0;
@@ -821,6 +830,46 @@ smb_is_srvsvc_pipe(const char *name)
     return !strcasecmp(name, "srvsvc");
 }
 
+static uint32_t
+smb_register_tree(smb_connection_t *sc, int is_ipc)
+{
+    for(int i = 0; i < SMB2_MAX_TREES; i++) {
+        smb_tree_entry_t *tree = &sc->sc_trees[i];
+        if(tree->tree_id == 0) {
+            uint32_t tree_id = sc->sc_next_tree_id++;
+            if(sc->sc_next_tree_id == 0)
+                sc->sc_next_tree_id = 0x1000;
+            tree->tree_id = tree_id;
+            tree->is_ipc = is_ipc;
+            return tree_id;
+        }
+    }
+    return 0;
+}
+
+static void
+smb_unregister_tree(smb_connection_t *sc, uint32_t tree_id)
+{
+    for(int i = 0; i < SMB2_MAX_TREES; i++) {
+        smb_tree_entry_t *tree = &sc->sc_trees[i];
+        if(tree->tree_id == tree_id) {
+            memset(tree, 0, sizeof(*tree));
+            return;
+        }
+    }
+}
+
+static int
+smb_tree_is_ipc(smb_connection_t *sc, uint32_t tree_id)
+{
+    for(int i = 0; i < SMB2_MAX_TREES; i++) {
+        smb_tree_entry_t *tree = &sc->sc_trees[i];
+        if(tree->tree_id == tree_id)
+            return tree->is_ipc;
+    }
+    return 0;
+}
+
 static int
 smb_tree_connect(struct smb2_server *srvr, struct smb2_context *smb2,
                  struct smb2_tree_connect_request *req,
@@ -831,6 +880,9 @@ smb_tree_connect(struct smb2_server *srvr, struct smb2_context *smb2,
     int auth_status = smb_reject_stale_session(srvr, smb2);
     if(auth_status)
         return auth_status;
+    smb_connection_t *sc = smb2_get_opaque(smb2);
+    if(sc == NULL)
+        return SMB2_STATUS_INTERNAL_ERROR;
     smb_server_t *srv = (smb_server_t *)srvr;
     rep->maximal_access = 0x101f01ff;
     rep->share_flags    = 0;
@@ -846,9 +898,15 @@ smb_tree_connect(struct smb2_server *srvr, struct smb2_context *smb2,
         return SMB2_STATUS_INSUFFICIENT_RESOURCES;
     }
     if(smb_is_ipc_share(share)) {
+        rep->tree_id = smb_register_tree(sc, 1);
+        if(rep->tree_id == 0) {
+            free(expected);
+            free((void *)path_utf8);
+            return SMB2_STATUS_INSUFFICIENT_RESOURCES;
+        }
         rep->share_type = SMB2_SHARE_TYPE_PIPE;
-        SMBTRACE("Tree connect: share_type=PIPE access=0x%08x path='%s'",
-                 rep->maximal_access, path_utf8 ? path_utf8 : "?");
+        SMBTRACE("Tree connect: share_type=PIPE tree_id=0x%08x access=0x%08x path='%s'",
+                 rep->tree_id, rep->maximal_access, path_utf8 ? path_utf8 : "?");
         free(expected);
         free((void *)path_utf8);
         return 0;
@@ -859,9 +917,15 @@ smb_tree_connect(struct smb2_server *srvr, struct smb2_context *smb2,
         free((void *)path_utf8);
         return SMB2_STATUS_BAD_NETWORK_NAME;
     }
+    rep->tree_id = smb_register_tree(sc, 0);
+    if(rep->tree_id == 0) {
+        free(expected);
+        free((void *)path_utf8);
+        return SMB2_STATUS_INSUFFICIENT_RESOURCES;
+    }
     rep->share_type = SMB2_SHARE_TYPE_DISK;
-    SMBTRACE("Tree connect: share_type=DISK access=0x%08x path='%s'",
-             rep->maximal_access, path_utf8 ? path_utf8 : "?");
+    SMBTRACE("Tree connect: share_type=DISK tree_id=0x%08x access=0x%08x path='%s'",
+             rep->tree_id, rep->maximal_access, path_utf8 ? path_utf8 : "?");
     free(expected);
     free((void *)path_utf8);
     return 0;
@@ -871,6 +935,9 @@ static int
 smb_tree_disconnect(struct smb2_server *srvr, struct smb2_context *smb2,
                     const uint32_t tree_id)
 {
+    smb_connection_t *sc = smb2_get_opaque(smb2);
+    if(sc != NULL)
+        smb_unregister_tree(sc, tree_id);
     SMBTRACE("Tree disconnect: tree_id=%u", tree_id);
     return 0;
 }
@@ -897,7 +964,8 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
      * req->name is UTF-8, already decoded by libsmb2.
      * An empty/NULL name means the share root itself.
      */
-    if(smb_is_srvsvc_pipe(req->name)) {
+    int is_ipc_tree = smb_tree_is_ipc(sc, req->tree_id);
+    if(is_ipc_tree && smb_is_srvsvc_pipe(req->name)) {
         char *pipe = strdup("srvsvc");
         if(pipe == NULL)
             return SMB2_STATUS_INSUFFICIENT_RESOURCES;
@@ -922,6 +990,11 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
             rep->last_write_time = rep->change_time = win_time;
         SMBTRACE("Create OK: pipe '%s'", pipe);
         return 0;
+    }
+    if(is_ipc_tree) {
+        SMBTRACE("Create: rejecting non-pipe IPC$ open '%s'",
+                 req->name ? req->name : "");
+        return SMB2_STATUS_OBJECT_NAME_NOT_FOUND;
     }
 
     char *path = NULL;
@@ -1351,12 +1424,8 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
         char errbuf[256];
         fe->fa_dir = vfs_scandir(fe->path, errbuf, sizeof(errbuf));
         if(fe->fa_dir == NULL) {
-            /* Empty or inaccessible dir — return 0 to signal no more files */
-            fe->dir_done = 1;
-            fe->next_fde = NULL;
-            rep->output_buffer        = NULL;
-            rep->output_buffer_length = 0;
-            return 0;
+            SMBINFO("QueryDir FAILED: '%s': %s", fe->path, errbuf);
+            return smb_vfs_error_to_ntstatus(-1, errbuf);
         }
         fe->next_fde = RB_FIRST(&fe->fa_dir->fd_entries);
     }
@@ -1894,7 +1963,7 @@ smb_ioctl(struct smb2_server *srvr, struct smb2_context *smb2,
 static int smb_cancel(struct smb2_server *s, struct smb2_context *c) { return 0; }
 static int smb_echo(struct smb2_server *s, struct smb2_context *c)   { return 0; }
 static int smb_lock(struct smb2_server *s, struct smb2_context *c,
-                    struct smb2_lock_request *r)                      { if(r == NULL) return SMB2_STATUS_INVALID_PARAMETER; return 0; }
+                    struct smb2_lock_request *r)                      { if(r == NULL) return SMB2_STATUS_INVALID_PARAMETER; return SMB2_STATUS_NOT_SUPPORTED; }
 
 /* ------------------------------------------------------------------ */
 /* Handler table                                                        */
