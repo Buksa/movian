@@ -108,6 +108,7 @@ typedef struct smb_connection {
     char                *sc_share_root;   /* root path for this share   */
     smb_file_entry_t     sc_files[SMB2_MAX_FILES];
     uint32_t             sc_gen;          /* generation counter         */
+    uint32_t             sc_auth_generation;
     uint8_t              sc_related_file_id[SMB2_FD_SIZE];
     int                  sc_related_file_valid;
     struct smb2_ioctl_validate_negotiate_info sc_vni; /* for validate negotiate info ioctl */
@@ -120,6 +121,7 @@ typedef struct {
     char *password;
     char *share_name;
     char *share_root;
+    uint32_t auth_generation;
 } smb_server_t;
 
 _Static_assert(offsetof(smb_server_t, srv) == 0,
@@ -168,10 +170,19 @@ smb_apply_active_auth(void)
         return;
     }
 
+    int auth_changed =
+        (srv->username == NULL) != (username == NULL) ||
+        (srv->username != NULL && username != NULL &&
+         strcmp(srv->username, username)) ||
+        (srv->password == NULL) != (password == NULL) ||
+        (srv->password != NULL && password != NULL &&
+         strcmp(srv->password, password));
     free(srv->username);
     free(srv->password);
     srv->username = username;
     srv->password = password;
+    if(auth_changed)
+        srv->auth_generation++;
     srv->srv.signing_enabled = srv->username != NULL ? 1 : 0;
     srv->srv.allow_anonymous = srv->username == NULL ? 1 : 0;
     hts_mutex_unlock(&smb_server_mutex);
@@ -671,6 +682,7 @@ smb_session_established(struct smb2_server *srvr, struct smb2_context *smb2)
         return -1;
     hts_mutex_lock(&smb_server_mutex);
     char *share_root = smb_strdup_or_null(srv->share_root);
+    uint32_t auth_generation = srv->auth_generation;
     hts_mutex_unlock(&smb_server_mutex);
     sc->sc_share_root = smb_normalize_share_root(share_root);
     free(share_root);
@@ -678,6 +690,7 @@ smb_session_established(struct smb2_server *srvr, struct smb2_context *smb2)
         free(sc);
         return -1;
     }
+    sc->sc_auth_generation = auth_generation;
     smb2_set_opaque(smb2, sc);
     return 0;
 }
@@ -700,6 +713,27 @@ smb_cleanup_session(struct smb2_context *smb2, const char *reason)
         SMBINFO("Client (%s) %s", _u ? _u : "anonymous", reason);
     }
     return 0;
+}
+
+static int
+smb_reject_stale_session(struct smb2_server *srvr, struct smb2_context *smb2)
+{
+    smb_connection_t *sc = smb2_get_opaque(smb2);
+    if(sc == NULL)
+        return SMB2_STATUS_INTERNAL_ERROR;
+
+    smb_server_t *srv = (smb_server_t *)srvr;
+    hts_mutex_lock(&smb_server_mutex);
+    int stale = sc->sc_auth_generation != srv->auth_generation;
+    hts_mutex_unlock(&smb_server_mutex);
+
+    if(!stale)
+        return 0;
+
+    SMBINFO("Closing stale SMB2 session after auth settings changed");
+    smb_cleanup_session(smb2, "closed after auth settings changed");
+    smb2_close_context(smb2);
+    return SMB2_STATUS_ACCESS_DENIED;
 }
 
 static int
@@ -764,6 +798,9 @@ smb_tree_connect(struct smb2_server *srvr, struct smb2_context *smb2,
 {
     if(req == NULL || rep == NULL)
         return -1;
+    int auth_status = smb_reject_stale_session(srvr, smb2);
+    if(auth_status)
+        return auth_status;
     smb_server_t *srv = (smb_server_t *)srvr;
     rep->maximal_access = 0x101f01ff;
     rep->share_flags    = 0;
@@ -822,6 +859,9 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
     smb_connection_t *sc = smb2_get_opaque(smb2);
     if(sc == NULL)
         return SMB2_STATUS_INTERNAL_ERROR;
+    int auth_status = smb_reject_stale_session(srvr, smb2);
+    if(auth_status)
+        return auth_status;
 
     /*
      * req->name is UTF-8, already decoded by libsmb2.
@@ -1046,6 +1086,9 @@ smb_close(struct smb2_server *srvr, struct smb2_context *smb2,
     smb_connection_t *sc = smb2_get_opaque(smb2);
     if(sc == NULL)
         return SMB2_STATUS_INTERNAL_ERROR;
+    int auth_status = smb_reject_stale_session(srvr, smb2);
+    if(auth_status)
+        return auth_status;
 
     smb_file_entry_t *fe = smb_find_file(sc, req->file_id);
     if(fe == NULL)
@@ -1109,6 +1152,9 @@ smb_read(struct smb2_server *srvr, struct smb2_context *smb2,
     smb_connection_t *sc = smb2_get_opaque(smb2);
     if(sc == NULL)
         return SMB2_STATUS_INTERNAL_ERROR;
+    int auth_status = smb_reject_stale_session(srvr, smb2);
+    if(auth_status)
+        return auth_status;
 
     smb_file_entry_t *fe = smb_find_file(sc, req->file_id);
     if(fe == NULL || fe->is_dir || fe->fa_fh == NULL)
@@ -1171,6 +1217,9 @@ smb_write(struct smb2_server *srvr, struct smb2_context *smb2,
     smb_connection_t *sc = smb2_get_opaque(smb2);
     if(sc == NULL)
         return SMB2_STATUS_INTERNAL_ERROR;
+    int auth_status = smb_reject_stale_session(srvr, smb2);
+    if(auth_status)
+        return auth_status;
 
     smb_file_entry_t *fe = smb_find_file(sc, req->file_id);
     if(fe == NULL || fe->is_dir || fe->fa_fh == NULL)
@@ -1219,6 +1268,9 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
     smb_connection_t *sc = smb2_get_opaque(smb2);
     if(sc == NULL)
         return SMB2_STATUS_INTERNAL_ERROR;
+    int auth_status = smb_reject_stale_session(srvr, smb2);
+    if(auth_status)
+        return auth_status;
 
     if(req->file_information_class != SMB2_FILE_ID_BOTH_DIRECTORY_INFORMATION &&
        req->file_information_class != SMB2_FILE_ID_FULL_DIRECTORY_INFORMATION)
@@ -1426,6 +1478,9 @@ smb_query_info(struct smb2_server *srvr, struct smb2_context *smb2,
     smb_connection_t *sc = smb2_get_opaque(smb2);
     if(sc == NULL)
         return SMB2_STATUS_INTERNAL_ERROR;
+    int auth_status = smb_reject_stale_session(srvr, smb2);
+    if(auth_status)
+        return auth_status;
 
     smb_file_entry_t *fe = smb_find_file(sc, req->file_id);
 
@@ -1630,6 +1685,9 @@ smb_set_info(struct smb2_server *srvr, struct smb2_context *smb2,
     smb_connection_t *sc = smb2_get_opaque(smb2);
     if(sc == NULL)
         return SMB2_STATUS_INTERNAL_ERROR;
+    int auth_status = smb_reject_stale_session(srvr, smb2);
+    if(auth_status)
+        return auth_status;
 
     smb_file_entry_t *fe = smb_find_file(sc, req->file_id);
     if(fe == NULL)
@@ -1729,6 +1787,9 @@ smb_ioctl(struct smb2_server *srvr, struct smb2_context *smb2,
     smb_connection_t *sc = smb2_get_opaque(smb2);
     if(sc == NULL)
         return SMB2_STATUS_INTERNAL_ERROR;
+    int auth_status = smb_reject_stale_session(srvr, smb2);
+    if(auth_status)
+        return auth_status;
 
     memset(rep, 0, sizeof(*rep));
     rep->ctl_code = req->ctl_code;
