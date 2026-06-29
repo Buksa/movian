@@ -103,6 +103,7 @@ typedef struct {
     int         is_pipe;
     int         delete_on_close;   /* set from SMB2_FILE_DELETE_ON_CLOSE */
     int         dir_done;          /* set after first full dir listing  */
+    char        *dir_pattern;      /* active QUERY_DIRECTORY pattern    */
     fa_dir_entry_t *next_fde;      /* next entry to process in directory scan */
 } smb_file_entry_t;
 
@@ -549,6 +550,7 @@ smb_free_file(smb_connection_t *sc, smb_file_entry_t *fe)
         if(fe->fa_fh)
             fa_close(fe->fa_fh);
     }
+    free(fe->dir_pattern);
     free(fe->path);
     memset(fe, 0, sizeof(*fe));
 }
@@ -1469,6 +1471,8 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
         }
         fe->dir_done = 0;
         fe->next_fde = NULL;
+        free(fe->dir_pattern);
+        fe->dir_pattern = NULL;
     }
 
     if(fe->dir_done) {
@@ -1479,6 +1483,15 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
     }
 
     SMBTRACE("QueryDir: '%s' flags=0x%02x idx=%u class=%u", fe->path, req->flags, req->file_index, req->file_information_class);
+
+    if(req->name && req->name[0] != '\0') {
+        char *pattern = strdup(req->name);
+        if(pattern == NULL)
+            return SMB2_STATUS_INSUFFICIENT_RESOURCES;
+        free(fe->dir_pattern);
+        fe->dir_pattern = pattern;
+    }
+    const char *pattern = fe->dir_pattern;
 
     /* Lazy scan */
     if(fe->fa_dir == NULL) {
@@ -1526,8 +1539,8 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
         if(name == NULL)
             continue;
 
-        if(req->name && req->name[0] != '\0') {
-            if(!pattern_match(name, req->name))
+        if(pattern != NULL) {
+            if(!pattern_match(name, pattern))
                 continue;
         }
 
@@ -2171,7 +2184,16 @@ static void set_enable(void *opaque, int v)
 
 static void set_port(void *opaque, const char *str)
 {
-    smb_port = atoi(str);
+    const char *input = str ? str : "";
+    char *end = NULL;
+    errno = 0;
+    long port = strtol(input, &end, 10);
+    if(errno || end == input || *end != '\0' || port < 1 || port > 65535) {
+        SMBINFO("Invalid SMB2 server port '%s'; keeping %d",
+                input, smb_port);
+        return;
+    }
+    smb_port = (int)port;
     int running = __atomic_load_n(&smb_thread_running, __ATOMIC_SEQ_CST);
     /* Port change only takes effect on next start — note in trace */
     SMBTRACE("Port changed to %d%s", smb_port,
