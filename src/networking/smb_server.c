@@ -98,6 +98,7 @@ typedef struct {
     int64_t     size;              /* cached file size (from stat)      */
     int64_t     pos;               /* cached file offset position       */
     time_t      mtime;             /* mtime timestamp                   */
+    uint32_t    tree_id;           /* tree that owns this handle        */
     int         is_dir;
     int         is_pipe;
     int         delete_on_close;   /* set from SMB2_FILE_DELETE_ON_CLOSE */
@@ -552,6 +553,35 @@ smb_free_file(smb_connection_t *sc, smb_file_entry_t *fe)
     memset(fe, 0, sizeof(*fe));
 }
 
+static int
+smb_vfs_error_to_ntstatus(int status, const char *reason);
+
+static int
+smb_close_file_entry(smb_connection_t *sc, smb_file_entry_t *fe)
+{
+    int ntstatus = 0;
+
+    if(fe->delete_on_close && fe->path) {
+        char errbuf[256];
+        int delete_status;
+        SMBINFO("Delete-on-close: '%s' (%s)", fe->path, fe->is_dir ? "dir" : "file");
+        SMBTRACE("Close+delete executing unlink/rmdir");
+        if(fe->is_dir)
+            delete_status = vfs_rmdir(fe->path, errbuf, sizeof(errbuf));
+        else
+            delete_status = vfs_unlink(fe->path, errbuf, sizeof(errbuf));
+        if(delete_status) {
+            ntstatus = smb_vfs_error_to_ntstatus(delete_status, errbuf);
+            SMBINFO("Delete-on-close FAILED: '%s': %s", fe->path, errbuf);
+        }
+    }
+
+    SMBTRACE("Close: '%s' (%s)", fe->path,
+             fe->is_pipe ? "PIPE" : fe->is_dir ? "DIR" : "FILE");
+    smb_free_file(sc, fe);
+    return ntstatus;
+}
+
 static void
 smb_close_all_files(smb_connection_t *sc)
 {
@@ -560,12 +590,35 @@ smb_close_all_files(smb_connection_t *sc)
         smb_file_entry_t *fe = &sc->sc_files[i];
         if(fe->path != NULL) {
             SMBTRACE("Cleanup: closing leaked handle '%s'", fe->path);
-            smb_free_file(sc, fe);
+            smb_close_file_entry(sc, fe);
             n_closed++;
         }
     }
     if(n_closed)
         SMBTRACE("Cleanup: closed %d leaked file handle(s)", n_closed);
+}
+
+static int
+smb_close_tree_files(smb_connection_t *sc, uint32_t tree_id)
+{
+    int n_closed = 0;
+    int first_status = 0;
+
+    for(int i = 0; i < SMB2_MAX_FILES; i++) {
+        smb_file_entry_t *fe = &sc->sc_files[i];
+        if(fe->path != NULL && fe->tree_id == tree_id) {
+            SMBTRACE("Tree disconnect: closing handle '%s' for tree_id=0x%08x",
+                     fe->path, tree_id);
+            int status = smb_close_file_entry(sc, fe);
+            if(first_status == 0 && status != 0)
+                first_status = status;
+            n_closed++;
+        }
+    }
+    if(n_closed)
+        SMBTRACE("Tree disconnect: closed %d handle(s) for tree_id=0x%08x",
+                 n_closed, tree_id);
+    return first_status;
 }
 
 /* ------------------------------------------------------------------ */
@@ -942,10 +995,13 @@ smb_tree_disconnect(struct smb2_server *srvr, struct smb2_context *smb2,
                     const uint32_t tree_id)
 {
     smb_connection_t *sc = smb2_get_opaque(smb2);
-    if(sc != NULL)
+    int status = 0;
+    if(sc != NULL) {
+        status = smb_close_tree_files(sc, tree_id);
         smb_unregister_tree(sc, tree_id);
-    SMBTRACE("Tree disconnect: tree_id=%u", tree_id);
-    return 0;
+    }
+    SMBTRACE("Tree disconnect: tree_id=0x%08x status=0x%08x", tree_id, status);
+    return status;
 }
 
 /* ------------------------------------------------------------------ */
@@ -989,6 +1045,7 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
         }
 
         fe->is_pipe = 1;
+        fe->tree_id = req->tree_id;
         fe->mtime = time(NULL);
         memcpy(sc->sc_related_file_id, fe->file_id, SMB2_FD_SIZE);
         sc->sc_related_file_valid = 1;
@@ -1029,6 +1086,7 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
         free(path);
         return SMB2_STATUS_INSUFFICIENT_RESOURCES;
     }
+    fe->tree_id = req->tree_id;
 
     struct fa_stat fs = {};
     char errbuf[256];
@@ -1226,27 +1284,7 @@ smb_close(struct smb2_server *srvr, struct smb2_context *smb2,
                                           : SMB2_FILE_ATTRIBUTE_NORMAL;
     }
 
-    if(fe->delete_on_close && fe->path) {
-        char errbuf[256];
-        int delete_status;
-        SMBINFO("Delete-on-close: '%s' (%s)", fe->path, fe->is_dir ? "dir" : "file");
-        SMBTRACE("Close+delete executing unlink/rmdir");
-        if(fe->is_dir)
-            delete_status = vfs_rmdir(fe->path, errbuf, sizeof(errbuf));
-        else
-            delete_status = vfs_unlink(fe->path, errbuf, sizeof(errbuf));
-        if(delete_status) {
-            int ntstatus = smb_vfs_error_to_ntstatus(delete_status, errbuf);
-            SMBINFO("Delete-on-close FAILED: '%s': %s", fe->path, errbuf);
-            smb_free_file(sc, fe);
-            return ntstatus;
-        }
-    }
-
-    SMBTRACE("Close: '%s' (%s)", fe->path,
-             fe->is_pipe ? "PIPE" : fe->is_dir ? "DIR" : "FILE");
-    smb_free_file(sc, fe);
-    return 0;
+    return smb_close_file_entry(sc, fe);
 }
 
 /* ------------------------------------------------------------------ */
