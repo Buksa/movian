@@ -232,6 +232,18 @@ run_file_root_case() {
   [ ! -e "$root/renamed.txt" ] || fail "del did not remove renamed.txt"
   run_smbclient file-rmdir "$port" "$file_dialect" -c 'rmdir made_by_smb'
   [ ! -e "$root/made_by_smb" ] || fail "rmdir did not remove made_by_smb"
+  mkdir -p "$root/nonempty_dir"
+  printf 'keep\n' >"$root/nonempty_dir/child.txt"
+  set +e
+  smbclient "//127.0.0.1/$SMB_SERVER_SMOKE_SHARE" \
+    -p "$port" -U "$SMB_SERVER_SMOKE_USER%$SMB_SERVER_SMOKE_PASSWORD" \
+    -m "$file_dialect" -c 'rmdir nonempty_dir' \
+    >"$ART/file-rmdir-nonempty.log" 2>&1
+  set -e
+  grep -q 'NT_STATUS' "$ART/file-rmdir-nonempty.log" ||
+    fail "rmdir of a non-empty directory did not report an SMB error"
+  [ -f "$root/nonempty_dir/child.txt" ] ||
+    fail "failed non-empty rmdir removed child.txt"
 
   set +e
   smbclient "//127.0.0.1/$SMB_SERVER_SMOKE_SHARE" \

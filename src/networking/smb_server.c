@@ -581,6 +581,24 @@ smb_errno_to_ntstatus(int err)
     }
 }
 
+static int
+smb_vfs_error_to_ntstatus(int err, const char *errbuf)
+{
+    if(err != -1 || errbuf == NULL)
+        return smb_errno_to_ntstatus(err);
+
+    if(!strcmp(errbuf, strerror(ENOTEMPTY)))
+        return SMB2_STATUS_DIRECTORY_NOT_EMPTY;
+    if(!strcmp(errbuf, strerror(ENOENT)))
+        return SMB2_STATUS_OBJECT_NAME_NOT_FOUND;
+    if(!strcmp(errbuf, strerror(EACCES)) || !strcmp(errbuf, strerror(EPERM)))
+        return SMB2_STATUS_ACCESS_DENIED;
+    if(!strcmp(errbuf, strerror(EROFS)))
+        return SMB2_STATUS_MEDIA_WRITE_PROTECTED;
+
+    return smb_errno_to_ntstatus(err);
+}
+
 /* ------------------------------------------------------------------ */
 /* Handler: AUTHORIZE                                                   */
 /* ------------------------------------------------------------------ */
@@ -1125,12 +1143,19 @@ smb_close(struct smb2_server *srvr, struct smb2_context *smb2,
 
     if(fe->delete_on_close && fe->path) {
         char errbuf[256];
+        int delete_status;
         SMBINFO("Delete-on-close: '%s' (%s)", fe->path, fe->is_dir ? "dir" : "file");
         SMBTRACE("Close+delete executing unlink/rmdir");
         if(fe->is_dir)
-            vfs_rmdir(fe->path, errbuf, sizeof(errbuf));
+            delete_status = vfs_rmdir(fe->path, errbuf, sizeof(errbuf));
         else
-            vfs_unlink(fe->path, errbuf, sizeof(errbuf));
+            delete_status = vfs_unlink(fe->path, errbuf, sizeof(errbuf));
+        if(delete_status) {
+            int ntstatus = smb_vfs_error_to_ntstatus(delete_status, errbuf);
+            SMBINFO("Delete-on-close FAILED: '%s': %s", fe->path, errbuf);
+            smb_free_file(sc, fe);
+            return ntstatus;
+        }
     }
 
     SMBTRACE("Close: '%s' (%s)", fe->path,
