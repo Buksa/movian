@@ -1489,7 +1489,11 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
      */
     int single_entry = !!(req->flags & SMB2_RETURN_SINGLE_ENTRY);
 
-    size_t entry_size = PAD_TO_64BIT(sizeof(struct smb2_fileidbothdirectoryinformation));
+    int full_info =
+        req->file_information_class == SMB2_FILE_ID_FULL_DIRECTORY_INFORMATION;
+    size_t entry_size = full_info ?
+        PAD_TO_64BIT(sizeof(struct smb2_fileidfulldirectoryinformation)) :
+        PAD_TO_64BIT(sizeof(struct smb2_fileidbothdirectoryinformation));
     int capacity = single_entry ? 1 : 16;
 
     uint8_t *info = malloc(capacity * entry_size);
@@ -1556,33 +1560,41 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
         }
 
         /*
-         * smb2_fileidbothdirectoryinformation.name is const char* (UTF-8).
+         * Directory information structs store name as a const char * (UTF-8).
          * libsmb2 re-encodes to UTF-16 when building the wire PDU.
          * The string pointer name remains valid as long as fe->fa_dir is alive.
          */
-        struct smb2_fileidbothdirectoryinformation *fsb =
-            (struct smb2_fileidbothdirectoryinformation *)(info + info_len);
-        memset(fsb, 0, entry_size);
-
-        fsb->file_index       = n_added;
-        fsb->file_attributes  = entry_is_dir ? SMB2_FILE_ATTRIBUTE_DIRECTORY
-                                              : SMB2_FILE_ATTRIBUTE_NORMAL;
-        if(!entry_is_dir) {
-            fsb->end_of_file      = fde->fde_stat.fs_size;
-            fsb->allocation_size  = fde->fde_stat.fs_size;
-        }
-
         time_t mtime = fde->fde_statdone ? fde->fde_stat.fs_mtime : fe->mtime;
-        smb_fill_timevals(&fsb->creation_time, mtime);
-
-        fsb->file_name_length = name_bytes;  /* UTF-8 byte count */
-
-        /*
-         * Short name: leave empty (modern clients ignore this legacy field).
-         */
-        fsb->short_name_length = 0;
-
-        fsb->name = name;
+        if(full_info) {
+            struct smb2_fileidfulldirectoryinformation *fs =
+                (struct smb2_fileidfulldirectoryinformation *)(info + info_len);
+            memset(fs, 0, entry_size);
+            fs->file_index = n_added;
+            fs->file_attributes = entry_is_dir ? SMB2_FILE_ATTRIBUTE_DIRECTORY
+                                               : SMB2_FILE_ATTRIBUTE_NORMAL;
+            if(!entry_is_dir) {
+                fs->end_of_file = fde->fde_stat.fs_size;
+                fs->allocation_size = fde->fde_stat.fs_size;
+            }
+            smb_fill_timevals(&fs->creation_time, mtime);
+            fs->file_name_length = name_bytes;
+            fs->name = name;
+        } else {
+            struct smb2_fileidbothdirectoryinformation *fs =
+                (struct smb2_fileidbothdirectoryinformation *)(info + info_len);
+            memset(fs, 0, entry_size);
+            fs->file_index = n_added;
+            fs->file_attributes = entry_is_dir ? SMB2_FILE_ATTRIBUTE_DIRECTORY
+                                               : SMB2_FILE_ATTRIBUTE_NORMAL;
+            if(!entry_is_dir) {
+                fs->end_of_file = fde->fde_stat.fs_size;
+                fs->allocation_size = fde->fde_stat.fs_size;
+            }
+            smb_fill_timevals(&fs->creation_time, mtime);
+            fs->file_name_length = name_bytes;
+            fs->short_name_length = 0;
+            fs->name = name;
+        }
 
         info_len += entry_size;
         serialized_wire_len += wire_size;
