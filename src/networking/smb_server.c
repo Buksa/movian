@@ -1091,6 +1091,7 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
     struct fa_stat fs = {};
     char errbuf[256];
     int exists = !vfs_stat(path, &fs, errbuf, sizeof(errbuf));
+    int existed = exists;
     int is_dir = exists && content_dirish(fs.fs_type);
 
     /* --- Honour create_options directory/non-directory constraints --- */
@@ -1160,6 +1161,16 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
 
     case SMB2_FILE_SUPERSEDE:
     case SMB2_FILE_OVERWRITE_IF:
+        if(!exists && (req->create_options & SMB2_FILE_DIRECTORY_FILE)) {
+            if(vfs_makedir(path)) {
+                smb_free_file(sc, fe);
+                return SMB2_STATUS_ACCESS_DENIED;
+            }
+            is_dir = 1; exists = 1;
+            if(vfs_stat(path, &fs, errbuf, sizeof(errbuf))) {
+                fs.fs_mtime = time(NULL);
+            }
+        }
         break;
 
     default:
@@ -1221,7 +1232,7 @@ smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
     rep->file_attributes = is_dir ? SMB2_FILE_ATTRIBUTE_DIRECTORY
                                   : SMB2_FILE_ATTRIBUTE_NORMAL;
 
-    if(exists) {
+    if(existed) {
         if(req->create_disposition == SMB2_FILE_OVERWRITE ||
            req->create_disposition == SMB2_FILE_OVERWRITE_IF) {
             rep->create_action = SMB2_FILE_OVERWRITTEN;
@@ -1897,7 +1908,7 @@ smb_set_info(struct smb2_server *srvr, struct smb2_context *smb2,
         if(r) {
             SMBINFO("Rename FAILED: '%s' → '%s': %s", fe->path, new_path, errbuf);
             free(new_path);
-            return smb_errno_to_ntstatus(r);
+            return smb_vfs_error_to_ntstatus(r, errbuf);
         }
         free(fe->path);
         fe->path = new_path;
