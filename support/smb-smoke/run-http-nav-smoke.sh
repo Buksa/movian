@@ -48,10 +48,22 @@ cleanup() {
 trap cleanup EXIT
 
 cd "$SMB_SMOKE_ROOT"
-gdb -ex r -ex "thread apply all bt full" -ex q --args "$SMB_SMOKE_MOVIAN" -d --disable-upgrades \
-  --persistent "$ART/profile/persistent" \
-  --cache "$ART/profile/cache" \
-  >"$ART/movian.log" 2>&1 &
+if [ "${SMB_SMOKE_USE_GDB:-0}" = "1" ]; then
+  command -v gdb >/dev/null || {
+    echo "SMB_SMOKE_USE_GDB=1 requires gdb" >&2
+    exit 2
+  }
+  gdb -ex r -ex "thread apply all bt full" -ex q --args "$SMB_SMOKE_MOVIAN" \
+    -d --disable-upgrades \
+    --persistent "$ART/profile/persistent" \
+    --cache "$ART/profile/cache" \
+    >"$ART/movian.log" 2>&1 &
+else
+  "$SMB_SMOKE_MOVIAN" -d --disable-upgrades \
+    --persistent "$ART/profile/persistent" \
+    --cache "$ART/profile/cache" \
+    >"$ART/movian.log" 2>&1 &
+fi
 PID=$!
 
 for _ in $(seq 1 120); do
