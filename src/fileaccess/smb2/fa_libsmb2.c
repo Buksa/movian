@@ -625,10 +625,14 @@ movian_smb2_keepalive_cb(callout_t *c, void *opaque)
   if(!broken && still_alive) {
     hts_mutex_lock(&session->lock);
     session->echo_pending = 1;
-    if(smb2_echo(session->smb2) == 0)
-      session->echo_missed = 0;
+    int rc = smb2_echo(session->smb2);
+    int missed = session->echo_missed;
+    if(rc == 0)
+      missed = session->echo_missed = 0;
     session->echo_pending = 0;
     hts_mutex_unlock(&session->lock);
+    SMB2TRACE("Keepalive %s/%s echo rc=%d missed=%d",
+              session->server, session->share, rc, missed);
   }
 
   if(!broken) {
@@ -1170,6 +1174,31 @@ movian_smb2_close(fa_handle_t *fh)
 }
 
 
+/*
+ * Maximum number of READ PDUs we keep in flight for a single movian_smb2_read()
+ * call. Pipelining overlaps the network round trip of one chunk with the
+ * server-side disk read of the next, which is what makes the cifs native
+ * backend fast for large files; SMB2 gains the same by issuing several
+ * smb2_pread_async() PDUs before blocking on the first reply.
+ */
+#define SMB2_READ_PIPELINE_DEPTH 4
+
+typedef struct {
+  int done;
+  int status;
+} movian_smb2_read_req_t;
+
+
+static void
+movian_smb2_read_cb(struct smb2_context *smb2, int status,
+                    void *command_data, void *opaque)
+{
+  movian_smb2_read_req_t *req = opaque;
+  req->status = status;
+  req->done = 1;
+}
+
+
 static int
 movian_smb2_read(fa_handle_t *fh, void *buf, size_t size)
 {
@@ -1177,9 +1206,113 @@ movian_smb2_read(fa_handle_t *fh, void *buf, size_t size)
   uint32_t count = size > INT_MAX ? INT_MAX : size;
 
   hts_mutex_lock(&file->session->lock);
-  int status = smb2_read(file->session->smb2, file->fh, buf, count);
+
+  /*
+   * Keep the simple synchronous path for small reads: the bookkeeping for a
+   * pipelined run is not worth it below one chunk, and short reads (tags,
+   * directory metadata) dominate browsing.
+   */
+  uint32_t max_read = smb2_get_max_read_size(file->session->smb2);
+  if(max_read == 0 || count <= max_read) {
+    int status = smb2_read(file->session->smb2, file->fh, buf, count);
+    hts_mutex_unlock(&file->session->lock);
+    return status;
+  }
+
+  struct smb2_context *smb2 = file->session->smb2;
+  struct smb2fh *sfh = file->fh;
+
+  int64_t base = smb2_lseek(smb2, sfh, 0, SEEK_CUR, NULL);
+  if(base < 0) {
+    hts_mutex_unlock(&file->session->lock);
+    return -1;
+  }
+
+  movian_smb2_read_req_t reqs[SMB2_READ_PIPELINE_DEPTH];
+  memset(reqs, 0, sizeof(reqs));
+
+  uint32_t chunk = max_read;
+  uint32_t issued = 0;
+  int nreqs = 0;
+  while(issued < count && nreqs < SMB2_READ_PIPELINE_DEPTH) {
+    uint32_t this_count = count - issued;
+    if(this_count > chunk)
+      this_count = chunk;
+
+    if(smb2_pread_async(smb2, sfh, (uint8_t *)buf + issued, this_count,
+                        base + issued, movian_smb2_read_cb,
+                        &reqs[nreqs]) < 0) {
+      if(nreqs == 0) {
+        hts_mutex_unlock(&file->session->lock);
+        return -1;
+      }
+      break;
+    }
+    issued += this_count;
+    nreqs++;
+  }
+
+  if(nreqs == 0) {
+    hts_mutex_unlock(&file->session->lock);
+    return -1;
+  }
+
+  int64_t deadline = arch_get_ts() +
+    (SMB2_DEFAULT_TIMEOUT + 5) * 1000000LL;
+  while(1) {
+    int all_done = 1;
+    for(int i = 0; i < nreqs; i++)
+      if(!reqs[i].done) {
+        all_done = 0;
+        break;
+      }
+    if(all_done)
+      break;
+
+    int64_t remaining = deadline - arch_get_ts();
+    if(remaining <= 0)
+      break;
+
+    struct pollfd pfd = {
+      .fd = smb2_get_fd(smb2),
+      .events = smb2_which_events(smb2),
+    };
+    int timeout = (remaining + 999) / 1000;
+    if(timeout > 1000)
+      timeout = 1000;
+
+    int rc = poll(&pfd, 1, timeout);
+    if(rc < 0) {
+      if(errno == EINTR)
+        continue;
+      break;
+    }
+    if(smb2_service(smb2, rc == 0 ? 0 : pfd.revents) < 0)
+      break;
+  }
+
+  /*
+   * Reassemble. Each pread wrote straight into its slice of buf, so we only
+   * need to total up the bytes and stop at the first short/error read the way
+   * a normal read() would.
+   */
+  int total = 0;
+  int failed = 0;
+  for(int i = 0; i < nreqs; i++) {
+    if(!reqs[i].done || reqs[i].status < 0) {
+      failed = 1;
+      break;
+    }
+    total += reqs[i].status;
+    if(reqs[i].status < (int)chunk)
+      break;
+  }
+
+  if(!failed && total > 0)
+    smb2_lseek(smb2, sfh, base + total, SEEK_SET, NULL);
+
   hts_mutex_unlock(&file->session->lock);
-  return status;
+  return failed ? -1 : total;
 }
 
 
