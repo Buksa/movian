@@ -485,11 +485,15 @@ libsmb2_setup() {
         LIBSMB2_CC="${CC#ccache }"
         LIBSMB2_CMAKE_LAUNCHER="-DCMAKE_C_COMPILER_LAUNCHER=ccache"
     fi
+    LIBSMB2_CMAKE_BUILD_TYPE=Release
+    case "${BUILD}" in
+        *debug*|*asan*) LIBSMB2_CMAKE_BUILD_TYPE=Debug ;;
+    esac
 
     cmake \
         -S "${TOPDIR}/ext/libsmb2" \
         -B "${LIBSMB2_BUILD_DIR}" \
-        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_BUILD_TYPE="${LIBSMB2_CMAKE_BUILD_TYPE}" \
         -DCMAKE_C_COMPILER="${LIBSMB2_CC}" \
         ${LIBSMB2_CMAKE_LAUNCHER} \
         -DCMAKE_INSTALL_PREFIX="${EXT_INSTALL_DIR}" \
