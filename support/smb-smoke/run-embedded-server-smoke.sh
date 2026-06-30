@@ -44,6 +44,7 @@ write_profile() {
   local password="${5-$SMB_SERVER_SMOKE_PASSWORD}"
 
   mkdir -p "$profile/persistent/settings" "$profile/cache"
+  smb_smoke_write_local_bittorrent_cache "$profile"
   cat >"$profile/persistent/settings/smbserver" <<EOF
 {"enable":1,"port":"$port","username":"$username","password":"$password","share":"$SMB_SERVER_SMOKE_SHARE","root":"$root"}
 EOF
@@ -161,6 +162,7 @@ run_file_root_case() {
     -o "$open_preserve" -lgnutls
 
   write_profile "$profile" "$port" "$root"
+  smb_smoke_profile_summary "$profile" "$case_art/profile-summary.txt"
   start_movian "$profile" "$port" "$case_art/movian.log"
 
   run_smbclient file-smb2-ls "$port" SMB2 -c 'ls; cd dir; ls'
@@ -267,6 +269,7 @@ run_file_root_case() {
 
   grep -q 'Read OK' "$case_art/movian.log" ||
     fail "SMB2 file read was not observed"
+  smb_smoke_check_no_unexpected_remote_smb2_client "$case_art/movian.log"
 
   stop_movian
 }
@@ -284,6 +287,7 @@ run_vfs_root_case() {
   cat >"$profile/persistent/settings/bookmarks2" <<EOF
 [{"id":"smb-smoke-zona","title":"zona","svctype":"other","url":"file://$zona"}]
 EOF
+  smb_smoke_profile_summary "$profile" "$case_art/profile-summary.txt"
   start_movian "$profile" "$port" "$case_art/movian.log"
 
   smbclient -L "//127.0.0.1" -p "$port" -U 'anonymous%' -m SMB2 \
@@ -342,6 +346,7 @@ EOF
     fail "compound stat QueryInfo was not observed during VFS child browse"
   grep -q 'scan directory done url=smb2://127.0.0.1:' "$case_art/movian.log" ||
     fail "SMB2 client directory scan completion was not observed"
+  smb_smoke_check_no_unexpected_remote_smb2_client "$case_art/movian.log"
 
   stop_movian
 }
