@@ -24,6 +24,7 @@
 #include "main.h"
 #include "keyring.h"
 #include "fileaccess/fa_proto.h"
+#include "misc/callout.h"
 #include "misc/queue.h"
 #include "misc/rstr.h"
 
@@ -45,6 +46,14 @@
  */
 #define SMB2_POOL_MAX_SESSIONS 8
 #define SMB2_POOL_IDLE_TTL_SEC 60
+
+/*
+ * Keepalive cadence (seconds) and how many consecutive missed echoes are
+ * tolerated before the session is torn down. Mirrors the cifs native
+ * SMB_ECHO_INTERVAL / cc_wait_for_ping scheme.
+ */
+#define SMB2_ECHO_INTERVAL 30
+#define SMB2_ECHO_MAX_MISSED 2
 
 #define SMB2TRACE(x, ...) do {                                 \
     if(gconf.enable_smb_debug)                                 \
@@ -76,6 +85,9 @@ typedef struct movian_smb2_session {
   int refcount;
   int broken;
   int64_t last_used;
+  callout_t keepalive;
+  int echo_pending;
+  int echo_missed;
   LIST_ENTRY(movian_smb2_session) link;
 } movian_smb2_session_t;
 
@@ -83,6 +95,8 @@ static LIST_HEAD(, movian_smb2_session) smb2_sessions =
   LIST_HEAD_INITIALIZER(smb2_sessions);
 static hts_mutex_t smb2_pool_mutex;
 static int smb2_pool_inited;
+
+static void movian_smb2_keepalive_cb(callout_t *c, void *opaque);
 
 typedef struct {
   fa_handle_t h;
@@ -330,6 +344,7 @@ movian_smb2_session_destroy(movian_smb2_session_t *session)
    * Caller must hold neither the pool nor the session lock. The session is
    * already unlinked from the pool.
    */
+  callout_disarm(&session->keepalive);
   if(session->smb2 != NULL) {
     smb2_disconnect_share(session->smb2);
     smb2_destroy_context(session->smb2);
@@ -583,6 +598,50 @@ movian_smb2_pool_init_once(void)
 
 
 /*
+ * Periodic keepalive. Runs on the main callout thread. Sends an SMB2 echo and,
+ * if the previous echo never came back, counts it as a miss. After too many
+ * misses (or a hard error) the session is marked broken so the next acquisition
+ * reconnects. The echo itself is a synchronous libsmb2 call; it is short and
+ * only ever sent for idle, refcount==0 sessions, so it never contends with a
+ * streaming reader that already holds session->lock for its own data PDU.
+ */
+static void
+movian_smb2_keepalive_cb(callout_t *c, void *opaque)
+{
+  movian_smb2_session_t *session = opaque;
+
+  hts_mutex_lock(&smb2_pool_mutex);
+  int still_alive = !session->broken && session->refcount <= 0;
+  if(session->echo_pending)
+    session->echo_missed++;
+  if(session->echo_missed > SMB2_ECHO_MAX_MISSED) {
+    SMB2TRACE("Keepalive %s/%s giving up (missed=%d) -> broken",
+              session->server, session->share, session->echo_missed);
+    session->broken = 1;
+  }
+  int broken = session->broken;
+  hts_mutex_unlock(&smb2_pool_mutex);
+
+  if(!broken && still_alive) {
+    hts_mutex_lock(&session->lock);
+    session->echo_pending = 1;
+    if(smb2_echo(session->smb2) == 0)
+      session->echo_missed = 0;
+    session->echo_pending = 0;
+    hts_mutex_unlock(&session->lock);
+  }
+
+  if(!broken) {
+    hts_mutex_lock(&smb2_pool_mutex);
+    if(!session->broken)
+      callout_arm(&session->keepalive, movian_smb2_keepalive_cb, session,
+                  SMB2_ECHO_INTERVAL);
+    hts_mutex_unlock(&smb2_pool_mutex);
+  }
+}
+
+
+/*
  * Acquire a pooled session for (target, share). On a cache miss the TCP +
  * negotiate + session setup + tree connect handshake runs once; subsequent
  * acquisitions reuse the live session. Returns a session with refcount bumped
@@ -668,6 +727,8 @@ movian_smb2_session_acquire(const movian_smb2_target_t *target,
   hts_mutex_lock(&smb2_pool_mutex);
   LIST_INSERT_HEAD(&smb2_sessions, session, link);
   movian_smb2_pool_evict_locked();
+  callout_arm(&session->keepalive, movian_smb2_keepalive_cb, session,
+              SMB2_ECHO_INTERVAL);
   hts_mutex_unlock(&smb2_pool_mutex);
 
   SMB2TRACE("Pool create %s/%s refcount=1",
