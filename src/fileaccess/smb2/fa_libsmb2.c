@@ -24,12 +24,30 @@
 #include "main.h"
 #include "keyring.h"
 #include "fileaccess/fa_proto.h"
+#include "misc/queue.h"
 #include "misc/rstr.h"
 
 #define SMB2_DEFAULT_TIMEOUT 15
 
-#define SMB2TRACE(x, ...) do {                                  \
-    if(gconf.enable_smb_debug)                                  \
+/*
+ * Connection pool limits.
+ *
+ * libsmb2 is not thread safe and binds a context to a single TCP socket, so a
+ * session cannot be shared between threads without serialization. We keep one
+ * long lived session per (server, share, user, domain) key in a pool so the
+ * TCP+negotiate+session-setup+tree-connect handshake happens once and is reused
+ * across the many VFS calls Movian issues while browsing a share. The cifs
+ * native backend achieves the same with cifs_connections/cc_refcount.
+ *
+ * Idle sessions are kept around for a while so that bouncing back into a share
+ * does not pay the handshake cost again, up to SMB2_POOL_MAX_SESSIONS. Older
+ * sessions are reaped first.
+ */
+#define SMB2_POOL_MAX_SESSIONS 8
+#define SMB2_POOL_IDLE_TTL_SEC 60
+
+#define SMB2TRACE(x, ...) do {                                 \
+    if(gconf.enable_smb_debug)                                 \
       tracelog(0, TRACE_DEBUG, "SMB2-CLIENT", x, ##__VA_ARGS__); \
   } while(0)
 
@@ -47,12 +65,30 @@ typedef struct {
   char *domain;
 } movian_smb2_credentials_t;
 
+typedef struct movian_smb2_session {
+  char *key;
+  char *server;
+  char *share;
+  char *user;
+  char *domain;
+  struct smb2_context *smb2;
+  hts_mutex_t lock;
+  int refcount;
+  int broken;
+  int64_t last_used;
+  LIST_ENTRY(movian_smb2_session) link;
+} movian_smb2_session_t;
+
+static LIST_HEAD(, movian_smb2_session) smb2_sessions =
+  LIST_HEAD_INITIALIZER(smb2_sessions);
+static hts_mutex_t smb2_pool_mutex;
+static int smb2_pool_inited;
+
 typedef struct {
   fa_handle_t h;
-  struct smb2_context *smb2;
+  movian_smb2_session_t *session;
   struct smb2fh *fh;
   int64_t size;
-  hts_mutex_t mutex;
 } movian_smb2_file_t;
 
 typedef struct {
@@ -267,6 +303,92 @@ movian_smb2_errno_to_fap(int status)
 }
 
 
+static int
+movian_smb2_session_key(const movian_smb2_target_t *target, const char *share,
+                        char **keyp)
+{
+  const char *user = target->user != NULL ? target->user : "";
+  const char *domain = target->domain != NULL ? target->domain : "";
+  const char *sh = share != NULL ? share : "";
+
+  size_t len = strlen(target->server) + strlen(sh) + strlen(user) +
+    strlen(domain) + 4;
+  char *key = malloc(len);
+  if(key == NULL)
+    return -1;
+
+  snprintf(key, len, "%s/%s/%s/%s", target->server, sh, user, domain);
+  *keyp = key;
+  return 0;
+}
+
+
+static void
+movian_smb2_session_destroy(movian_smb2_session_t *session)
+{
+  /*
+   * Caller must hold neither the pool nor the session lock. The session is
+   * already unlinked from the pool.
+   */
+  if(session->smb2 != NULL) {
+    smb2_disconnect_share(session->smb2);
+    smb2_destroy_context(session->smb2);
+  }
+  hts_mutex_destroy(&session->lock);
+  free(session->key);
+  free(session->server);
+  free(session->share);
+  free(session->user);
+  free(session->domain);
+  free(session);
+}
+
+
+/*
+ * Reap idle and broken sessions. Called under the pool mutex. The least
+ * recently used idle session is dropped when the pool grows past the limit.
+ */
+static void
+movian_smb2_pool_evict_locked(void)
+{
+  if(LIST_EMPTY(&smb2_sessions))
+    return;
+
+  int64_t now = arch_get_ts();
+  int64_t cutoff = now - SMB2_POOL_IDLE_TTL_SEC * 1000000LL;
+
+  movian_smb2_session_t *session = LIST_FIRST(&smb2_sessions);
+  while(session != NULL) {
+    movian_smb2_session_t *next = LIST_NEXT(session, link);
+    if(session->refcount <= 0 &&
+       (session->broken || session->last_used < cutoff)) {
+      LIST_REMOVE(session, link);
+      movian_smb2_session_destroy(session);
+    }
+    session = next;
+  }
+
+  int count = 0;
+  LIST_FOREACH(session, &smb2_sessions, link)
+    count++;
+
+  while(count > SMB2_POOL_MAX_SESSIONS) {
+    movian_smb2_session_t *oldest = NULL;
+    LIST_FOREACH(session, &smb2_sessions, link) {
+      if(session->refcount > 0)
+        continue;
+      if(oldest == NULL || session->last_used < oldest->last_used)
+        oldest = session;
+    }
+    if(oldest == NULL)
+      break;
+    LIST_REMOVE(oldest, link);
+    movian_smb2_session_destroy(oldest);
+    count--;
+  }
+}
+
+
 static struct smb2_context *
 movian_smb2_connect_once(const movian_smb2_target_t *target,
                          const char *share,
@@ -312,9 +434,16 @@ movian_smb2_connect_once(const movian_smb2_target_t *target,
 }
 
 
+/*
+ * Resolve credentials and perform the (interactive, possibly retrying) connect.
+ * Runs without the pool lock so that a keyring prompt does not stall other
+ * sessions. Returns a fresh connected context and, on success, leaves the
+ * resolved credentials in *resolved for the session to retain.
+ */
 static struct smb2_context *
 movian_smb2_connect_impl(const movian_smb2_target_t *target, const char *share,
                          int flags, int timeout, int *auth_needed,
+                         movian_smb2_credentials_t *resolved,
                          char *errbuf, size_t errlen)
 {
   movian_smb2_credentials_t credentials = {};
@@ -349,6 +478,13 @@ movian_smb2_connect_impl(const movian_smb2_target_t *target, const char *share,
     movian_smb2_connect_once(target, share, &credentials, timeout, &status,
                             reason, sizeof(reason));
   if(smb2 != NULL) {
+    if(resolved != NULL) {
+      resolved->user = strdup(credentials.user != NULL ? credentials.user : "");
+      resolved->password =
+        strdup(credentials.password != NULL ? credentials.password : "");
+      resolved->domain =
+        strdup(credentials.domain != NULL ? credentials.domain : "");
+    }
     movian_smb2_credentials_fini(&credentials);
     free(keyring_id);
     return smb2;
@@ -422,6 +558,13 @@ movian_smb2_connect_impl(const movian_smb2_target_t *target, const char *share,
                                   &status, reason, sizeof(reason));
   if(smb2 == NULL)
     snprintf(errbuf, errlen, "Unable to connect to SMB2 share: %s", reason);
+  else if(resolved != NULL) {
+    resolved->user = strdup(credentials.user != NULL ? credentials.user : "");
+    resolved->password =
+      strdup(credentials.password != NULL ? credentials.password : "");
+    resolved->domain =
+      strdup(credentials.domain != NULL ? credentials.domain : "");
+  }
 
   movian_smb2_credentials_fini(&credentials);
   free(keyring_id);
@@ -429,22 +572,145 @@ movian_smb2_connect_impl(const movian_smb2_target_t *target, const char *share,
 }
 
 
-static struct smb2_context *
-movian_smb2_connect(const movian_smb2_target_t *target, const char *share,
-                    int flags, int timeout, char *errbuf, size_t errlen)
+static void
+movian_smb2_pool_init_once(void)
 {
-  return movian_smb2_connect_impl(target, share, flags, timeout, NULL,
-                                  errbuf, errlen);
+  if(smb2_pool_inited)
+    return;
+  hts_mutex_init(&smb2_pool_mutex);
+  smb2_pool_inited = 1;
+}
+
+
+/*
+ * Acquire a pooled session for (target, share). On a cache miss the TCP +
+ * negotiate + session setup + tree connect handshake runs once; subsequent
+ * acquisitions reuse the live session. Returns a session with refcount bumped
+ * (locked for the caller via session->lock semantics — see release) or NULL on
+ * failure.
+ *
+ * The returned session has its pool refcount incremented; the caller must pair
+ * this with movian_smb2_session_release(). Per-operation serialization on a
+ * single context is the caller's responsibility: take session->lock around the
+ * libsmb2 call.
+ */
+static movian_smb2_session_t *
+movian_smb2_session_acquire(const movian_smb2_target_t *target,
+                            const char *share, int flags, int timeout,
+                            int *auth_needed, char *errbuf, size_t errlen)
+{
+  movian_smb2_pool_init_once();
+
+  char *key;
+  if(movian_smb2_session_key(target, share, &key)) {
+    snprintf(errbuf, errlen, "Out of memory while opening SMB2 session");
+    return NULL;
+  }
+
+  movian_smb2_session_t *session = NULL;
+
+  hts_mutex_lock(&smb2_pool_mutex);
+  LIST_FOREACH(session, &smb2_sessions, link) {
+    if(!strcmp(session->key, key) && !session->broken) {
+      session->refcount++;
+      session->last_used = arch_get_ts();
+      hts_mutex_unlock(&smb2_pool_mutex);
+      free(key);
+      SMB2TRACE("Pool reuse %s/%s refcount=%d",
+                target->server, share != NULL ? share : "", session->refcount);
+      return session;
+    }
+  }
+  hts_mutex_unlock(&smb2_pool_mutex);
+
+  movian_smb2_credentials_t resolved = {};
+  struct smb2_context *smb2 =
+    movian_smb2_connect_impl(target, share, flags, timeout, auth_needed,
+                             &resolved, errbuf, errlen);
+  if(smb2 == NULL) {
+    free(key);
+    return NULL;
+  }
+
+  session = calloc(1, sizeof(*session));
+  if(session == NULL) {
+    snprintf(errbuf, errlen, "Out of memory while opening SMB2 session");
+    smb2_disconnect_share(smb2);
+    smb2_destroy_context(smb2);
+    movian_smb2_credentials_fini(&resolved);
+    free(key);
+    return NULL;
+  }
+
+  session->key = key;
+  session->smb2 = smb2;
+  session->refcount = 1;
+  session->last_used = arch_get_ts();
+  session->server = strdup(target->server);
+  session->share = strdup(share != NULL ? share : "");
+  session->user = resolved.user;
+  session->domain = resolved.domain;
+  if(session->server == NULL || session->share == NULL) {
+    snprintf(errbuf, errlen, "Out of memory while opening SMB2 session");
+    movian_smb2_credentials_fini(&resolved);
+    movian_smb2_session_destroy(session);
+    return NULL;
+  }
+  /*
+   * resolved.password is intentionally not retained: the session never
+   * re-authenticates (it is dropped when the server tears it down), and the
+   * keyring still holds the credentials for the next acquisition.
+   */
+  free(resolved.password);
+  resolved = (movian_smb2_credentials_t){};
+  hts_mutex_init(&session->lock);
+
+  hts_mutex_lock(&smb2_pool_mutex);
+  LIST_INSERT_HEAD(&smb2_sessions, session, link);
+  movian_smb2_pool_evict_locked();
+  hts_mutex_unlock(&smb2_pool_mutex);
+
+  SMB2TRACE("Pool create %s/%s refcount=1",
+            target->server, share != NULL ? share : "");
+  return session;
 }
 
 
 static void
-movian_smb2_disconnect(struct smb2_context *smb2)
+movian_smb2_session_release(movian_smb2_session_t *session)
 {
-  if(smb2 == NULL)
+  if(session == NULL)
     return;
-  smb2_disconnect_share(smb2);
-  smb2_destroy_context(smb2);
+
+  hts_mutex_lock(&smb2_pool_mutex);
+  session->refcount--;
+  session->last_used = arch_get_ts();
+  SMB2TRACE("Pool release %s/%s refcount=%d",
+            session->server, session->share, session->refcount);
+  if(session->refcount <= 0)
+    movian_smb2_pool_evict_locked();
+  hts_mutex_unlock(&smb2_pool_mutex);
+}
+
+
+/*
+ * Mark a session as broken under the pool lock and drop it from the pool so the
+ * next acquisition reconnects. Called when an operation fails in a way that
+ * implies the context is no longer usable.
+ */
+static void
+movian_smb2_session_invalidate(movian_smb2_session_t *session)
+{
+  if(session == NULL)
+    return;
+
+  hts_mutex_lock(&smb2_pool_mutex);
+  session->broken = 1;
+  if(session->refcount <= 0) {
+    LIST_REMOVE(session, link);
+    movian_smb2_session_destroy(session);
+  }
+  hts_mutex_unlock(&smb2_pool_mutex);
 }
 
 
@@ -563,13 +829,17 @@ movian_smb2_scan_host(fa_dir_t *fd, const char *url,
                       char *errbuf, size_t errlen)
 {
   SMB2TRACE("Enumerating shares on %s", target->server);
-  struct smb2_context *smb2 =
-    movian_smb2_connect(target, "IPC$", flags, SMB2_DEFAULT_TIMEOUT,
-                        errbuf, errlen);
-  if(smb2 == NULL)
+  movian_smb2_session_t *session =
+    movian_smb2_session_acquire(target, "IPC$", flags, SMB2_DEFAULT_TIMEOUT,
+                                NULL, errbuf, errlen);
+  if(session == NULL)
     return -1;
 
+  struct smb2_context *smb2 = session->smb2;
   movian_smb2_enum_state_t state = {};
+  int rc = -1;
+
+  hts_mutex_lock(&session->lock);
   if(smb2_share_enum_async(smb2, SHARE_INFO_1,
                            movian_smb2_enum_callback, &state) < 0 ||
      movian_smb2_wait_for_enum(smb2, &state) < 0 ||
@@ -580,8 +850,10 @@ movian_smb2_scan_host(fa_dir_t *fd, const char *url,
               state.status, errbuf);
     if(state.reply != NULL)
       smb2_free_data(smb2, state.reply);
-    movian_smb2_disconnect(smb2);
-    return -1;
+    if(state.status != 0)
+      movian_smb2_session_invalidate(session);
+    hts_mutex_unlock(&session->lock);
+    goto out;
   }
 
   struct srvsvc_SHARE_INFO_1_CONTAINER *shares =
@@ -617,8 +889,12 @@ movian_smb2_scan_host(fa_dir_t *fd, const char *url,
   }
 
   smb2_free_data(smb2, state.reply);
-  movian_smb2_disconnect(smb2);
-  return 0;
+  hts_mutex_unlock(&session->lock);
+  rc = 0;
+
+out:
+  movian_smb2_session_release(session);
+  return rc;
 }
 
 
@@ -630,22 +906,26 @@ movian_smb2_scan_directory(fa_dir_t *fd, const char *url,
   SMB2TRACE("scan directory url=%s share=%s path='%s' flags=0x%x",
             url, target->share, target->path, flags);
 
-  struct smb2_context *smb2 =
-    movian_smb2_connect(target, target->share, flags, SMB2_DEFAULT_TIMEOUT,
-                        errbuf, errlen);
-  if(smb2 == NULL) {
+  movian_smb2_session_t *session =
+    movian_smb2_session_acquire(target, target->share, flags,
+                                SMB2_DEFAULT_TIMEOUT, NULL, errbuf, errlen);
+  if(session == NULL) {
     SMB2TRACE("scan directory connect failed url=%s reason=%s", url, errbuf);
     return -1;
   }
 
+  struct smb2_context *smb2 = session->smb2;
+  int rc = -1;
+
+  hts_mutex_lock(&session->lock);
   struct smb2dir *dir = smb2_opendir(smb2, target->path);
   if(dir == NULL) {
     snprintf(errbuf, errlen, "Unable to open SMB2 directory: %s",
              smb2_get_error(smb2));
     SMB2TRACE("scan directory opendir failed url=%s path='%s' reason=%s",
               url, target->path, errbuf);
-    movian_smb2_disconnect(smb2);
-    return -1;
+    hts_mutex_unlock(&session->lock);
+    goto out;
   }
 
   int entries = 0;
@@ -676,8 +956,12 @@ movian_smb2_scan_directory(fa_dir_t *fd, const char *url,
   SMB2TRACE("scan directory done url=%s path='%s' entries=%d",
             url, target->path, entries);
   smb2_closedir(smb2, dir);
-  movian_smb2_disconnect(smb2);
-  return 0;
+  hts_mutex_unlock(&session->lock);
+  rc = 0;
+
+out:
+  movian_smb2_session_release(session);
+  return rc;
 }
 
 
@@ -730,13 +1014,15 @@ movian_smb2_open(fa_protocol_t *fap, const char *url,
 
   int timeout = foe != NULL && foe->foe_open_timeout > 0 ?
     (foe->foe_open_timeout + 999) / 1000 : SMB2_DEFAULT_TIMEOUT;
-  struct smb2_context *smb2 =
-    movian_smb2_connect(&target, target.share, flags, timeout,
-                        errbuf, errlen);
-  if(smb2 == NULL) {
+  movian_smb2_session_t *session =
+    movian_smb2_session_acquire(&target, target.share, flags, timeout,
+                                NULL, errbuf, errlen);
+  if(session == NULL) {
     movian_smb2_target_fini(&target);
     return NULL;
   }
+
+  struct smb2_context *smb2 = session->smb2;
 
   int open_flags = O_RDONLY;
   if(flags & FA_WRITE) {
@@ -745,15 +1031,17 @@ movian_smb2_open(fa_protocol_t *fap, const char *url,
       open_flags |= O_TRUNC;
   }
 
+  movian_smb2_file_t *file = NULL;
+
+  hts_mutex_lock(&session->lock);
+
   struct smb2fh *fh = smb2_open(smb2, target.path, open_flags);
   if(fh == NULL) {
     snprintf(errbuf, errlen, "Unable to open SMB2 file: %s",
              smb2_get_error(smb2));
     SMB2TRACE("open failed url=%s path='%s' open_flags=0x%x reason=%s",
               url, target.path, open_flags, errbuf);
-    movian_smb2_disconnect(smb2);
-    movian_smb2_target_fini(&target);
-    return NULL;
+    goto fail_locked;
   }
 
   struct smb2_stat_64 statbuf;
@@ -764,43 +1052,45 @@ movian_smb2_open(fa_protocol_t *fap, const char *url,
     SMB2TRACE("open fstat rejected url=%s path='%s' smb2_type=%d reason=%s",
               url, target.path, statbuf.smb2_type, errbuf);
     smb2_close(smb2, fh);
-    movian_smb2_disconnect(smb2);
-    movian_smb2_target_fini(&target);
-    return NULL;
+    goto fail_locked;
   }
   SMB2TRACE("open ok url=%s path='%s' size=%"PRId64, url, target.path,
             statbuf.smb2_size);
 
-  movian_smb2_file_t *file = calloc(1, sizeof(*file));
+  file = calloc(1, sizeof(*file));
   if(file == NULL) {
     snprintf(errbuf, errlen, "Out of memory while opening SMB2 file");
     smb2_close(smb2, fh);
-    movian_smb2_disconnect(smb2);
-    movian_smb2_target_fini(&target);
-    return NULL;
+    goto fail_locked;
   }
 
   file->h.fh_proto = fap;
-  file->smb2 = smb2;
   file->fh = fh;
   file->size = statbuf.smb2_size;
-  hts_mutex_init(&file->mutex);
 
   if(flags & FA_APPEND) {
-    if(smb2_lseek(file->smb2, file->fh, 0, SEEK_END, NULL) < 0) {
+    if(smb2_lseek(smb2, file->fh, 0, SEEK_END, NULL) < 0) {
       snprintf(errbuf, errlen, "Unable to seek SMB2 file: %s",
                smb2_get_error(smb2));
-      hts_mutex_destroy(&file->mutex);
+      smb2_close(smb2, file->fh);
       free(file);
-      smb2_close(smb2, fh);
-      movian_smb2_disconnect(smb2);
-      movian_smb2_target_fini(&target);
-      return NULL;
+      file = NULL;
+      goto fail_locked;
     }
   }
 
+  hts_mutex_unlock(&session->lock);
+
+  /* The handle now owns the session reference. */
+  file->session = session;
   movian_smb2_target_fini(&target);
   return &file->h;
+
+fail_locked:
+  hts_mutex_unlock(&session->lock);
+  movian_smb2_session_release(session);
+  movian_smb2_target_fini(&target);
+  return NULL;
 }
 
 
@@ -809,12 +1099,13 @@ movian_smb2_close(fa_handle_t *fh)
 {
   movian_smb2_file_t *file = (movian_smb2_file_t *)fh;
 
-  hts_mutex_lock(&file->mutex);
-  smb2_close(file->smb2, file->fh);
-  movian_smb2_disconnect(file->smb2);
-  hts_mutex_unlock(&file->mutex);
-  hts_mutex_destroy(&file->mutex);
+  hts_mutex_lock(&file->session->lock);
+  smb2_close(file->session->smb2, file->fh);
+  hts_mutex_unlock(&file->session->lock);
+
+  movian_smb2_session_t *session = file->session;
   free(file);
+  movian_smb2_session_release(session);
 }
 
 
@@ -824,9 +1115,9 @@ movian_smb2_read(fa_handle_t *fh, void *buf, size_t size)
   movian_smb2_file_t *file = (movian_smb2_file_t *)fh;
   uint32_t count = size > INT_MAX ? INT_MAX : size;
 
-  hts_mutex_lock(&file->mutex);
-  int status = smb2_read(file->smb2, file->fh, buf, count);
-  hts_mutex_unlock(&file->mutex);
+  hts_mutex_lock(&file->session->lock);
+  int status = smb2_read(file->session->smb2, file->fh, buf, count);
+  hts_mutex_unlock(&file->session->lock);
   return status;
 }
 
@@ -837,14 +1128,14 @@ movian_smb2_write(fa_handle_t *fh, const void *buf, size_t size)
   movian_smb2_file_t *file = (movian_smb2_file_t *)fh;
   uint32_t count = size > INT_MAX ? INT_MAX : size;
 
-  hts_mutex_lock(&file->mutex);
-  int status = smb2_write(file->smb2, file->fh, buf, count);
+  hts_mutex_lock(&file->session->lock);
+  int status = smb2_write(file->session->smb2, file->fh, buf, count);
   if(status > 0) {
-    int64_t pos = smb2_lseek(file->smb2, file->fh, 0, SEEK_CUR, NULL);
+    int64_t pos = smb2_lseek(file->session->smb2, file->fh, 0, SEEK_CUR, NULL);
     if(pos > file->size)
       file->size = pos;
   }
-  hts_mutex_unlock(&file->mutex);
+  hts_mutex_unlock(&file->session->lock);
   return status;
 }
 
@@ -854,9 +1145,10 @@ movian_smb2_seek(fa_handle_t *fh, int64_t pos, int whence, int lazy)
 {
   movian_smb2_file_t *file = (movian_smb2_file_t *)fh;
 
-  hts_mutex_lock(&file->mutex);
-  int64_t status = smb2_lseek(file->smb2, file->fh, pos, whence, NULL);
-  hts_mutex_unlock(&file->mutex);
+  hts_mutex_lock(&file->session->lock);
+  int64_t status =
+    smb2_lseek(file->session->smb2, file->fh, pos, whence, NULL);
+  hts_mutex_unlock(&file->session->lock);
   return status;
 }
 
@@ -874,11 +1166,11 @@ movian_smb2_ftruncate(fa_handle_t *fh, uint64_t newsize)
 {
   movian_smb2_file_t *file = (movian_smb2_file_t *)fh;
 
-  hts_mutex_lock(&file->mutex);
-  int status = smb2_ftruncate(file->smb2, file->fh, newsize);
+  hts_mutex_lock(&file->session->lock);
+  int status = smb2_ftruncate(file->session->smb2, file->fh, newsize);
   if(status == 0)
     file->size = newsize > INT64_MAX ? INT64_MAX : (int64_t)newsize;
-  hts_mutex_unlock(&file->mutex);
+  hts_mutex_unlock(&file->session->lock);
 
   return status < 0 ? movian_smb2_errno_to_fap(status) : FAP_OK;
 }
@@ -890,9 +1182,9 @@ movian_smb2_set_read_timeout(fa_handle_t *fh, int ms)
   movian_smb2_file_t *file = (movian_smb2_file_t *)fh;
   int seconds = ms > 0 ? (ms + 999) / 1000 : 0;
 
-  hts_mutex_lock(&file->mutex);
-  smb2_set_timeout(file->smb2, seconds);
-  hts_mutex_unlock(&file->mutex);
+  hts_mutex_lock(&file->session->lock);
+  smb2_set_timeout(file->session->smb2, seconds);
+  hts_mutex_unlock(&file->session->lock);
 }
 
 
@@ -918,18 +1210,21 @@ movian_smb2_stat(fa_protocol_t *fap, const char *url, struct fa_stat *fs,
   }
 
   int auth_needed = 0;
-  struct smb2_context *smb2 =
-    movian_smb2_connect_impl(&target, target.share, flags,
-                             SMB2_DEFAULT_TIMEOUT, &auth_needed,
-                             errbuf, errlen);
-  if(smb2 == NULL) {
+  movian_smb2_session_t *session =
+    movian_smb2_session_acquire(&target, target.share, flags,
+                                SMB2_DEFAULT_TIMEOUT, &auth_needed,
+                                errbuf, errlen);
+  if(session == NULL) {
     SMB2TRACE("stat connect failed url=%s auth_needed=%d reason=%s",
               url, auth_needed, errbuf);
     movian_smb2_target_fini(&target);
     return auth_needed ? FAP_NEED_AUTH : FAP_ERROR;
   }
 
+  struct smb2_context *smb2 = session->smb2;
   int status = FAP_OK;
+
+  hts_mutex_lock(&session->lock);
   if(target.path[0] == '\0') {
     fs->fs_type = CONTENT_DIR;
   } else {
@@ -950,10 +1245,11 @@ movian_smb2_stat(fa_protocol_t *fap, const char *url, struct fa_stat *fs,
                 fs->fs_size);
     }
   }
+  hts_mutex_unlock(&session->lock);
 
   SMB2TRACE("stat done url=%s status=%d type=%d", url, status,
             fs->fs_type);
-  movian_smb2_disconnect(smb2);
+  movian_smb2_session_release(session);
   movian_smb2_target_fini(&target);
   return status;
 }
@@ -974,20 +1270,22 @@ movian_smb2_unlink(const fa_protocol_t *fap, const char *url,
     return -1;
   }
 
-  struct smb2_context *smb2 =
-    movian_smb2_connect(&target, target.share, 0, SMB2_DEFAULT_TIMEOUT,
-                        errbuf, errlen);
-  if(smb2 == NULL) {
+  movian_smb2_session_t *session =
+    movian_smb2_session_acquire(&target, target.share, 0,
+                                SMB2_DEFAULT_TIMEOUT, NULL, errbuf, errlen);
+  if(session == NULL) {
     movian_smb2_target_fini(&target);
     return -1;
   }
 
-  int status = smb2_unlink(smb2, target.path);
+  hts_mutex_lock(&session->lock);
+  int status = smb2_unlink(session->smb2, target.path);
   if(status < 0)
     snprintf(errbuf, errlen, "Unable to delete SMB2 file: %s",
-             smb2_get_error(smb2));
+             smb2_get_error(session->smb2));
+  hts_mutex_unlock(&session->lock);
 
-  movian_smb2_disconnect(smb2);
+  movian_smb2_session_release(session);
   movian_smb2_target_fini(&target);
   return status < 0 ? -1 : 0;
 }
@@ -1008,20 +1306,22 @@ movian_smb2_rmdir(const fa_protocol_t *fap, const char *url,
     return -1;
   }
 
-  struct smb2_context *smb2 =
-    movian_smb2_connect(&target, target.share, 0, SMB2_DEFAULT_TIMEOUT,
-                        errbuf, errlen);
-  if(smb2 == NULL) {
+  movian_smb2_session_t *session =
+    movian_smb2_session_acquire(&target, target.share, 0,
+                                SMB2_DEFAULT_TIMEOUT, NULL, errbuf, errlen);
+  if(session == NULL) {
     movian_smb2_target_fini(&target);
     return -1;
   }
 
-  int status = smb2_rmdir(smb2, target.path);
+  hts_mutex_lock(&session->lock);
+  int status = smb2_rmdir(session->smb2, target.path);
   if(status < 0)
     snprintf(errbuf, errlen, "Unable to remove SMB2 directory: %s",
-             smb2_get_error(smb2));
+             smb2_get_error(session->smb2));
+  hts_mutex_unlock(&session->lock);
 
-  movian_smb2_disconnect(smb2);
+  movian_smb2_session_release(session);
   movian_smb2_target_fini(&target);
   return status < 0 ? -1 : 0;
 }
@@ -1059,21 +1359,23 @@ movian_smb2_rename(const fa_protocol_t *fap, const char *old_url,
     return -2;
   }
 
-  struct smb2_context *smb2 =
-    movian_smb2_connect(&old_target, old_target.share, 0,
-                        SMB2_DEFAULT_TIMEOUT, errbuf, errlen);
-  if(smb2 == NULL) {
+  movian_smb2_session_t *session =
+    movian_smb2_session_acquire(&old_target, old_target.share, 0,
+                                SMB2_DEFAULT_TIMEOUT, NULL, errbuf, errlen);
+  if(session == NULL) {
     movian_smb2_target_fini(&old_target);
     movian_smb2_target_fini(&new_target);
     return -1;
   }
 
-  int status = smb2_rename(smb2, old_target.path, new_target.path);
+  hts_mutex_lock(&session->lock);
+  int status = smb2_rename(session->smb2, old_target.path, new_target.path);
   if(status < 0)
     snprintf(errbuf, errlen, "Unable to rename SMB2 path: %s",
-             smb2_get_error(smb2));
+             smb2_get_error(session->smb2));
+  hts_mutex_unlock(&session->lock);
 
-  movian_smb2_disconnect(smb2);
+  movian_smb2_session_release(session);
   movian_smb2_target_fini(&old_target);
   movian_smb2_target_fini(&new_target);
   return status == -EXDEV ? -2 : status < 0 ? -1 : 0;
@@ -1094,16 +1396,20 @@ movian_smb2_makedir(fa_protocol_t *fap, const char *url)
     return FAP_ERROR;
   }
 
-  struct smb2_context *smb2 =
-    movian_smb2_connect(&target, target.share, 0, SMB2_DEFAULT_TIMEOUT,
-                        errbuf, sizeof(errbuf));
-  if(smb2 == NULL) {
+  movian_smb2_session_t *session =
+    movian_smb2_session_acquire(&target, target.share, 0,
+                                SMB2_DEFAULT_TIMEOUT, NULL,
+                                errbuf, sizeof(errbuf));
+  if(session == NULL) {
     movian_smb2_target_fini(&target);
     return FAP_ERROR;
   }
 
-  int status = smb2_mkdir(smb2, target.path);
-  movian_smb2_disconnect(smb2);
+  hts_mutex_lock(&session->lock);
+  int status = smb2_mkdir(session->smb2, target.path);
+  hts_mutex_unlock(&session->lock);
+
+  movian_smb2_session_release(session);
   movian_smb2_target_fini(&target);
   return status < 0 ? movian_smb2_errno_to_fap(status) : FAP_OK;
 }
@@ -1125,16 +1431,21 @@ movian_smb2_fsinfo(fa_protocol_t *fap, const char *url, fa_fsinfo_t *ffi)
     return FAP_ERROR;
   }
 
-  struct smb2_context *smb2 =
-    movian_smb2_connect(&target, target.share, 0, SMB2_DEFAULT_TIMEOUT,
-                        errbuf, sizeof(errbuf));
-  if(smb2 == NULL) {
+  movian_smb2_session_t *session =
+    movian_smb2_session_acquire(&target, target.share, 0,
+                                SMB2_DEFAULT_TIMEOUT, NULL,
+                                errbuf, sizeof(errbuf));
+  if(session == NULL) {
     movian_smb2_target_fini(&target);
     return FAP_ERROR;
   }
 
   struct smb2_statvfs vfs;
-  int status = smb2_statvfs(smb2, target.path[0] ? target.path : "", &vfs);
+  hts_mutex_lock(&session->lock);
+  int status = smb2_statvfs(session->smb2,
+                            target.path[0] ? target.path : "", &vfs);
+  hts_mutex_unlock(&session->lock);
+
   if(status == 0) {
     uint64_t frsize = vfs.f_frsize;
     ffi->ffi_size = frsize != 0 && vfs.f_blocks > UINT64_MAX / frsize ?
@@ -1143,7 +1454,7 @@ movian_smb2_fsinfo(fa_protocol_t *fap, const char *url, fa_fsinfo_t *ffi)
       UINT64_MAX : (uint64_t)vfs.f_bavail * frsize;
   }
 
-  movian_smb2_disconnect(smb2);
+  movian_smb2_session_release(session);
   movian_smb2_target_fini(&target);
   return status < 0 ? movian_smb2_errno_to_fap(status) : FAP_OK;
 }
