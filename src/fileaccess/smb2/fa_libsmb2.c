@@ -150,14 +150,26 @@ movian_smb2_enum_callback(struct smb2_context *smb2, int status,
 }
 
 
+/*
+ * Drive a synchronous libsmb2 operation to completion.
+ *
+ * libsmb2 needs its socket serviced (poll on smb2_get_fd/smb2_which_events,
+ * then smb2_service) for any *_async callback to fire. This pumps that loop
+ * until is_done(opaque) returns true (set from a libsmb2 callback) or the
+ * deadline expires. timeout_sec is added to now to form the deadline; callers
+ * pass SMB2_DEFAULT_TIMEOUT + a margin so the network op has room but the loop
+ * still bails.
+ *
+ * Both the share-enum wait and the pipelined-read wait used to inline their own
+ * copy of this loop; they now both go through here.
+ */
 static int
-movian_smb2_wait_for_enum(struct smb2_context *smb2,
-                          movian_smb2_enum_state_t *state)
+movian_smb2_pump(struct smb2_context *smb2, int (*is_done)(void *),
+                 void *opaque, int timeout_sec)
 {
-  int64_t deadline =
-    arch_get_ts() + (SMB2_DEFAULT_TIMEOUT + 5) * 1000000LL;
+  int64_t deadline = arch_get_ts() + (int64_t)timeout_sec * 1000000LL;
 
-  while(!state->done) {
+  while(!is_done(opaque)) {
     int64_t remaining = deadline - arch_get_ts();
     if(remaining <= 0)
       return -1;
@@ -181,6 +193,22 @@ movian_smb2_wait_for_enum(struct smb2_context *smb2,
       return -1;
   }
   return 0;
+}
+
+
+static int
+enum_state_is_done(void *opaque)
+{
+  return ((movian_smb2_enum_state_t *)opaque)->done;
+}
+
+
+static int
+movian_smb2_wait_for_enum(struct smb2_context *smb2,
+                          movian_smb2_enum_state_t *state)
+{
+  return movian_smb2_pump(smb2, enum_state_is_done, state,
+                          SMB2_DEFAULT_TIMEOUT + 5);
 }
 
 
@@ -485,6 +513,17 @@ typedef struct {
 } movian_smb2_read_req_t;
 
 
+/*
+ * Pipelined-read pump context: the array of in-flight pread requests plus how
+ * many were issued. read_pipeline_is_done reports true once every issued
+ * request's callback has fired.
+ */
+typedef struct {
+  movian_smb2_read_req_t *reqs;
+  int nreqs;
+} movian_smb2_read_pipeline_t;
+
+
 static void
 movian_smb2_read_cb(struct smb2_context *smb2, int status,
                     void *command_data, void *opaque)
@@ -492,6 +531,17 @@ movian_smb2_read_cb(struct smb2_context *smb2, int status,
   movian_smb2_read_req_t *req = opaque;
   req->status = status;
   req->done = 1;
+}
+
+
+static int
+read_pipeline_is_done(void *opaque)
+{
+  movian_smb2_read_pipeline_t *p = opaque;
+  for(int i = 0; i < p->nreqs; i++)
+    if(!p->reqs[i].done)
+      return 0;
+  return 1;
 }
 
 
@@ -553,39 +603,10 @@ movian_smb2_read(fa_handle_t *fh, void *buf, size_t size)
     return -1;
   }
 
-  int64_t deadline = arch_get_ts() +
-    (SMB2_DEFAULT_TIMEOUT + 5) * 1000000LL;
-  while(1) {
-    int all_done = 1;
-    for(int i = 0; i < nreqs; i++)
-      if(!reqs[i].done) {
-        all_done = 0;
-        break;
-      }
-    if(all_done)
-      break;
+  movian_smb2_read_pipeline_t pipeline = { reqs, nreqs };
 
-    int64_t remaining = deadline - arch_get_ts();
-    if(remaining <= 0)
-      break;
-
-    struct pollfd pfd = {
-      .fd = smb2_get_fd(smb2),
-      .events = smb2_which_events(smb2),
-    };
-    int timeout = (remaining + 999) / 1000;
-    if(timeout > 1000)
-      timeout = 1000;
-
-    int rc = poll(&pfd, 1, timeout);
-    if(rc < 0) {
-      if(errno == EINTR)
-        continue;
-      break;
-    }
-    if(smb2_service(smb2, rc == 0 ? 0 : pfd.revents) < 0)
-      break;
-  }
+  (void)movian_smb2_pump(smb2, read_pipeline_is_done, &pipeline,
+                         SMB2_DEFAULT_TIMEOUT + 5);
 
   /*
    * Reassemble. Each pread wrote straight into its slice of buf, so we only
