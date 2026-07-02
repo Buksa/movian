@@ -656,8 +656,6 @@ movian_smb2_keepalive_cb(callout_t *c, void *opaque)
 
   hts_mutex_lock(&smb2_pool_mutex);
   int still_alive = !session->broken && session->refcount <= 0;
-  if(session->echo_pending)
-    session->echo_missed++;
   if(session->echo_missed > SMB2_ECHO_MAX_MISSED) {
     SMB2TRACE("Keepalive %s/%s giving up (missed=%d) -> broken",
               session->server, session->share, session->echo_missed);
@@ -668,12 +666,12 @@ movian_smb2_keepalive_cb(callout_t *c, void *opaque)
 
   if(!broken && still_alive) {
     hts_mutex_lock(&session->lock);
-    session->echo_pending = 1;
     int rc = smb2_echo(session->smb2);
     int missed = session->echo_missed;
     if(rc == 0)
       missed = session->echo_missed = 0;
-    session->echo_pending = 0;
+    else
+      missed = ++session->echo_missed;
     hts_mutex_unlock(&session->lock);
     SMB2TRACE("Keepalive %s/%s echo rc=%d missed=%d",
               session->server, session->share, rc, missed);

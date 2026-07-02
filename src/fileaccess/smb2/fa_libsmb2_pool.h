@@ -87,7 +87,6 @@ typedef struct movian_smb2_session {
   int broken;
   int64_t last_used;
   callout_t keepalive;
-  int echo_pending;
   int echo_missed;
   LIST_ENTRY(movian_smb2_session) link;
 } movian_smb2_session_t;
