@@ -745,9 +745,25 @@ movian_smb2_stat(fa_protocol_t *fap, const char *url, struct fa_stat *fs,
 }
 
 
+/*
+ * Run a single-path libsmb2 call against a pooled session.
+ *
+ * Parses the URL, requires a share + path, acquires the session, takes the
+ * session lock, invokes op(smb2, target->path), and tears everything down on
+ * every path. Returns the libsmb2 status from op on success/failure of the op
+ * itself (0 on success, <0 = -errno on failure), or -1 for URL/connect/acquire
+ * failures before op runs. Callers map that to their own return type.
+ *
+ * This collapses the near-identical parse/validate/acquire/lock/release
+ * scaffolding that unlink/rmdir/makedir would otherwise each duplicate.
+ */
+typedef int (*movian_smb2_path_op_t)(struct smb2_context *smb2,
+                                     const char *path);
+
 static int
-movian_smb2_unlink(const fa_protocol_t *fap, const char *url,
-                   char *errbuf, size_t errlen)
+movian_smb2_run_path_op(const char *url, const char *what,
+                        movian_smb2_path_op_t op,
+                        char *errbuf, size_t errlen)
 {
   movian_smb2_target_t target = {};
   if(movian_smb2_target_parse(url, &target, errbuf, errlen))
@@ -755,7 +771,7 @@ movian_smb2_unlink(const fa_protocol_t *fap, const char *url,
 
   if(target.share == NULL || target.share[0] == '\0' ||
      target.path[0] == '\0') {
-    snprintf(errbuf, errlen, "SMB2 URL does not identify a file");
+    snprintf(errbuf, errlen, "SMB2 URL does not identify a path");
     movian_smb2_target_fini(&target);
     return -1;
   }
@@ -769,15 +785,39 @@ movian_smb2_unlink(const fa_protocol_t *fap, const char *url,
   }
 
   hts_mutex_lock(&session->lock);
-  int status = smb2_unlink(session->smb2, target.path);
+  int status = op(session->smb2, target.path);
   if(status < 0)
-    snprintf(errbuf, errlen, "Unable to delete SMB2 file: %s",
+    snprintf(errbuf, errlen, "Unable to %s: %s", what,
              smb2_get_error(session->smb2));
   hts_mutex_unlock(&session->lock);
 
   movian_smb2_session_release(session);
   movian_smb2_target_fini(&target);
+  return status;
+}
+
+
+static int
+unlink_op(struct smb2_context *smb2, const char *path)
+{
+  return smb2_unlink(smb2, path);
+}
+
+
+static int
+movian_smb2_unlink(const fa_protocol_t *fap, const char *url,
+                   char *errbuf, size_t errlen)
+{
+  int status = movian_smb2_run_path_op(url, "delete SMB2 file", unlink_op,
+                                       errbuf, errlen);
   return status < 0 ? -1 : 0;
+}
+
+
+static int
+rmdir_op(struct smb2_context *smb2, const char *path)
+{
+  return smb2_rmdir(smb2, path);
 }
 
 
@@ -785,34 +825,8 @@ static int
 movian_smb2_rmdir(const fa_protocol_t *fap, const char *url,
                   char *errbuf, size_t errlen)
 {
-  movian_smb2_target_t target = {};
-  if(movian_smb2_target_parse(url, &target, errbuf, errlen))
-    return -1;
-
-  if(target.share == NULL || target.share[0] == '\0' ||
-     target.path[0] == '\0') {
-    snprintf(errbuf, errlen, "SMB2 URL does not identify a directory");
-    movian_smb2_target_fini(&target);
-    return -1;
-  }
-
-  movian_smb2_session_t *session =
-    movian_smb2_session_acquire(&target, target.share, 0,
-                                SMB2_DEFAULT_TIMEOUT, NULL, errbuf, errlen);
-  if(session == NULL) {
-    movian_smb2_target_fini(&target);
-    return -1;
-  }
-
-  hts_mutex_lock(&session->lock);
-  int status = smb2_rmdir(session->smb2, target.path);
-  if(status < 0)
-    snprintf(errbuf, errlen, "Unable to remove SMB2 directory: %s",
-             smb2_get_error(session->smb2));
-  hts_mutex_unlock(&session->lock);
-
-  movian_smb2_session_release(session);
-  movian_smb2_target_fini(&target);
+  int status = movian_smb2_run_path_op(url, "remove SMB2 directory", rmdir_op,
+                                       errbuf, errlen);
   return status < 0 ? -1 : 0;
 }
 
@@ -872,35 +886,19 @@ movian_smb2_rename(const fa_protocol_t *fap, const char *old_url,
 }
 
 
+static int
+mkdir_op(struct smb2_context *smb2, const char *path)
+{
+  return smb2_mkdir(smb2, path);
+}
+
+
 static fa_err_code_t
 movian_smb2_makedir(fa_protocol_t *fap, const char *url)
 {
   char errbuf[256];
-  movian_smb2_target_t target = {};
-  if(movian_smb2_target_parse(url, &target, errbuf, sizeof(errbuf)))
-    return FAP_ERROR;
-
-  if(target.share == NULL || target.share[0] == '\0' ||
-     target.path[0] == '\0') {
-    movian_smb2_target_fini(&target);
-    return FAP_ERROR;
-  }
-
-  movian_smb2_session_t *session =
-    movian_smb2_session_acquire(&target, target.share, 0,
-                                SMB2_DEFAULT_TIMEOUT, NULL,
-                                errbuf, sizeof(errbuf));
-  if(session == NULL) {
-    movian_smb2_target_fini(&target);
-    return FAP_ERROR;
-  }
-
-  hts_mutex_lock(&session->lock);
-  int status = smb2_mkdir(session->smb2, target.path);
-  hts_mutex_unlock(&session->lock);
-
-  movian_smb2_session_release(session);
-  movian_smb2_target_fini(&target);
+  int status = movian_smb2_run_path_op(url, "create SMB2 directory",
+                                       mkdir_op, errbuf, sizeof(errbuf));
   return status < 0 ? movian_smb2_errno_to_fap(status) : FAP_OK;
 }
 
