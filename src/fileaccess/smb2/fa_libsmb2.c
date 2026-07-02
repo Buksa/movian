@@ -379,6 +379,78 @@ movian_smb2_scan(fa_protocol_t *fap, fa_dir_t *fd, const char *url,
 }
 
 
+/*
+ * Build a file handle for target under session->lock: open the path, fstat it
+ * (rejecting directories), allocate the handle, and seek to end for FA_APPEND.
+ * Returns the handle (without a session ref, which the caller wires up on
+ * success) or NULL with errbuf filled. The caller must hold session->lock for
+ * the whole call; on failure any opened smb2fh is closed before returning.
+ *
+ * Keeping the lock-scoped work in one function lets movian_smb2_open use a
+ * single, symmetric acquire/release discipline: it always releases on failure
+ * and always transfers the ref to the handle on success, with no goto asymmetry.
+ */
+static movian_smb2_file_t *
+movian_smb2_open_under_lock(fa_protocol_t *fap, const char *url,
+                            movian_smb2_session_t *session,
+                            const movian_smb2_target_t *target,
+                            int flags, char *errbuf, size_t errlen)
+{
+  struct smb2_context *smb2 = session->smb2;
+
+  int open_flags = O_RDONLY;
+  if(flags & FA_WRITE) {
+    open_flags = O_RDWR | O_CREAT;
+    if(!(flags & FA_APPEND))
+      open_flags |= O_TRUNC;
+  }
+
+  struct smb2fh *fh = smb2_open(smb2, target->path, open_flags);
+  if(fh == NULL) {
+    snprintf(errbuf, errlen, "Unable to open SMB2 file: %s",
+             smb2_get_error(smb2));
+    SMB2TRACE("open failed url=%s path='%s' open_flags=0x%x reason=%s",
+              url, target->path, open_flags, errbuf);
+    return NULL;
+  }
+
+  struct smb2_stat_64 statbuf;
+  if(smb2_fstat(smb2, fh, &statbuf) < 0 ||
+     statbuf.smb2_type == SMB2_TYPE_DIRECTORY) {
+    snprintf(errbuf, errlen, "Unable to stat SMB2 file: %s",
+             smb2_get_error(smb2));
+    SMB2TRACE("open fstat rejected url=%s path='%s' smb2_type=%d reason=%s",
+              url, target->path, statbuf.smb2_type, errbuf);
+    smb2_close(smb2, fh);
+    return NULL;
+  }
+  SMB2TRACE("open ok url=%s path='%s' size=%"PRId64, url, target->path,
+            statbuf.smb2_size);
+
+  movian_smb2_file_t *file = calloc(1, sizeof(*file));
+  if(file == NULL) {
+    snprintf(errbuf, errlen, "Out of memory while opening SMB2 file");
+    smb2_close(smb2, fh);
+    return NULL;
+  }
+
+  file->h.fh_proto = fap;
+  file->fh = fh;
+  file->size = statbuf.smb2_size;
+
+  if(flags & FA_APPEND) {
+    if(smb2_lseek(smb2, file->fh, 0, SEEK_END, NULL) < 0) {
+      snprintf(errbuf, errlen, "Unable to seek SMB2 file: %s",
+               smb2_get_error(smb2));
+      smb2_close(smb2, file->fh);
+      free(file);
+      return NULL;
+    }
+  }
+  return file;
+}
+
+
 static fa_handle_t *
 movian_smb2_open(fa_protocol_t *fap, const char *url,
                  char *errbuf, size_t errlen, int flags,
@@ -411,75 +483,23 @@ movian_smb2_open(fa_protocol_t *fap, const char *url,
     return NULL;
   }
 
-  struct smb2_context *smb2 = session->smb2;
-
-  int open_flags = O_RDONLY;
-  if(flags & FA_WRITE) {
-    open_flags = O_RDWR | O_CREAT;
-    if(!(flags & FA_APPEND))
-      open_flags |= O_TRUNC;
-  }
-
-  movian_smb2_file_t *file = NULL;
-
   hts_mutex_lock(&session->lock);
+  movian_smb2_file_t *file =
+    movian_smb2_open_under_lock(fap, url, session, &target, flags,
+                                errbuf, errlen);
+  hts_mutex_unlock(&session->lock);
 
-  struct smb2fh *fh = smb2_open(smb2, target.path, open_flags);
-  if(fh == NULL) {
-    snprintf(errbuf, errlen, "Unable to open SMB2 file: %s",
-             smb2_get_error(smb2));
-    SMB2TRACE("open failed url=%s path='%s' open_flags=0x%x reason=%s",
-              url, target.path, open_flags, errbuf);
-    goto fail_locked;
-  }
+  movian_smb2_target_fini(&target);
 
-  struct smb2_stat_64 statbuf;
-  if(smb2_fstat(smb2, fh, &statbuf) < 0 ||
-     statbuf.smb2_type == SMB2_TYPE_DIRECTORY) {
-    snprintf(errbuf, errlen, "Unable to stat SMB2 file: %s",
-             smb2_get_error(smb2));
-    SMB2TRACE("open fstat rejected url=%s path='%s' smb2_type=%d reason=%s",
-              url, target.path, statbuf.smb2_type, errbuf);
-    smb2_close(smb2, fh);
-    goto fail_locked;
-  }
-  SMB2TRACE("open ok url=%s path='%s' size=%"PRId64, url, target.path,
-            statbuf.smb2_size);
-
-  file = calloc(1, sizeof(*file));
   if(file == NULL) {
-    snprintf(errbuf, errlen, "Out of memory while opening SMB2 file");
-    smb2_close(smb2, fh);
-    goto fail_locked;
+    /* Symmetric release: acquire and release always pair up on the failure
+       path. On success the ref transfers to the handle (close() releases). */
+    movian_smb2_session_release(session);
+    return NULL;
   }
 
-  file->h.fh_proto = fap;
-  file->fh = fh;
-  file->size = statbuf.smb2_size;
-
-  if(flags & FA_APPEND) {
-    if(smb2_lseek(smb2, file->fh, 0, SEEK_END, NULL) < 0) {
-      snprintf(errbuf, errlen, "Unable to seek SMB2 file: %s",
-               smb2_get_error(smb2));
-      smb2_close(smb2, file->fh);
-      free(file);
-      file = NULL;
-      goto fail_locked;
-    }
-  }
-
-  hts_mutex_unlock(&session->lock);
-
-  /* The handle now owns the session reference. */
   file->session = session;
-  movian_smb2_target_fini(&target);
   return &file->h;
-
-fail_locked:
-  hts_mutex_unlock(&session->lock);
-  movian_smb2_session_release(session);
-  movian_smb2_target_fini(&target);
-  return NULL;
 }
 
 
