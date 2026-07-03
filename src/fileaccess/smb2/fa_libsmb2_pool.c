@@ -41,7 +41,6 @@
 static LIST_HEAD(, movian_smb2_session) smb2_sessions =
   LIST_HEAD_INITIALIZER(smb2_sessions);
 static hts_mutex_t smb2_pool_mutex;
-static int smb2_pool_inited;
 
 static void movian_smb2_keepalive_cb(callout_t *c, void *opaque);
 
@@ -427,13 +426,10 @@ movian_smb2_connect_impl(const movian_smb2_target_t *target, const char *share,
  * Pool state + lifecycle.
  */
 
-static void
-movian_smb2_pool_init_once(void)
+void
+movian_smb2_pool_init(void)
 {
-  if(smb2_pool_inited)
-    return;
   hts_mutex_init(&smb2_pool_mutex);
-  smb2_pool_inited = 1;
 }
 
 
@@ -458,13 +454,8 @@ movian_smb2_session_key(const movian_smb2_target_t *target, const char *share,
 
 
 static void
-movian_smb2_session_destroy(movian_smb2_session_t *session)
+movian_smb2_session_free(movian_smb2_session_t *session)
 {
-  /*
-   * Caller must hold neither the pool nor the session lock. The session is
-   * already unlinked from the pool.
-   */
-  callout_disarm(&session->keepalive);
   if(session->smb2 != NULL) {
     smb2_disconnect_share(session->smb2);
     smb2_destroy_context(session->smb2);
@@ -476,6 +467,63 @@ movian_smb2_session_destroy(movian_smb2_session_t *session)
   free(session->user);
   free(session->domain);
   free(session);
+}
+
+
+static void
+movian_smb2_session_retain_lifetime(movian_smb2_session_t *session)
+{
+  atomic_inc(&session->lifetime_refcount);
+}
+
+
+static void
+movian_smb2_session_release_lifetime(movian_smb2_session_t *session)
+{
+  if(atomic_dec(&session->lifetime_refcount))
+    return;
+  movian_smb2_session_free(session);
+}
+
+
+static int
+movian_smb2_session_lockmgr(void *ptr, lockmgr_op_t op)
+{
+  movian_smb2_session_t *session = ptr;
+
+  switch(op) {
+  case LOCKMGR_UNLOCK:
+  case LOCKMGR_LOCK:
+  case LOCKMGR_TRY:
+    return 0;
+  case LOCKMGR_RETAIN:
+    movian_smb2_session_retain_lifetime(session);
+    return 0;
+  case LOCKMGR_RELEASE:
+    movian_smb2_session_release_lifetime(session);
+    return 0;
+  }
+  abort();
+}
+
+
+static void
+movian_smb2_session_destroy(movian_smb2_session_t *session)
+{
+  callout_disarm(&session->keepalive);
+  movian_smb2_session_release_lifetime(session);
+}
+
+
+static int
+movian_smb2_session_unlink_locked(movian_smb2_session_t *session)
+{
+  if(session->linked) {
+    LIST_REMOVE(session, link);
+    session->linked = 0;
+    return 1;
+  }
+  return 0;
 }
 
 
@@ -497,8 +545,8 @@ movian_smb2_pool_evict_locked(void)
     movian_smb2_session_t *next = LIST_NEXT(session, link);
     if(session->refcount <= 0 &&
        (session->broken || session->last_used < cutoff)) {
-      LIST_REMOVE(session, link);
-      movian_smb2_session_destroy(session);
+      if(movian_smb2_session_unlink_locked(session))
+        movian_smb2_session_destroy(session);
     }
     session = next;
   }
@@ -517,8 +565,8 @@ movian_smb2_pool_evict_locked(void)
     }
     if(oldest == NULL)
       break;
-    LIST_REMOVE(oldest, link);
-    movian_smb2_session_destroy(oldest);
+    if(movian_smb2_session_unlink_locked(oldest))
+      movian_smb2_session_destroy(oldest);
     count--;
   }
 }
@@ -529,8 +577,6 @@ movian_smb2_session_acquire(const movian_smb2_target_t *target,
                             const char *share, int flags, int timeout,
                             int *auth_needed, char *errbuf, size_t errlen)
 {
-  movian_smb2_pool_init_once();
-
   char *key;
   if(movian_smb2_session_key(target, share, &key)) {
     snprintf(errbuf, errlen, "Out of memory while opening SMB2 session");
@@ -572,6 +618,8 @@ movian_smb2_session_acquire(const movian_smb2_target_t *target,
     return NULL;
   }
 
+  hts_mutex_init(&session->lock);
+  atomic_set(&session->lifetime_refcount, 1);
   session->key = key;
   session->smb2 = smb2;
   session->refcount = 1;
@@ -580,6 +628,8 @@ movian_smb2_session_acquire(const movian_smb2_target_t *target,
   session->share = strdup(share != NULL ? share : "");
   session->user = resolved.user;
   session->domain = resolved.domain;
+  resolved.user = NULL;
+  resolved.domain = NULL;
   if(session->server == NULL || session->share == NULL) {
     snprintf(errbuf, errlen, "Out of memory while opening SMB2 session");
     movian_smb2_credentials_fini(&resolved);
@@ -593,13 +643,27 @@ movian_smb2_session_acquire(const movian_smb2_target_t *target,
    */
   free(resolved.password);
   resolved = (movian_smb2_credentials_t){};
-  hts_mutex_init(&session->lock);
 
   hts_mutex_lock(&smb2_pool_mutex);
+  movian_smb2_session_t *existing;
+  LIST_FOREACH(existing, &smb2_sessions, link) {
+    if(!strcmp(existing->key, key) && !existing->broken) {
+      existing->refcount++;
+      existing->last_used = arch_get_ts();
+      hts_mutex_unlock(&smb2_pool_mutex);
+      SMB2TRACE("Pool reuse after connect race %s/%s refcount=%d",
+                target->server, share != NULL ? share : "",
+                existing->refcount);
+      movian_smb2_session_destroy(session);
+      return existing;
+    }
+  }
   LIST_INSERT_HEAD(&smb2_sessions, session, link);
+  session->linked = 1;
   movian_smb2_pool_evict_locked();
-  callout_arm(&session->keepalive, movian_smb2_keepalive_cb, session,
-              SMB2_ECHO_INTERVAL);
+  callout_arm_managed(&session->keepalive, movian_smb2_keepalive_cb, session,
+                      SMB2_ECHO_INTERVAL * 1000000LL,
+                      movian_smb2_session_lockmgr);
   hts_mutex_unlock(&smb2_pool_mutex);
 
   SMB2TRACE("Pool create %s/%s refcount=1",
@@ -634,54 +698,83 @@ movian_smb2_session_invalidate(movian_smb2_session_t *session)
   hts_mutex_lock(&smb2_pool_mutex);
   session->broken = 1;
   if(session->refcount <= 0) {
-    LIST_REMOVE(session, link);
-    movian_smb2_session_destroy(session);
+    int unlinked = movian_smb2_session_unlink_locked(session);
+    if(unlinked)
+      movian_smb2_session_destroy(session);
   }
   hts_mutex_unlock(&smb2_pool_mutex);
 }
 
 
 /*
- * Periodic keepalive. Runs on the main callout thread. Sends an SMB2 echo and,
- * if the previous echo never came back, counts it as a miss. After too many
- * misses (or a hard error) the session is marked broken so the next acquisition
- * reconnects. The echo itself is a synchronous libsmb2 call; it is short and
- * only ever sent for idle, refcount==0 sessions, so it never contends with a
- * streaming reader that already holds session->lock for its own data PDU.
+ * Periodic keepalive. Runs on the callout thread. The managed callout holds a
+ * lifetime ref while queued or running, so an idle-session eviction can unlink
+ * and logically destroy the session without freeing memory out from under this
+ * callback. Echoes only run for idle, refcount==0 sessions.
+ *
+ * smb2_echo() blocks (up to SMB2_DEFAULT_TIMEOUT) with the pool mutex
+ * dropped, so a concurrent acquire()/evict_locked() can unlink (and
+ * logically destroy) this very session while the echo is in flight. All
+ * outcomes of that race are resolved in one place, at the end of the
+ * callback, under the pool mutex: session->linked is the source of truth
+ * for "someone else already tore this down", not session->broken alone.
  */
 static void
 movian_smb2_keepalive_cb(callout_t *c, void *opaque)
 {
   movian_smb2_session_t *session = opaque;
+  int do_echo = 0;
+  int destroy = 0;
 
   hts_mutex_lock(&smb2_pool_mutex);
-  int still_alive = !session->broken && session->refcount <= 0;
-  if(session->echo_missed > SMB2_ECHO_MAX_MISSED) {
+  if(!session->broken && session->refcount <= 0 &&
+     session->echo_missed > SMB2_ECHO_MAX_MISSED) {
     SMB2TRACE("Keepalive %s/%s giving up (missed=%d) -> broken",
               session->server, session->share, session->echo_missed);
     session->broken = 1;
   }
-  int broken = session->broken;
+  do_echo = !session->broken && session->refcount <= 0;
   hts_mutex_unlock(&smb2_pool_mutex);
 
-  if(!broken && still_alive) {
+  int rc = 0;
+  int missed = 0;
+  if(do_echo) {
     hts_mutex_lock(&session->lock);
-    int rc = smb2_echo(session->smb2);
-    int missed = session->echo_missed;
+    rc = smb2_echo(session->smb2);
+    hts_mutex_unlock(&session->lock);
+  }
+
+  hts_mutex_lock(&smb2_pool_mutex);
+  if(do_echo && !session->broken) {
     if(rc == 0)
       missed = session->echo_missed = 0;
     else
       missed = ++session->echo_missed;
-    hts_mutex_unlock(&session->lock);
-    SMB2TRACE("Keepalive %s/%s echo rc=%d missed=%d",
-              session->server, session->share, rc, missed);
+    if(session->echo_missed > SMB2_ECHO_MAX_MISSED) {
+      SMB2TRACE("Keepalive %s/%s giving up (missed=%d) -> broken",
+                session->server, session->share, session->echo_missed);
+      session->broken = 1;
+    }
   }
 
-  if(!broken) {
-    hts_mutex_lock(&smb2_pool_mutex);
-    if(!session->broken)
-      callout_arm(&session->keepalive, movian_smb2_keepalive_cb, session,
-                  SMB2_ECHO_INTERVAL);
-    hts_mutex_unlock(&smb2_pool_mutex);
+  /* Single end-of-callback decision point (see block comment above). */
+  if(!session->linked) {
+    /* Unlinked (and logically destroyed) by someone else while the echo
+     * was in flight: no re-arm, no extra release. The callout machinery
+     * drops its own running ref once we return. */
+  } else if(session->broken && session->refcount <= 0) {
+    destroy = movian_smb2_session_unlink_locked(session);
+  } else {
+    callout_arm_managed(&session->keepalive, movian_smb2_keepalive_cb,
+                        session, SMB2_ECHO_INTERVAL * 1000000LL,
+                        movian_smb2_session_lockmgr);
   }
+  hts_mutex_unlock(&smb2_pool_mutex);
+
+  if(do_echo)
+    SMB2TRACE("Keepalive %s/%s echo rc=%d missed=%d",
+              session->server, session->share, rc, missed);
+
+  if(destroy)
+    movian_smb2_session_destroy(session);
 }

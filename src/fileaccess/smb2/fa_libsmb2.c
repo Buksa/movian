@@ -996,9 +996,17 @@ movian_smb2_no_parking(fa_handle_t *fh)
 }
 
 
+static void
+movian_smb2_init(void)
+{
+  movian_smb2_pool_init();
+}
+
+
 static fa_protocol_t fa_protocol_smb2 = {
   .fap_flags = FAP_INCLUDE_PROTO_IN_URL | FAP_ALLOW_CACHE,
   .fap_name = "smb2",
+  .fap_init = movian_smb2_init,
   .fap_scan = movian_smb2_scan,
   .fap_open = movian_smb2_open,
   .fap_close = movian_smb2_close,
