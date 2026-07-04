@@ -120,6 +120,13 @@ For the full Linux, Flatpak, runtime, and manual Steam Deck checklist, see:
 docs/Guides/LINUX_FLATPAK_SMOKE_CHECKLIST.md
 ```
 
+For driving the Deck remotely over SSH (copy/install/log collection from a
+WSL/Linux dev machine), see:
+
+```text
+docs/Guides/STEAM_DECK_REMOTE_TESTING.md
+```
+
 ## Install And Run
 
 Install the generated bundle:
