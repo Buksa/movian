@@ -574,9 +574,40 @@ movian_smb2_write(fa_handle_t *fh, const void *buf, size_t size)
   uint32_t count = size > INT_MAX ? INT_MAX : size;
 
   hts_mutex_lock(&file->session->lock);
-  int status = smb2_write(file->session->smb2, file->fh, buf, count);
+  struct smb2_context *smb2 = file->session->smb2;
+  struct smb2fh *sfh = file->fh;
+
+  uint32_t max_write = smb2_get_max_write_size(smb2);
+
+  int status;
+  if(max_write == 0 || count <= max_write) {
+    status = smb2_write(smb2, sfh, buf, count);
+  } else {
+    uint32_t total = 0;
+    int failed = 0;
+    while(total < count) {
+      uint32_t chunk = count - total;
+      if(chunk > max_write)
+        chunk = max_write;
+
+      int wstatus = smb2_write(smb2, sfh, (const uint8_t *)buf + total, chunk);
+      if(wstatus <= 0) {
+        failed = wstatus < 0;
+        break;
+      }
+      total += wstatus;
+      if((uint32_t)wstatus < chunk)
+        break;
+    }
+    /* POSIX-style short-write semantics: report bytes actually written
+       whenever we wrote something, even if a later chunk failed. The
+       cursor already reflects the data that made it to the server, so
+       (unlike the read path) it is not restored on partial failure. */
+    status = (failed && total == 0) ? -1 : (int)total;
+  }
+
   if(status > 0) {
-    int64_t pos = smb2_lseek(file->session->smb2, file->fh, 0, SEEK_CUR, NULL);
+    int64_t pos = smb2_lseek(smb2, sfh, 0, SEEK_CUR, NULL);
     if(pos > file->size)
       file->size = pos;
   }
