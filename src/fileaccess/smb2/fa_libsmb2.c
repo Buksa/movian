@@ -324,6 +324,14 @@ movian_smb2_scan_directory(fa_dir_t *fd, const char *url,
     if(!strcmp(entry->name, ".") || !strcmp(entry->name, ".."))
       continue;
 
+    if(entry->st.smb2_file_attributes &
+       (SMB2_FILE_ATTRIBUTE_HIDDEN | SMB2_FILE_ATTRIBUTE_SYSTEM)) {
+      SMB2TRACE("scan directory entry url=%s name=%s skipped "
+                "(hidden/system attrs=0x%x)",
+                url, entry->name, entry->st.smb2_file_attributes);
+      continue;
+    }
+
     int type = entry->st.smb2_type == SMB2_TYPE_DIRECTORY ?
       CONTENT_DIR : CONTENT_FILE;
     char *child = movian_smb2_child_url(url, entry->name);
