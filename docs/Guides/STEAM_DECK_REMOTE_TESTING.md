@@ -99,10 +99,33 @@ ssh -i ~/.ssh/movian_deck deck@<deck-ip> \
 ## Launch And Observe
 
 Launching the GLW UI through SSH can exit immediately in some Deck desktop
-sessions. If this happens, ask the Deck user to start Movian normally, then
-continue the remote smoke through SSH and HTTP.
+sessions. Before giving up and asking the Deck user to start Movian normally,
+try launching with the real desktop session environment. On a KWin/Wayland
+session `DISPLAY=:0` alone fails with "Authorization required"; read the live
+env off the running compositor and reuse it:
 
-Useful probes:
+```sh
+ssh -i ~/.ssh/movian_deck deck@<deck-ip> '
+  pid=$(pgrep -x plasmashell | head -1)
+  tr "\0" "\n" < /proc/$pid/environ | \
+    grep -E "^(DISPLAY|WAYLAND_DISPLAY|XAUTHORITY|DBUS_SESSION_BUS_ADDRESS)="
+'
+```
+
+Export those before `flatpak run`. If the flatpak `command` binary is missing,
+override it explicitly (a known packaging bug once installed the binary at
+`/app/showtime` instead of `/app/bin/showtime`):
+`flatpak run --command=/app/showtime dev.uzver.Movian`.
+
+Two undocumented HTTP endpoints help during a remote smoke:
+`GET /api/open?url=<url>` opens a URL in the running instance, and
+`GET /api/prop/<path>` browses the live prop tree (e.g.
+`/api/prop/global/services/all` to inspect discovered services).
+
+Do not put credentials in the `smb2://user:pass@host` URL form: navigation logs
+the full URL and `/api/logfile/0` is unauthenticated. Pre-seed the keyring
+instead (`support/smb-smoke/common.sh`). The Deck may be shared — watch for SSH
+logins and keyring dialogs you did not initiate.
 
 ```sh
 curl -fsS http://<deck-ip>:42000/api/diag
