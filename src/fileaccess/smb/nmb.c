@@ -314,8 +314,9 @@ int
 nmb_resolve(const char *hostname, struct net_addr *na)
 {
   if(nmb_udp_fd == NULL) {
-    // UDP socket never bound (e.g. discovery-only init skipped) -- nothing
-    // to send the query on, fail cleanly instead of touching a NULL fd.
+    // UDP socket bind failed at runtime (nmb_init() is unconditional, but
+    // asyncio_udp_bind() can still fail) -- nothing to send the query on,
+    // fail cleanly instead of touching a NULL fd.
     return -1;
   }
 
@@ -389,27 +390,29 @@ nmb_resolver_init(void)
 
 INITME(INIT_GROUP_NET, nmb_resolver_init, NULL, 0);
 
-#if ENABLE_NATIVESMB
 /**
- * Binds the shared NBT UDP socket and kicks off the LAN master-browser
- * discovery loop. Only needed when the native SMB1 backend is compiled in,
- * since query_master_browser() (the only consumer of the discovery replies)
- * depends on smb_enum_servers(), which lives in fa_nativesmb.c.
+ * Binds the shared NBT UDP socket that all NBT queries (both the
+ * nmb_resolve() DNS-fallback resolver and, when compiled in, LAN
+ * master-browser discovery) are sent/received on. Unconditional: both
+ * backends need nmb_resolve() to work, so the socket must exist even in
+ * a libsmb2-only build that has no discovery.
  *
- * A libsmb2-only build has no discovery, but nmb_resolve() (the DNS
- * fallback used by both backends) still needs the socket; see the
- * nmb_udp_fd == NULL guard in nmb_resolve() above for that case.
+ * The master-browser discovery loop itself stays native-only, since
+ * query_master_browser() (the only consumer of the discovery replies)
+ * depends on smb_enum_servers(), which lives in fa_nativesmb.c. A
+ * libsmb2-only build binds the socket but never starts that loop.
  */
 static void
 nmb_init(void)
 {
   nmb_udp_fd = asyncio_udp_bind("nmb", 0, nmb_udp_input, NULL, 0, 1);
 
+#if ENABLE_NATIVESMB
   asyncio_timer_init(&nmb_timer, nmb_send_msb_query, NULL);
   asyncio_timer_init(&nmb_flush_timer, remove_all_servers, NULL);
 
   nmb_send_msb_query(NULL);
+#endif /* ENABLE_NATIVESMB */
 }
 
 INITME(INIT_GROUP_ASYNCIO, nmb_init, NULL, 0);
-#endif /* ENABLE_NATIVESMB */
