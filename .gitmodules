@@ -29,4 +29,4 @@
 [submodule "ext/libsmb2"]
 	path = ext/libsmb2
 	url = https://github.com/Buksa/libsmb2.git
-	branch = ag-smb2-server-mvp
+	branch = ag-smb2-client-parity
