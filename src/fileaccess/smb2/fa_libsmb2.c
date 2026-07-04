@@ -942,6 +942,394 @@ movian_smb2_fsinfo(fa_protocol_t *fap, const char *url, fa_fsinfo_t *ffi)
 }
 
 
+/*
+ * Extended attributes (SMB2 FILE_FULL_EA_INFORMATION), used by
+ * fa_kvstore_as_xattr to store resume/watched metadata as
+ * showtime.default.<domain>.<key> EAs on smb2:// files -- see fa_proto.h
+ * fap_set_xattr/fap_get_xattr and kvstore.c opt_get_ea/kv_write_xattr.
+ *
+ * libsmb2 has no high-level EA helpers, so these drive the raw async
+ * CREATE -> SET_INFO|QUERY_INFO -> CLOSE commands directly, compounded into
+ * a single request/response round trip (the same idiom libsmb2.c itself uses
+ * internally for e.g. smb2_truncate_async/smb2_stat_async), pumped via
+ * movian_smb2_pump under session->lock. Both ops resolve the session
+ * non-interactively, matching the native cifs backend's smb_set_xattr/
+ * smb_get_xattr (fa_nativesmb.c), which never prompt for credentials either.
+ */
+
+#define MOVIAN_SMB2_EA_NAME_MAX 255
+
+static fa_err_code_t
+movian_smb2_xattr_status_to_fap(uint32_t status)
+{
+  switch(status) {
+  case SMB2_STATUS_SUCCESS:
+    return FAP_OK;
+  case SMB2_STATUS_ACCESS_DENIED:
+    return FAP_PERMISSION_DENIED;
+  case SMB2_STATUS_EAS_NOT_SUPPORTED:
+    return FAP_NOT_SUPPORTED;
+  default:
+    return FAP_ERROR;
+  }
+}
+
+
+typedef struct {
+  int done;
+  uint32_t create_status;
+  uint32_t op_status;
+} movian_smb2_xattr_set_state_t;
+
+static void
+movian_smb2_xattr_set_create_cb(struct smb2_context *smb2, int status,
+                                void *command_data, void *opaque)
+{
+  movian_smb2_xattr_set_state_t *state = opaque;
+  state->create_status = status;
+}
+
+static void
+movian_smb2_xattr_set_info_cb(struct smb2_context *smb2, int status,
+                              void *command_data, void *opaque)
+{
+  movian_smb2_xattr_set_state_t *state = opaque;
+  state->op_status = status;
+}
+
+static void
+movian_smb2_xattr_set_close_cb(struct smb2_context *smb2, int status,
+                               void *command_data, void *opaque)
+{
+  movian_smb2_xattr_set_state_t *state = opaque;
+  state->done = 1;
+}
+
+static int
+xattr_set_state_is_done(void *opaque)
+{
+  return ((movian_smb2_xattr_set_state_t *)opaque)->done;
+}
+
+
+static fa_err_code_t
+movian_smb2_set_xattr(struct fa_protocol *fap, const char *url,
+                      const char *name, const void *data, size_t len)
+{
+  movian_smb2_target_t target = {};
+  char errbuf[256];
+
+  if(movian_smb2_target_parse(url, &target, errbuf, sizeof(errbuf))) {
+    SMB2TRACE("set_xattr parse failed url=%s reason=%s", url, errbuf);
+    return FAP_ERROR;
+  }
+
+  if(target.share == NULL || target.share[0] == '\0' || target.path[0] == '\0') {
+    movian_smb2_target_fini(&target);
+    return FAP_ERROR;
+  }
+
+  size_t name_len = strlen(name);
+  size_t value_len = data == NULL ? 0 : len;
+  if(name_len > MOVIAN_SMB2_EA_NAME_MAX || value_len > UINT16_MAX) {
+    movian_smb2_target_fini(&target);
+    return FAP_ERROR;
+  }
+
+  SMB2TRACE("set_xattr url=%s name=%s len=%zu%s", url, name, value_len,
+            data == NULL ? " (delete)" : "");
+
+  movian_smb2_session_t *session =
+    movian_smb2_session_acquire(&target, target.share, FA_NON_INTERACTIVE,
+                                SMB2_DEFAULT_TIMEOUT, NULL, errbuf,
+                                sizeof(errbuf));
+  if(session == NULL) {
+    SMB2TRACE("set_xattr connect failed url=%s reason=%s", url, errbuf);
+    movian_smb2_target_fini(&target);
+    return FAP_ERROR;
+  }
+
+  struct smb2_context *smb2 = session->smb2;
+  movian_smb2_xattr_set_state_t state = {};
+
+  struct smb2_file_full_ea_info eai = {};
+  eai.ea_name_length = (uint8_t)name_len;
+  eai.ea_value_length = (uint16_t)value_len;
+  eai.ea_name = name;
+  eai.ea_value = data;
+
+  struct smb2_create_request cr_req = {};
+  cr_req.requested_oplock_level = SMB2_OPLOCK_LEVEL_NONE;
+  cr_req.impersonation_level = SMB2_IMPERSONATION_IMPERSONATION;
+  cr_req.desired_access = SMB2_FILE_WRITE_EA;
+  cr_req.share_access = SMB2_FILE_SHARE_READ | SMB2_FILE_SHARE_WRITE;
+  cr_req.create_disposition = SMB2_FILE_OPEN;
+  cr_req.create_options = SMB2_FILE_NON_DIRECTORY_FILE;
+  cr_req.name = target.path;
+
+  struct smb2_set_info_request si_req = {};
+  si_req.info_type = SMB2_0_INFO_FILE;
+  si_req.file_info_class = SMB2_FILE_FULL_EA_INFORMATION;
+  si_req.input_data = &eai;
+  memcpy(si_req.file_id, compound_file_id, SMB2_FD_SIZE);
+
+  struct smb2_close_request cl_req = {};
+  memcpy(cl_req.file_id, compound_file_id, SMB2_FD_SIZE);
+
+  hts_mutex_lock(&session->lock);
+
+  struct smb2_pdu *pdu =
+    smb2_cmd_create_async(smb2, &cr_req, movian_smb2_xattr_set_create_cb,
+                          &state);
+  struct smb2_pdu *next_pdu = pdu == NULL ? NULL :
+    smb2_cmd_set_info_async(smb2, &si_req, movian_smb2_xattr_set_info_cb,
+                            &state);
+  if(next_pdu != NULL)
+    smb2_add_compound_pdu(smb2, pdu, next_pdu);
+
+  struct smb2_pdu *close_pdu = next_pdu == NULL ? NULL :
+    smb2_cmd_close_async(smb2, &cl_req, movian_smb2_xattr_set_close_cb,
+                         &state);
+  if(close_pdu != NULL)
+    smb2_add_compound_pdu(smb2, pdu, close_pdu);
+
+  if(pdu == NULL || next_pdu == NULL || close_pdu == NULL) {
+    snprintf(errbuf, sizeof(errbuf), "Unable to build SMB2 set-xattr "
+             "request: %s", smb2_get_error(smb2));
+    SMB2TRACE("set_xattr build failed url=%s reason=%s", url, errbuf);
+    if(pdu != NULL)
+      smb2_free_pdu(smb2, pdu);
+    hts_mutex_unlock(&session->lock);
+    movian_smb2_session_release(session);
+    movian_smb2_target_fini(&target);
+    return FAP_ERROR;
+  }
+
+  smb2_queue_pdu(smb2, pdu);
+
+  int rc = movian_smb2_pump(smb2, xattr_set_state_is_done, &state,
+                            SMB2_DEFAULT_TIMEOUT + 5);
+  if(rc < 0)
+    movian_smb2_session_invalidate(session);
+  hts_mutex_unlock(&session->lock);
+
+  movian_smb2_session_release(session);
+  movian_smb2_target_fini(&target);
+
+  if(rc < 0) {
+    SMB2TRACE("set_xattr timed out url=%s", url);
+    return FAP_ERROR;
+  }
+
+  uint32_t status =
+    state.create_status != 0 ? state.create_status : state.op_status;
+  fa_err_code_t result = movian_smb2_xattr_status_to_fap(status);
+  SMB2TRACE("set_xattr done url=%s name=%s status=0x%x result=%d",
+            url, name, status, result);
+  return result;
+}
+
+
+typedef struct {
+  int done;
+  uint32_t create_status;
+  uint32_t query_status;
+  void *output_buffer;
+  uint32_t output_buffer_length;
+} movian_smb2_xattr_get_state_t;
+
+static void
+movian_smb2_xattr_get_create_cb(struct smb2_context *smb2, int status,
+                                void *command_data, void *opaque)
+{
+  movian_smb2_xattr_get_state_t *state = opaque;
+  state->create_status = status;
+}
+
+static void
+movian_smb2_xattr_get_query_cb(struct smb2_context *smb2, int status,
+                               void *command_data, void *opaque)
+{
+  movian_smb2_xattr_get_state_t *state = opaque;
+  state->query_status = status;
+  if(status == 0 && command_data != NULL) {
+    struct smb2_query_info_reply *rep = command_data;
+    state->output_buffer = rep->output_buffer;
+    state->output_buffer_length = rep->output_buffer_length;
+  }
+}
+
+static void
+movian_smb2_xattr_get_close_cb(struct smb2_context *smb2, int status,
+                               void *command_data, void *opaque)
+{
+  movian_smb2_xattr_get_state_t *state = opaque;
+  state->done = 1;
+}
+
+static int
+xattr_get_state_is_done(void *opaque)
+{
+  return ((movian_smb2_xattr_get_state_t *)opaque)->done;
+}
+
+
+static fa_err_code_t
+movian_smb2_get_xattr(struct fa_protocol *fap, const char *url,
+                      const char *name, void **datap, size_t *lenp)
+{
+  movian_smb2_target_t target = {};
+  char errbuf[256];
+
+  *datap = NULL;
+  *lenp = 0;
+
+  if(movian_smb2_target_parse(url, &target, errbuf, sizeof(errbuf))) {
+    SMB2TRACE("get_xattr parse failed url=%s reason=%s", url, errbuf);
+    return FAP_ERROR;
+  }
+
+  if(target.share == NULL || target.share[0] == '\0' || target.path[0] == '\0') {
+    movian_smb2_target_fini(&target);
+    return FAP_ERROR;
+  }
+
+  size_t name_len = strlen(name);
+  if(name_len > MOVIAN_SMB2_EA_NAME_MAX) {
+    movian_smb2_target_fini(&target);
+    return FAP_ERROR;
+  }
+
+  SMB2TRACE("get_xattr url=%s name=%s", url, name);
+
+  movian_smb2_session_t *session =
+    movian_smb2_session_acquire(&target, target.share, FA_NON_INTERACTIVE,
+                                SMB2_DEFAULT_TIMEOUT, NULL, errbuf,
+                                sizeof(errbuf));
+  if(session == NULL) {
+    SMB2TRACE("get_xattr connect failed url=%s reason=%s", url, errbuf);
+    movian_smb2_target_fini(&target);
+    return FAP_ERROR;
+  }
+
+  struct smb2_context *smb2 = session->smb2;
+  movian_smb2_xattr_get_state_t state = {};
+
+  /* FILE_GET_EA_INFORMATION (MS-FSCC 2.4.15.1) input buffer: a single
+   * requested name -- NextEntryOffset(4)=0, EaNameLength(1), EaName, NUL. */
+  uint8_t input_buf[4 + 1 + MOVIAN_SMB2_EA_NAME_MAX + 1] = {};
+  size_t input_len = 4 + 1 + name_len + 1;
+  input_buf[4] = (uint8_t)name_len;
+  memcpy(input_buf + 5, name, name_len);
+
+  struct smb2_create_request cr_req = {};
+  cr_req.requested_oplock_level = SMB2_OPLOCK_LEVEL_NONE;
+  cr_req.impersonation_level = SMB2_IMPERSONATION_IMPERSONATION;
+  cr_req.desired_access = SMB2_FILE_READ_EA;
+  cr_req.share_access = SMB2_FILE_SHARE_READ | SMB2_FILE_SHARE_WRITE;
+  cr_req.create_disposition = SMB2_FILE_OPEN;
+  cr_req.create_options = SMB2_FILE_NON_DIRECTORY_FILE;
+  cr_req.name = target.path;
+
+  struct smb2_query_info_request qi_req = {};
+  qi_req.info_type = SMB2_0_INFO_FILE;
+  qi_req.file_info_class = SMB2_FILE_FULL_EA_INFORMATION;
+  qi_req.output_buffer_length = 4096;
+  qi_req.input_buffer = input_buf;
+  qi_req.input_buffer_length = input_len;
+  memcpy(qi_req.file_id, compound_file_id, SMB2_FD_SIZE);
+
+  struct smb2_close_request cl_req = {};
+  memcpy(cl_req.file_id, compound_file_id, SMB2_FD_SIZE);
+
+  hts_mutex_lock(&session->lock);
+
+  struct smb2_pdu *pdu =
+    smb2_cmd_create_async(smb2, &cr_req, movian_smb2_xattr_get_create_cb,
+                          &state);
+  struct smb2_pdu *next_pdu = pdu == NULL ? NULL :
+    smb2_cmd_query_info_async(smb2, &qi_req, movian_smb2_xattr_get_query_cb,
+                              &state);
+  if(next_pdu != NULL)
+    smb2_add_compound_pdu(smb2, pdu, next_pdu);
+
+  struct smb2_pdu *close_pdu = next_pdu == NULL ? NULL :
+    smb2_cmd_close_async(smb2, &cl_req, movian_smb2_xattr_get_close_cb,
+                         &state);
+  if(close_pdu != NULL)
+    smb2_add_compound_pdu(smb2, pdu, close_pdu);
+
+  if(pdu == NULL || next_pdu == NULL || close_pdu == NULL) {
+    snprintf(errbuf, sizeof(errbuf), "Unable to build SMB2 get-xattr "
+             "request: %s", smb2_get_error(smb2));
+    SMB2TRACE("get_xattr build failed url=%s reason=%s", url, errbuf);
+    if(pdu != NULL)
+      smb2_free_pdu(smb2, pdu);
+    hts_mutex_unlock(&session->lock);
+    movian_smb2_session_release(session);
+    movian_smb2_target_fini(&target);
+    return FAP_ERROR;
+  }
+
+  smb2_queue_pdu(smb2, pdu);
+
+  int rc = movian_smb2_pump(smb2, xattr_get_state_is_done, &state,
+                            SMB2_DEFAULT_TIMEOUT + 5);
+  if(rc < 0)
+    movian_smb2_session_invalidate(session);
+
+  fa_err_code_t result;
+  if(rc < 0) {
+    result = FAP_ERROR;
+  } else if(state.create_status != 0) {
+    result = FAP_ERROR;
+  } else if(state.query_status == SMB2_STATUS_NONEXISTENT_EA_ENTRY ||
+            state.query_status == SMB2_STATUS_NO_EAS_ON_FILE) {
+    /* No such EA on this file. Native's SMB1 QUERY_EAS_FROM_LIST always
+       succeeds here with a zero-length value; mirror that instead of
+       surfacing an error so a first-ever kvstore read isn't treated as a
+       failure. */
+    result = FAP_OK;
+  } else if(state.query_status != 0) {
+    result = FAP_ERROR;
+  } else {
+    const uint8_t *buf = state.output_buffer;
+    uint32_t buflen = state.output_buffer_length;
+
+    /* FILE_FULL_EA_INFORMATION (MS-FSCC 2.4.15) single entry: 8-byte fixed
+     * header (NextEntryOffset, Flags, EaNameLength, EaValueLength) followed
+     * by EaName, a NUL, then EaValue. */
+    if(buf == NULL || buflen < 8) {
+      result = FAP_OK; /* empty/missing value, same as native */
+    } else {
+      uint8_t ea_name_length = buf[5];
+      uint16_t ea_value_length = (uint16_t)buf[6] | ((uint16_t)buf[7] << 8);
+      uint64_t value_offset = 8u + (uint64_t)ea_name_length + 1u;
+
+      if(ea_value_length > 0 && value_offset + ea_value_length <= buflen) {
+        void *value = malloc(ea_value_length);
+        memcpy(value, buf + value_offset, ea_value_length);
+        *datap = value;
+        *lenp = ea_value_length;
+      }
+      result = FAP_OK;
+    }
+  }
+
+  if(state.output_buffer != NULL)
+    smb2_free_data(smb2, state.output_buffer);
+
+  hts_mutex_unlock(&session->lock);
+
+  movian_smb2_session_release(session);
+  movian_smb2_target_fini(&target);
+
+  SMB2TRACE("get_xattr done url=%s name=%s result=%d len=%zu",
+            url, name, result, *lenp);
+  return result;
+}
+
+
 static int
 movian_smb2_no_parking(fa_handle_t *fh)
 {
@@ -975,6 +1363,8 @@ static fa_protocol_t fa_protocol_smb2 = {
   .fap_makedir = movian_smb2_makedir,
   .fap_fsinfo = movian_smb2_fsinfo,
   .fap_set_read_timeout = movian_smb2_set_read_timeout,
+  .fap_set_xattr = movian_smb2_set_xattr,
+  .fap_get_xattr = movian_smb2_get_xattr,
   .fap_no_parking = movian_smb2_no_parking,
   .fap_redirect = movian_smb2_redirect,
   .fap_normalize = movian_smb2_normalize,
