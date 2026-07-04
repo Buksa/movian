@@ -34,6 +34,8 @@
 #include "main.h"
 #include "keyring.h"
 #include "misc/rstr.h"
+#include "networking/net.h"
+#include "fileaccess/smb/nmb.h"
 
 #include "fa_libsmb2_pool.h"
 
@@ -270,7 +272,38 @@ movian_smb2_connect_once(const movian_smb2_target_t *target,
   if(credentials->domain != NULL)
     smb2_set_domain(smb2, credentials->domain);
 
-  *status = smb2_connect_share(smb2, target->server, share, user);
+  /*
+   * libsmb2 resolves target->server itself (getaddrinfo), which cannot see
+   * NetBIOS-only names. For a dot-less name -- one DNS has no chance of
+   * resolving -- pre-resolve it ourselves: try normal DNS first, then fall
+   * back to an NBT name query. Either way we only ever hand libsmb2 an IP
+   * string; the pool key, keyring id and all traces above/below keep using
+   * the original target->server so a resolved address never leaks into
+   * session identity.
+   */
+  const char *connect_server = target->server;
+  net_addr_t resolved_addr = {0};
+  char resolved_str[64];
+  if(strchr(target->server, '.') == NULL) {
+    const char *errmsg = NULL;
+    if(!net_resolve(target->server, &resolved_addr, &errmsg)) {
+      net_fmt_host(resolved_str, sizeof(resolved_str), &resolved_addr);
+      connect_server = resolved_str;
+      SMB2TRACE("Pre-resolved dot-less name '%s' via DNS -> %s",
+                target->server, connect_server);
+    } else if(!nmb_resolve(target->server, &resolved_addr)) {
+      net_fmt_host(resolved_str, sizeof(resolved_str), &resolved_addr);
+      connect_server = resolved_str;
+      SMB2TRACE("Pre-resolved dot-less name '%s' via NBT -> %s",
+                target->server, connect_server);
+    } else {
+      SMB2TRACE("Pre-resolve failed for dot-less name '%s' (DNS: %s; NBT: "
+                "no answer) -- falling back to libsmb2's own resolution",
+                target->server, errmsg != NULL ? errmsg : "unknown error");
+    }
+  }
+
+  *status = smb2_connect_share(smb2, connect_server, share, user);
   if(*status == 0) {
     SMB2TRACE("%s/%s Session setup", target->server,
               share != NULL ? share : "");
