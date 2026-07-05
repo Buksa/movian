@@ -61,8 +61,15 @@ modules:
       - install -Dm644 support/flatpak/dev.uzver.Movian.desktop /app/share/applications/dev.uzver.Movian.desktop
       - install -Dm644 support/flatpak/dev.uzver.Movian.GameMode.desktop /app/share/applications/dev.uzver.Movian.GameMode.desktop
       - >-
-        movian_version=$(git describe --always --dirty --abbrev=5 2>/dev/null || printf '0.0.0') &&
+        movian_version=$(cat .movian-version-override 2>/dev/null) &&
+        if [ -z "$movian_version" ]; then
+        movian_version=$(git describe --always --dirty --abbrev=5 2>/dev/null || printf '0.0.0');
+        fi &&
         movian_version=$(printf '%s' "$movian_version" | sed -e 's/-/./g') &&
+        if [ -z "$movian_version" ] || [ "$movian_version" = "0.0.0" ]; then
+        echo "movian: refusing to package a versionless build (git describe unavailable and no .movian-version-override was provided)" >&2;
+        exit 1;
+        fi &&
         sed "s/@MOVIAN_VERSION@/${movian_version}/g" support/flatpak/dev.uzver.Movian.metainfo.xml.in > build.flatpak/dev.uzver.Movian.metainfo.xml &&
         install -Dm644 build.flatpak/dev.uzver.Movian.metainfo.xml /app/share/metainfo/dev.uzver.Movian.metainfo.xml
       - install -Dm644 res/showtime/showtime.png /app/share/icons/hicolor/256x256/apps/dev.uzver.Movian.png

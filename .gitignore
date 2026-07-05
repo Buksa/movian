@@ -1,4 +1,5 @@
 /build.*
+/.movian-version-override
 /.codex/
 /.codegraph/
 /.codex-session.md

@@ -18,6 +18,14 @@
 .SUFFIXES:
 SUFFIXES=
 
+# Without this, a recipe that fails after already creating/truncating its
+# target (e.g. a linker killed by OOM, or one that exits non-zero without
+# being caught by a signal) leaves a corrupt-but-present file with a fresh
+# mtime. A later `make` invocation over the same build dir (e.g. a retried
+# `flatpak-builder --keep-build-dirs` run) then sees that target as
+# up to date from prerequisites alone and never relinks it, so the broken
+# artifact ships silently. See Buksa/movian#64.
+.DELETE_ON_ERROR:
 
 C ?= ${CURDIR}
 
