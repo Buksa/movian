@@ -1,4 +1,5 @@
 /build.*
+/.movian-version-override
 config.default
 *~
 ps3support

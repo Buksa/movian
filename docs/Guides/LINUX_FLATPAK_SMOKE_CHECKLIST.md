@@ -60,6 +60,14 @@ Expected result:
 Run these for Flatpak manifest, SteamOS, packaging, sandbox, AppStream, icon,
 runtime dependency, or release-profile changes:
 
+`build-local.sh` now fails the build itself (non-zero exit, before writing
+the bundle) if `/app/bin/showtime` is missing, zero-length, non-executable,
+doesn't run under `flatpak build ... --help`, or if the staged metainfo
+version is empty/`0.0.0` -- see Buksa/movian#64, where a "successful"
+flatpak-builder run had silently shipped a zero-length `/app/bin/showtime`
+because `make` decided (from mtimes alone) a corrupt leftover target needed
+no rebuild. The commands below re-run those same checks manually.
+
 ```sh
 support/flatpak/build-local.sh
 

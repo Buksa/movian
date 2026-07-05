@@ -34,7 +34,22 @@ The build log is written to:
 build.flatpak/flatpak-build.log
 ```
 
+Before touching the bundle, the script computes `git describe --dirty
+--abbrev=5` on the host and smoke-checks the result: it refuses to run if
+that's empty (see "Manifest Notes" below), and after flatpak-builder
+finishes it fails loudly if `/app/bin/showtime` is missing, zero-length,
+non-executable, doesn't run under `flatpak build ... --help`, or if the
+staged metainfo's version is empty/`0.0.0`. A "successful" flatpak-builder
+run only means every build-command exited zero -- it does not mean `make`
+actually relinked a good binary instead of reusing a stale/corrupt one left
+over from an earlier interrupted attempt (see Buksa/movian#64), so
+build-local.sh checks the real artifact itself rather than trusting the
+exit code alone.
+
 ## Validate
+
+The entrypoint and version checks above run automatically at the end of
+`build-local.sh`. The following remain manual/optional:
 
 ```sh
 desktop-file-validate \
@@ -110,7 +125,20 @@ during the build. The version comes from:
 git describe --dirty --abbrev=5 | sed -e 's/-/./g'
 ```
 
-That keeps Discover, `flatpak info`, and Movian's About/log version aligned.
+`git describe --dirty` cannot run inside the sandboxed build itself: the
+manifest's `sources: type: dir, path: ../..` copies the whole repo,
+including every submodule's `.git` gitlink -- a path relative to *this*
+checkout's location. Once copied elsewhere, those relative paths no longer
+resolve, and `--dirty`'s "is a submodule modified?" check fails outright
+(`fatal: not a git repository: ...`), which quietly collapsed the version to
+empty (`support/gitver.mk`'s `VERSION_GIT`) or `0.0.0` (the metainfo
+fallback) for every flatpak build. `build-local.sh` now runs `git describe`
+on the host, before the sandboxed copy happens, and writes the result to a
+git-ignored `.movian-version-override` file at the repo root; both
+`support/gitver.mk` and the manifest's metainfo step prefer that file over
+calling `git describe` themselves. That keeps Discover, `flatpak info`, and
+Movian's About/log version aligned with the host's real `git describe`
+output.
 
 The app icon is installed as:
 
