@@ -36,6 +36,27 @@ libxxf86vm-dev libgmp-dev libgnutls28-dev
 smbclient samba-common-bin gdb xvfb
 ```
 
+## 1b. Keep it in sync
+
+The stand is a build/run target, not a place to keep state: verification
+runs scp patches onto it, leave logs, and drift it from the dev workspace.
+To converge it back to the pushed branch in one command (run on the stand,
+or through ssh):
+
+```sh
+support/smb-smoke/sync-stand.sh                  # sync current branch + rebuild
+support/smb-smoke/sync-stand.sh --branch <b>     # sync a specific branch
+```
+
+It force-resets to `origin/<branch>`, discards local changes and untracked
+files (except `.codex/`), resets submodules to the committed gitlinks, and
+rebuilds. Anything worth keeping must be committed and pushed from the dev
+workspace first.
+
+The rebuild configures with `--disable-dvd`: the vendored `ext/dvd` code
+does not compile under GCC >= 14 (Buksa/movian#68) and an SMB stand has no
+use for DVD support. Pass `--enable-dvd` to keep it on an older toolchain.
+
 ## 2. Remote access
 
 Drive the stand over SSH from the dev machine with a **passphrase-free** key so
