@@ -219,6 +219,26 @@ query_master_browser(void *a)
 #endif /* ENABLE_NATIVESMB */
 
 /**
+ * Address entry 'i' (0-based) of an NBNS positive name-query answer.
+ *
+ * Entry 0 (2-byte nodeflags + 4-byte IPv4) is embedded directly in
+ * nmbpkt_answer_t right after the RDLENGTH field. A multi-homed host
+ * (VirtualBox/VMware/Hyper-V/WSL adapters alongside the real LAN NIC)
+ * answers a broadcast name query with one such 6-byte entry per
+ * interface; entries 1..N-1 follow contiguously in the trailing packet
+ * bytes. Caller must bounds-check 'i' against the RDLENGTH-derived
+ * count (and that count against the actual packet size) first.
+ */
+static const uint8_t *
+nmb_answer_addr(const nmbpkt_answer_t *pkt, int i)
+{
+  if(i == 0)
+    return pkt->addr;
+  return (const uint8_t *)pkt + sizeof(nmbpkt_answer_t) + (i - 1) * 6 + 2;
+}
+
+
+/**
  *
  */
 static void
@@ -234,9 +254,18 @@ nmb_udp_input(void *opaque, const void *data, int size,
     return;
   if(betoh_16(pkt->h.answer_count) < 1)
     return;
-  if(betoh_16(pkt->length) != 6)
+
+  // RDLENGTH is 6 bytes (nodeflags + IPv4) per returned address; a
+  // multi-homed host sends RDLENGTH = 6*N for its N interfaces. Reject
+  // anything that isn't a positive multiple of 6, then make sure the
+  // packet actually carries that many trailing bytes before touching them.
+  uint16_t rdlength = betoh_16(pkt->length);
+  if(rdlength == 0 || rdlength % 6 != 0)
     return;
 
+  int count = rdlength / 6;
+  if((size_t)size < sizeof(nmbpkt_answer_t) + (size_t)(count - 1) * 6)
+    return;
 
 #if ENABLE_NATIVESMB
   if(pkt->h.transaction_id == nmb_txid) {
@@ -254,8 +283,35 @@ nmb_udp_input(void *opaque, const void *data, int size,
     if(nr->nr_txid == pkt->h.transaction_id) {
       LIST_REMOVE(nr, nr_link);
       asyncio_timer_disarm(&nr->nr_timeout);
+
+      // Address selection for multi-homed replies: prefer the entry that
+      // matches the reply's source address (remote_addr) -- that's the
+      // interface the host actually answered from, so it's reachable by
+      // construction. If none of the entries match it exactly, still
+      // prefer remote_addr itself over any of the (possibly unreachable
+      // virtual-adapter) entries. Only fall back to the first entry if
+      // remote_addr isn't a usable IPv4 address. This keeps the
+      // single-address path byte-identical, since there entry 0 already
+      // equals remote_addr in practice.
+      const uint8_t *chosen;
+
+      if(remote_addr != NULL && remote_addr->na_family == 4) {
+        chosen = remote_addr->na_addr;
+        for(int i = 0; i < count; i++) {
+          const uint8_t *a = nmb_answer_addr(pkt, i);
+          net_addr_t entry = { .na_family = 4, .na_port = remote_addr->na_port };
+          memcpy(entry.na_addr, a, 4);
+          if(!net_addr_cmp(&entry, remote_addr)) {
+            chosen = a;
+            break;
+          }
+        }
+      } else {
+        chosen = nmb_answer_addr(pkt, 0);
+      }
+
       nr->nr_addr->na_family = 4;
-      memcpy(nr->nr_addr->na_addr, pkt->addr, 4);
+      memcpy(nr->nr_addr->na_addr, chosen, 4);
       hts_mutex_lock(&nmb_mutex);
       nr->nr_status = 0;
       hts_cond_broadcast(&nmb_resolver_cond);
