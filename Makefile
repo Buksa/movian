@@ -283,6 +283,14 @@ SRCS 			+= src/sd/sd.c
 SRCS-$(CONFIG_AVAHI) 	+= src/sd/avahi.c
 SRCS-$(CONFIG_BONJOUR) 	+= src/sd/bonjour.c
 
+# WS-Discovery client -- finds modern Windows (10/11) hosts that dropped
+# SMB1/NetBIOS browsing and don't advertise SMB over mDNS, registering them
+# as smb2:// services. No external library dependency (plain UDP multicast
+# + the in-tree XML parser), so it isn't gated like avahi.c; it only needs
+# the smb2 client to make the services it registers useful, independent of
+# CONFIG_NATIVESMB.
+SRCS-$(CONFIG_LIBSMB2)	+= src/sd/wsd.c
+
 ${BUILDDIR}/src/sd/avahi.o : CFLAGS = $(CFLAGS_AVAHI) -Wall -Werror  ${OPTFLAGS}
 
 
