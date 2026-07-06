@@ -593,13 +593,27 @@ SRCS-$(CONFIG_DVD) += 	ext/dvd/dvdcss/css.c \
 			ext/dvd/dvdnav/vm/vmget.c \
 			ext/dvd/dvdnav/searching.c
 
-${BUILDDIR}/ext/dvd/dvdcss/%.o : CFLAGS = ${OPTFLAGS} \
+# GCC 14 (default on Debian 13 / Fedora 40+ / Ubuntu 24.10) promoted several
+# long-standing C warnings to errors by default in the C frontend, independent
+# of -Werror: -Wimplicit-function-declaration, -Wincompatible-pointer-types,
+# -Wint-conversion, -Wimplicit-int. ext/dvd is built with only ${OPTFLAGS}
+# (no -Wall/-Werror), so two vendored hits stopped the parallel build:
+# dvdcss svfs_readv (const struct iovec *) and libdvdread ISOFindFile (no
+# prototype). The dvdcss/libdvdread/dvdnav upstreams are effectively frozen,
+# so per issue #68 path (c) use scoped compat flags rather than hand-patches
+# that would desync from upstream.
+DVD_COMPAT_FLAGS = -Wno-implicit-function-declaration \
+		   -Wno-incompatible-pointer-types \
+		   -Wno-int-conversion \
+		   -Wno-implicit-int
+
+${BUILDDIR}/ext/dvd/dvdcss/%.o : CFLAGS = ${OPTFLAGS} $(DVD_COMPAT_FLAGS) \
  -DHAVE_LIMITS_H -DHAVE_UNISTD_H -DHAVE_ERRNO_H -DVERSION="0" $(DVDCSS_CFLAGS)
 
-${BUILDDIR}/ext/dvd/libdvdread/%.o : CFLAGS = ${OPTFLAGS} \
- -DHAVE_DVDCSS_DVDCSS_H -DDVDNAV_COMPILE -Wno-strict-aliasing  -Iext/dvd 
+${BUILDDIR}/ext/dvd/libdvdread/%.o : CFLAGS = ${OPTFLAGS} $(DVD_COMPAT_FLAGS) \
+ -DHAVE_DVDCSS_DVDCSS_H -DDVDNAV_COMPILE -Wno-strict-aliasing  -Iext/dvd
 
-${BUILDDIR}/ext/dvd/dvdnav/%.o : CFLAGS = ${OPTFLAGS} \
+${BUILDDIR}/ext/dvd/dvdnav/%.o : CFLAGS = ${OPTFLAGS} $(DVD_COMPAT_FLAGS) \
  -DVERSION=\"movian\" -DDVDNAV_COMPILE -Wno-strict-aliasing -Iext/dvd \
  -Iext/dvd/dvdnav
 
