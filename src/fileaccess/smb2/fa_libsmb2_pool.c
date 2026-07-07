@@ -677,12 +677,7 @@ movian_smb2_io_thread_fn(void *aux)
       TAILQ_INSERT_TAIL(&session->inflight_queue, op, link);
       hts_mutex_unlock(&session->q_mutex);
 
-      /* Transitional: VFS ops not yet ported to the op framework still
-         drive this context synchronously under session->lock; serialize
-         with them. Goes away once every op is submit/wait. */
-      hts_mutex_lock(&session->lock);
       int rc = op->submit(session, op);
-      hts_mutex_unlock(&session->lock);
 
       hts_mutex_lock(&session->q_mutex);
       if(rc < 0 && op->state == MOVIAN_SMB2_OP_INFLIGHT) {
@@ -709,10 +704,8 @@ movian_smb2_io_thread_fn(void *aux)
     pfd[0].events = POLLIN;
     int nfds = 1;
     if(!dead) {
-      hts_mutex_lock(&session->lock);   /* transitional, see above */
       pfd[1].fd = smb2_get_fd(smb2);
       pfd[1].events = smb2_which_events(smb2);
-      hts_mutex_unlock(&session->lock);
       nfds = 2;
     }
 
@@ -733,9 +726,7 @@ movian_smb2_io_thread_fn(void *aux)
     }
 
     if(nfds == 2 && pfd[1].revents != 0) {
-      hts_mutex_lock(&session->lock);   /* transitional, see above */
       int src = smb2_service(smb2, pfd[1].revents);
-      hts_mutex_unlock(&session->lock);
       if(src < 0) {
         char reason[164];
         snprintf(reason, sizeof(reason), "%s", smb2_get_error(smb2));
@@ -927,7 +918,6 @@ movian_smb2_session_free(movian_smb2_session_t *session)
   }
   hts_cond_destroy(&session->q_cond);
   hts_mutex_destroy(&session->q_mutex);
-  hts_mutex_destroy(&session->lock);
   free(session->key);
   free(session->server);
   free(session->share);
@@ -1116,7 +1106,6 @@ movian_smb2_session_acquire(const movian_smb2_target_t *target,
     return NULL;
   }
 
-  hts_mutex_init(&session->lock);
   hts_mutex_init(&session->q_mutex);
   hts_cond_init(&session->q_cond, &session->q_mutex);
   TAILQ_INIT(&session->submit_queue);
@@ -1158,8 +1147,17 @@ movian_smb2_session_acquire(const movian_smb2_target_t *target,
   free(resolved.password);
   resolved = (movian_smb2_credentials_t){};
 
+  /*
+   * Operation pacing is per waiter (movian_smb2_op_run deadlines), not per
+   * context: disable libsmb2's internal PDU timeout so it cannot fail a
+   * request some caller is deliberately waiting forever on
+   * (fa_set_read_timeout(0)). Dead transports are detected by the owner
+   * loop (poll/smb2_service errors) and by waiter deadlines.
+   */
+  smb2_set_timeout(smb2, 0);
+
   /* From this point the ownership rule applies: only the owner thread may
-     touch session->smb2 (the transitional session->lock guard aside). */
+     touch session->smb2. */
   hts_thread_create_joinable("smb2io", &session->io_thread,
                              movian_smb2_io_thread_fn, session,
                              THREAD_PRIO_FILESYSTEM);
@@ -1229,6 +1227,7 @@ movian_smb2_session_error(movian_smb2_session_t *session, int status)
   case ENOENT:
   case EEXIST:
   case EACCES:
+  case EPERM:
   case ENOTDIR:
   case EISDIR:
   case ENOTEMPTY:
@@ -1241,12 +1240,11 @@ movian_smb2_session_error(movian_smb2_session_t *session, int status)
     break;
   }
 
-  /* Transport-suspect status. The legacy sync wrappers surface transport
-     failures (socket error, poll failure, request timeout) as a bare -1
-     (== -EPERM), so that is treated as transport too until every op is
-     ported to the async framework, whose callbacks report real errnos.
-     The owner thread already failed every other queued op if the socket
-     died; dropping the session from the pool is what is left to do. */
+  /* Transport-suspect status (every op reports a real errno from its async
+     completion callback, so -EPERM above is a genuine server verdict, not
+     the legacy sync wrappers' ambiguous "-1"). The owner thread already
+     failed every other queued op if the socket died; dropping the session
+     from the pool is what is left to do. */
   SMB2TRACE("Session %s/%s failed op status=%d -> dropping from pool",
             session->server, session->share, status);
   movian_smb2_session_invalidate(session);

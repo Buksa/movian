@@ -153,7 +153,6 @@ typedef struct movian_smb2_session {
   char *user;
   char *domain;
   struct smb2_context *smb2;
-  hts_mutex_t lock;
   atomic_t lifetime_refcount;
   int refcount;
   int broken;
