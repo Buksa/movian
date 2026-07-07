@@ -666,7 +666,13 @@ SRCS-$(CONFIG_POLARSSL) += \
 	ext/polarssl-1.3/library/xtea.c \
 
 
-${BUILDDIR}/ext/polarssl-1.3/library/%.o : CFLAGS = -Wall ${OPTFLAGS}
+# Vendored polarssl 1.3 is frozen upstream and trips GCC 14's promotion of
+# -Wimplicit-function-declaration to an error (e.g. camellia.c only includes
+# <string.h> under POLARSSL_SELF_TEST but calls memset/memcpy regardless).
+# Same as ext/dvd above: scoped compat flags per issue #68 path (c), not
+# hand-patches that would desync from upstream.
+${BUILDDIR}/ext/polarssl-1.3/library/%.o : CFLAGS = -Wall ${OPTFLAGS} \
+	-Wno-implicit-function-declaration
 
 
 ifeq ($(CONFIG_POLARSSL), yes)
