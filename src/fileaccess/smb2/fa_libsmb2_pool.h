@@ -72,6 +72,16 @@ typedef struct {
 } movian_smb2_credentials_t;
 
 /*
+ * Per-operation state blobs parked on a session because a queued libsmb2 PDU
+ * may still hold a callback pointer into them; freed by the pool after
+ * smb2_destroy_context() has failed every pending callback.
+ */
+typedef struct movian_smb2_deferred {
+  struct movian_smb2_deferred *next;
+  void *ptr;
+} movian_smb2_deferred_t;
+
+/*
  * A pooled, reusable libsmb2 session: one TCP connection + negotiated session
  * + tree connect to a single share, kept alive across VFS calls and re-used by
  * refcount.
@@ -91,6 +101,7 @@ typedef struct movian_smb2_session {
   int64_t last_used;
   callout_t keepalive;
   int echo_missed;
+  movian_smb2_deferred_t *deferred;
   LIST_ENTRY(movian_smb2_session) link;
 } movian_smb2_session_t;
 
@@ -129,5 +140,26 @@ void movian_smb2_session_release(movian_smb2_session_t *session);
  * implies the context is no longer usable.
  */
 void movian_smb2_session_invalidate(movian_smb2_session_t *session);
+
+/*
+ * Classify a failed libsmb2 sync-op status and drop the session if the
+ * transport underneath it is dead. Statuses that prove the server replied
+ * (raw NT statuses, application-level errnos like ENOENT) leave the session
+ * alone; anything else is probed with a cheap echo and the session is
+ * invalidated when the probe fails, so the pool never hands a dead context
+ * to the next acquirer. Call with session->lock held, after the failed op,
+ * with the context timeout at its default (the probe blocks up to that).
+ */
+void movian_smb2_session_error(movian_smb2_session_t *session, int status);
+
+/*
+ * Park a malloc'd per-operation state blob that a queued PDU callback may
+ * still reference (e.g. after movian_smb2_pump() gave up on a request that
+ * is still in flight). The blob is freed when the session itself is freed,
+ * after smb2_destroy_context() has failed every pending callback. Call with
+ * session->lock held and pair with movian_smb2_session_invalidate() so the
+ * session (and with it the blob) does not outlive its brokenness for long.
+ */
+void movian_smb2_session_defer_free(movian_smb2_session_t *session, void *ptr);
 
 #endif /* FA_LIBSMB2_POOL_H__ */

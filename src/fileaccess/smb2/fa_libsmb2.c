@@ -44,8 +44,16 @@ typedef struct {
   int read_timeout_sec;
 } movian_smb2_file_t;
 
+/*
+ * State for the async share enumeration, heap-allocated because a queued
+ * PDU keeps a callback pointer to it. When the issuing scan gives up on a
+ * still-in-flight request it sets `abandoned` (under session->lock) and
+ * parks the state on the session via movian_smb2_session_defer_free(); the
+ * callback then drops any late reply instead of publishing results.
+ */
 typedef struct {
   int done;
+  int abandoned;
   int status;
   struct srvsvc_NetrShareEnum_rep *reply;
 } movian_smb2_enum_state_t;
@@ -145,6 +153,11 @@ movian_smb2_enum_callback(struct smb2_context *smb2, int status,
                           void *command_data, void *opaque)
 {
   movian_smb2_enum_state_t *state = opaque;
+  if(state->abandoned) {
+    if(status == 0 && command_data != NULL)
+      smb2_free_data(smb2, command_data);
+    return;
+  }
   state->status = status;
   state->reply = command_data;
   state->done = 1;
@@ -226,28 +239,56 @@ movian_smb2_scan_host(fa_dir_t *fd, const char *url,
     return -1;
 
   struct smb2_context *smb2 = session->smb2;
-  movian_smb2_enum_state_t state = {};
   int rc = -1;
+
+  movian_smb2_enum_state_t *state = calloc(1, sizeof(*state));
+  if(state == NULL) {
+    snprintf(errbuf, errlen, "Out of memory while enumerating SMB2 shares");
+    movian_smb2_session_release(session);
+    return -1;
+  }
 
   hts_mutex_lock(&session->lock);
   if(smb2_share_enum_async(smb2, SHARE_INFO_1,
-                           movian_smb2_enum_callback, &state) < 0 ||
-     movian_smb2_wait_for_enum(smb2, &state) < 0 ||
-     state.status != 0 || state.reply == NULL) {
+                           movian_smb2_enum_callback, state) < 0) {
+    snprintf(errbuf, errlen, "Unable to enumerate SMB2 shares: %s",
+             smb2_get_error(smb2));
+    SMB2TRACE("Share enumeration submit failed reason=%s", errbuf);
+    free(state);                /* nothing queued: the callback never fires */
+    hts_mutex_unlock(&session->lock);
+    goto out;
+  }
+
+  if(movian_smb2_wait_for_enum(smb2, state) < 0) {
+    snprintf(errbuf, errlen, "Unable to enumerate SMB2 shares: %s",
+             smb2_get_error(smb2));
+    SMB2TRACE("Share enumeration timed out reason=%s", errbuf);
+    /* The enum PDU may still be queued with its callback pointing at
+       *state: park the state on the session and drop the session from the
+       pool, so a late reply can neither write into a dead frame nor fire
+       on a context that was reused for another operation. */
+    state->abandoned = 1;
+    movian_smb2_session_defer_free(session, state);
+    movian_smb2_session_invalidate(session);
+    hts_mutex_unlock(&session->lock);
+    goto out;
+  }
+
+  if(state->status != 0 || state->reply == NULL) {
     snprintf(errbuf, errlen, "Unable to enumerate SMB2 shares: %s",
              smb2_get_error(smb2));
     SMB2TRACE("Share enumeration failed status=%d reason=%s",
-              state.status, errbuf);
-    if(state.reply != NULL)
-      smb2_free_data(smb2, state.reply);
-    if(state.status != 0)
-      movian_smb2_session_invalidate(session);
+              state->status, errbuf);
+    if(state->reply != NULL)
+      smb2_free_data(smb2, state->reply);
+    movian_smb2_session_invalidate(session);
+    free(state);
     hts_mutex_unlock(&session->lock);
     goto out;
   }
 
   struct srvsvc_SHARE_INFO_1_CONTAINER *shares =
-    &state.reply->ses.ShareEnum.Level1;
+    &state->reply->ses.ShareEnum.Level1;
   if(shares->share_info_1 != NULL) {
     for(uint32_t i = 0; i < shares->EntriesRead; i++) {
       struct srvsvc_SHARE_INFO_1 *share =
@@ -278,7 +319,8 @@ movian_smb2_scan_host(fa_dir_t *fd, const char *url,
     }
   }
 
-  smb2_free_data(smb2, state.reply);
+  smb2_free_data(smb2, state->reply);
+  free(state);
   hts_mutex_unlock(&session->lock);
   rc = 0;
 
@@ -314,6 +356,7 @@ movian_smb2_scan_directory(fa_dir_t *fd, const char *url,
              smb2_get_error(smb2));
     SMB2TRACE("scan directory opendir failed url=%s path='%s' reason=%s",
               url, target->path, errbuf);
+    movian_smb2_session_error(session, -1);
     hts_mutex_unlock(&session->lock);
     goto out;
   }
@@ -420,16 +463,19 @@ movian_smb2_open_under_lock(fa_protocol_t *fap, const char *url,
              smb2_get_error(smb2));
     SMB2TRACE("open failed url=%s path='%s' open_flags=0x%x reason=%s",
               url, target->path, open_flags, errbuf);
+    movian_smb2_session_error(session, -1);
     return NULL;
   }
 
   struct smb2_stat_64 statbuf;
-  if(smb2_fstat(smb2, fh, &statbuf) < 0 ||
-     statbuf.smb2_type == SMB2_TYPE_DIRECTORY) {
+  int fstat_rc = smb2_fstat(smb2, fh, &statbuf);
+  if(fstat_rc < 0 || statbuf.smb2_type == SMB2_TYPE_DIRECTORY) {
     snprintf(errbuf, errlen, "Unable to stat SMB2 file: %s",
              smb2_get_error(smb2));
     SMB2TRACE("open fstat rejected url=%s path='%s' smb2_type=%d reason=%s",
               url, target->path, statbuf.smb2_type, errbuf);
+    if(fstat_rc < 0)
+      movian_smb2_session_error(session, fstat_rc);
     smb2_close(smb2, fh);
     return NULL;
   }
@@ -449,9 +495,11 @@ movian_smb2_open_under_lock(fa_protocol_t *fap, const char *url,
   file->read_timeout_sec = SMB2_DEFAULT_TIMEOUT;
 
   if(flags & FA_APPEND) {
-    if(smb2_lseek(smb2, file->fh, 0, SEEK_END, NULL) < 0) {
+    int64_t seek_rc = smb2_lseek(smb2, file->fh, 0, SEEK_END, NULL);
+    if(seek_rc < 0) {
       snprintf(errbuf, errlen, "Unable to seek SMB2 file: %s",
                smb2_get_error(smb2));
+      movian_smb2_session_error(session, (int)seek_rc);
       smb2_close(smb2, file->fh);
       free(file);
       return NULL;
@@ -543,6 +591,8 @@ movian_smb2_read(fa_handle_t *fh, void *buf, size_t size)
   if(max_read == 0 || count <= max_read) {
     int status = smb2_read(smb2, sfh, buf, count);
     smb2_set_timeout(smb2, SMB2_DEFAULT_TIMEOUT);
+    if(status < 0)
+      movian_smb2_session_error(file->session, status);
     hts_mutex_unlock(&file->session->lock);
     return status;
   }
@@ -551,6 +601,7 @@ movian_smb2_read(fa_handle_t *fh, void *buf, size_t size)
 
   uint32_t total = 0;
   int failed = 0;
+  int fail_status = 0;
   while(total < count) {
     uint32_t chunk = count - total;
     if(chunk > max_read)
@@ -559,6 +610,7 @@ movian_smb2_read(fa_handle_t *fh, void *buf, size_t size)
     int status = smb2_read(smb2, sfh, (uint8_t *)buf + total, chunk);
     if(status <= 0) {
       failed = status < 0;
+      fail_status = status;
       break;
     }
     total += status;
@@ -569,7 +621,11 @@ movian_smb2_read(fa_handle_t *fh, void *buf, size_t size)
   if(failed && start_offset >= 0)
     smb2_lseek(smb2, sfh, start_offset, SEEK_SET, NULL);
 
+  /* The probe in session_error must run with the default timeout restored;
+     a read timeout of 0 (infinite) would make it block forever. */
   smb2_set_timeout(smb2, SMB2_DEFAULT_TIMEOUT);
+  if(failed)
+    movian_smb2_session_error(file->session, fail_status);
   hts_mutex_unlock(&file->session->lock);
   return failed ? -1 : (int)total;
 }
@@ -590,6 +646,8 @@ movian_smb2_write(fa_handle_t *fh, const void *buf, size_t size)
   int status;
   if(max_write == 0 || count <= max_write) {
     status = smb2_write(smb2, sfh, buf, count);
+    if(status < 0)
+      movian_smb2_session_error(file->session, status);
   } else {
     uint32_t total = 0;
     int failed = 0;
@@ -601,6 +659,8 @@ movian_smb2_write(fa_handle_t *fh, const void *buf, size_t size)
       int wstatus = smb2_write(smb2, sfh, (const uint8_t *)buf + total, chunk);
       if(wstatus <= 0) {
         failed = wstatus < 0;
+        if(failed)
+          movian_smb2_session_error(file->session, wstatus);
         break;
       }
       total += wstatus;
@@ -654,6 +714,8 @@ movian_smb2_ftruncate(fa_handle_t *fh, uint64_t newsize)
   int status = smb2_ftruncate(file->session->smb2, file->fh, newsize);
   if(status == 0)
     file->size = newsize > INT64_MAX ? INT64_MAX : (int64_t)newsize;
+  else if(status < 0)
+    movian_smb2_session_error(file->session, status);
   hts_mutex_unlock(&file->session->lock);
 
   return status < 0 ? movian_smb2_errno_to_fap(status) : FAP_OK;
@@ -713,11 +775,13 @@ movian_smb2_stat(fa_protocol_t *fap, const char *url, struct fa_stat *fs,
     fs->fs_type = CONTENT_DIR;
   } else {
     struct smb2_stat_64 statbuf;
-    if(smb2_stat(smb2, target.path, &statbuf) < 0) {
+    int rc = smb2_stat(smb2, target.path, &statbuf);
+    if(rc < 0) {
       snprintf(errbuf, errlen, "Unable to stat SMB2 path: %s",
                smb2_get_error(smb2));
       SMB2TRACE("stat failed url=%s path='%s' reason=%s", url,
                 target.path, errbuf);
+      movian_smb2_session_error(session, rc);
       status = FAP_ERROR;
     } else {
       fs->fs_type = statbuf.smb2_type == SMB2_TYPE_DIRECTORY ?
@@ -780,9 +844,11 @@ movian_smb2_run_path_op(const char *url, const char *what,
 
   hts_mutex_lock(&session->lock);
   int status = op(session->smb2, target.path);
-  if(status < 0)
+  if(status < 0) {
     snprintf(errbuf, errlen, "Unable to %s: %s", what,
              smb2_get_error(session->smb2));
+    movian_smb2_session_error(session, status);
+  }
   hts_mutex_unlock(&session->lock);
 
   movian_smb2_session_release(session);
@@ -868,9 +934,11 @@ movian_smb2_rename(const fa_protocol_t *fap, const char *old_url,
 
   hts_mutex_lock(&session->lock);
   int status = smb2_rename(session->smb2, old_target.path, new_target.path);
-  if(status < 0)
+  if(status < 0) {
     snprintf(errbuf, errlen, "Unable to rename SMB2 path: %s",
              smb2_get_error(session->smb2));
+    movian_smb2_session_error(session, status);
+  }
   hts_mutex_unlock(&session->lock);
 
   movian_smb2_session_release(session);
@@ -893,6 +961,12 @@ movian_smb2_makedir(fa_protocol_t *fap, const char *url)
   char errbuf[256];
   int status = movian_smb2_run_path_op(url, "create SMB2 directory",
                                        mkdir_op, errbuf, sizeof(errbuf));
+  /* -1 is not a server verdict: run_path_op returns it for its own parse/
+     connect failures and libsmb2's sync wrappers return it for transport
+     failures. Mapping it through errno_to_fap would turn those into
+     EPERM/"Permission denied". */
+  if(status == -1)
+    return FAP_ERROR;
   return status < 0 ? movian_smb2_errno_to_fap(status) : FAP_OK;
 }
 
@@ -926,6 +1000,8 @@ movian_smb2_fsinfo(fa_protocol_t *fap, const char *url, fa_fsinfo_t *ffi)
   hts_mutex_lock(&session->lock);
   int status = smb2_statvfs(session->smb2,
                             target.path[0] ? target.path : "", &vfs);
+  if(status < 0)
+    movian_smb2_session_error(session, status);
   hts_mutex_unlock(&session->lock);
 
   if(status == 0) {
@@ -975,8 +1051,17 @@ movian_smb2_xattr_status_to_fap(uint32_t status)
 }
 
 
+/*
+ * Both xattr states are heap-allocated because the compound PDUs keep
+ * callback pointers to them. When the issuing op gives up on a request
+ * still in flight it sets `abandoned` (under session->lock) and parks the
+ * state on the session via movian_smb2_session_defer_free(); the callbacks
+ * must then not publish results (and must free reply data they would
+ * otherwise hand over), because nobody will consume them.
+ */
 typedef struct {
   int done;
+  int abandoned;
   uint32_t create_status;
   uint32_t op_status;
 } movian_smb2_xattr_set_state_t;
@@ -986,6 +1071,8 @@ movian_smb2_xattr_set_create_cb(struct smb2_context *smb2, int status,
                                 void *command_data, void *opaque)
 {
   movian_smb2_xattr_set_state_t *state = opaque;
+  if(state->abandoned)
+    return;
   state->create_status = status;
 }
 
@@ -994,6 +1081,8 @@ movian_smb2_xattr_set_info_cb(struct smb2_context *smb2, int status,
                               void *command_data, void *opaque)
 {
   movian_smb2_xattr_set_state_t *state = opaque;
+  if(state->abandoned)
+    return;
   state->op_status = status;
 }
 
@@ -1002,6 +1091,8 @@ movian_smb2_xattr_set_close_cb(struct smb2_context *smb2, int status,
                                void *command_data, void *opaque)
 {
   movian_smb2_xattr_set_state_t *state = opaque;
+  if(state->abandoned)
+    return;
   state->done = 1;
 }
 
@@ -1050,7 +1141,13 @@ movian_smb2_set_xattr(struct fa_protocol *fap, const char *url,
   }
 
   struct smb2_context *smb2 = session->smb2;
-  movian_smb2_xattr_set_state_t state = {};
+
+  movian_smb2_xattr_set_state_t *state = calloc(1, sizeof(*state));
+  if(state == NULL) {
+    movian_smb2_session_release(session);
+    movian_smb2_target_fini(&target);
+    return FAP_ERROR;
+  }
 
   struct smb2_file_full_ea_info eai = {};
   eai.ea_name_length = (uint8_t)name_len;
@@ -1080,16 +1177,16 @@ movian_smb2_set_xattr(struct fa_protocol *fap, const char *url,
 
   struct smb2_pdu *pdu =
     smb2_cmd_create_async(smb2, &cr_req, movian_smb2_xattr_set_create_cb,
-                          &state);
+                          state);
   struct smb2_pdu *next_pdu = pdu == NULL ? NULL :
     smb2_cmd_set_info_async(smb2, &si_req, movian_smb2_xattr_set_info_cb,
-                            &state);
+                            state);
   if(next_pdu != NULL)
     smb2_add_compound_pdu(smb2, pdu, next_pdu);
 
   struct smb2_pdu *close_pdu = next_pdu == NULL ? NULL :
     smb2_cmd_close_async(smb2, &cl_req, movian_smb2_xattr_set_close_cb,
-                         &state);
+                         state);
   if(close_pdu != NULL)
     smb2_add_compound_pdu(smb2, pdu, close_pdu);
 
@@ -1099,6 +1196,7 @@ movian_smb2_set_xattr(struct fa_protocol *fap, const char *url,
     SMB2TRACE("set_xattr build failed url=%s reason=%s", url, errbuf);
     if(pdu != NULL)
       smb2_free_pdu(smb2, pdu);
+    free(state);                /* nothing queued: no callback will fire */
     hts_mutex_unlock(&session->lock);
     movian_smb2_session_release(session);
     movian_smb2_target_fini(&target);
@@ -1107,22 +1205,29 @@ movian_smb2_set_xattr(struct fa_protocol *fap, const char *url,
 
   smb2_queue_pdu(smb2, pdu);
 
-  int rc = movian_smb2_pump(smb2, xattr_set_state_is_done, &state,
+  int rc = movian_smb2_pump(smb2, xattr_set_state_is_done, state,
                             SMB2_DEFAULT_TIMEOUT + 5);
-  if(rc < 0)
+  if(rc < 0) {
+    /* The compound PDUs may still hold callback pointers to *state: park
+       it on the session (freed after the context is torn down) and drop
+       the session from the pool. */
+    state->abandoned = 1;
+    movian_smb2_session_defer_free(session, state);
     movian_smb2_session_invalidate(session);
+    hts_mutex_unlock(&session->lock);
+    movian_smb2_session_release(session);
+    movian_smb2_target_fini(&target);
+    SMB2TRACE("set_xattr timed out url=%s", url);
+    return FAP_ERROR;
+  }
   hts_mutex_unlock(&session->lock);
 
   movian_smb2_session_release(session);
   movian_smb2_target_fini(&target);
 
-  if(rc < 0) {
-    SMB2TRACE("set_xattr timed out url=%s", url);
-    return FAP_ERROR;
-  }
-
   uint32_t status =
-    state.create_status != 0 ? state.create_status : state.op_status;
+    state->create_status != 0 ? state->create_status : state->op_status;
+  free(state);
   fa_err_code_t result = movian_smb2_xattr_status_to_fap(status);
   SMB2TRACE("set_xattr done url=%s name=%s status=0x%x result=%d",
             url, name, status, result);
@@ -1132,6 +1237,7 @@ movian_smb2_set_xattr(struct fa_protocol *fap, const char *url,
 
 typedef struct {
   int done;
+  int abandoned;
   uint32_t create_status;
   uint32_t query_status;
   void *output_buffer;
@@ -1143,6 +1249,8 @@ movian_smb2_xattr_get_create_cb(struct smb2_context *smb2, int status,
                                 void *command_data, void *opaque)
 {
   movian_smb2_xattr_get_state_t *state = opaque;
+  if(state->abandoned)
+    return;
   state->create_status = status;
 }
 
@@ -1151,6 +1259,16 @@ movian_smb2_xattr_get_query_cb(struct smb2_context *smb2, int status,
                                void *command_data, void *opaque)
 {
   movian_smb2_xattr_get_state_t *state = opaque;
+  if(state->abandoned) {
+    /* Nobody will consume a late reply; free the buffer we would have
+       handed over. */
+    if(status == 0 && command_data != NULL) {
+      struct smb2_query_info_reply *rep = command_data;
+      smb2_free_data(smb2, rep->output_buffer);
+      rep->output_buffer = NULL;
+    }
+    return;
+  }
   state->query_status = status;
   if(status == 0 && command_data != NULL) {
     struct smb2_query_info_reply *rep = command_data;
@@ -1164,6 +1282,8 @@ movian_smb2_xattr_get_close_cb(struct smb2_context *smb2, int status,
                                void *command_data, void *opaque)
 {
   movian_smb2_xattr_get_state_t *state = opaque;
+  if(state->abandoned)
+    return;
   state->done = 1;
 }
 
@@ -1213,7 +1333,13 @@ movian_smb2_get_xattr(struct fa_protocol *fap, const char *url,
   }
 
   struct smb2_context *smb2 = session->smb2;
-  movian_smb2_xattr_get_state_t state = {};
+
+  movian_smb2_xattr_get_state_t *state = calloc(1, sizeof(*state));
+  if(state == NULL) {
+    movian_smb2_session_release(session);
+    movian_smb2_target_fini(&target);
+    return FAP_ERROR;
+  }
 
   /* FILE_GET_EA_INFORMATION (MS-FSCC 2.4.15.1) input buffer: a single
    * requested name -- NextEntryOffset(4)=0, EaNameLength(1), EaName, NUL. */
@@ -1246,16 +1372,16 @@ movian_smb2_get_xattr(struct fa_protocol *fap, const char *url,
 
   struct smb2_pdu *pdu =
     smb2_cmd_create_async(smb2, &cr_req, movian_smb2_xattr_get_create_cb,
-                          &state);
+                          state);
   struct smb2_pdu *next_pdu = pdu == NULL ? NULL :
     smb2_cmd_query_info_async(smb2, &qi_req, movian_smb2_xattr_get_query_cb,
-                              &state);
+                              state);
   if(next_pdu != NULL)
     smb2_add_compound_pdu(smb2, pdu, next_pdu);
 
   struct smb2_pdu *close_pdu = next_pdu == NULL ? NULL :
     smb2_cmd_close_async(smb2, &cl_req, movian_smb2_xattr_get_close_cb,
-                         &state);
+                         state);
   if(close_pdu != NULL)
     smb2_add_compound_pdu(smb2, pdu, close_pdu);
 
@@ -1265,6 +1391,7 @@ movian_smb2_get_xattr(struct fa_protocol *fap, const char *url,
     SMB2TRACE("get_xattr build failed url=%s reason=%s", url, errbuf);
     if(pdu != NULL)
       smb2_free_pdu(smb2, pdu);
+    free(state);                /* nothing queued: no callback will fire */
     hts_mutex_unlock(&session->lock);
     movian_smb2_session_release(session);
     movian_smb2_target_fini(&target);
@@ -1273,28 +1400,42 @@ movian_smb2_get_xattr(struct fa_protocol *fap, const char *url,
 
   smb2_queue_pdu(smb2, pdu);
 
-  int rc = movian_smb2_pump(smb2, xattr_get_state_is_done, &state,
+  int rc = movian_smb2_pump(smb2, xattr_get_state_is_done, state,
                             SMB2_DEFAULT_TIMEOUT + 5);
-  if(rc < 0)
+  if(rc < 0) {
+    /* The compound PDUs may still hold callback pointers to *state: park
+       it on the session (freed after the context is torn down) and drop
+       the session from the pool. A partially processed reply may already
+       have stashed the query buffer; nobody will consume it now. */
+    if(state->output_buffer != NULL) {
+      smb2_free_data(smb2, state->output_buffer);
+      state->output_buffer = NULL;
+    }
+    state->abandoned = 1;
+    movian_smb2_session_defer_free(session, state);
     movian_smb2_session_invalidate(session);
+    hts_mutex_unlock(&session->lock);
+    movian_smb2_session_release(session);
+    movian_smb2_target_fini(&target);
+    SMB2TRACE("get_xattr timed out url=%s", url);
+    return FAP_ERROR;
+  }
 
   fa_err_code_t result;
-  if(rc < 0) {
+  if(state->create_status != 0) {
     result = FAP_ERROR;
-  } else if(state.create_status != 0) {
-    result = FAP_ERROR;
-  } else if(state.query_status == SMB2_STATUS_NONEXISTENT_EA_ENTRY ||
-            state.query_status == SMB2_STATUS_NO_EAS_ON_FILE) {
+  } else if(state->query_status == SMB2_STATUS_NONEXISTENT_EA_ENTRY ||
+            state->query_status == SMB2_STATUS_NO_EAS_ON_FILE) {
     /* No such EA on this file. Native's SMB1 QUERY_EAS_FROM_LIST always
        succeeds here with a zero-length value; mirror that instead of
        surfacing an error so a first-ever kvstore read isn't treated as a
        failure. */
     result = FAP_OK;
-  } else if(state.query_status != 0) {
+  } else if(state->query_status != 0) {
     result = FAP_ERROR;
   } else {
-    const uint8_t *buf = state.output_buffer;
-    uint32_t buflen = state.output_buffer_length;
+    const uint8_t *buf = state->output_buffer;
+    uint32_t buflen = state->output_buffer_length;
 
     /* FILE_FULL_EA_INFORMATION (MS-FSCC 2.4.15) single entry: 8-byte fixed
      * header (NextEntryOffset, Flags, EaNameLength, EaValueLength) followed
@@ -1306,18 +1447,23 @@ movian_smb2_get_xattr(struct fa_protocol *fap, const char *url,
       uint16_t ea_value_length = (uint16_t)buf[6] | ((uint16_t)buf[7] << 8);
       uint64_t value_offset = 8u + (uint64_t)ea_name_length + 1u;
 
+      result = FAP_OK;
       if(ea_value_length > 0 && value_offset + ea_value_length <= buflen) {
         void *value = malloc(ea_value_length);
-        memcpy(value, buf + value_offset, ea_value_length);
-        *datap = value;
-        *lenp = ea_value_length;
+        if(value == NULL) {
+          result = FAP_ERROR;
+        } else {
+          memcpy(value, buf + value_offset, ea_value_length);
+          *datap = value;
+          *lenp = ea_value_length;
+        }
       }
-      result = FAP_OK;
     }
   }
 
-  if(state.output_buffer != NULL)
-    smb2_free_data(smb2, state.output_buffer);
+  if(state->output_buffer != NULL)
+    smb2_free_data(smb2, state->output_buffer);
+  free(state);
 
   hts_mutex_unlock(&session->lock);
 
