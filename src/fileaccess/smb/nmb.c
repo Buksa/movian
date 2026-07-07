@@ -618,6 +618,9 @@ nmb_sweep_candidate(const net_addr_t *addr)
     if(!memcmp(ss->ss_addr, addr->na_addr, 4)) {
       /* Already probed (or currently being probed) this round -- skip,
        * don't re-run NBSTAT+connect against a host we already know. */
+      TRACE(TRACE_DEBUG, "NMB",
+            "Wildcard sweep: %s already known, skipping re-probe",
+            net_addr_str(addr));
       hts_mutex_unlock(&nmb_mutex);
       return;
     }
