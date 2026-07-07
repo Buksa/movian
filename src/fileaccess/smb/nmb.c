@@ -185,15 +185,38 @@ ns_destroy(nmb_server_t *ns)
 }
 
 
+#if ENABLE_LIBSMB2
+static void nmb_sweep_flush(void); /* defined with the sweep machinery below */
+#endif
+
 /**
+ * Flush-timer callback (asyncio thread): the master browser has stayed
+ * silent past the 60s nmb_flush_timer window, so drop every registered
+ * server. Runs under nmb_mutex like every other mutator of nmb_servers
+ * (query_master_browser()'s RAP path and nmb_smb2_probe_and_register()
+ * both lock it around their list walks/inserts); ns_destroy() ->
+ * service_destroy() takes service_mutex inside, the same
+ * nmb_mutex-then-service_mutex order service_create_managed() already
+ * establishes in nmb_smb2_probe_and_register(), so no inversion.
  *
+ * The sweep's address-dedup state is flushed together with the server
+ * list (Buksa/movian#70 amendment 1): a sweep-discovered host whose
+ * service row was just destroyed must become re-probeable on the next
+ * sweep tick, or it would stay "seen" -- and thus invisible -- until
+ * process restart.
  */
 static void
 remove_all_servers(void *aux)
 {
   nmb_server_t *ns;
+
+  hts_mutex_lock(&nmb_mutex);
   while((ns = LIST_FIRST(&nmb_servers)) != NULL)
     ns_destroy(ns);
+#if ENABLE_LIBSMB2
+  nmb_sweep_flush();
+#endif
+  hts_mutex_unlock(&nmb_mutex);
 }
 
 
@@ -648,6 +671,43 @@ nmb_sweep_candidate(const net_addr_t *addr)
   *na = *addr;
   na->na_port = 0;
   task_run(nmb_sweep_probe_task, na);
+}
+
+
+/**
+ * Empties the sweep's address-dedup list. Caller must hold nmb_mutex --
+ * the only caller is remove_all_servers() above, which flushes this
+ * together with the nmb_servers list it protects, so the next sweep tick
+ * can re-probe and re-register hosts whose service rows were just
+ * destroyed.
+ *
+ * Interaction with probes in flight during a flush:
+ *
+ *  - nmb_sweep_inflight is deliberately NOT reset here. Every running
+ *    nmb_sweep_probe_task() decrements it exactly once when it finishes,
+ *    flush or no flush; zeroing it here would make those late decrements
+ *    drive the counter negative and break the cap accounting.
+ *
+ *  - Freeing the seen entries cannot race a running probe task: tasks
+ *    never hold pointers into nmb_sweep_seen -- nmb_sweep_candidate()
+ *    hands each task its own malloc'd net_addr_t copy -- so there is
+ *    nothing here a task could double-free or use after free.
+ *
+ *  - Worst case after a flush: the next sweep tick re-spawns a probe for
+ *    an address whose pre-flush probe is still running. Both funnel into
+ *    nmb_smb2_probe_and_register(), whose under-nmb_mutex re-check keeps
+ *    the service list duplicate-free; the cost is one redundant
+ *    NBSTAT+connect, bounded by the same in-flight cap as any probe.
+ */
+static void
+nmb_sweep_flush(void)
+{
+  nmb_sweep_seen_t *ss;
+
+  while((ss = LIST_FIRST(&nmb_sweep_seen)) != NULL) {
+    LIST_REMOVE(ss, ss_link);
+    free(ss);
+  }
 }
 #endif /* ENABLE_LIBSMB2 */
 
