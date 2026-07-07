@@ -389,6 +389,8 @@ wsd_udp_input(void *opaque, const void *data, int size,
 {
   char errbuf[256];
   char *xml = malloc(size + 1);
+  if(xml == NULL)
+    return;
   memcpy(xml, data, size);
   xml[size] = 0;
 
