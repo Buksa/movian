@@ -84,6 +84,9 @@ static uint16_t nmb_transaction_id_tally;
 static struct asyncio_timer nmb_timer;
 static struct asyncio_timer nmb_flush_timer;
 static uint16_t nmb_txid;
+#if ENABLE_LIBSMB2
+static uint16_t nmb_sweep_txid;
+#endif
 #endif
 
 typedef struct {
@@ -543,6 +546,106 @@ nmb_smb2_probe_and_register(const net_addr_t *addr)
 
   TRACE(TRACE_DEBUG, "NMB", "Registered %s (%s) via SMB2 probe", url, id);
 }
+
+
+/*
+ * Wildcard NBNS sweep (Buksa/movian#70): a broadcast NB name-query for "*"
+ * (the nmblookup '*' technique) is sent alongside the periodic
+ * __MSBROWSE__ query in nmb_send_msb_query() below, reaching every
+ * NetBIOS host on the subnet that answers broadcast name queries -- not
+ * just whichever host is the master browser. nmb_udp_input() routes
+ * positive replies tagged with nmb_sweep_txid here instead of falling
+ * into the master-browser or resolver paths.
+ *
+ * The candidate address is always the reply's SOURCE address
+ * (remote_addr), never a payload address -- same reachable-by-construction
+ * rule as the #66 lesson already applied to nmb_resolve()'s multi-homed
+ * handling above; a wildcard reply's embedded address list is just as
+ * unreliable.
+ *
+ * Bounding (per the #70 spec): nmb_sweep_seen dedupes by address so the
+ * query re-firing every 15s doesn't re-spawn a probe task for a host
+ * already probed or in flight; nmb_sweep_inflight caps concurrent probe
+ * tasks so a subnet full of NetBIOS hosts answering at once can't spawn
+ * unbounded task threads. Both the dedup check and the cap check happen
+ * here, before task_run() -- the name/workgroup re-check already inside
+ * nmb_smb2_probe_and_register() only catches duplicates *after* the
+ * (comparatively expensive) NBSTAT+SMB2 round trip has already run.
+ */
+typedef struct nmb_sweep_seen {
+  LIST_ENTRY(nmb_sweep_seen) ss_link;
+  uint8_t ss_addr[4];
+} nmb_sweep_seen_t;
+
+static LIST_HEAD(nmb_sweep_seen_list, nmb_sweep_seen) nmb_sweep_seen;
+static int nmb_sweep_inflight; /* nmb_mutex-protected */
+
+#define NMB_SWEEP_MAX_INFLIGHT 8
+
+/**
+ * task_run() entry point for one sweep candidate. Runs on a task worker
+ * thread, off the asyncio thread, same as query_master_browser()'s probe
+ * path -- nmb_smb2_probe_and_register() already does NBSTAT + the
+ * anonymous SMB2 probe + registration with its own internal dedup.
+ */
+static void
+nmb_sweep_probe_task(void *aux)
+{
+  net_addr_t *na = aux;
+
+  nmb_smb2_probe_and_register(na);
+  free(na);
+
+  hts_mutex_lock(&nmb_mutex);
+  nmb_sweep_inflight--;
+  hts_mutex_unlock(&nmb_mutex);
+}
+
+/**
+ * Called from nmb_udp_input() (asyncio thread) for every positive reply
+ * to the wildcard sweep query. 'addr' is the reply's source address
+ * (na_port irrelevant, zeroed by the caller). Dedupes by address and caps
+ * in-flight probe tasks before spawning a new one.
+ */
+static void
+nmb_sweep_candidate(const net_addr_t *addr)
+{
+  nmb_sweep_seen_t *ss;
+
+  hts_mutex_lock(&nmb_mutex);
+
+  LIST_FOREACH(ss, &nmb_sweep_seen, ss_link) {
+    if(!memcmp(ss->ss_addr, addr->na_addr, 4)) {
+      /* Already probed (or currently being probed) this round -- skip,
+       * don't re-run NBSTAT+connect against a host we already know. */
+      hts_mutex_unlock(&nmb_mutex);
+      return;
+    }
+  }
+
+  if(nmb_sweep_inflight >= NMB_SWEEP_MAX_INFLIGHT) {
+    TRACE(TRACE_DEBUG, "NMB",
+          "Wildcard sweep: %d probes already in flight, dropping candidate %s",
+          nmb_sweep_inflight, net_addr_str(addr));
+    hts_mutex_unlock(&nmb_mutex);
+    return;
+  }
+
+  ss = calloc(1, sizeof(nmb_sweep_seen_t));
+  memcpy(ss->ss_addr, addr->na_addr, 4);
+  LIST_INSERT_HEAD(&nmb_sweep_seen, ss, ss_link);
+  nmb_sweep_inflight++;
+
+  hts_mutex_unlock(&nmb_mutex);
+
+  TRACE(TRACE_DEBUG, "NMB", "Wildcard sweep: new candidate %s, probing",
+        net_addr_str(addr));
+
+  net_addr_t *na = malloc(sizeof(net_addr_t));
+  *na = *addr;
+  na->na_port = 0;
+  task_run(nmb_sweep_probe_task, na);
+}
 #endif /* ENABLE_LIBSMB2 */
 
 
@@ -706,6 +809,14 @@ nmb_udp_input(void *opaque, const void *data, int size,
     asyncio_timer_arm_delta_sec(&nmb_flush_timer, 60);
     return;
   }
+
+#if ENABLE_LIBSMB2
+  if(pkt->h.transaction_id == nmb_sweep_txid) {
+    if(remote_addr != NULL && remote_addr->na_family == 4)
+      nmb_sweep_candidate(remote_addr);
+    return;
+  }
+#endif
 #endif
 
   nmb_resolve_t *nr;
@@ -790,6 +901,13 @@ nmb_send_msb_query(void *aux)
   asyncio_timer_arm_delta_sec(&nmb_timer, 15);
 
   nmb_txid = nmb_send_query("\001\002__MSBROWSE__\002\001", 1, 0);
+
+#if ENABLE_LIBSMB2
+  /* Wildcard NBNS sweep (#70): one extra broadcast packet per tick, no
+   * new timer. encode_name() special-cases "*" (see its NBSTAT use above)
+   * so the name_type argument here is unused. */
+  nmb_sweep_txid = nmb_send_query("*", 0, 0);
+#endif
 }
 #endif /* ENABLE_NATIVESMB || ENABLE_LIBSMB2 */
 
