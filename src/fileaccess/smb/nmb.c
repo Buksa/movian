@@ -658,6 +658,11 @@ nmb_sweep_candidate(const net_addr_t *addr)
   }
 
   ss = calloc(1, sizeof(nmb_sweep_seen_t));
+  if(ss == NULL) {
+    /* OOM: drop the candidate, nothing committed yet. */
+    hts_mutex_unlock(&nmb_mutex);
+    return;
+  }
   memcpy(ss->ss_addr, addr->na_addr, 4);
   LIST_INSERT_HEAD(&nmb_sweep_seen, ss, ss_link);
   nmb_sweep_inflight++;
@@ -668,6 +673,17 @@ nmb_sweep_candidate(const net_addr_t *addr)
         net_addr_str(addr));
 
   net_addr_t *na = malloc(sizeof(net_addr_t));
+  if(na == NULL) {
+    /* OOM: the dedup entry stays (this address really was seen this
+     * round, so re-probing it before the next sweep reset would be
+     * wrong), but no probe task will run for it -- undo the inflight
+     * bump so the cap above doesn't stay wedged against a probe that
+     * never got queued. */
+    hts_mutex_lock(&nmb_mutex);
+    nmb_sweep_inflight--;
+    hts_mutex_unlock(&nmb_mutex);
+    return;
+  }
   *na = *addr;
   na->na_port = 0;
   task_run(nmb_sweep_probe_task, na);
