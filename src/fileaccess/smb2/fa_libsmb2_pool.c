@@ -726,14 +726,26 @@ movian_smb2_io_thread_fn(void *aux)
     }
 
     if(nfds == 2 && pfd[1].revents != 0) {
+      /* Bracket the unlocked smb2_service() call with io_servicing so an
+         in-flight-timeout waiter in op_run() can tell whether a PDU
+         callback may still be writing into its (about-to-be-freed) caller
+         buffer. smb2_service() fires completion callbacks that take
+         q_mutex themselves, so it must run without the lock held. */
+      hts_mutex_lock(&session->q_mutex);
+      session->io_servicing = 1;
+      hts_mutex_unlock(&session->q_mutex);
+
       int src = smb2_service(smb2, pfd[1].revents);
-      if(src < 0) {
-        char reason[164];
+      char reason[164];
+      if(src < 0)
         snprintf(reason, sizeof(reason), "%s", smb2_get_error(smb2));
-        hts_mutex_lock(&session->q_mutex);
+
+      hts_mutex_lock(&session->q_mutex);
+      session->io_servicing = 0;
+      hts_cond_broadcast(&session->q_cond);
+      if(src < 0)
         movian_smb2_io_declare_dead_locked(session, reason);
-        hts_mutex_unlock(&session->q_mutex);
-      }
+      hts_mutex_unlock(&session->q_mutex);
     }
   }
 
@@ -842,6 +854,12 @@ movian_smb2_op_run(movian_smb2_session_t *session, movian_smb2_op_t *op,
     op->abandoned = 1;
     movian_smb2_op_park_locked(session, op);
     movian_smb2_io_declare_dead_locked(session, "SMB2 operation timed out");
+    /* io_dead now blocks any *new* smb2_service() call, but one may
+       already be in progress with a PDU callback pointing into this op's
+       caller-owned buffer (rbuf/wbuf). Wait for it to drain before
+       returning: only then is it safe for the caller to free/reuse buf. */
+    while(session->io_servicing)
+      hts_cond_wait(&session->q_cond, &session->q_mutex);
     hts_mutex_unlock(&session->q_mutex);
     movian_smb2_session_invalidate(session);
     if(errbuf != NULL)
