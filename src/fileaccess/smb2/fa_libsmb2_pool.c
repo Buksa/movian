@@ -1254,6 +1254,13 @@ movian_smb2_session_error(movian_smb2_session_t *session, int status)
   case EXDEV:
   case ENAMETOOLONG:
     return;                     /* application-level: the session is healthy */
+  case ETIMEDOUT:
+    /* op_run() owns the timeout->session policy: a queued timeout means the
+       owner thread never touched the context (session left healthy in the
+       pool), while an in-flight timeout already invalidated the session
+       itself via movian_smb2_io_declare_dead_locked()+invalidate(). Either
+       way this generic error path has nothing to add. */
+    return;
   default:
     break;
   }
