@@ -730,22 +730,36 @@ movian_smb2_io_thread_fn(void *aux)
          in-flight-timeout waiter in op_run() can tell whether a PDU
          callback may still be writing into its (about-to-be-freed) caller
          buffer. smb2_service() fires completion callbacks that take
-         q_mutex themselves, so it must run without the lock held. */
-      hts_mutex_lock(&session->q_mutex);
-      session->io_servicing = 1;
-      hts_mutex_unlock(&session->q_mutex);
+         q_mutex themselves, so it must run without the lock held.
 
-      int src = smb2_service(smb2, pfd[1].revents);
-      char reason[164];
-      if(src < 0)
-        snprintf(reason, sizeof(reason), "%s", smb2_get_error(smb2));
-
+         The io_dead re-check here is atomic with setting io_servicing:
+         'dead' was sampled once at the top of this iteration, so a waiter
+         could have declared the transport dead (and returned, freeing its
+         buffer) after that sample but before this point. Re-checking under
+         q_mutex makes the waiter's {set io_dead; check io_servicing} and
+         this {check io_dead; set io_servicing} mutually exclusive: if the
+         waiter won, we see io_dead and skip the service (no write into the
+         freed buffer); if we won, the waiter sees io_servicing=1 and waits
+         for the drain. */
       hts_mutex_lock(&session->q_mutex);
-      session->io_servicing = 0;
-      hts_cond_broadcast(&session->q_cond);
-      if(src < 0)
-        movian_smb2_io_declare_dead_locked(session, reason);
-      hts_mutex_unlock(&session->q_mutex);
+      if(session->io_dead) {
+        hts_mutex_unlock(&session->q_mutex);
+      } else {
+        session->io_servicing = 1;
+        hts_mutex_unlock(&session->q_mutex);
+
+        int src = smb2_service(smb2, pfd[1].revents);
+        char reason[164];
+        if(src < 0)
+          snprintf(reason, sizeof(reason), "%s", smb2_get_error(smb2));
+
+        hts_mutex_lock(&session->q_mutex);
+        session->io_servicing = 0;
+        hts_cond_broadcast(&session->q_cond);
+        if(src < 0)
+          movian_smb2_io_declare_dead_locked(session, reason);
+        hts_mutex_unlock(&session->q_mutex);
+      }
     }
   }
 
