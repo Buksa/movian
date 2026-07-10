@@ -61,7 +61,7 @@ modules:
       - install -Dm644 support/flatpak/dev.uzver.Movian.desktop /app/share/applications/dev.uzver.Movian.desktop
       - install -Dm644 support/flatpak/dev.uzver.Movian.GameMode.desktop /app/share/applications/dev.uzver.Movian.GameMode.desktop
       - >-
-        movian_version=$(cat .movian-version-override 2>/dev/null) &&
+        movian_version=$(cat .movian-version-override 2>/dev/null || true) &&
         if [ -z "$movian_version" ]; then
         movian_version=$(git describe --always --dirty --abbrev=5 2>/dev/null || printf '0.0.0');
         fi &&
