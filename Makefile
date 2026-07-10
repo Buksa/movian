@@ -18,6 +18,14 @@
 .SUFFIXES:
 SUFFIXES=
 
+# Without this, a recipe that fails after already creating/truncating its
+# target (e.g. a linker killed by OOM, or one that exits non-zero without
+# being caught by a signal) leaves a corrupt-but-present file with a fresh
+# mtime. A later `make` invocation over the same build dir (e.g. a retried
+# `flatpak-builder --keep-build-dirs` run) then sees that target as
+# up to date from prerequisites alone and never relinks it, so the broken
+# artifact ships silently. See Buksa/movian#64.
+.DELETE_ON_ERROR:
 
 C ?= ${CURDIR}
 
@@ -251,11 +259,19 @@ SRCS-$(CONFIG_LIBAV) += \
 SRCS-$(CONFIG_LOCATEDB)        += src/fileaccess/fa_locatedb.c
 SRCS-$(CONFIG_SPOTLIGHT)       += src/fileaccess/fa_spotlight.c
 SRCS-$(CONFIG_LIBNTFS)         += src/fileaccess/fa_ntfs.c
-SRCS-$(CONFIG_NATIVESMB)       += src/fileaccess/smb/fa_nativesmb.c \
-				  src/fileaccess/smb/nmb.c
-SRCS-$(CONFIG_LIBSMB2)         += src/fileaccess/smb2/fa_libsmb2.c
+SRCS-$(CONFIG_NATIVESMB)       += src/fileaccess/smb/fa_nativesmb.c
+SRCS-$(CONFIG_LIBSMB2)         += src/fileaccess/smb2/fa_libsmb2.c \
+				  src/fileaccess/smb2/fa_libsmb2_pool.c
 SRCS-$(CONFIG_LIBSMB2)         += src/networking/smb_server.c
 SRCS-$(CONFIG_RAR)             += src/fileaccess/fa_rar.c
+
+# nmb.c provides NetBIOS name resolution (a DNS fallback used by both the
+# native SMB1 backend and the smb2 backend) and, only when the native
+# backend is also present, LAN master-browser discovery. Compile it once
+# when either backend is enabled -- never twice when both are.
+ifneq (,$(filter yes,$(CONFIG_NATIVESMB) $(CONFIG_LIBSMB2)))
+SRCS += src/fileaccess/smb/nmb.c
+endif
 
 BUNDLES += res/fileaccess
 
@@ -266,6 +282,14 @@ BUNDLES += res/fileaccess
 SRCS 			+= src/sd/sd.c
 SRCS-$(CONFIG_AVAHI) 	+= src/sd/avahi.c
 SRCS-$(CONFIG_BONJOUR) 	+= src/sd/bonjour.c
+
+# WS-Discovery client -- finds modern Windows (10/11) hosts that dropped
+# SMB1/NetBIOS browsing and don't advertise SMB over mDNS, registering them
+# as smb2:// services. No external library dependency (plain UDP multicast
+# + the in-tree XML parser), so it isn't gated like avahi.c; it only needs
+# the smb2 client to make the services it registers useful, independent of
+# CONFIG_NATIVESMB.
+SRCS-$(CONFIG_LIBSMB2)	+= src/sd/wsd.c
 
 ${BUILDDIR}/src/sd/avahi.o : CFLAGS = $(CFLAGS_AVAHI) -Wall -Werror  ${OPTFLAGS}
 
@@ -569,13 +593,27 @@ SRCS-$(CONFIG_DVD) += 	ext/dvd/dvdcss/css.c \
 			ext/dvd/dvdnav/vm/vmget.c \
 			ext/dvd/dvdnav/searching.c
 
-${BUILDDIR}/ext/dvd/dvdcss/%.o : CFLAGS = ${OPTFLAGS} \
+# GCC 14 (default on Debian 13 / Fedora 40+ / Ubuntu 24.10) promoted several
+# long-standing C warnings to errors by default in the C frontend, independent
+# of -Werror: -Wimplicit-function-declaration, -Wincompatible-pointer-types,
+# -Wint-conversion, -Wimplicit-int. ext/dvd is built with only ${OPTFLAGS}
+# (no -Wall/-Werror), so two vendored hits stopped the parallel build:
+# dvdcss svfs_readv (const struct iovec *) and libdvdread ISOFindFile (no
+# prototype). The dvdcss/libdvdread/dvdnav upstreams are effectively frozen,
+# so per issue #68 path (c) use scoped compat flags rather than hand-patches
+# that would desync from upstream.
+DVD_COMPAT_FLAGS = -Wno-implicit-function-declaration \
+		   -Wno-incompatible-pointer-types \
+		   -Wno-int-conversion \
+		   -Wno-implicit-int
+
+${BUILDDIR}/ext/dvd/dvdcss/%.o : CFLAGS = ${OPTFLAGS} $(DVD_COMPAT_FLAGS) \
  -DHAVE_LIMITS_H -DHAVE_UNISTD_H -DHAVE_ERRNO_H -DVERSION="0" $(DVDCSS_CFLAGS)
 
-${BUILDDIR}/ext/dvd/libdvdread/%.o : CFLAGS = ${OPTFLAGS} \
- -DHAVE_DVDCSS_DVDCSS_H -DDVDNAV_COMPILE -Wno-strict-aliasing  -Iext/dvd 
+${BUILDDIR}/ext/dvd/libdvdread/%.o : CFLAGS = ${OPTFLAGS} $(DVD_COMPAT_FLAGS) \
+ -DHAVE_DVDCSS_DVDCSS_H -DDVDNAV_COMPILE -Wno-strict-aliasing  -Iext/dvd
 
-${BUILDDIR}/ext/dvd/dvdnav/%.o : CFLAGS = ${OPTFLAGS} \
+${BUILDDIR}/ext/dvd/dvdnav/%.o : CFLAGS = ${OPTFLAGS} $(DVD_COMPAT_FLAGS) \
  -DVERSION=\"movian\" -DDVDNAV_COMPILE -Wno-strict-aliasing -Iext/dvd \
  -Iext/dvd/dvdnav
 
@@ -654,7 +692,13 @@ SRCS-$(CONFIG_POLARSSL) += \
 	ext/polarssl-1.3/library/xtea.c \
 
 
-${BUILDDIR}/ext/polarssl-1.3/library/%.o : CFLAGS = -Wall ${OPTFLAGS}
+# Vendored polarssl 1.3 is frozen upstream and trips GCC 14's promotion of
+# -Wimplicit-function-declaration to an error (e.g. camellia.c only includes
+# <string.h> under POLARSSL_SELF_TEST but calls memset/memcpy regardless).
+# Same as ext/dvd above: scoped compat flags per issue #68 path (c), not
+# hand-patches that would desync from upstream.
+${BUILDDIR}/ext/polarssl-1.3/library/%.o : CFLAGS = -Wall ${OPTFLAGS} \
+	-Wno-implicit-function-declaration
 
 
 ifeq ($(CONFIG_POLARSSL), yes)

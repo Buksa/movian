@@ -108,3 +108,50 @@ Checks under GDB:
 
 The scripts seed credentials into an isolated Movian profile and remove the
 seeded keyring before exit. Logs are also sanitized for the password string.
+
+## Diagnosing Connection Pool, Read Pipelining, and Keepalive
+
+The SMB2 backend keeps a per-`(server, share, user, domain)` session pool, a
+pipelined large-read path, and a 30 s echo keepalive. None of those are
+exercised by the navigation/write smokes above (which use `--no-ui` and a single
+URL), so verify them separately with the SMB2 client trace enabled.
+
+`smbdebug` is a `dev`-group setting, not a CLI flag, and the HTTP `/api/prop`
+path `settings/dev/nodes/smbdebug` returns 404 in this build. Enable it for an
+isolated run by writing the htsmsg JSON store directly:
+
+```sh
+mkdir -p "$ART/profile/persistent/settings"
+printf '{"smbdebug":1}\n' >"$ART/profile/persistent/settings/dev"
+```
+
+Then launch with `-d`, open `search:smb2://$SMB_SMOKE_HOST/$SMB_SMOKE_SHARE/`
+through `/api/open`, and assert against `SMB2-CLIENT` log lines:
+
+- **Pool reuse.** One `Pool create ... refcount=1` per (server, share) pair, then
+  many `Pool reuse ... refcount=1` per VFS call (scan/stat/open/...). Before the
+  pool, every call paid a full `Connecting to` + `Session setup`. A regression
+  shows `Connecting to` counts close to the operation count.
+- **Echo keepalive.** With an idle pooled session held for ~30 s, expect
+  `Keepalive ... echo rc=0 missed=0` recurring every `SMB2_ECHO_INTERVAL`
+  (30 s). The session must stay pooled and not flip to `broken`. If you see
+  `rc=-12` / `ENOMEM`, the bundled `ext/libsmb2` is missing the `smb2_echo`
+  socket-validity fix (see "libsmb2 echo fix" below), not a dead session.
+
+## libsmb2 echo fix
+
+`smb2_echo()` in `ext/libsmb2/lib/sync.c` historically had an inverted
+socket-validity check (`SMB2_VALID_SOCKET` instead of `!SMB2_VALID_SOCKET`), so
+it always reported "Not Connected" on a live session. Upstream commit `82d8bb6`
+("smb2_echo fails if socket fd is valid") fixed it; that commit is included in
+the `ext/libsmb2` gitlink that PR #47 bumped into `movian6` (`998e569`).
+
+If `ext/libsmb2` is ever pinned back to the bare `libsmb2-6.2` tag (before
+`82d8bb6`), `smb2_echo()` returns `-ENOMEM` and the keepalive marks healthy
+sessions broken after `SMB2_ECHO_MAX_MISSED` intervals. Verify the submodule
+carries the fix with:
+
+```sh
+grep -q '!SMB2_VALID_SOCKET(smb2->fd)' ext/libsmb2/lib/sync.c \
+  && echo "echo fix present" || echo "echo fix MISSING"
+```

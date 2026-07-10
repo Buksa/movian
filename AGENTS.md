@@ -21,6 +21,11 @@ file reads:
 Use the equivalent MCP tools when available. Fall back to `rg` when the index
 does not cover the question or reports pending changes.
 
+After changing source files, run `codegraph sync` so later CodeGraph queries
+(yours or another agent's) reflect the edits. The file watcher lags writes by
+about a second; `codegraph sync` makes the refresh explicit. This applies to
+executor and verifier agents as well, not just interactive sessions.
+
 ## WSL Workspace Guardrail
 
 When working from Windows tooling against this WSL checkout, open the workspace
