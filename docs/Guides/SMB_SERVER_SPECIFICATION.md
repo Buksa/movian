@@ -52,7 +52,7 @@
 * `smb2://host:port/` должен проходить через `IPC$` и pipe `srvsvc`. Минимальный `NetrShareEnum` возвращает только настроенную share и не включает network-neighborhood discovery.
 * Movian SMB2 client и часть внешних клиентов используют compound `CREATE + QUERY_INFO + CLOSE` для `stat()`. В таких цепочках `QUERY_INFO` и `CLOSE` могут передавать all-`FF` File ID как related-operation placeholder. Сервер хранит последний созданный handle в сессии и резолвит этот placeholder в реальный File ID.
 * Deep browse `smb2://host:port/share/zona/` должен логировать последовательность `Create OK` directory -> `QueryInfo: FILE/ALL` -> client `stat ok` -> `QueryDir`. Если `Create OK` есть, но `QueryInfo` нет, искать проблему в related compound File ID обработке.
-* Password SMB3 signing пока проверяется отдельным diagnostic smoke: password SMB2 write/read является обязательным baseline, anonymous SMB2/SMB3 navigation является обязательным baseline, а password SMB3 можно сделать обязательным через `SMB_SERVER_SMOKE_REQUIRE_PASSWORD_SMB3=1`.
+* Password SMB3 signing работает для всех SMB3 диалектов (Buksa/movian#74) и является обязательной hard-проверкой в embedded-server smoke: password SMB2 write/read, anonymous SMB2/SMB3 navigation и password SMB3 listing (`SMB3_00`/`SMB3_02`/`SMB3_11`, каждый диалект зафиксирован точно) — все обязательный baseline.
 
 ## 3. Таблица трансляции ошибок (Error Code Mappings)
 
