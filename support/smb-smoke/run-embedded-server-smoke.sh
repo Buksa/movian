@@ -186,21 +186,28 @@ run_file_root_case() {
   [ ! -e /tmp/movian-ipc-denied.bin ] ||
     fail "IPC$ non-pipe create unexpectedly read from the disk share"
 
-  set +e
-  smbclient "//127.0.0.1/$SMB_SERVER_SMOKE_SHARE" \
-    -p "$port" -U "$SMB_SERVER_SMOKE_USER%$SMB_SERVER_SMOKE_PASSWORD" \
-    -m SMB3 -c 'ls; cd dir; ls' >"$ART/file-smb3-ls.log" 2>&1
-  smb3_ls_rc=$?
-  set -e
-  if [ "$smb3_ls_rc" -ne 0 ]; then
-    echo "WARN: password SMB3 listing failed; see $ART/file-smb3-ls.log" \
-      >"$ART/file-smb3-ls.warning"
-    [ "${SMB_SERVER_SMOKE_REQUIRE_PASSWORD_SMB3:-0}" != "1" ] ||
-      fail "password SMB3 listing failed"
-  else
-    grep -q 'movie.mkv' "$ART/file-smb3-ls.log" || fail "SMB3 ls did not show movie.mkv"
-    grep -q 'nested.mp4' "$ART/file-smb3-ls.log" || fail "SMB3 ls did not show nested.mp4"
-  fi
+  # Password SMB3 signing is a hard check by default: every SMB3 dialect
+  # must sign correctly against the embedded server (Buksa/movian#74).
+  for smb3_dialect in SMB3_00 SMB3_02 SMB3_11; do
+    smbclient "//127.0.0.1/$SMB_SERVER_SMOKE_SHARE" \
+      -p "$port" -U "$SMB_SERVER_SMOKE_USER%$SMB_SERVER_SMOKE_PASSWORD" \
+      -m "$smb3_dialect" -c 'ls; cd dir; ls' \
+      >"$ART/file-smb3-ls-$smb3_dialect.log" 2>&1 ||
+      fail "password $smb3_dialect listing failed; see $ART/file-smb3-ls-$smb3_dialect.log"
+    grep -q 'movie.mkv' "$ART/file-smb3-ls-$smb3_dialect.log" ||
+      fail "$smb3_dialect ls did not show movie.mkv"
+    grep -q 'nested.mp4' "$ART/file-smb3-ls-$smb3_dialect.log" ||
+      fail "$smb3_dialect ls did not show nested.mp4"
+
+    set +e
+    smbclient "//127.0.0.1/$SMB_SERVER_SMOKE_SHARE" \
+      -p "$port" -U "$SMB_SERVER_SMOKE_USER%wrongpass" \
+      -m "$smb3_dialect" -c 'ls' >"$ART/file-smb3-wrong-password-$smb3_dialect.log" 2>&1
+    smb3_wrong_rc=$?
+    set -e
+    [ "$smb3_wrong_rc" -ne 0 ] ||
+      fail "wrong password unexpectedly succeeded on $smb3_dialect"
+  done
 
   local file_dialect="${SMB_SERVER_SMOKE_FILE_DIALECT:-SMB2}"
 
