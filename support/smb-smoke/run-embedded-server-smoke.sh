@@ -188,10 +188,16 @@ run_file_root_case() {
 
   # Password SMB3 signing is a hard check by default: every SMB3 dialect
   # must sign correctly against the embedded server (Buksa/movian#74).
+  # Pin BOTH the client min and max protocol to the exact dialect: -m only
+  # caps the maximum, so on its own a server that quietly stopped
+  # advertising e.g. SMB3_11 would let the client fall back to SMB3_02/SMB2
+  # and still pass this "every SMB3 dialect" gate. Forcing min == max makes
+  # negotiation fail (and this check fail) unless that exact dialect is used.
   for smb3_dialect in SMB3_00 SMB3_02 SMB3_11; do
     smbclient "//127.0.0.1/$SMB_SERVER_SMOKE_SHARE" \
       -p "$port" -U "$SMB_SERVER_SMOKE_USER%$SMB_SERVER_SMOKE_PASSWORD" \
-      -m "$smb3_dialect" -c 'ls; cd dir; ls' \
+      -m "$smb3_dialect" --option="client min protocol=$smb3_dialect" \
+      -c 'ls; cd dir; ls' \
       >"$ART/file-smb3-ls-$smb3_dialect.log" 2>&1 ||
       fail "password $smb3_dialect listing failed; see $ART/file-smb3-ls-$smb3_dialect.log"
     grep -q 'movie.mkv' "$ART/file-smb3-ls-$smb3_dialect.log" ||
@@ -202,7 +208,8 @@ run_file_root_case() {
     set +e
     smbclient "//127.0.0.1/$SMB_SERVER_SMOKE_SHARE" \
       -p "$port" -U "$SMB_SERVER_SMOKE_USER%wrongpass" \
-      -m "$smb3_dialect" -c 'ls' >"$ART/file-smb3-wrong-password-$smb3_dialect.log" 2>&1
+      -m "$smb3_dialect" --option="client min protocol=$smb3_dialect" \
+      -c 'ls' >"$ART/file-smb3-wrong-password-$smb3_dialect.log" 2>&1
     smb3_wrong_rc=$?
     set -e
     [ "$smb3_wrong_rc" -ne 0 ] ||

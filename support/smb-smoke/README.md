@@ -54,8 +54,9 @@ Checks a local Movian SMB2 server with an isolated profile:
   `profile-summary.txt` so saved torrent/bookmark/keyring state cannot quietly
   trigger unrelated remote SMB2 client scans;
 - password SMB2 `smbclient` listing and writable operations;
-- password SMB3 listing as a diagnostic check; set
-  `SMB_SERVER_SMOKE_REQUIRE_PASSWORD_SMB3=1` to make it mandatory;
+- password SMB3 listing (and wrong-password rejection) as a mandatory hard
+  check against `SMB3_00`, `SMB3_02` and `SMB3_11`, each dialect pinned
+  exactly (client min == max protocol);
 - wrong password rejection;
 - `get`, `put`, `mkdir`, `rename`, `del`, `rmdir` using
   `SMB_SERVER_SMOKE_FILE_DIALECT` (default `SMB2`);
