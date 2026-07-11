@@ -216,6 +216,23 @@ run_file_root_case() {
       fail "wrong password unexpectedly succeeded on $smb3_dialect"
   done
 
+  # NOTE (Buksa/movian#76): the server now rejects any post-auth PDU that
+  # arrives with SMB2_FLAGS_SIGNED clear on a signing-required session
+  # (ext/libsmb2 lib/socket.c). There is no reliable *automated* negative
+  # test for this with stock tooling: `smbclient --option="client
+  # signing=disabled"` still signs its PDUs once the server advertises
+  # SMB2_NEGOTIATE_SIGNING_REQUIRED (verified manually — smbclient ignores
+  # the "disabled" preference and negotiates signing on anyway, so the
+  # command exits 0 and browses normally instead of failing). Adding that
+  # as a gate here would just be a no-op assertion, so it is intentionally
+  # left out. The bypass and the fix were instead proven with a throwaway,
+  # never-committed patch to Movian's own libsmb2 client (lib/pdu.c) that
+  # forced unsigned outgoing PDUs on a password/SMB3 session against this
+  # same embedded server: pre-fix the server served the request; post-fix
+  # it tore the connection down (smb_destruction "disconnected (abrupt)")
+  # before any file operation. See the issue #76 report for the captured
+  # smbdebug evidence.
+
   local file_dialect="${SMB_SERVER_SMOKE_FILE_DIALECT:-SMB2}"
 
   set +e
