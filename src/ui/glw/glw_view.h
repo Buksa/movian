@@ -213,6 +213,7 @@ typedef struct errorinfo {
   char file[PATH_MAX];
   char error[128];
   int line;
+  int traced; // Set by glw_view_seterr() once the error has been TRACE_ERROR:ed
 } errorinfo_t;
 
 

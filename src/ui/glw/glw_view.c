@@ -217,7 +217,7 @@ gcv_load(glw_root_t *gr, glw_cached_view_t *gcv, int may_unlock)
 {
   char errbuf[512];
   buf_t *buf;
-  errorinfo_t ei;
+  errorinfo_t ei = {};
 
   if(may_unlock)
     glw_unlock(gr);
@@ -243,6 +243,8 @@ gcv_load(glw_root_t *gr, glw_cached_view_t *gcv, int may_unlock)
     snprintf(errmsg, sizeof(errmsg), "Unable to open \"%s\" -- %s",
              rstr_get(file), errbuf);
     gcv->gcv_error = strdup(errmsg);
+    tracelog(TRACE_NO_PROP, TRACE_ERROR, "GLW", "Error %s:%d: %s",
+             rstr_get(file), 0, errmsg);
     return;
   }
 
@@ -277,6 +279,13 @@ gcv_load(glw_root_t *gr, glw_cached_view_t *gcv, int may_unlock)
   gcv->gcv_error = strdup(ei.error);
   gcv->gcv_error_file = strdup(ei.file);
   gcv->gcv_error_line = ei.line;
+  // Parser/preproc errors are already TRACE_ERROR:ed by glw_view_seterr();
+  // avoid logging those twice. Lexer errors and #include/#import load
+  // failures fill 'ei' directly and never pass through seterr(), so trace
+  // them here -- this is the single convergence point for all load failures.
+  if(!ei.traced)
+    tracelog(TRACE_NO_PROP, TRACE_ERROR, "GLW", "Error %s:%d: %s",
+             ei.file, ei.line, ei.error);
 }
 
 

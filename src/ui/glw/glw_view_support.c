@@ -499,6 +499,7 @@ glw_view_seterr(errorinfo_t *ei, token_t *b, const char *fmt, ...)
   ei->line = b->line;
   tracelog(TRACE_NO_PROP, TRACE_ERROR, "GLW", "Error %s:%d: %s",
            rstr_get(b->file), b->line, ei->error);
+  ei->traced = 1;
 
   return -1;
 }
