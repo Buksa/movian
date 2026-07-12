@@ -32,18 +32,20 @@ def emit(args: argparse.Namespace, data: dict, human: str) -> None:
 def cmd_run(args: argparse.Namespace) -> int:
     inst = Instance(args.name)
     own_pid = inst.live_pid()
-    all_pids = harness.movian_pids()
-    foreign = [p for p in all_pids if p != own_pid]
+    foreign, collisions = harness.classify_foreign(inst, own_pid)
 
-    if foreign:
+    # Same-dir collision: a live movian pid is using this instance's own
+    # --persistent path but state.json didn't confirm it as `own_pid`
+    # (stale/corrupted state.json, or a race). Refuse -- this is not a
+    # foreign instance, it's ambiguity about our own state (issue #94).
+    if collisions:
         raise MdevError(
-            "refusing to start: live movian process(es) not owned by "
-            "instance %r: pid %s (their state is not in %s). "
-            "Stop them from their own instance; --force never kills "
-            "foreign pids." % (
-                args.name,
-                ", ".join(str(p) for p in foreign),
-                inst.state_path,
+            "refusing to start: live movian pid(s) using %s are not "
+            "confirmed as instance %r's own process by state.json: %s -- "
+            "this instance's state may be corrupted; investigate before "
+            "using --force." % (
+                inst.persistent, args.name,
+                ", ".join("%d (%s)" % (p, c) for p, c in collisions),
             ),
             exit_code=2,
         )
@@ -56,6 +58,12 @@ def cmd_run(args: argparse.Namespace) -> int:
                 exit_code=2,
             )
         harness.kill_owned_pid(own_pid)
+
+    # Foreign movian instances (not ours, not a same-dir collision) are
+    # safe to coexist with: isolated profile + dynamic port, no state.json
+    # overlap. Warn instead of refusing (issue #94).
+    if foreign:
+        print(harness.coexist_warning(foreign), file=sys.stderr)
 
     inst.ensure_dirs()
 
@@ -377,8 +385,21 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--json", action="store_true",
                         help="machine-readable JSON output")
 
-    run = sub.add_parser("run", parents=[common],
-                         help="launch an isolated Movian instance")
+    run = sub.add_parser(
+        "run", parents=[common],
+        help="launch an isolated Movian instance",
+        description="Launch an isolated Movian instance under "
+                    "/tmp/mdev/<name>/. Coexists with any foreign movian "
+                    "process (own isolated profile + dynamic port): prints "
+                    "a one-line warning naming the foreign pid(s) and "
+                    "proceeds. Exit 2 is reserved for (a) this same --name "
+                    "already alive (use --force to restart it) and (b) a "
+                    "live pid using this instance's own --persistent path "
+                    "that state.json can't confirm as ours (corrupted/"
+                    "stale state -- investigate, don't --force blindly). "
+                    "`mdev stop`/`--force` only ever signal the pid "
+                    "recorded in this instance's own state.json, never a "
+                    "foreign pid.")
     run.add_argument("-p", "--plugin", action="append", default=[],
                      metavar="DIR", help="plugin dev directory; repeatable")
     run.add_argument("--skin", metavar="DIR",

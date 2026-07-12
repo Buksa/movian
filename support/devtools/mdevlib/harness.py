@@ -11,6 +11,7 @@ import os
 import re
 import signal
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -133,8 +134,9 @@ class Instance:
 # Process guard
 # ---------------------------------------------------------------------------
 
-def movian_pids() -> list[int]:
-    """All live pids whose command line invokes a movian binary.
+def movian_procs() -> list[tuple[int, str]]:
+    """All live (pid, cmdline) pairs whose command line invokes a movian
+    binary. `cmdline` is the raw `pgrep -fa` argv string (space-joined).
 
     Uses `pgrep -fa movian` and keeps only processes where some argv token's
     basename is exactly "movian" (avoids matching unrelated processes whose
@@ -147,7 +149,7 @@ def movian_pids() -> list[int]:
         ).stdout
     except OSError as error:
         raise MdevError("pgrep failed: %s" % error)
-    pids = []
+    procs = []
     for line in out.splitlines():
         try:
             pid_str, cmdline = line.split(" ", 1)
@@ -155,9 +157,51 @@ def movian_pids() -> list[int]:
             continue
         for token in cmdline.split():
             if os.path.basename(token) == "movian":
-                pids.append(int(pid_str))
+                procs.append((int(pid_str), cmdline))
                 break
-    return [p for p in pids if p != os.getpid()]
+    return [(p, c) for p, c in procs if p != os.getpid()]
+
+
+def movian_pids() -> list[int]:
+    """All live pids whose command line invokes a movian binary. See
+    `movian_procs()` for the (pid, cmdline) form used by the coexistence
+    guard."""
+    return [p for p, _ in movian_procs()]
+
+
+def classify_foreign(
+    inst: "Instance", own_pid: int | None
+) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
+    """Split live movian pids (excluding `own_pid`) into (coexistable
+    foreign, same-dir collisions) (issue #94).
+
+    A "collision" is a live movian pid whose cmdline references this
+    instance's own `--persistent` path -- i.e. something is running against
+    our state dir that `state.json` did not confirm as `own_pid` (stale/
+    corrupted state.json, or a race). That case still refuses (exit 2):
+    coexistence is only safe for genuinely separate instances/profiles.
+    Every other live movian pid is a "foreign" instance -- isolated profile,
+    dynamic port, no state.json overlap -- safe to warn-and-coexist with.
+    """
+    persistent_str = str(inst.persistent)
+    foreign: list[tuple[int, str]] = []
+    collisions: list[tuple[int, str]] = []
+    for pid, cmdline in movian_procs():
+        if pid == own_pid:
+            continue
+        if persistent_str in cmdline:
+            collisions.append((pid, cmdline))
+        else:
+            foreign.append((pid, cmdline))
+    return foreign, collisions
+
+
+def coexist_warning(foreign: list[tuple[int, str]]) -> str:
+    """One-line coexistence warning naming each foreign pid + cmdline
+    (issue #94 contract)."""
+    return "coexisting with foreign movian: " + "; ".join(
+        "pid %d (%s)" % (pid, cmdline) for pid, cmdline in foreign
+    )
 
 
 def pid_is_movian(pid: int) -> bool:
@@ -293,8 +337,10 @@ def ensure_running(name: str, plugins: list[str]) -> Instance:
     """Return a live Instance named `name`, launching one with `plugins`
     if it is not already up. Reuses an already-running instance as-is
     (its existing plugin/skin selection wins -- this does not restart
-    it even if `plugins` differs). Same foreign-pid guard as `mdev run`:
-    never touches a movian process this state dir doesn't own.
+    it even if `plugins` differs). Same coexistence guard as `mdev run`
+    (issue #94): warns and proceeds next to a foreign movian instance;
+    never touches a movian process this state dir doesn't own, and still
+    refuses (exit 2) on a same-dir collision (see `classify_foreign()`).
 
     Used by `mdev preview` (issue #87) to auto-start the viewpreview
     instance on first use. Passes the existing core CLI flag
@@ -309,17 +355,20 @@ def ensure_running(name: str, plugins: list[str]) -> Instance:
     if inst.live_pid() is not None:
         return inst
 
-    foreign = movian_pids()
-    if foreign:
+    foreign, collisions = classify_foreign(inst, None)
+    if collisions:
         raise MdevError(
-            "refusing to start: live movian process(es) not owned by "
-            "instance %r: pid %s (their state is not in %s). "
-            "Stop them from their own instance; mdev preview never "
-            "kills foreign pids." % (
-                name, ", ".join(str(p) for p in foreign), inst.state_path,
+            "refusing to start: live movian pid(s) using %s are not "
+            "confirmed as instance %r's own process by state.json: %s -- "
+            "this instance's state may be corrupted; investigate before "
+            "retrying." % (
+                inst.persistent, name,
+                ", ".join("%d (%s)" % (p, c) for p, c in collisions),
             ),
             exit_code=2,
         )
+    if foreign:
+        print(coexist_warning(foreign), file=sys.stderr)
 
     inst.ensure_dirs()
     argv = build_argv(inst, plugins, None, False, None,

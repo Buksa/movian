@@ -8,14 +8,19 @@ launching or interpreting Movian plugin smokes.
 - Do not launch Movian from the plugin directory with an absolute binary
   path. Launch from the Movian checkout root (`mdev` already does this); the
   cwd affects `dataroot://` GLW skin/shader resolution.
-- Do not start another Movian if a manual or non-test instance is already
-  running. `mdev run`/`mdev preview` already refuse to start when a
-  `movian`-basename process not owned by their own state dir is alive (exit
-  code 2) — if you launch the binary directly instead, use the same
-  basename-anchored check (`pgrep -fa movian`, then keep only lines where an
-  argv token's basename is exactly `movian`) rather than a bare
+- `mdev run`/`mdev preview` coexist by default with a manual or foreign
+  Movian instance (isolated profile + dynamic port — see the `movian-run`
+  skill's coexistence guard, issue #94): they print a one-line warning
+  naming the foreign pid(s) and proceed, and never signal a pid they don't
+  own. Exit code 2 is reserved for a same-`--name` collision or a same-dir
+  collision (a live pid using *this* instance's own `--persistent` path that
+  `state.json` can't confirm as owned) — not for a foreign instance merely
+  existing. If you launch the binary directly instead of via `mdev`, still
+  use the basename-anchored check (`pgrep -fa movian`, then keep only lines
+  where an argv token's basename is exactly `movian`) rather than a bare
   `pgrep -f movian`, which also matches unrelated processes whose *path*
-  merely contains the substring "movian".
+  merely contains the substring "movian" — and never signal a pid you did
+  not start yourself.
 - Do not hardcode `42000`. Parse `http-server: Listening on port ...` from
   the current log every run (`mdev` does this for you).
 - Do not use `--no-ui` for HTTP prop navigation smokes. Keep it for

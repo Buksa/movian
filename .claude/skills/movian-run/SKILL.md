@@ -50,7 +50,7 @@ mdev stop [--name NAME]
   launch (e.g. `smbdebug=1`) — the profile-scoped way to turn on subsystem
   debug logging; see `movian-plugin-testing/references/debug-flags.md`.
 - `--force`: restart the instance *this state dir* owns. It never signals a
-  process it doesn't own (see stale-process guard below).
+  process it doesn't own (see coexistence guard below).
 - `mdev open` POSTs `/api/open?url=...` (GET-style query string, not a POST
   body — core `hc_open` at `src/api/httpcontrol.c:49` reads a plain query arg
   either way, but a POST body triggers a connection reset in this HTTP
@@ -58,20 +58,39 @@ mdev stop [--name NAME]
   What "ready" means, and its caveats, are documented in
   `movian-plugin-testing` — that judgment does not belong to the launcher.
 
-## Stale-process / foreign-pid guard
+## Coexistence / foreign-pid guard (updated, issue #94)
 
-`mdev run` (and `mdev preview`'s auto-start) refuse to start when a movian
-process **not owned by this instance's state dir** is already alive — exit
-code 2, and it never kills a pid it doesn't own
-(`support/devtools/mdevlib/harness.py: movian_pids()` / `kill_owned_pid()`).
-The process match is basename-anchored (checks that some argv token's
-`os.path.basename(...)` is exactly `"movian"`), not a bare substring match —
-a bare `pgrep -f movian` also matches unrelated processes whose *path*
-happens to contain the string "movian" (e.g. a checkout directory name).
+`mdev run` (and `mdev preview`'s auto-start) **coexist by default** with any
+movian process **not owned by this instance's state dir**: each instance uses
+an isolated `--persistent`/`--cache` under `/tmp/mdev/<name>/` and a
+dynamically-assigned HTTP port parsed into its own `state.json`, so a foreign
+instance (a hand-started Movian, another `mdev` name, the SMB2 test stand's
+persistent UI-backed instance — see this repo's `AGENTS.md`) cannot cross-talk
+with it. `mdev run` prints a one-line warning naming the foreign pid(s) and
+cmdline (`coexisting with foreign movian: pid ... (cmdline)`) and proceeds;
+it never signals a pid it doesn't own
+(`support/devtools/mdevlib/harness.py: classify_foreign()` /
+`kill_owned_pid()`). The process match is basename-anchored (checks that some
+argv token's `os.path.basename(...)` is exactly `"movian"`), not a bare
+substring match — a bare `pgrep -f movian` also matches unrelated processes
+whose *path* happens to contain the string "movian" (e.g. a checkout
+directory name).
 
-If you see the refusal: stop the owning instance by its own `--name` first
-(`mdev stop --name <name>`), or use `--force` only on the instance you
-already own. Never reach for a broad `pkill`/`killall`.
+Exit code 2 is reserved for two narrower cases:
+
+- **Same-name collision**: this instance's own `--name` is already alive —
+  use `--force` to restart it (kills only the pid recorded in *this*
+  instance's own `state.json`, never a foreign one).
+- **Same-dir collision**: a live movian pid's cmdline references this
+  instance's own `--persistent` path, but `state.json` doesn't confirm it as
+  the owned pid (stale/corrupted state, or a race). This is not a foreign
+  instance — investigate before retrying rather than blindly `--force`ing.
+
+`mdev stop` is unchanged: it only ever signals the pid recorded in this
+instance's own `state.json`. Never reach for a broad `pkill`/`killall`.
+
+(Supersedes #85's original "refuse if any foreign movian is alive" contract
+— see the amendment comment on #85.)
 
 ## Logs, props, screenshots
 
