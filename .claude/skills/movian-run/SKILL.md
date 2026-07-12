@@ -92,6 +92,48 @@ instance's own `state.json`. Never reach for a broad `pkill`/`killall`.
 (Supersedes #85's original "refuse if any foreign movian is alive" contract
 — see the amendment comment on #85.)
 
+## Reload: views vs. dev-plugin JS (issue #93)
+
+Plain `mdev reload`/`mdev watch` are **views-only** (`ReloadUI`); they never
+touch a dev plugin's JS. `--js` opts into the other core reload path:
+
+```
+mdev reload --js [--name NAME] [--shot]
+mdev watch --js [--dir <plugin-dir>] [--name NAME] [--shot]
+```
+
+- `--js` sends `ReloadData` instead of `ReloadUI`. Core routes it
+  `hc_action` (`/api/input/action`) → `event_dispatch` → the navigator's
+  eventSink → `nav_reload_current` (`src/navigator.c:862`) →
+  `plugins_reload_dev_plugin()` (`src/plugins.c:1453`), which force-reloads
+  **every** `-p` dev plugin's ECMAScript (unloads+re-executes the JS,
+  destroying its permanent resources: routes, services, hooks,
+  subscriptions), then reloads the current page as a side effect
+  (`nav_reload_page`) — page state resets, same as a fresh open at that URL.
+  This is why `--js` is opt-in, not the `reload`/`watch` default.
+- Exit 0 only when every `-p` plugin of the instance reports reloaded;
+  `mdev reload --js` prints one line per plugin. An instance with no `-p`
+  plugin exits non-zero with a clear message instead of a silent green.
+- **Known quirk** (`support/devtools/mdevlib/harness.py:
+  RELOAD_JS_COMPILE_ERROR_RE`): `plugin_load()` (`src/plugins.c:611`)
+  unconditionally falls through to `return 0` for an `"ecmascript"` plugin
+  even when the JS fails to compile — so the log can show
+  `plugins [INFO]: Reloaded dev plugin <path>` **right alongside** a
+  `[ERROR]: Unable to compile <path> -- ...` line for the very same failed
+  reload. `do_reload_js()` treats the compile-error line (or
+  `Unable to reload development plugin: ...`) as authoritative over a
+  same-tick "Reloaded" line for that plugin — don't trust "Reloaded dev
+  plugin" alone as proof of a working JS reload.
+- `mdev watch --js` extends the existing `.view` watcher: it additionally
+  polls the same root for `*.js`/`plugin.json` and runs the `--js` flow on
+  change; `.view` changes under `--js` still run the plain `ReloadUI` flow.
+  Default root without `--dir` is `glwskins/flat` (unchanged) unless `--js`
+  is given, in which case it defaults to this instance's own `-p` plugin
+  dir — but only when there is exactly one; pass `--dir` explicitly for a
+  multi-plugin instance. A poll tick with both `.view` and JS changes runs
+  the JS reload only (it already implies a page reload, so a separate
+  `ReloadUI` would be redundant).
+
 ## Logs, props, screenshots
 
 - `mdev log [--tail N] [--errors]` — dump/tail `movian.log`. `--errors`

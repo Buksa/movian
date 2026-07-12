@@ -63,6 +63,20 @@ clean reload even though the view did not load. Until #92 lands:
   nontrivial, and look for any `GLW` line near the reload, not just the two
   patterns the command itself checks.
 
+## Dev-plugin JS reload (`mdev reload --js` / `mdev watch --js`, issue #93)
+
+`mdev reload`/`mdev watch` as described above are **views-only** — they never
+reload a dev plugin's JS, only `.view` files. If you're iterating on a `-p`
+dev plugin's `.js` (not its `.view` files), use `--js` instead: `mdev reload
+--js` / `mdev watch --js [--dir <plugin-dir>]` send the `ReloadData` action,
+which force-reloads every `-p` plugin's ECMAScript AND reloads the current
+page as a side effect (page state resets — an open page backed by the
+reloaded plugin does not survive, it's torn down and reopened at the same
+URL). Full mechanism, the exit-code contract, and a core quirk in how a JS
+compile failure is reported are documented in the `movian-run` skill's
+"Reload: views vs. dev-plugin JS" section — read that before relying on
+`--js`'s exit code as proof of a working reload.
+
 ## Isolated single-view preview (`mdev preview`, issue #87)
 
 For iterating on one `.view` file without navigating the full app:

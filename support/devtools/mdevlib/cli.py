@@ -229,8 +229,40 @@ def report_reload(args: argparse.Namespace, ok: bool,
 
 def cmd_reload(args: argparse.Namespace) -> int:
     inst = Instance(args.name)
+    if getattr(args, "js", False):
+        ok, per_plugin = harness.do_reload_js(inst)
+        return report_reload_js(args, ok, per_plugin)
     ok, errors = harness.do_reload(inst)
     return report_reload(args, ok, errors)
+
+
+def report_reload_js(args: argparse.Namespace, ok: bool,
+                     per_plugin: list[dict]) -> int:
+    """Report a `mdev reload --js` result: one line per `-p` dev plugin
+    (issue #93 contract: "prints per-plugin result")."""
+    lines = [
+        "%s: %s%s" % (
+            "OK" if p["ok"] else "FAILED",
+            p["plugin"] or "(unattributed)",
+            "" if p["ok"] else (" -- " + p["detail"]),
+        )
+        for p in per_plugin
+    ]
+    if ok:
+        shot = None
+        if getattr(args, "shot", False):
+            shot = str(harness.take_shot(Instance(args.name)))
+        emit(args, {"reload_js": "ok", "plugins": per_plugin, "shot": shot},
+             "\n".join(lines) + "\nRELOAD JS OK"
+             + (("\nshot: " + shot) if shot else ""))
+        return 0
+    if args.json:
+        print(json.dumps({"reload_js": "error", "plugins": per_plugin},
+                         ensure_ascii=False, indent=2))
+    else:
+        for line in lines:
+            print(line)
+    return 1
 
 
 # ---------------------------------------------------------------------------
@@ -241,43 +273,102 @@ def scan_views(root: Path) -> dict[Path, float]:
     return {p: p.stat().st_mtime for p in root.rglob("*.view")}
 
 
+def scan_plugin_files(root: Path) -> dict[Path, float]:
+    """*.js / plugin.json under `root`, for `mdev watch --js` (issue #93)."""
+    files: dict[Path, float] = {}
+    for pattern in ("*.js", "plugin.json"):
+        for p in root.rglob(pattern):
+            files[p] = p.stat().st_mtime
+    return files
+
+
+def _changed_paths(root: Path, seen: dict[Path, float],
+                   current: dict[Path, float]) -> list[str]:
+    return sorted(
+        str(p.relative_to(root)) for p in
+        (set(current) ^ set(seen))
+        | {p for p in current if p in seen and current[p] != seen[p]}
+    )
+
+
+def _resolve_watch_root(args: argparse.Namespace, inst: Instance) -> Path:
+    if args.dir is not None:
+        root = Path(args.dir)
+        if not root.is_absolute():
+            root = harness.REPO_ROOT / root
+        return root
+    if not args.js:
+        return harness.REPO_ROOT / "glwskins" / "flat"
+    # --js with no --dir: default to this instance's own -p plugin dir,
+    # but only when it is unambiguous.
+    state = inst.load_state() or {}
+    dirs = harness.plugin_dirs_from_argv(state.get("argv") or [])
+    if len(dirs) != 1:
+        raise MdevError(
+            "--js needs --dir <plugin-dir> when the instance has %d "
+            "dev plugins (need exactly 1 to default unambiguously)"
+            % len(dirs)
+        )
+    return Path(dirs[0])
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     inst = Instance(args.name)
     inst.base_url()  # verify instance is up before entering the loop
-    root = Path(args.dir)
-    if not root.is_absolute():
-        root = harness.REPO_ROOT / root
+    root = _resolve_watch_root(args, inst)
     if not root.is_dir():
         raise MdevError("watch dir not found: %s" % root)
 
-    seen = scan_views(root)
-    print("watching %d .view files under %s (Ctrl-C to stop)"
-          % (len(seen), root))
+    seen_view = scan_views(root)
+    seen_js = scan_plugin_files(root) if args.js else {}
+    extra = (" + %d JS/plugin.json file(s)" % len(seen_js)) if args.js else ""
+    print("watching %d .view file(s)%s under %s (Ctrl-C to stop)"
+          % (len(seen_view), extra, root))
     try:
         while True:
             time.sleep(0.5)
-            current = scan_views(root)
-            changed = sorted(
-                str(p.relative_to(root)) for p in
-                (set(current) ^ set(seen))
-                | {p for p in current if p in seen
-                   and current[p] != seen[p]}
-            )
-            seen = current
-            if not changed:
+            current_view = scan_views(root)
+            changed_view = _changed_paths(root, seen_view, current_view)
+            seen_view = current_view
+
+            changed_js: list[str] = []
+            if args.js:
+                current_js = scan_plugin_files(root)
+                changed_js = _changed_paths(root, seen_js, current_js)
+                seen_js = current_js
+
+            if not changed_view and not changed_js:
                 continue
+
+            stamp = time.strftime("%H:%M:%S")
+            # Mixed edits in one tick: JS reload wins (it implies a page
+            # reload already -- nav_reload_current does both the dev
+            # plugin reload AND nav_reload_page) -- issue #93 contract.
+            if changed_js:
+                ok, per_plugin = harness.do_reload_js(inst, settle=1.2)
+                if ok:
+                    line = "[%s] JS %s: RELOAD JS OK" % (
+                        stamp, ", ".join(changed_js))
+                    if args.shot:
+                        line += " shot=%s" % harness.take_shot(inst)
+                else:
+                    failed = next(p for p in per_plugin if not p["ok"])
+                    line = "[%s] JS %s: FAILED: %s" % (
+                        stamp, ", ".join(changed_js), failed["detail"])
+                print(line, flush=True)
+                continue
+
             # Tighter settle than plain `mdev reload` so the report lands
             # within 2 s of the file change (0.5 s poll + 1.2 s settle);
             # view errors surface within milliseconds of ReloadUI anyway.
             ok, errors = harness.do_reload(inst, settle=1.2)
-            stamp = time.strftime("%H:%M:%S")
             if ok:
-                line = "[%s] %s: RELOAD OK" % (stamp, ", ".join(changed))
+                line = "[%s] %s: RELOAD OK" % (stamp, ", ".join(changed_view))
                 if args.shot:
                     line += " shot=%s" % harness.take_shot(inst)
             else:
                 line = "[%s] %s: %d error(s): %s" % (
-                    stamp, ", ".join(changed), len(errors), errors[0])
+                    stamp, ", ".join(changed_view), len(errors), errors[0])
             print(line, flush=True)
     except KeyboardInterrupt:
         return 0
@@ -448,18 +539,47 @@ def build_parser() -> argparse.ArgumentParser:
                      help="only error-signal lines; exit 1 if any matched")
     log.set_defaults(func=cmd_log)
 
-    reload_ = sub.add_parser("reload", parents=[common],
-                             help="ReloadUI and grep the log for view errors")
+    reload_ = sub.add_parser(
+        "reload", parents=[common],
+        help="ReloadUI and grep the log for view errors",
+        description="Plain `mdev reload` sends ReloadUI (views-only, "
+                    "unchanged). `--js` instead sends ReloadData (issue "
+                    "#93): reloads every `-p` dev plugin's ECMAScript "
+                    "(core plugins_reload_dev_plugin(), src/plugins.c) "
+                    "and reloads the current page as a side effect -- "
+                    "page state resets, so it is opt-in rather than the "
+                    "default. Exit 0 only when every `-p` plugin reports "
+                    "reloaded.")
     reload_.add_argument("--shot", action="store_true",
                          help="screenshot after a clean reload")
+    reload_.add_argument("--js", action="store_true",
+                         help="reload dev-plugin JS via ReloadData instead "
+                              "of views via ReloadUI; resets page state")
     reload_.set_defaults(func=cmd_reload)
 
-    watch = sub.add_parser("watch", parents=[common],
-                           help="auto-reload when .view files change")
-    watch.add_argument("--dir", default="glwskins/flat",
-                       help="directory to watch (default: glwskins/flat)")
+    watch = sub.add_parser(
+        "watch", parents=[common],
+        help="auto-reload when .view (or, with --js, plugin JS) files "
+             "change",
+        description="Polls `--dir` for changed `*.view` files and runs "
+                    "the `reload` (ReloadUI) flow on change (default: "
+                    "glwskins/flat). With `--js`, ALSO polls the same "
+                    "root for `*.js`/`plugin.json` and runs the `reload "
+                    "--js` (ReloadData) flow instead when those change -- "
+                    "default root becomes this instance's own `-p` "
+                    "plugin dir (only when there is exactly one; pass "
+                    "--dir explicitly otherwise). A tick with both kinds "
+                    "of changes runs the JS reload only (it already "
+                    "implies a page reload).")
+    watch.add_argument("--dir", default=None,
+                       help="directory to watch (default: glwskins/flat, "
+                            "or this instance's own -p plugin dir with "
+                            "--js)")
     watch.add_argument("--shot", action="store_true",
                        help="screenshot after each clean reload")
+    watch.add_argument("--js", action="store_true",
+                       help="also watch *.js/plugin.json and run the "
+                            "ReloadData flow on change")
     watch.set_defaults(func=cmd_watch)
 
     # Own --name/--json (not `common`): the default instance name is
