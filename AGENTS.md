@@ -53,6 +53,28 @@ cd ~/repos/movian_ag && ./build.debug/movian -d
 
 Always run `git diff --check`. Scale additional tests to the changed behavior.
 
+### Testing the embedded SMB2 server
+
+Movian's process lifetime is tied to its UI event loop (`main()` blocks in
+`glw_x11_main()`); it runs with a UI in every real deployment, so the embedded
+SMB2 server stays alive for as long as the app is open. **There is no headless
+daemon mode and none is planned** — do not add one for a media player.
+
+Consequence for testing: a **headless launch** (no X display, or `--no-ui`,
+with a fresh `--persistent` profile) **self-terminates ~2.5–3 s after startup**
+("Opening page:home" → "ASYNCIO Shutdown"). A server driven that way only ever
+answers **immediate one-shot** requests before the process exits — it never
+exercises an idle session, so signing/keepalive behavior is invisible. This is
+exactly how the #76 signing guard's rejection of Samba's unsigned `SMB2_ECHO`
+keepalive slipped past the one-shot smokes (fixed in #79).
+
+So any test of **idle / keepalive / interactive** server behavior must run
+against a **persistent, UI-backed** Movian — launch it on a real or virtual
+display (e.g. `DISPLAY=:0 XAUTHORITY=... ./build.debug/movian -d`, or `Xvfb`)
+and hold the client connection open (`smbclient` interactive, or an idle then a
+second operation). A one-shot `smbclient -c 'ls'` proves nothing about the idle
+path. The existing one-shot smokes stay valid for the non-idle surface.
+
 ## Recovery
 
 When `.codex/context.sh` exists, run its `check` command at the start of a
