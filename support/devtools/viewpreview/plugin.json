@@ -1,0 +1,10 @@
+{
+  "type": "ecmascript",
+  "id": "devtools_viewpreview",
+  "title": "viewpreview (dev only, not packaged)",
+  "version": "1.0.0",
+  "category": "other",
+  "synopsis": "Renders one arbitrary .view file in isolation with JSON fixture data, for the mockup-to-view design loop (issue #87). Dev tool only; lives under support/, never shipped.",
+  "file": "viewpreview.js",
+  "apiversion": 2
+}

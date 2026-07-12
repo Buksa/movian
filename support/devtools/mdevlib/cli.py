@@ -7,11 +7,12 @@ Exit codes: 0 = verified success, 2 = stale-process guard refusal,
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import sys
 import time
-import urllib.parse
 from pathlib import Path
+from typing import Any
 
 from . import harness
 from .harness import Instance, MdevError
@@ -101,50 +102,10 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
 def cmd_open(args: argparse.Namespace) -> int:
     inst = Instance(args.name)
-    base = inst.base_url()
-
-    before_url = harness.prop_value(base, harness.PAGE_URL)
-
-    # GET with query args: the core's /api/open handler answers a
-    # plain GET and redirects; POST bodies reset the connection.
-    result = harness.http_request(
-        base, "/api/open?" + urllib.parse.urlencode({"url": args.url}),
-        timeout=5.0)
-    if not result.get("ok"):
-        raise MdevError("POST /api/open failed: %s"
-                        % (result.get("error") or result.get("status")))
-
-    deadline = time.monotonic() + args.timeout
-    url = title = ptype = None
-    ready = False
-    while time.monotonic() < deadline:
-        url = harness.prop_value(base, harness.PAGE_URL)
-        loading = harness.prop_value(base, harness.PAGE_LOADING)
-        title = harness.prop_value(base, harness.PAGE_TITLE)
-        # Ready when loading is 0 -- or void/absent: routes like
-        # page:settings never create the loading prop at all.
-        if loading in ("0", "(void)", None) and harness.prop_has_value(title):
-            # Verify navigation actually targeted our URL: either the page
-            # url now equals the requested one, or it at least changed away
-            # from what was open before.
-            if url == args.url or url != before_url:
-                ready = True
-                break
-        time.sleep(0.2)
-
-    if not ready:
-        raise MdevError(
-            "page not ready after %.0fs: url=%r loading=%r title=%r"
-            % (args.timeout, url,
-               harness.prop_value(base, harness.PAGE_LOADING), title)
-        )
-
-    ptype = harness.prop_value(base, harness.PAGE_TYPE)
-    nodes = harness.node_count(base)
-    emit(args,
-         {"url": url, "title": title, "type": ptype, "nodes": nodes},
+    result = harness.open_and_wait(inst, args.url, timeout=args.timeout)
+    emit(args, result,
          "url:   %s\ntitle: %s\ntype:  %s\nnodes: %d"
-         % (url, title, ptype, nodes))
+         % (result["url"], result["title"], result["type"], result["nodes"]))
     return 0
 
 
@@ -315,6 +276,89 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# preview (issue #87 -- viewpreview dev plugin)
+# ---------------------------------------------------------------------------
+
+def resolve_repo_path(path_str: str) -> Path:
+    """Absolute-ize a CLI-supplied path against REPO_ROOT (not just CWD),
+    matching cmd_watch's --dir handling."""
+    p = Path(path_str)
+    if not p.is_absolute():
+        p = harness.REPO_ROOT / p
+    return p.resolve()
+
+
+def viewpreview_route(view_path: str, fixture_path: str | None) -> str:
+    """Build the `viewpreview:show:<base64 JSON>` route for `view_path`
+    (+ optional fixture). Paths are resolved to absolute filesystem paths
+    here -- the plugin itself does the existence/readability checks so a
+    missing file surfaces as visible page text + a `viewpreview:` log
+    line, not a bare mdev-side error (see support/devtools/viewpreview/
+    README.md "error surfacing")."""
+    config: dict[str, Any] = {
+        "view": str(resolve_repo_path(view_path)),
+        "type": "raw",
+    }
+    if fixture_path:
+        config["fixture"] = str(resolve_repo_path(fixture_path))
+    payload = json.dumps(config).encode("utf-8")
+    return "viewpreview:show:" + base64.b64encode(payload).decode("ascii")
+
+
+def cmd_preview(args: argparse.Namespace) -> int:
+    inst = harness.ensure_running(args.name, [str(harness.VIEWPREVIEW_DIR)])
+    route = viewpreview_route(args.view, args.fixture)
+
+    offset = harness.log_size(inst)
+    result = harness.open_and_wait(inst, route, timeout=20.0)
+
+    # Settle window: a prop change (page.metadata.glwview) is dispatched
+    # to the GLW thread asynchronously, so a GLW view-parse error (or our
+    # own "viewpreview: ERROR:" line, which the JS route handler can also
+    # emit slightly after loading/title go ready) can land a beat after
+    # open_and_wait already sees the page as ready. Poll briefly rather
+    # than reading the log delta once immediately (same idea as
+    # do_reload's settle window).
+    deadline = time.monotonic() + 1.5
+    errors: list[str] = []
+    while time.monotonic() < deadline:
+        delta = harness.read_log_delta(inst, offset)
+        errors = (harness.viewpreview_error_lines(delta)
+                 + harness.view_error_lines(delta))
+        if errors:
+            break
+        time.sleep(0.2)
+
+    if errors:
+        if args.json:
+            print(json.dumps({"preview": "error", "errors": errors,
+                              "result": result},
+                             ensure_ascii=False, indent=2))
+        else:
+            print("PREVIEW ERROR")
+            for line in errors:
+                print(line)
+        return 1
+
+    shot_path = None
+    if args.shot:
+        # raw.view's loader crossfades over 0.2s (glwskins/flat/pages/
+        # raw.view: "effect: blend; time: 0.2;"); page-ready fires as
+        # soon as the JS side sets loading=false, which is before that
+        # blend visually finishes. A short settle avoids a screenshot
+        # that still shows the previous preview mid-transition.
+        time.sleep(0.3)
+        shot_path = str(harness.take_shot(inst))
+
+    emit(args,
+         {**result, "shot": shot_path},
+         "url:   %s\ntitle: %s\ntype:  %s\nnodes: %d%s"
+         % (result["url"], result["title"], result["type"], result["nodes"],
+            ("\nshot:  " + shot_path) if shot_path else ""))
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # parser
 # ---------------------------------------------------------------------------
 
@@ -396,6 +440,27 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--shot", action="store_true",
                        help="screenshot after each clean reload")
     watch.set_defaults(func=cmd_watch)
+
+    # Own --name/--json (not `common`): the default instance name is
+    # "preview", not "dev" (issue #87 contract).
+    preview = sub.add_parser(
+        "preview",
+        help="render one .view file in isolation via the viewpreview dev "
+             "plugin (auto-starts a 'preview' instance if needed)")
+    preview.add_argument("--name", default="preview",
+                         help="instance name; state in /tmp/mdev/<name>/ "
+                              "(default: preview)")
+    preview.add_argument("--json", action="store_true",
+                         help="machine-readable JSON output")
+    preview.add_argument("view", metavar="VIEW-PATH",
+                         help=".view file to render, any path (see "
+                              "support/devtools/viewpreview/README.md)")
+    preview.add_argument("--fixture", metavar="JSON",
+                         help="fixture JSON file (schema v1, see "
+                              "support/devtools/viewpreview/README.md)")
+    preview.add_argument("--shot", action="store_true",
+                         help="screenshot after a clean render")
+    preview.set_defaults(func=cmd_preview)
 
     return parser
 
