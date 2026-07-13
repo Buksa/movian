@@ -181,7 +181,7 @@ eval_loaded_view(glw_root_t *gr, glw_cached_view_t *gcv, glw_view_t *view,
   token_t *t = glw_view_clone_chain(gr, gcv->gcv_sof, NULL);
 
   glw_view_eval_context_t ec = {};
-  errorinfo_t ei;
+  errorinfo_t ei = {};
 
   ec.gr = gr;
   ec.rc = NULL;

@@ -91,7 +91,9 @@ class Instance:
     """One named mdev-managed Movian instance under /tmp/mdev/<name>/."""
 
     def __init__(self, name: str):
-        if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        # Must contain at least one non-dot char: "." / ".." would resolve
+        # the state dir outside /tmp/mdev/.
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", name) or set(name) == {"."}:
             raise MdevError("invalid instance name: %r" % name)
         self.name = name
         self.dir = STATE_ROOT / name
