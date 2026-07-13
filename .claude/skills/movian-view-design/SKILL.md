@@ -5,10 +5,28 @@ description: Iterating on GLW `.view` files — live reload, isolated single-vie
 
 # Movian View Design
 
-Skeleton skill: the durable procedural knowledge for the `.view` edit loop.
-A full GLW DSL reference and a richer `viewpreview` fixture-authoring guide
-are tracked as follow-up issues — this skill covers the loop itself and the
-core mechanisms it depends on, each with its source anchor.
+The durable procedural knowledge for the `.view` edit loop, plus the GLW
+DSL reference set (issue #88) under `references/`:
+
+- `references/glw-view-language.md` — the `.view` language: lexical
+  elements, all 5 assignment operators (`=`, `?=`, `:=`, `<-`, `_=_`),
+  the complete expression-function table (`funcvec[]`, 90 entries), prop
+  scopes (`$self`/`$args`/`$parent`/`$view`/`$clone`/`$ui`/`$core`/`$nav`),
+  event maps, and the preprocessor (`#define`/`#import`/`#include`).
+  **Read this before writing a `.view` from scratch.**
+- `references/glw-widget-catalog.md` — all 51 registered widget classes
+  (name, flags, layout behavior, class-specific attributes) and the
+  116-entry global attribute table.
+- `references/glw-patterns.md` — worked recipes from the skin corpus:
+  page skeleton + `mdev preview` fixture pair, list/grid pages, focus
+  highlight, popups, settings rows, plugin data binding, debug moves.
+
+`mdev viewdoc --check` diffs those reference docs against the C source
+tables (`attribtab[]` / `funcvec[]`) and exits nonzero on drift — run it
+after touching either side. A richer `viewpreview` fixture-authoring
+guide is still a tracked follow-up; this file itself covers the
+edit/reload loop and the core mechanisms it depends on, each with its
+source anchor.
 
 ## The edit/reload loop
 
@@ -188,8 +206,11 @@ builtin", not "GLW error".
 
 ## Follow-ups tracked elsewhere
 
-- A GLW DSL reference (attributes, widgets, event model) — not yet written;
-  this skill intentionally does not duplicate it piecemeal.
+- ~~A GLW DSL reference (attributes, widgets, event model)~~ — landed
+  (issue #88): see `references/glw-view-language.md`,
+  `references/glw-widget-catalog.md`, `references/glw-patterns.md` and
+  the `mdev viewdoc --check` drift detector, all described at the top of
+  this file.
 - A richer `viewpreview` fixture-authoring guide beyond the schema already
   in `support/devtools/viewpreview/README.md`.
 - Issue #92: teach `mdev reload`/`preview` to also catch lexer errors and
