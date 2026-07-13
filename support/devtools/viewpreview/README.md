@@ -185,3 +185,14 @@ via `mdev run --name preview`), `mdev preview` reuses it as-is and does not
 verify/re-add the plugin -- the `viewpreview:show:...` route will then
 fail to resolve. Use a fresh/dedicated `--name` for `mdev preview`, or
 `mdev stop --name preview` first, if in doubt.
+
+### Blank render on a clean parse
+
+A raw preview page gives the target view the full screen with no
+constraining parent. A root-level `container_y` whose children rely on
+default alignment/sizing can render completely blank while parsing
+cleanly (exit 0). If a preview comes up empty, set `align` explicitly on
+the root container (`align: top;` / `align: center;`) before suspecting
+the fixture bindings. See the gotcha note in
+`.claude/skills/movian-view-design/references/glw-patterns.md`
+(empirically verified during #88 verification).

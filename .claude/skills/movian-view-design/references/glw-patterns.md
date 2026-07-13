@@ -15,6 +15,15 @@ A target view bound to `$self.model.*` plus a fixture JSON that
 repo** (built and render-verified for issue #87's own DoD), so this pair
 is known-good, not new content:
 
+> **Blank-render gotcha (empirically verified, #88 verification):** a
+> root-level `container_y` in a raw preview page can render completely
+> blank — with a clean parse and exit 0 — when its children rely on
+> default alignment/sizing (e.g. a bare `label` + `image` mix without a
+> constraining `list_y`). Set `align` explicitly on the root container
+> (`align: top;` or `align: center;`) when a preview comes up empty
+> before suspecting your prop bindings. The skeleton below avoids it via
+> `list_y`, which constrains its rows.
+
 ```view
 // support/devtools/viewpreview/views/demo-list.view (lines 9-51)
 widget(container_y, {

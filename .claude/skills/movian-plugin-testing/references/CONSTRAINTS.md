@@ -70,3 +70,16 @@ launching or interpreting Movian plugin smokes.
   silently un-tracks any file named `core.py`/`core.sh`/etc. anywhere in the
   tree, not just build-time core dumps. Avoid a `core` prefix for any smoke
   helper script you add.
+
+## Long-idle GLW instance stops dispatching UI events (WSLg)
+
+Observed 2026-07-13 (#88 rework): an mdev instance left idle ~10 minutes
+under WSLg kept answering HTTP (`/api/open` returned 200/redirect,
+`/api/prop` readable) but its GLW main loop was wedged — 0% CPU, not one
+log line after startup, `EVENT_OPENURL` accepted and never dispatched, so
+the page never changed. This mimics "route open silently ignored".
+Signature: log mtime frozen at startup while HTTP still answers.
+Mitigation: don't reuse long-idle instances for event-driven checks —
+`mdev stop` + fresh `mdev run`; treat "open returns 200 but navigator
+never logs `Opening <url>`" as an instance-health failure, not a route
+bug.
