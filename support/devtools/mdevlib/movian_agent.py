@@ -15,13 +15,12 @@ import socket
 import struct
 import sys
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from . import harness
 from . import movian_diag_snapshot as diag
 from . import stpp_probe as ws
 
@@ -75,11 +74,9 @@ BLOCKED_HTTP_PROBES = [
 ]
 
 SIGNALS = {
-    "errors": re.compile(
-        r"TypeError|ReferenceError|Cannot read property|Unable to load image|"
-        r"Unknown format|\|E\||CRASH|assert|Segmentation fault",
-        re.IGNORECASE,
-    ),
+    # Canonical error-line set lives in harness.ERROR_SIGNALS; keep the
+    # two tools' idea of "an error line" from drifting apart.
+    "errors": harness.ERROR_SIGNALS,
     "http_ready": re.compile(r"http-server: Listening on port"),
     "plugin_ready": re.compile(r"Loaded dev plugin|Route .* added"),
     "navigation": re.compile(r"navigator.*Opening"),
@@ -100,34 +97,14 @@ def request(
     method: str = "GET",
     form: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    data = None
-    headers: dict[str, str] = {}
-    if form is not None:
-        data = urllib.parse.urlencode(form).encode("utf-8")
-        headers["Content-Type"] = "application/x-www-form-urlencoded"
-    req = urllib.request.Request(
-        base_url.rstrip("/") + path,
-        data=data,
-        headers=headers,
-        method=method,
-    )
-    try:
-        response = urllib.request.urlopen(req, timeout=timeout)
-    except urllib.error.HTTPError as error:
-        response = error
-    except urllib.error.URLError as error:
-        return {"ok": False, "error": str(error), "path": path}
-
-    with response:
-        body = response.read()
-        return {
-            "ok": 200 <= response.status < 400,
-            "status": response.status,
-            "content_type": response.headers.get("Content-Type"),
-            "bytes": len(body),
-            "body": body,
-            "path": path,
-        }
+    """harness.http_request plus a "bytes" convenience key. Delegating
+    also inherits its guarded body read: a connection reset mid-read on
+    one probe becomes {"ok": False, ...} for that probe instead of an
+    OSError that aborts a whole snapshot run."""
+    result = harness.http_request(base_url, path, timeout, method, form)
+    if "body" in result:
+        result["bytes"] = len(result["body"])
+    return result
 
 
 def public_http_result(result: dict[str, Any], preview: int = 240) -> dict[str, Any]:
@@ -175,18 +152,16 @@ def page_state(base_url: str, timeout: float) -> dict[str, Any]:
     }
 
 
-def child_indexes(parsed: dict[str, Any]) -> list[int]:
-    found: list[int] = []
-    unnamed = 0
-    for line in parsed.get("children", []):
-        if line == "<unnamed>":
-            unnamed += 1
-        match = re.match(r"^\*(\d+)\b", line)
-        if match:
-            found.append(int(match.group(1)))
-    if found:
-        return sorted(set(found))
-    return list(range(unnamed))
+def child_refs(parsed: dict[str, Any]) -> list[str]:
+    """Addressable ref per child, in order. /api/prop's plain-text output
+    (src/prop/prop_http.c, non-html branch) prints each child's real name
+    or the literal "<unnamed>" -- never the html-only "*N" form -- so
+    unnamed children are addressed by their POSITION among all children
+    (same scheme as cli.collect_props)."""
+    return [
+        "*%d" % index if name == "<unnamed>" else name
+        for index, name in enumerate(parsed.get("children", []))
+    ]
 
 
 def enumerate_children(
@@ -197,12 +172,12 @@ def enumerate_children(
     timeout: float,
 ) -> dict[str, Any]:
     root = prop_result(base_url, parent, timeout)
-    indexes = child_indexes(root.get("parsed", {}))
+    refs = child_refs(root.get("parsed", {}))
     rows = []
-    for index in indexes[:limit]:
-        prefix = f"{parent}/*{index}"
+    for ref in refs[:limit]:
+        prefix = f"{parent}/{ref}"
         row = {
-            "index": index,
+            "ref": ref,
             "root": prop_result(base_url, prefix, timeout),
             "fields": {
                 field: prop_result(base_url, f"{prefix}/{field}", timeout)
@@ -212,8 +187,8 @@ def enumerate_children(
         rows.append(row)
     return {
         "parent": root,
-        "child_count": len(indexes),
-        "truncated": len(indexes) > limit,
+        "child_count": len(refs),
+        "truncated": len(refs) > limit,
         "children": rows,
     }
 

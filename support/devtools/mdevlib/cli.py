@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -40,16 +41,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     # (stale/corrupted state.json, or a race). Refuse -- this is not a
     # foreign instance, it's ambiguity about our own state (issue #94).
     if collisions:
-        raise MdevError(
-            "refusing to start: live movian pid(s) using %s are not "
-            "confirmed as instance %r's own process by state.json: %s -- "
-            "this instance's state may be corrupted; investigate before "
-            "using --force." % (
-                inst.persistent, args.name,
-                ", ".join("%d (%s)" % (p, c) for p, c in collisions),
-            ),
-            exit_code=2,
-        )
+        raise harness.collision_refusal(inst, collisions)
 
     if own_pid is not None:
         if not args.force:
@@ -58,7 +50,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 "use --force to restart it" % (args.name, own_pid),
                 exit_code=2,
             )
-        harness.kill_owned_pid(own_pid)
+        harness.kill_owned_pid(inst, own_pid)
 
     # Foreign movian instances (not ours, not a same-dir collision) are
     # safe to coexist with: isolated profile + dynamic port, no state.json
@@ -93,8 +85,8 @@ def cmd_stop(args: argparse.Namespace) -> int:
                     "reason": "not running"},
              "instance %r is not running" % args.name)
         return 0
-    harness.kill_owned_pid(pid)
-    if harness.pid_is_movian(pid):
+    harness.kill_owned_pid(inst, pid)
+    if inst.owns_pid(pid):
         raise MdevError("pid %d still alive after SIGKILL" % pid)
     state = inst.load_state() or {}
     state.pop("pid", None)
@@ -210,12 +202,18 @@ def cmd_log(args: argparse.Namespace) -> int:
 # reload
 # ---------------------------------------------------------------------------
 
+def _maybe_shot(args: argparse.Namespace) -> str | None:
+    """Screenshot path when --shot was passed, else None (shared by every
+    shot-on-success reporter)."""
+    if getattr(args, "shot", False):
+        return str(harness.take_shot(Instance(args.name)))
+    return None
+
+
 def report_reload(args: argparse.Namespace, ok: bool,
                   errors: list[str]) -> int:
     if ok:
-        shot = None
-        if getattr(args, "shot", False):
-            shot = str(harness.take_shot(Instance(args.name)))
+        shot = _maybe_shot(args)
         emit(args, {"reload": "ok", "shot": shot},
              "RELOAD OK" + (("\nshot: " + shot) if shot else ""))
         return 0
@@ -250,9 +248,7 @@ def report_reload_js(args: argparse.Namespace, ok: bool,
         for p in per_plugin
     ]
     if ok:
-        shot = None
-        if getattr(args, "shot", False):
-            shot = str(harness.take_shot(Instance(args.name)))
+        shot = _maybe_shot(args)
         emit(args, {"reload_js": "ok", "plugins": per_plugin, "shot": shot},
              "\n".join(lines) + "\nRELOAD JS OK"
              + (("\nshot: " + shot) if shot else ""))
@@ -270,17 +266,30 @@ def report_reload_js(args: argparse.Namespace, ok: bool,
 # watch
 # ---------------------------------------------------------------------------
 
-def scan_views(root: Path) -> dict[Path, float]:
-    return {p: p.stat().st_mtime for p in root.rglob("*.view")}
-
-
-def scan_plugin_files(root: Path) -> dict[Path, float]:
-    """*.js / plugin.json under `root`, for `mdev watch --js` (issue #93)."""
-    files: dict[Path, float] = {}
-    for pattern in ("*.js", "plugin.json"):
-        for p in root.rglob(pattern):
-            files[p] = p.stat().st_mtime
-    return files
+def scan_watch_files(
+    root: Path, include_js: bool
+) -> tuple[dict[Path, float], dict[Path, float]]:
+    """One directory traversal returning ({*.view: mtime}, {*.js /
+    plugin.json: mtime}) -- cmd_watch polls this twice a second, so a
+    single os.walk pass instead of one rglob per pattern (issue #93)."""
+    views: dict[Path, float] = {}
+    plugin: dict[Path, float] = {}
+    for dirpath, _dirnames, filenames in os.walk(root):
+        parent = Path(dirpath)
+        for name in filenames:
+            if name.endswith(".view"):
+                target = views
+            elif include_js and (name.endswith(".js")
+                                 or name == "plugin.json"):
+                target = plugin
+            else:
+                continue
+            path = parent / name
+            try:
+                target[path] = path.stat().st_mtime
+            except OSError:
+                continue  # deleted between listing and stat
+    return views, plugin
 
 
 def _changed_paths(root: Path, seen: dict[Path, float],
@@ -313,6 +322,47 @@ def _resolve_watch_root(args: argparse.Namespace, inst: Instance) -> Path:
     return Path(dirs[0])
 
 
+def _watch_tick(args: argparse.Namespace, inst: Instance, stamp: str,
+                changed_view: list[str], changed_js: list[str]) -> list[str]:
+    """Run the reload flow(s) for one tick's changes; return report lines.
+
+    A mixed tick (JS and views changed together) runs BOTH flows: the
+    ReloadData page reload alone would re-render against GLW's still-
+    cached OLD .view parses -- and do_reload_js never scans for GLW view
+    errors -- so a view syntax error would go unreported (false green).
+    JS first (it resets page state), then ReloadUI to flush and re-parse
+    the views.
+    """
+    lines: list[str] = []
+    if changed_js:
+        ok, per_plugin = harness.do_reload_js(inst, settle=1.2)
+        if ok:
+            line = "[%s] JS %s: RELOAD JS OK" % (stamp, ", ".join(changed_js))
+            if args.shot and not changed_view:
+                line += " shot=%s" % harness.take_shot(inst)
+        else:
+            failed = next(p for p in per_plugin if not p["ok"])
+            line = "[%s] JS %s: FAILED: %s" % (
+                stamp, ", ".join(changed_js), failed["detail"])
+        lines.append(line)
+        if not changed_view:
+            return lines
+
+    # Tighter settle than plain `mdev reload` so the report lands
+    # within 2 s of the file change (0.5 s poll + 1.2 s settle);
+    # view errors surface within milliseconds of ReloadUI anyway.
+    ok, errors = harness.do_reload(inst, settle=1.2)
+    if ok:
+        line = "[%s] %s: RELOAD OK" % (stamp, ", ".join(changed_view))
+        if args.shot:
+            line += " shot=%s" % harness.take_shot(inst)
+    else:
+        line = "[%s] %s: %d error(s): %s" % (
+            stamp, ", ".join(changed_view), len(errors), errors[0])
+    lines.append(line)
+    return lines
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     inst = Instance(args.name)
     inst.base_url()  # verify instance is up before entering the loop
@@ -320,57 +370,34 @@ def cmd_watch(args: argparse.Namespace) -> int:
     if not root.is_dir():
         raise MdevError("watch dir not found: %s" % root)
 
-    seen_view = scan_views(root)
-    seen_js = scan_plugin_files(root) if args.js else {}
+    seen_view, seen_js = scan_watch_files(root, args.js)
     extra = (" + %d JS/plugin.json file(s)" % len(seen_js)) if args.js else ""
     print("watching %d .view file(s)%s under %s (Ctrl-C to stop)"
           % (len(seen_view), extra, root))
     try:
         while True:
             time.sleep(0.5)
-            current_view = scan_views(root)
+            current_view, current_js = scan_watch_files(root, args.js)
             changed_view = _changed_paths(root, seen_view, current_view)
-            seen_view = current_view
-
-            changed_js: list[str] = []
-            if args.js:
-                current_js = scan_plugin_files(root)
-                changed_js = _changed_paths(root, seen_js, current_js)
-                seen_js = current_js
+            changed_js = _changed_paths(root, seen_js, current_js)
+            seen_view, seen_js = current_view, current_js
 
             if not changed_view and not changed_js:
                 continue
 
             stamp = time.strftime("%H:%M:%S")
-            # Mixed edits in one tick: JS reload wins (it implies a page
-            # reload already -- nav_reload_current does both the dev
-            # plugin reload AND nav_reload_page) -- issue #93 contract.
-            if changed_js:
-                ok, per_plugin = harness.do_reload_js(inst, settle=1.2)
-                if ok:
-                    line = "[%s] JS %s: RELOAD JS OK" % (
-                        stamp, ", ".join(changed_js))
-                    if args.shot:
-                        line += " shot=%s" % harness.take_shot(inst)
-                else:
-                    failed = next(p for p in per_plugin if not p["ok"])
-                    line = "[%s] JS %s: FAILED: %s" % (
-                        stamp, ", ".join(changed_js), failed["detail"])
-                print(line, flush=True)
-                continue
-
-            # Tighter settle than plain `mdev reload` so the report lands
-            # within 2 s of the file change (0.5 s poll + 1.2 s settle);
-            # view errors surface within milliseconds of ReloadUI anyway.
-            ok, errors = harness.do_reload(inst, settle=1.2)
-            if ok:
-                line = "[%s] %s: RELOAD OK" % (stamp, ", ".join(changed_view))
-                if args.shot:
-                    line += " shot=%s" % harness.take_shot(inst)
-            else:
-                line = "[%s] %s: %d error(s): %s" % (
-                    stamp, ", ".join(changed_view), len(errors), errors[0])
-            print(line, flush=True)
+            try:
+                for line in _watch_tick(args, inst, stamp,
+                                        changed_view, changed_js):
+                    print(line, flush=True)
+            except MdevError as error:
+                # One flaky reload/screenshot must not kill a long-running
+                # watch; only bail when the instance itself is gone.
+                if inst.live_pid() is None:
+                    raise MdevError(
+                        "instance %r died: %s" % (args.name, error))
+                print("[%s] reload failed (will retry on next change): %s"
+                      % (stamp, error), flush=True)
     except KeyboardInterrupt:
         return 0
 
@@ -409,7 +436,28 @@ def cmd_preview(args: argparse.Namespace) -> int:
     inst = harness.ensure_running(args.name, [str(harness.VIEWPREVIEW_DIR)])
     route = viewpreview_route(args.view, args.fixture)
 
+    # Flush GLW's per-path view cache before opening: GLW only re-parses
+    # a .view on ReloadUI (glw_load_universe, src/ui/glw/glw.c:2522), so
+    # a re-preview of a just-edited file would otherwise render the stale
+    # cached parse -- and report it error-free (false green).
+    #
+    # The log offset must be taken BEFORE the flush: when the previous
+    # page already shows this same view (the normal iterate loop), the
+    # flush itself re-parses the edited file and traces its error right
+    # then -- the open below is then served from that already-loaded
+    # cache entry without a second trace. View errors are filtered to the
+    # target view's path below, so re-parse errors from unrelated views
+    # in the skin can't leak into this preview's report.
+    base = inst.base_url()
     offset = harness.log_size(inst)
+    flush = harness.http_request(base, "/api/input/action/ReloadUI",
+                                 timeout=5.0, method="POST")
+    if not flush.get("ok"):
+        raise MdevError(
+            "POST /api/input/action/ReloadUI (view-cache flush) failed: %s"
+            % (flush.get("error") or flush.get("status")))
+    time.sleep(0.4)  # let the universe reload land before the open below
+
     result = harness.open_and_wait(inst, route, timeout=20.0)
 
     # Settle window: a prop change (page.metadata.glwview) is dispatched
@@ -419,12 +467,15 @@ def cmd_preview(args: argparse.Namespace) -> int:
     # open_and_wait already sees the page as ready. Poll briefly rather
     # than reading the log delta once immediately (same idea as
     # do_reload's settle window).
+    view_path = str(resolve_repo_path(args.view))
     deadline = time.monotonic() + 1.5
     errors: list[str] = []
     while time.monotonic() < deadline:
         delta = harness.read_log_delta(inst, offset)
-        errors = (harness.viewpreview_error_lines(delta)
-                 + harness.view_error_lines(delta))
+        errors = harness.viewpreview_error_lines(delta) + [
+            line for line in harness.view_error_lines(delta)
+            if view_path in line
+        ]
         if errors:
             break
         time.sleep(0.2)
@@ -610,8 +661,9 @@ def build_parser() -> argparse.ArgumentParser:
                     "default root becomes this instance's own `-p` "
                     "plugin dir (only when there is exactly one; pass "
                     "--dir explicitly otherwise). A tick with both kinds "
-                    "of changes runs the JS reload only (it already "
-                    "implies a page reload).")
+                    "of changes runs the JS reload first, then the view "
+                    "reload (ReloadUI is what re-parses changed views "
+                    "and surfaces their errors).")
     watch.add_argument("--dir", default=None,
                        help="directory to watch (default: glwskins/flat, "
                             "or this instance's own -p plugin dir with "

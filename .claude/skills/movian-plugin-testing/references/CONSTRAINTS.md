@@ -83,3 +83,16 @@ Mitigation: don't reuse long-idle instances for event-driven checks —
 `mdev stop` + fresh `mdev run`; treat "open returns 200 but navigator
 never logs `Opening <url>`" as an instance-health failure, not a route
 bug.
+
+Follow-up (2026-07-14, PR #95 review smokes): the same wedge can hit a
+FRESH instance immediately at launch when the WSLg vGPU path has no
+active viewer (RDP surface not being presented) — GL vsync/present
+blocks the GLW loop, so even X11 keypresses go undispatched. Two
+additions:
+- Health probe: `GET /api/screenshot/raw` on a wedged instance returns a
+  small error HTML instead of a PNG after ~5 s — cheap way to tell "GLW
+  loop dead" from "route bug" without waiting on a 20 s open timeout.
+- Workaround: launch mdev instances with `LIBGL_ALWAYS_SOFTWARE=1
+  GALLIUM_DRIVER=llvmpipe` in the environment (mdev's child inherits it).
+  Rendering falls back to llvmpipe and the event loop stays live with no
+  viewer attached; screenshots and `mdev preview` work normally.
