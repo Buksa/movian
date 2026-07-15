@@ -1,0 +1,5 @@
+// Fixture (#97): preproc error -- #include target does not exist.
+widget(label, {
+  caption: "ok";
+});
+#include "does-not-exist.view"

@@ -1,0 +1,5 @@
+// Fixture (#97): lexer error -- invalid character.
+widget(label, {
+  caption: "ok";
+  alpha: `;
+});

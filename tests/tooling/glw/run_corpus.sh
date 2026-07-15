@@ -1,0 +1,150 @@
+#!/bin/sh
+# Corpus guard for movian-analyze (#97).
+#
+# This is the regression test that makes the auto-generated abort-only
+# stub strategy (gen-abort-stubs.sh) safe: it runs --check (and
+# --tokens, for the lexer-only path) over every glwskins/**.view file
+# plus the intentional-failure fixtures in tests/tooling/glw/fixtures/,
+# and fails the whole run if the analyzer ever exits by signal (an
+# abort()'d stub firing means core GLW code grew a new parse-time
+# dependency this tool's shim doesn't know about -- see shim.c's
+# contract table) instead of a plain exit code.
+#
+# glwskins/flat/**.view (98 files) is the acceptance-criterion corpus:
+# every one of those MUST exit 0 with empty stderr (issue #97: "All
+# glwskins/flat/**.view (98) -> exit 0, nothing on stderr"). Everything
+# else under glwskins/ (glwskins/old/, legacy/experimental) and the
+# intentionally-broken fixtures are only held to "did not crash" --
+# exit 0 (clean) or exit 1 (a real, reported parse error) are both fine
+# there; a lexer/parser abort() or a shell-reported crash is not.
+#
+# Usage: run_corpus.sh <path-to-movian-analyze-binary>
+set -u
+
+if [ $# -lt 1 ]; then
+  echo "usage: $0 <path-to-movian-analyze>" >&2
+  exit 2
+fi
+
+ANALYZE=$1
+TOPDIR=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
+cd "$TOPDIR"
+
+# NB: deliberately not `set -e` from here on -- every check_one() call
+# below expects and handles non-zero exit codes (parse errors are the
+# normal, correct outcome for the fixtures and for some of the loose
+# corpora), so -e would abort the whole guard on the first one.
+
+fail=0
+flat_fail=0
+crash=0
+n_flat=0
+n_other=0
+n_fixtures=0
+
+check_one() {
+  # $1 = view path, $2 = 1 if this is a strict flat-corpus file
+  view=$1
+  strict=$2
+
+  out=$("$ANALYZE" --check "$view" 2>/tmp/movian-analyze-corpus.stderr)
+  rc=$?
+
+  if [ "$rc" -gt 128 ]; then
+    echo "CRASH (signal $((rc - 128))): $view" >&2
+    crash=$((crash + 1))
+    fail=1
+    return
+  fi
+  if [ "$rc" != 0 ] && [ "$rc" != 1 ]; then
+    echo "UNEXPECTED EXIT CODE $rc: $view" >&2
+    fail=1
+    return
+  fi
+
+  if [ "$strict" = 1 ]; then
+    if [ "$rc" != 0 ]; then
+      echo "FLAT CORPUS REGRESSION (exit $rc, expected 0): $view" >&2
+      echo "  $out" >&2
+      flat_fail=$((flat_fail + 1))
+      fail=1
+    elif [ -s /tmp/movian-analyze-corpus.stderr ]; then
+      echo "FLAT CORPUS REGRESSION (nonempty stderr): $view" >&2
+      sed 's/^/  stderr: /' /tmp/movian-analyze-corpus.stderr >&2
+      flat_fail=$((flat_fail + 1))
+      fail=1
+    fi
+  fi
+
+  # --tokens: lexer-only path, exercises a different (smaller) part of
+  # the object closure; must never crash either.
+  "$ANALYZE" --tokens "$view" >/dev/null 2>>/tmp/movian-analyze-corpus.stderr
+  trc=$?
+  if [ "$trc" -gt 128 ]; then
+    echo "CRASH in --tokens (signal $((trc - 128))): $view" >&2
+    crash=$((crash + 1))
+    fail=1
+  fi
+}
+
+echo "== glwskins/flat (strict: must exit 0, empty stderr) =="
+for f in $(find glwskins/flat -name '*.view'); do
+  n_flat=$((n_flat + 1))
+  check_one "$f" 1
+done
+
+echo "== glwskins/old (loose: must not crash) =="
+if [ -d glwskins/old ]; then
+  for f in $(find glwskins/old -name '*.view'); do
+    n_other=$((n_other + 1))
+    check_one "$f" 0
+  done
+fi
+
+echo "== tests/tooling/glw/fixtures (loose: must not crash) =="
+for f in tests/tooling/glw/fixtures/*.view; do
+  [ -f "$f" ] || continue
+  n_fixtures=$((n_fixtures + 1))
+  check_one "$f" 0
+done
+
+echo "== tests/tooling/glw/golden (strict: must exit 0, empty stderr) =="
+for f in tests/tooling/glw/golden/*.view; do
+  [ -f "$f" ] || continue
+  n_flat=$((n_flat + 1))
+  check_one "$f" 1
+done
+
+rm -f /tmp/movian-analyze-corpus.stderr
+
+echo "== golden JSON byte-compare (tests/tooling/glw/golden/small.view) =="
+golden_fail=0
+if [ -f tests/tooling/glw/golden/small.check.json ]; then
+  got=$("$ANALYZE" --check tests/tooling/glw/golden/small.view 2>/dev/null)
+  want=$(cat tests/tooling/glw/golden/small.check.json)
+  if [ "$got" != "$want" ]; then
+    echo "GOLDEN MISMATCH (--check small.view):" >&2
+    echo "  got:  $got" >&2
+    echo "  want: $want" >&2
+    golden_fail=1
+    fail=1
+  fi
+fi
+if [ -f tests/tooling/glw/golden/small.tokens.json ]; then
+  got=$("$ANALYZE" --tokens tests/tooling/glw/golden/small.view 2>/dev/null)
+  want=$(cat tests/tooling/glw/golden/small.tokens.json)
+  if [ "$got" != "$want" ]; then
+    echo "GOLDEN MISMATCH (--tokens small.view):" >&2
+    golden_fail=1
+    fail=1
+  fi
+fi
+
+echo
+echo "flat+golden: $n_flat, glwskins/old: $n_other, fixtures: $n_fixtures, crashes: $crash, flat regressions: $flat_fail, golden mismatches: $golden_fail"
+
+if [ "$fail" != 0 ]; then
+  echo "CORPUS GUARD FAILED" >&2
+  exit 1
+fi
+echo "CORPUS GUARD OK"

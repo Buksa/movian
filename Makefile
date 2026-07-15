@@ -974,3 +974,68 @@ include support/mklicense.mk
 
 license: ${BUILDDIR}/LICENSE
 licensepdf: ${BUILDDIR}/LICENSE.pdf
+
+
+# ---------------------------------------------------------------------
+# movian-analyze (#97): host CLI driving the real GLW lexer/preproc/
+# parser outside the application. Reuses this BUILD's own
+# glw_view_*.o/misc/*.o objects (built above as part of $(OBJS) the
+# normal way -- no separate compile rule needed for them); only links
+# in a small shim (support/devtools/analyze/shim.c) plus auto-generated
+# abort-only stubs for every symbol that shim doesn't provide. See
+# support/devtools/analyze/shim.c for the documented symbol contract.
+# ---------------------------------------------------------------------
+
+MOVIAN_ANALYZE_DIR = support/devtools/analyze
+MOVIAN_ANALYZE_BUILDDIR = ${BUILDDIR}/${MOVIAN_ANALYZE_DIR}
+MOVIAN_ANALYZE_BIN = ${BUILDDIR}/movian-analyze
+
+# glw.h/glw_view.h use bare #include "glw.h" (resolved by GCC's quote-
+# include search against the including file's own directory when
+# compiled as part of src/ui/glw/*.c); our driver/shim live under
+# support/devtools/analyze/ instead, so they need src/ui/glw explicitly
+# on the quote-include path.
+${MOVIAN_ANALYZE_BUILDDIR}/%.o : CFLAGS += -iquote${C}/src/ui/glw
+
+MOVIAN_ANALYZE_CORE_OBJS = \
+	${BUILDDIR}/src/ui/glw/glw_view_lexer.o \
+	${BUILDDIR}/src/ui/glw/glw_view_parser.o \
+	${BUILDDIR}/src/ui/glw/glw_view_preproc.o \
+	${BUILDDIR}/src/ui/glw/glw_view_support.o \
+	${BUILDDIR}/src/ui/glw/glw_view_attrib.o \
+	${BUILDDIR}/src/ui/glw/glw_view_eval.o \
+	${BUILDDIR}/src/misc/pool.o \
+	${BUILDDIR}/src/misc/rstr.o \
+	${BUILDDIR}/src/misc/buf.o
+
+MOVIAN_ANALYZE_OWN_OBJS = \
+	${MOVIAN_ANALYZE_BUILDDIR}/movian_analyze.o \
+	${MOVIAN_ANALYZE_BUILDDIR}/shim.o
+
+MOVIAN_ANALYZE_STUBS_C = ${MOVIAN_ANALYZE_BUILDDIR}/stubs-auto.c
+MOVIAN_ANALYZE_STUBS_O = ${MOVIAN_ANALYZE_BUILDDIR}/stubs-auto.o
+
+.PHONY: movian-analyze movian-analyze-corpus
+
+movian-analyze: ${MOVIAN_ANALYZE_BIN}
+
+# The core glw_view_*.o/misc/*.o objects are ordinary members of $(OBJS)
+# and already have their own pattern rules (with the CFLAGS overrides
+# the normal build uses, e.g. -ffast-math for src/ui/glw/%.o); asking
+# for them here just builds/reuses those same objects, never copies or
+# recompiles with different flags.
+${MOVIAN_ANALYZE_STUBS_C}: ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_OWN_OBJS} \
+    ${C}/${MOVIAN_ANALYZE_DIR}/gen-abort-stubs.sh
+	@mkdir -p $(dir $@)
+	${C}/${MOVIAN_ANALYZE_DIR}/gen-abort-stubs.sh $@ \
+	    ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_OWN_OBJS}
+
+${MOVIAN_ANALYZE_STUBS_O}: ${MOVIAN_ANALYZE_STUBS_C}
+	$(CC) -c -o $@ $<
+
+${MOVIAN_ANALYZE_BIN}: ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_OWN_OBJS} \
+    ${MOVIAN_ANALYZE_STUBS_O}
+	$(LINKER) -o $@ $^ -lm -lpthread
+
+movian-analyze-corpus: ${MOVIAN_ANALYZE_BIN}
+	${C}/tests/tooling/glw/run_corpus.sh ${MOVIAN_ANALYZE_BIN}

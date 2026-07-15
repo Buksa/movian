@@ -1,0 +1,3 @@
+// Fixture (#97): parser error -- truncated file (unterminated block).
+widget(label, {
+  caption: "ok";
