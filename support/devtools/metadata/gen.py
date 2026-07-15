@@ -1,0 +1,599 @@
+#!/usr/bin/env python3
+"""movian-metadata generator (issue #98).
+
+Generates `generated/movian-metadata.json` (schema v1): the single
+committed metadata artifact for the GLW view language, grown from
+`support/devtools/mdevlib/viewdoc.py` (issue #88). Sections:
+
+- glw.functions   -- `token_func_t funcvec[]`, src/ui/glw/glw_view_eval.c
+                      (name, nargs/variadic, ctor/dtor/preproc presence).
+- glw.attributes  -- `token_attrib_t attribtab[]`, src/ui/glw/glw_view_attrib.c
+                      (name, valueType inferred from the setter function,
+                      raw setter/attribConst/fn fields, noSubscription flag).
+- glw.widgets     -- every `glw_class_t` designated initializer
+                      (`.gc_name`/`.gc_name2`) across src/ui/glw/glw_*.c,
+                      cross-referenced against `GLW_REGISTER_CLASS(...)`
+                      call sites for the `registered` flag. Includes two
+                      classes that define `.gc_name` but are never
+                      registered (`view`, `style` -- internal-only, not
+                      resolvable by name from a `.view` file).
+- glw.operators   -- curated, `curated_operators.json` next to this file.
+- glw.scopes      -- curated, `curated_scopes.json` next to this file.
+- js.*            -- v1-wave stub (empty), see issue #96 follow-ups E-I.
+
+Every record carries `source: {file, line}` pointing at the defining line
+in the C source (scanned, not hand-typed -- see the table-entry scanner
+below) or, for curated sections, a hand-verified anchor.
+
+Python 3 stdlib only. Determinism: every list is sorted by its primary key
+name, `json.dumps(..., sort_keys=True, indent=2)`, trailing newline.
+`movianRevision` is the current `git rev-parse HEAD` -- it is the one field
+that legitimately changes between two regenerations on different commits,
+so `--check` compares content with `movianRevision` normalized out (see
+`_strip_revision`) rather than requiring a pinned value.
+
+Usage:
+    gen.py            -- regenerate generated/movian-metadata.json in place
+    gen.py --check    -- regenerate in memory and diff against the
+                          committed artifact (ignoring movianRevision);
+                          nonzero exit and a printed diff on drift
+    gen.py --json     -- with --check, print the diff as JSON instead
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+METADATA_DIR = Path(__file__).resolve().parent
+ARTIFACT_PATH = REPO_ROOT / "generated" / "movian-metadata.json"
+
+ATTRIB_C = REPO_ROOT / "src" / "ui" / "glw" / "glw_view_attrib.c"
+EVAL_C = REPO_ROOT / "src" / "ui" / "glw" / "glw_view_eval.c"
+GLW_DIR = REPO_ROOT / "src" / "ui" / "glw"
+
+CURATED_OPERATORS = METADATA_DIR / "curated_operators.json"
+CURATED_SCOPES = METADATA_DIR / "curated_scopes.json"
+
+SCHEMA_VERSION = 1
+GENERATED_BY = "support/devtools/metadata/gen.py"
+
+ATTRIB_TABLE_DECL = "token_attrib_t attribtab[] = {"
+FUNC_TABLE_DECL = "token_func_t funcvec[] = {"
+
+WIDGET_DECL_RE = re.compile(r'^(?:static\s+)?glw_class_t\s+(\w+)\s*=\s*\{')
+GC_NAME_RE = re.compile(r'\.gc_name\s*=\s*"([^"]+)"')
+GC_NAME2_RE = re.compile(r'\.gc_name2\s*=\s*"([^"]+)"')
+REGISTER_RE = re.compile(r'GLW_REGISTER_CLASS\((\w+)\)')
+
+# Value type + confidence inferred from attribtab[]'s setter function (2nd
+# field). "high" = the setter is unambiguous about the wire type; "medium"
+# = the setter is polymorphic (set_number dispatches to the target class's
+# own gc_set_int/gc_set_float switch, so the actual type is class-specific).
+VALUE_TYPE_MAP: dict[str, tuple[str, str]] = {
+    "set_style": ("style", "high"),
+    "set_rstring": ("string", "high"),
+    "set_caption": ("string", "high"),
+    "set_font": ("string", "high"),
+    "set_fs": ("string", "high"),
+    "set_source": ("string", "high"),
+    "set_alt": ("string", "high"),
+    "mod_hidden": ("bool", "high"),
+    "mod_flag": ("bool", "high"),
+    "set_float": ("float", "high"),
+    "set_int": ("int", "high"),
+    "set_number": ("number", "medium"),
+    "set_float3": ("vec3", "high"),
+    "set_float4": ("vec4", "high"),
+    "set_int16_4": ("vec4i", "high"),
+    "set_margin": ("vec4i", "high"),
+    "set_align": ("enum", "high"),
+    "set_transition_effect": ("enum", "high"),
+    "set_args": ("block", "high"),
+    "set_propref": ("propref", "high"),
+}
+
+
+class GenError(Exception):
+    pass
+
+
+def rel(path: Path) -> str:
+    return path.relative_to(REPO_ROOT).as_posix()
+
+
+# ---------------------------------------------------------------------------
+# Generic C array-of-struct-initializer scanner, shared by attribtab[] and
+# funcvec[]: both are `static const token_*_t name[] = { {...}, {...}, };`
+# tables whose entries are plain comma-separated identifier/literal fields
+# (no nested braces) but may span multiple physical lines (attribtab's
+# GLW_ATTRIB_FLAG_NO_SUBSCRIPTION entries do). Returns a list of
+# (raw_entry_text, first_line_of_entry) tuples, one per top-level `{...}`.
+# ---------------------------------------------------------------------------
+
+def scan_array_block(path: Path, decl_marker: str,
+                      close_marker: str = "};") -> list[tuple[str, int]]:
+    if not path.is_file():
+        raise GenError("source file not found: %s" % path)
+    lines = path.read_text(encoding="utf-8").splitlines()
+
+    start_idx = None
+    for i, line in enumerate(lines):
+        if decl_marker in line:
+            start_idx = i
+            break
+    if start_idx is None:
+        raise GenError("table %r not found in %s" % (decl_marker, path))
+
+    end_idx = None
+    for i in range(start_idx + 1, len(lines)):
+        if lines[i].strip() == close_marker:
+            end_idx = i
+            break
+    if end_idx is None:
+        raise GenError("closing %r not found after %r in %s"
+                        % (close_marker, decl_marker, path))
+
+    entries: list[tuple[str, int]] = []
+    depth = 0
+    buf: list[str] = []
+    entry_line = 0
+    in_str = False
+    str_q = ""
+
+    for i_line in range(start_idx + 1, end_idx):
+        line_no = i_line + 1  # 1-based
+        text = lines[i_line]
+        j = 0
+        n = len(text)
+        while j < n:
+            c = text[j]
+            if in_str:
+                buf.append(c)
+                if c == "\\" and j + 1 < n:
+                    j += 1
+                    buf.append(text[j])
+                elif c == str_q:
+                    in_str = False
+                j += 1
+                continue
+            if c == "/" and j + 1 < n and text[j + 1] == "/":
+                break  # line comment: rest of physical line is not code
+            if c in ('"', "'"):
+                if depth > 0:
+                    in_str = True
+                    str_q = c
+                    buf.append(c)
+                j += 1
+                continue
+            if c == "{":
+                if depth == 0:
+                    buf = []
+                    entry_line = line_no
+                else:
+                    buf.append(c)
+                depth += 1
+                j += 1
+                continue
+            if c == "}":
+                depth -= 1
+                if depth < 0:
+                    raise GenError("unbalanced '}' at %s:%d" % (path, line_no))
+                if depth == 0:
+                    entries.append(("".join(buf), entry_line))
+                else:
+                    buf.append(c)
+                j += 1
+                continue
+            if depth > 0:
+                buf.append(c)
+            j += 1
+
+    if depth != 0:
+        raise GenError("unbalanced braces scanning %r in %s"
+                        % (decl_marker, path))
+    return entries
+
+
+def split_fields(text: str) -> list[str]:
+    """Top-level comma-separated fields of one entry's inner text (paren/
+    bracket depth tracked so a field like `foo(a, b)` -- not used by either
+    table today, but kept generic -- doesn't get split)."""
+    fields: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    in_str = False
+    str_q = ""
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if in_str:
+            buf.append(c)
+            if c == "\\" and i + 1 < n:
+                i += 1
+                buf.append(text[i])
+            elif c == str_q:
+                in_str = False
+            i += 1
+            continue
+        if c in ('"', "'"):
+            in_str = True
+            str_q = c
+            buf.append(c)
+            i += 1
+            continue
+        if c in "([":
+            depth += 1
+            buf.append(c)
+            i += 1
+            continue
+        if c in ")]":
+            depth -= 1
+            buf.append(c)
+            i += 1
+            continue
+        if c == "," and depth == 0:
+            fields.append("".join(buf).strip())
+            buf = []
+            i += 1
+            continue
+        buf.append(c)
+        i += 1
+    tail = "".join(buf).strip()
+    if tail:
+        fields.append(tail)
+    return [f for f in fields if f]
+
+
+def unquote(field: str) -> str:
+    if len(field) >= 2 and field[0] == '"' and field[-1] == '"':
+        return field[1:-1]
+    return field
+
+
+# ---------------------------------------------------------------------------
+# glw.attributes -- attribtab[]
+# ---------------------------------------------------------------------------
+
+def build_attributes() -> list[dict[str, Any]]:
+    entries = scan_array_block(ATTRIB_C, ATTRIB_TABLE_DECL)
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for text, line in entries:
+        fields = split_fields(text)
+        if not fields:
+            continue
+        name = unquote(fields[0])
+        if name in seen:
+            raise GenError("duplicate attribute name in source: %s" % name)
+        seen.add(name)
+
+        setter = fields[1] if len(fields) > 1 else None
+        attrib_const = (fields[2] if len(fields) > 2 and fields[2] != "0"
+                         else None)
+        fn = fields[3] if len(fields) > 3 and fields[3] != "NULL" else None
+        no_sub = (len(fields) > 4
+                  and fields[4] == "GLW_ATTRIB_FLAG_NO_SUBSCRIPTION")
+        value_type, confidence = VALUE_TYPE_MAP.get(setter, ("unknown", "low"))
+
+        records.append({
+            "name": name,
+            "valueType": value_type,
+            "confidence": confidence,
+            "setter": setter,
+            "attribConst": attrib_const,
+            "fn": fn,
+            "noSubscription": no_sub,
+            "source": {"file": rel(ATTRIB_C), "line": line},
+        })
+    records.sort(key=lambda r: r["name"])
+    return records
+
+
+# ---------------------------------------------------------------------------
+# glw.functions -- funcvec[]
+# ---------------------------------------------------------------------------
+
+def build_functions() -> list[dict[str, Any]]:
+    entries = scan_array_block(EVAL_C, FUNC_TABLE_DECL)
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for text, line in entries:
+        fields = split_fields(text)
+        if not fields:
+            continue
+        name = unquote(fields[0])
+        if name in seen:
+            raise GenError("duplicate function name in source: %s" % name)
+        seen.add(name)
+
+        nargs = int(fields[1]) if len(fields) > 1 else None
+        impl = fields[2] if len(fields) > 2 else None
+        ctor = fields[3] if len(fields) > 3 and fields[3] != "NULL" else None
+        dtor = fields[4] if len(fields) > 4 and fields[4] != "NULL" else None
+        preproc = (fields[5] if len(fields) > 5 and fields[5] != "NULL"
+                   else None)
+
+        records.append({
+            "name": name,
+            "nargs": nargs,
+            "variadic": nargs == -1,
+            "impl": impl,
+            "ctor": ctor is not None,
+            "dtor": dtor is not None,
+            "preproc": preproc is not None,
+            "source": {"file": rel(EVAL_C), "line": line},
+        })
+    records.sort(key=lambda r: r["name"])
+    return records
+
+
+# ---------------------------------------------------------------------------
+# glw.widgets -- glw_class_t designated initializers across glw_*.c
+# ---------------------------------------------------------------------------
+
+def build_widgets() -> list[dict[str, Any]]:
+    files = sorted(GLW_DIR.glob("glw_*.c"))
+
+    registered: set[str] = set()
+    for f in files:
+        registered.update(REGISTER_RE.findall(f.read_text(encoding="utf-8")))
+
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for f in files:
+        lines = f.read_text(encoding="utf-8").splitlines()
+        n = len(lines)
+        i = 0
+        while i < n:
+            m = WIDGET_DECL_RE.match(lines[i].strip())
+            if not m:
+                i += 1
+                continue
+            symbol = m.group(1)
+            depth = lines[i].count("{") - lines[i].count("}")
+            gc_name = None
+            gc_name_line = None
+            gc_name2 = None
+            j = i + 1
+            while j < n and depth > 0:
+                line = lines[j]
+                depth += line.count("{") - line.count("}")
+                nm = GC_NAME_RE.search(line)
+                if nm and gc_name is None:
+                    gc_name = nm.group(1)
+                    gc_name_line = j + 1
+                nm2 = GC_NAME2_RE.search(line)
+                if nm2:
+                    gc_name2 = nm2.group(1)
+                j += 1
+            if gc_name is None:
+                raise GenError("glw_class_t %s in %s has no .gc_name"
+                                % (symbol, f))
+            if gc_name in seen:
+                raise GenError("duplicate widget gc_name: %s" % gc_name)
+            seen.add(gc_name)
+            records.append({
+                "name": gc_name,
+                "aliases": [gc_name2] if gc_name2 else [],
+                "symbol": symbol,
+                "registered": symbol in registered,
+                "source": {"file": rel(f), "line": gc_name_line},
+            })
+            i = j
+    records.sort(key=lambda r: r["name"])
+    return records
+
+
+# ---------------------------------------------------------------------------
+# glw.operators / glw.scopes -- curated, hand-authored next to this file
+# ---------------------------------------------------------------------------
+
+def load_curated(path: Path, required_keys: set[str]) -> list[dict[str, Any]]:
+    if not path.is_file():
+        raise GenError("curated input file not found: %s" % path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        raise GenError("%s: expected a top-level JSON array" % path)
+    for entry in data:
+        missing = required_keys - entry.keys()
+        if missing:
+            raise GenError("%s: entry missing keys %s: %r"
+                            % (path, sorted(missing), entry))
+        src = entry["source"]
+        if not isinstance(src, dict) or "file" not in src or "line" not in src:
+            raise GenError("%s: entry has malformed source: %r" % (path, entry))
+        src_path = REPO_ROOT / src["file"]
+        if not src_path.is_file():
+            raise GenError("%s: source.file does not exist: %s"
+                            % (path, src["file"]))
+    return data
+
+
+def build_operators() -> list[dict[str, Any]]:
+    ops = load_curated(CURATED_OPERATORS,
+                        {"symbols", "token", "category", "semantics", "source"})
+    ops.sort(key=lambda r: r["symbols"][0])
+    return ops
+
+
+def build_scopes() -> list[dict[str, Any]]:
+    scopes = load_curated(CURATED_SCOPES, {"name", "meaning", "source"})
+    scopes.sort(key=lambda r: r["name"])
+    return scopes
+
+
+# ---------------------------------------------------------------------------
+# top level
+# ---------------------------------------------------------------------------
+
+def git_revision() -> str:
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True,
+        )
+        return out.stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+def build_artifact() -> dict[str, Any]:
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "movianRevision": git_revision(),
+        "generatedBy": GENERATED_BY,
+        "glw": {
+            "functions": build_functions(),
+            "attributes": build_attributes(),
+            "widgets": build_widgets(),
+            "operators": build_operators(),
+            "scopes": build_scopes(),
+        },
+        "js": {},
+    }
+
+
+def dumps(artifact: dict[str, Any]) -> str:
+    return json.dumps(artifact, ensure_ascii=False, indent=2,
+                       sort_keys=True) + "\n"
+
+
+def _strip_revision(artifact: dict[str, Any]) -> dict[str, Any]:
+    """A copy of `artifact` with movianRevision normalized out -- the one
+    field that legitimately differs between two regenerations run on
+    different commits (see module docstring)."""
+    clone = dict(artifact)
+    clone["movianRevision"] = None
+    return clone
+
+
+def cmd_generate(_args: argparse.Namespace) -> int:
+    artifact = build_artifact()
+    ARTIFACT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ARTIFACT_PATH.write_text(dumps(artifact), encoding="utf-8")
+    print("wrote %s" % rel(ARTIFACT_PATH))
+    return 0
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    fresh = build_artifact()
+    if not ARTIFACT_PATH.is_file():
+        print("mdev-metadata: committed artifact not found: %s"
+              % ARTIFACT_PATH, file=sys.stderr)
+        return 1
+    committed = json.loads(ARTIFACT_PATH.read_text(encoding="utf-8"))
+
+    fresh_norm = _strip_revision(fresh)
+    committed_norm = _strip_revision(committed)
+
+    if fresh_norm == committed_norm:
+        if args.json:
+            print(json.dumps({"metadata": "ok"}, indent=2))
+        else:
+            print("METADATA OK (movianRevision: committed=%s current=%s)"
+                  % (committed.get("movianRevision"),
+                     fresh.get("movianRevision")))
+        return 0
+
+    diff = diff_artifacts(committed_norm, fresh_norm)
+    if args.json:
+        print(json.dumps({"metadata": "drift", "diff": diff},
+                          ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print("METADATA DRIFT")
+        for line in format_diff(diff):
+            print(line)
+    return 1
+
+
+def _without_line(record: dict[str, Any]) -> dict[str, Any]:
+    """`record` with `source.line` blanked out -- an unrelated insertion
+    earlier in the same C table shifts every later entry's line number,
+    which is real but not "drift" worth reporting as a changed record; the
+    added/removed name lists already carry that signal."""
+    clone = dict(record)
+    src = dict(clone.get("source") or {})
+    src["line"] = None
+    clone["source"] = src
+    return clone
+
+
+def diff_artifacts(committed: dict[str, Any],
+                    fresh: dict[str, Any]) -> dict[str, Any]:
+    """Section-by-section (by name/symbols key) added/removed/changed
+    report for every glw.* list, so drift is falsifiable and legible in
+    both directions (added-since-commit vs removed-since-commit)."""
+    result: dict[str, Any] = {}
+    for section, key in (("functions", "name"), ("attributes", "name"),
+                          ("widgets", "name")):
+        c = {r[key]: r for r in committed["glw"][section]}
+        f = {r[key]: r for r in fresh["glw"][section]}
+        added = sorted(set(f) - set(c))
+        removed = sorted(set(c) - set(f))
+        changed = sorted(
+            n for n in (set(f) & set(c))
+            if _without_line(f[n]) != _without_line(c[n])
+        )
+        if added or removed or changed:
+            result[section] = {"added": added, "removed": removed,
+                                "changed": changed}
+    if committed.get("js") != fresh.get("js"):
+        result["js"] = {"committed": committed.get("js"),
+                         "fresh": fresh.get("js")}
+    for section in ("operators", "scopes"):
+        if committed["glw"][section] != fresh["glw"][section]:
+            result[section] = {"note": "curated section changed on disk "
+                                        "vs committed artifact"}
+    return result
+
+
+def format_diff(diff: dict[str, Any]) -> list[str]:
+    lines = []
+    for section, d in diff.items():
+        if "added" in d or "removed" in d or "changed" in d:
+            for name in d.get("added", []):
+                lines.append("added (%s): %s" % (section, name))
+            for name in d.get("removed", []):
+                lines.append("removed (%s): %s" % (section, name))
+            for name in d.get("changed", []):
+                lines.append("changed (%s): %s" % (section, name))
+        else:
+            lines.append("changed (%s)" % section)
+    return lines
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="gen.py",
+        description="Generate/check generated/movian-metadata.json "
+                     "(issue #98).")
+    parser.add_argument("--check", action="store_true",
+                         help="diff regenerated content against the "
+                              "committed artifact (movianRevision "
+                              "ignored); exit 1 on drift")
+    parser.add_argument("--json", action="store_true",
+                         help="machine-readable JSON output (--check only)")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        if args.check:
+            return cmd_check(args)
+        return cmd_generate(args)
+    except GenError as error:
+        print("gen.py: %s" % error, file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

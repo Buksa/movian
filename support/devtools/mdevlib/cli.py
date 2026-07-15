@@ -702,17 +702,20 @@ def build_parser() -> argparse.ArgumentParser:
         "viewdoc",
         help="diff the GLW attribute/function tables against the "
              "movian-view-design reference docs (issue #88)",
-        description="Extracts attribute names from glw_view_attrib.c's "
-                    "attribtab[] and expression-function names from "
-                    "glw_view_eval.c's funcvec[], and (with --check) diffs "
-                    "them against the names documented in the "
-                    "movian-view-design skill's glw-widget-catalog.md / "
-                    "glw-view-language.md. Reports missing-from-doc "
-                    "(in source, undocumented) and gone-from-source "
-                    "(documented, not implemented); exit 1 on any drift. "
-                    "Without --check, dumps the source-side inventories.")
+        description="Reads attribute and expression-function names from "
+                    "generated/movian-metadata.json's glw.attributes / "
+                    "glw.functions (issue #98's generated artifact -- run "
+                    "support/devtools/metadata/gen.py to (re)build it from "
+                    "glw_view_attrib.c's attribtab[] / glw_view_eval.c's "
+                    "funcvec[]), and (with --check) diffs them against the "
+                    "names documented in the movian-view-design skill's "
+                    "glw-widget-catalog.md / glw-view-language.md. Reports "
+                    "missing-from-doc (in the artifact, undocumented) and "
+                    "gone-from-source (documented, not in the artifact); "
+                    "exit 1 on any drift. Without --check, dumps the "
+                    "artifact-side inventories.")
     viewdoc_.add_argument("--check", action="store_true",
-                          help="diff source tables against the docs; "
+                          help="diff artifact tables against the docs; "
                                "exit 1 on any drift")
     viewdoc_.add_argument("--json", action="store_true",
                           help="machine-readable JSON output")
