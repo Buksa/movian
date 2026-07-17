@@ -297,7 +297,7 @@ http_resolve(http_connection_t *hc, char **remainp, char **argsp)
 
   case '/':
     if(v[1] == '?') {
-      *argsp = v + 1;
+      *argsp = v + 2;
       break;
     }
 
