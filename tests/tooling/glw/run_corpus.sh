@@ -11,8 +11,9 @@
 # contract table) instead of a plain exit code.
 #
 # glwskins/flat/**.view (98 files) is the acceptance-criterion corpus:
-# every one of those MUST exit 0 with empty stderr (issue #97: "All
-# glwskins/flat/**.view (98) -> exit 0, nothing on stderr"). Everything
+# every one of those MUST make both --check and --tokens exit 0 with empty
+# stderr (issue #97: "All glwskins/flat/**.view (98) -> exit 0, nothing on
+# stderr"). Everything
 # else under glwskins/ (glwskins/old/, legacy/experimental) and the
 # intentionally-broken fixtures are only held to "did not crash" --
 # exit 0 (clean) or exit 1 (a real, reported parse error) are both fine
@@ -77,13 +78,25 @@ check_one() {
   fi
 
   # --tokens: lexer-only path, exercises a different (smaller) part of
-  # the object closure; must never crash either.
-  "$ANALYZE" --tokens "$view" >/dev/null 2>>/tmp/movian-analyze-corpus.stderr
+  # the object closure. Strict files must be clean here too; loose files
+  # retain the crash-only contract.
+  "$ANALYZE" --tokens "$view" >/dev/null 2>/tmp/movian-analyze-corpus.tokens.stderr
   trc=$?
   if [ "$trc" -gt 128 ]; then
     echo "CRASH in --tokens (signal $((trc - 128))): $view" >&2
     crash=$((crash + 1))
     fail=1
+  elif [ "$strict" = 1 ]; then
+    if [ "$trc" != 0 ]; then
+      echo "FLAT CORPUS REGRESSION (--tokens exit $trc, expected 0): $view" >&2
+      flat_fail=$((flat_fail + 1))
+      fail=1
+    elif [ -s /tmp/movian-analyze-corpus.tokens.stderr ]; then
+      echo "FLAT CORPUS REGRESSION (--tokens nonempty stderr): $view" >&2
+      sed 's/^/  stderr: /' /tmp/movian-analyze-corpus.tokens.stderr >&2
+      flat_fail=$((flat_fail + 1))
+      fail=1
+    fi
   fi
 }
 
@@ -105,6 +118,14 @@ echo "== tests/tooling/glw/fixtures (loose: must not crash) =="
 for f in tests/tooling/glw/fixtures/*.view; do
   [ -f "$f" ] || continue
   n_fixtures=$((n_fixtures + 1))
+  # --check invokes the real preprocessor, which has no analyzer
+  # --max-depth option. The self-cycle is checked below by the bounded
+  # --tokens walker instead.
+  case "$f" in
+    tests/tooling/glw/fixtures/self-include.view)
+      continue
+      ;;
+  esac
   check_one "$f" 0
 done
 
@@ -115,10 +136,41 @@ for f in tests/tooling/glw/golden/*.view; do
   check_one "$f" 1
 done
 
-rm -f /tmp/movian-analyze-corpus.stderr
+rm -f /tmp/movian-analyze-corpus.stderr /tmp/movian-analyze-corpus.tokens.stderr
 
 echo "== golden JSON byte-compare (tests/tooling/glw/golden/small.view) =="
 golden_fail=0
+
+check_tokens_golden() {
+  # $1 = source view, $2 = expected --tokens JSON, $3 = label
+  golden_view=$1
+  golden_path=$2
+  golden_label=$3
+
+  "$ANALYZE" --tokens "$golden_view" \
+    > /tmp/movian-analyze-corpus.golden.tokens \
+    2> /tmp/movian-analyze-corpus.golden.stderr
+  golden_rc=$?
+
+  if [ "$golden_rc" != 0 ] || \
+     [ -s /tmp/movian-analyze-corpus.golden.stderr ] || \
+     ! cmp -s /tmp/movian-analyze-corpus.golden.tokens "$golden_path"; then
+    echo "GOLDEN MISMATCH (--tokens $golden_label):" >&2
+    if [ "$golden_rc" != 0 ]; then
+      echo "  exit: $golden_rc (expected 0)" >&2
+    fi
+    if [ -s /tmp/movian-analyze-corpus.golden.stderr ]; then
+      sed 's/^/  stderr: /' /tmp/movian-analyze-corpus.golden.stderr >&2
+    fi
+    if ! cmp -s /tmp/movian-analyze-corpus.golden.tokens "$golden_path"; then
+      sed 's/^/  got:  /' /tmp/movian-analyze-corpus.golden.tokens >&2
+      sed 's/^/  want: /' "$golden_path" >&2
+    fi
+    golden_fail=1
+    fail=1
+  fi
+}
+
 if [ -f tests/tooling/glw/golden/small.check.json ]; then
   got=$("$ANALYZE" --check tests/tooling/glw/golden/small.view 2>/dev/null)
   want=$(cat tests/tooling/glw/golden/small.check.json)
@@ -131,14 +183,54 @@ if [ -f tests/tooling/glw/golden/small.check.json ]; then
   fi
 fi
 if [ -f tests/tooling/glw/golden/small.tokens.json ]; then
-  got=$("$ANALYZE" --tokens tests/tooling/glw/golden/small.view 2>/dev/null)
-  want=$(cat tests/tooling/glw/golden/small.tokens.json)
-  if [ "$got" != "$want" ]; then
-    echo "GOLDEN MISMATCH (--tokens small.view):" >&2
+  check_tokens_golden tests/tooling/glw/golden/small.view \
+    tests/tooling/glw/golden/small.tokens.json "small.view"
+fi
+if [ -f tests/tooling/glw/golden/deescape-drop.tokens.json ]; then
+  check_tokens_golden tests/tooling/glw/fixtures/deescape-drop.view \
+    tests/tooling/glw/golden/deescape-drop.tokens.json "deescape-drop.view"
+fi
+if [ -f tests/tooling/glw/golden/repeated-include.tokens.json ]; then
+  check_tokens_golden tests/tooling/glw/fixtures/repeated-include.view \
+    tests/tooling/glw/golden/repeated-include.tokens.json "repeated-include.view"
+fi
+
+if [ -f tests/tooling/glw/golden/self-include.depth-1.tokens.json ] && \
+   [ -f tests/tooling/glw/golden/self-include.depth-1.stderr ]; then
+  echo "== self-include depth guard (--tokens --max-depth 1) =="
+  timeout 5 "$ANALYZE" --tokens --max-depth 1 \
+    tests/tooling/glw/fixtures/self-include.view \
+    > /tmp/movian-analyze-corpus.self-include.tokens \
+    2> /tmp/movian-analyze-corpus.self-include.stderr
+  self_rc=$?
+  if [ "$self_rc" != 0 ] || \
+     ! cmp -s /tmp/movian-analyze-corpus.self-include.tokens \
+       tests/tooling/glw/golden/self-include.depth-1.tokens.json || \
+     ! cmp -s /tmp/movian-analyze-corpus.self-include.stderr \
+       tests/tooling/glw/golden/self-include.depth-1.stderr; then
+    echo "SELF-INCLUDE REGRESSION (--tokens --max-depth 1):" >&2
+    echo "  exit: $self_rc (expected 0)" >&2
+    if ! cmp -s /tmp/movian-analyze-corpus.self-include.tokens \
+      tests/tooling/glw/golden/self-include.depth-1.tokens.json; then
+      sed 's/^/  got:  /' /tmp/movian-analyze-corpus.self-include.tokens >&2
+      sed 's/^/  want: /' \
+        tests/tooling/glw/golden/self-include.depth-1.tokens.json >&2
+    fi
+    if ! cmp -s /tmp/movian-analyze-corpus.self-include.stderr \
+      tests/tooling/glw/golden/self-include.depth-1.stderr; then
+      sed 's/^/  stderr: /' /tmp/movian-analyze-corpus.self-include.stderr >&2
+      sed 's/^/  wanted stderr: /' \
+        tests/tooling/glw/golden/self-include.depth-1.stderr >&2
+    fi
     golden_fail=1
     fail=1
   fi
 fi
+
+rm -f /tmp/movian-analyze-corpus.golden.tokens \
+  /tmp/movian-analyze-corpus.golden.stderr \
+  /tmp/movian-analyze-corpus.self-include.tokens \
+  /tmp/movian-analyze-corpus.self-include.stderr
 
 echo
 echo "flat+golden: $n_flat, glwskins/old: $n_other, fixtures: $n_fixtures, crashes: $crash, flat regressions: $flat_fail, golden mismatches: $golden_fail"

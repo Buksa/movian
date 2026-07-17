@@ -1,0 +1,4 @@
+// Fixture (#103): target of repeated-include.view.
+widget(label, {
+  caption: "included twice";
+});

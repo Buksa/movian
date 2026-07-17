@@ -329,7 +329,8 @@ already_visited(import_walk_t *w, const char *path)
   return 0;
 }
 
-static void lex_and_walk(import_walk_t *w, rstr_t *file, int depth);
+static void lex_and_walk(import_walk_t *w, rstr_t *file, int depth,
+                         int is_import);
 
 /* Scans one already-lexed, flat token chain for '#import "X"' / '#include
  * "X"' directive shapes -- the same syntactic pattern
@@ -371,15 +372,18 @@ scan_for_imports(import_walk_t *w, token_t *chain, int depth)
                                         NULL);
     if(resolved == NULL)
       continue;
-    lex_and_walk(w, resolved, depth + 1);
+    lex_and_walk(w, resolved, depth + 1, !strcmp(kwname, "import"));
     rstr_release(resolved);
   }
 }
 
 static void
-lex_and_walk(import_walk_t *w, rstr_t *file, int depth)
+lex_and_walk(import_walk_t *w, rstr_t *file, int depth, int is_import)
 {
-  if(already_visited(w, rstr_get(file)))
+  /* The real preprocessor only deduplicates #import. Every #include
+   * splices its target, including a repeated target; include cycles are
+   * bounded by scan_for_imports()' max-depth guard instead. */
+  if(is_import && already_visited(w, rstr_get(file)))
     return;
 
   /* shim.c's fa_load() ignores all varargs (no FA_LOAD_* tag parsing --
@@ -463,8 +467,6 @@ cmd_tokens(glw_root_t *gr, const char *path, int max_depth)
   w.gr = gr;
   w.sink = &sink;
   w.max_depth = max_depth;
-  already_visited(&w, path); /* seed with the top file so a cyclic
-                                #import back to it is a no-op */
   scan_for_imports(&w, sof->next, 0);
 
   printf("]}\n");

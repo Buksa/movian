@@ -211,33 +211,27 @@ tracelog(int flags, int level, const char *subsys, const char *fmt, ...)
 
 
 /* ---- string unescape ----------------------------------------------------
- * The real implementation lives in src/misc/str.c, which drags in
- * charset/codepage tables unrelated to parsing. This is a semantically
- * equivalent minimal version limited to the escapes the GLW lexer
- * actually emits ("\n \t \r \\ \" \'"; anything else passes through the
- * escaped character unchanged, matching src/misc/str.c's default case). */
+ * byte-identical port of src/misc/str.c deescape_cstyle (only \n and \\
+ * produce output; all other escapes are dropped). */
 void
 deescape_cstyle(char *str)
 {
-  char *rd = str, *wr = str;
-  while(*rd) {
-    if(*rd == '\\' && rd[1]) {
-      rd++;
-      switch(*rd) {
-      case 'n': *wr++ = '\n'; break;
-      case 't': *wr++ = '\t'; break;
-      case 'r': *wr++ = '\r'; break;
-      case '\\': *wr++ = '\\'; break;
-      case '"': *wr++ = '"'; break;
-      case '\'': *wr++ = '\''; break;
-      default: *wr++ = *rd; break;
-      }
-      rd++;
+  char *dst = str;
+  while(*str) {
+    if(*str == '\\') {
+      str++;
+      if(*str == 0)
+        break;
+      if(*str == 'n')
+        *dst++ = '\n';
+      if(*str == '\\')
+        *dst++ = '\\';
+      str++;
     } else {
-      *wr++ = *rd++;
+      *dst++ = *str++;
     }
   }
-  *wr = 0;
+  *dst = 0;
 }
 
 
