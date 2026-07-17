@@ -1,0 +1,10 @@
+{
+  "expected": {
+    "endCharacter": 18,
+    "line": 1,
+    "message": "Invalid char '`'",
+    "source": "movian-glw"
+  },
+  "text": "widget(label, {\r\n\tcaption: \"😀\"; `;\r\n});\r\n",
+  "uri": "file:///tmp/movian-lsp-utf16-emoji-tabs.view"
+}
