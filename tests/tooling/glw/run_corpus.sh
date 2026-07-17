@@ -100,10 +100,27 @@ check_one() {
   fi
 }
 
-echo "== glwskins/flat (strict: must exit 0, empty stderr) =="
+# Include-fragments: files that are only ever #include/#import-ed into a
+# document that has already imported theme.view, so they call macros
+# (e.g. ListItemBevel from theme.view) that do not exist in a standalone
+# parse. The real runtime rejects a standalone parse of these the same
+# way, so a clean-exit expectation would be FALSE parity; they run in the
+# loose lane (must not crash, well-formed error allowed). See issue #106.
+is_fragment() {
+  case "$1" in
+    glwskins/flat/menu/sidebar_common.view) return 0 ;;
+  esac
+  return 1
+}
+
+echo "== glwskins/flat (strict: must exit 0, empty stderr; fragments loose) =="
 for f in $(find glwskins/flat -name '*.view'); do
   n_flat=$((n_flat + 1))
-  check_one "$f" 1
+  if is_fragment "$f"; then
+    check_one "$f" 0
+  else
+    check_one "$f" 1
+  fi
 done
 
 echo "== glwskins/old (loose: must not crash) =="
