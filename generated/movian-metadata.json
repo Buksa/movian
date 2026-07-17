@@ -1365,7 +1365,7 @@
           "file": "src/ui/glw/glw_view_attrib.c",
           "line": 1375
         },
-        "valueType": "string"
+        "valueType": "string|string[]"
       },
       {
         "attribConst": "GLW_ATTRIB_SPACING",
@@ -1786,6 +1786,7 @@
         "variadic": false
       },
       {
+        "condition": "#ifndef NDEBUG",
         "ctor": false,
         "dtor": false,
         "impl": "glwf_dumpdynamicstatements",
@@ -2685,11 +2686,12 @@
     ],
     "operators": [
       {
+        "anchor": "TOKEN_BOOLEAN_AND",
         "category": "boolean",
         "semantics": "Short-circuit-free boolean and/or/xor over token2bool() results -- this DSL's RPN evaluator resolves both operands before combining.",
         "source": {
           "file": "src/ui/glw/glw_view_lexer.c",
-          "line": 247
+          "line": 248
         },
         "symbols": [
           "&&",
@@ -2699,6 +2701,7 @@
         "token": "TOKEN_BOOLEAN_AND / TOKEN_BOOLEAN_OR / TOKEN_BOOLEAN_XOR"
       },
       {
+        "anchor": "TOKEN_ADD",
         "category": "arithmetic",
         "semantics": "Numeric arithmetic; '+' is overloaded for string concatenation when either operand is a string.",
         "source": {
@@ -2715,6 +2718,7 @@
         "token": "TOKEN_ADD / TOKEN_SUB / TOKEN_MULTIPLY / TOKEN_DIVIDE / TOKEN_MODULO"
       },
       {
+        "anchor": "TOKEN_REF_ASSIGNMENT",
         "category": "assignment",
         "semantics": "Reference assignment: the right side is not resolved to a value, it stays a property reference. Assigning a bare property with ':=' creates a live prop-symlink; assigning to self/args/itemModel/parentModel/tentative passes the actual prop_t* into the setter.",
         "source": {
@@ -2727,6 +2731,7 @@
         "token": "TOKEN_REF_ASSIGNMENT"
       },
       {
+        "anchor": "TOKEN_LINK_ASSIGNMENT",
         "category": "assignment",
         "semantics": "Link assignment: always creates a one-way, continuously-live prop_link_ex() link from the right-hand property to the left. The left side may be a bare identifier inside an args/block scope, auto-created as a child prop of the current target.",
         "source": {
@@ -2739,6 +2744,7 @@
         "token": "TOKEN_LINK_ASSIGNMENT"
       },
       {
+        "anchor": "TOKEN_ASSIGNMENT",
         "category": "assignment",
         "semantics": "Normal assignment. If the right side is a property path it is resolved through a live subscription (re-evaluates whenever the underlying prop changes), unless the target attribute is flagged GLW_ATTRIB_FLAG_NO_SUBSCRIPTION (self, itemModel, parentModel, tentative).",
         "source": {
@@ -2751,11 +2757,12 @@
         "token": "TOKEN_ASSIGNMENT"
       },
       {
+        "anchor": "TOKEN_EQ",
         "category": "comparison",
         "semantics": "Numeric/string comparison via token_cmp()-style helpers; mixed int/float compares by value.",
         "source": {
           "file": "src/ui/glw/glw_view_lexer.c",
-          "line": 289
+          "line": 290
         },
         "symbols": [
           "==",
@@ -2766,11 +2773,12 @@
         "token": "TOKEN_EQ / TOKEN_NEQ / TOKEN_LT / TOKEN_GT"
       },
       {
+        "anchor": "eval_tenary",
         "category": "other",
         "semantics": "'cond ? a : b': resolves cond via token2bool(), then (unlike '??') does not eagerly resolve both branches -- pushes the unresolved chosen branch.",
         "source": {
           "file": "src/ui/glw/glw_view_eval.c",
-          "line": 1087
+          "line": 1088
         },
         "symbols": [
           "?:"
@@ -2778,6 +2786,7 @@
         "token": "TOKEN_TENARY"
       },
       {
+        "anchor": "TOKEN_COND_ASSIGNMENT",
         "category": "assignment",
         "semantics": "Conditional assignment: identical to '=', except if the resolved right-hand value is void the assignment is skipped entirely and the left side keeps its previous value.",
         "source": {
@@ -2790,11 +2799,12 @@
         "token": "TOKEN_COND_ASSIGNMENT"
       },
       {
+        "anchor": "TOKEN_NULL_COALESCE",
         "category": "other",
         "semantics": "'a ?? b': resolves a; if a is void, evaluates to b, else to a. Idiom for falling back to a default only when a prop is genuinely unset.",
         "source": {
           "file": "src/ui/glw/glw_view_lexer.c",
-          "line": 301
+          "line": 302
         },
         "symbols": [
           "??"
@@ -2802,6 +2812,7 @@
         "token": "TOKEN_NULL_COALESCE"
       },
       {
+        "anchor": "TOKEN_DEBUG_ASSIGNMENT",
         "category": "assignment",
         "semantics": "Debug assignment: functionally identical to '=' for the common case; in the direct prop-to-prop link case it passes debug=1 into prop_link_ex(), turning on subscription-debug tracing for that link.",
         "source": {
@@ -2816,6 +2827,7 @@
     ],
     "scopes": [
       {
+        "anchor": "\"args\"",
         "meaning": "Arguments passed in via the args: attribute.",
         "name": "args",
         "source": {
@@ -2824,6 +2836,7 @@
         }
       },
       {
+        "anchor": "\"clone\"",
         "meaning": "Scratch root local to one cloner()-generated clone instance.",
         "name": "clone",
         "source": {
@@ -2832,6 +2845,7 @@
         }
       },
       {
+        "anchor": "\"core\"",
         "meaning": "Global core-service props (e.g. $core.stpp, $core.popups, $core.clipboard).",
         "name": "core",
         "source": {
@@ -2840,6 +2854,7 @@
         }
       },
       {
+        "anchor": "strcmp(name, \"global\")",
         "meaning": "Prop root's absolute global tree; rarely used directly in views.",
         "name": "global",
         "source": {
@@ -2848,6 +2863,7 @@
         }
       },
       {
+        "anchor": "PROP_TAG_NAMED_ROOT",
         "meaning": "The navigator ($nav.currentpage, $nav.pages), wired in via PROP_TAG_NAMED_ROOT.",
         "name": "nav",
         "source": {
@@ -2856,6 +2872,7 @@
         }
       },
       {
+        "anchor": "\"parent\"",
         "meaning": "The enclosing scope's self, one level up -- set when a loader/widget block rebinds self.",
         "name": "parent",
         "source": {
@@ -2864,6 +2881,7 @@
         }
       },
       {
+        "anchor": "\"parentview\"",
         "meaning": "The view root one level up (companion to parent).",
         "name": "parentview",
         "source": {
@@ -2872,6 +2890,7 @@
         }
       },
       {
+        "anchor": "\"self\"",
         "meaning": "The widget/clone's own bound prop (e.g. a page, or the current clone item).",
         "name": "self",
         "source": {
@@ -2880,6 +2899,7 @@
         }
       },
       {
+        "anchor": "prop_create_root(\"ui\")",
         "meaning": "Global per-glw_root_t UI prop tree ($ui.width, $ui.aspect, $ui.keyboard, $ui.pointerVisible, ...); resolves because the prop node itself is named \"ui\", not via an explicit named-root tag.",
         "name": "ui",
         "source": {
@@ -2888,6 +2908,7 @@
         }
       },
       {
+        "anchor": "\"view\"",
         "meaning": "Per-view-file scratch root, fresh each time the .view file is loaded.",
         "name": "view",
         "source": {
@@ -3095,6 +3116,7 @@
       },
       {
         "aliases": [],
+        "condition": "#if NUM_FADERS > 0",
         "name": "fader",
         "registered": true,
         "source": {
@@ -3335,6 +3357,7 @@
       },
       {
         "aliases": [],
+        "condition": "#if NUM_STENCILERS > 0",
         "name": "stencil",
         "registered": true,
         "source": {
@@ -3436,6 +3459,6 @@
     ]
   },
   "js": {},
-  "movianRevision": "803a53a6f473e51f864b0336140a956442020b2e",
+  "movianRevision": "6042a3b5e7514f68723e81d39e5cc10ccf947517",
   "schemaVersion": 1
 }

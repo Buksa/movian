@@ -23,7 +23,9 @@ committed metadata artifact for the GLW view language, grown from
 
 Every record carries `source: {file, line}` pointing at the defining line
 in the C source (scanned, not hand-typed -- see the table-entry scanner
-below) or, for curated sections, a hand-verified anchor.
+below) or, for curated sections, a hand-verified anchor. Records discovered
+under a C preprocessor guard additionally carry optional `condition` text;
+active nested guards are joined with ` && `.
 
 Python 3 stdlib only. Determinism: every list is sorted by its primary key
 name, `json.dumps(..., sort_keys=True, indent=2)`, trailing newline.
@@ -73,7 +75,8 @@ GC_NAME2_RE = re.compile(r'\.gc_name2\s*=\s*"([^"]+)"')
 REGISTER_RE = re.compile(r'GLW_REGISTER_CLASS\((\w+)\)')
 
 # Value type + confidence inferred from attribtab[]'s setter function (2nd
-# field). "high" = the setter is unambiguous about the wire type; "medium"
+# field). A `|`-joined value type is a union; an `[]` suffix means a vector of
+# that type. "high" = the setter is unambiguous about the wire type; "medium"
 # = the setter is polymorphic (set_number dispatches to the target class's
 # own gc_set_int/gc_set_float switch, so the actual type is class-specific).
 VALUE_TYPE_MAP: dict[str, tuple[str, str]] = {
@@ -82,7 +85,7 @@ VALUE_TYPE_MAP: dict[str, tuple[str, str]] = {
     "set_caption": ("string", "high"),
     "set_font": ("string", "high"),
     "set_fs": ("string", "high"),
-    "set_source": ("string", "high"),
+    "set_source": ("string|string[]", "high"),
     "set_alt": ("string", "high"),
     "mod_hidden": ("bool", "high"),
     "mod_flag": ("bool", "high"),
@@ -201,6 +204,48 @@ def scan_array_block(path: Path, decl_marker: str,
     return entries
 
 
+PREPROC_GUARD_RE = re.compile(r"^\s*#\s*(if|ifdef|ifndef|else|endif)\b")
+
+
+def preprocessor_conditions(lines: list[str], path: Path) -> list[str | None]:
+    """Return the active raw preprocessor guard text for every source line.
+
+    `#else` is represented as the inverse of the guard it replaces. This is
+    deliberately descriptive rather than an attempt to evaluate C macros.
+    """
+    guard_stack: list[str] = []
+    conditions: list[str | None] = []
+    for line_no, line in enumerate(lines, 1):
+        match = PREPROC_GUARD_RE.match(line)
+        if match:
+            directive = match.group(1)
+            if directive in ("if", "ifdef", "ifndef"):
+                guard_stack.append(line.strip())
+            elif directive == "else":
+                if not guard_stack:
+                    raise GenError("#else without an active guard at %s:%d"
+                                   % (path, line_no))
+                guard_stack[-1] = "!(%s)" % guard_stack[-1]
+            else:
+                if not guard_stack:
+                    raise GenError("#endif without an active guard at %s:%d"
+                                   % (path, line_no))
+                guard_stack.pop()
+        conditions.append(" && ".join(guard_stack) or None)
+    if guard_stack:
+        raise GenError("unterminated preprocessor guard in %s" % path)
+    return conditions
+
+
+def combine_conditions(*conditions: str | None) -> str | None:
+    """Join distinct active guard strings while preserving source order."""
+    terms: list[str] = []
+    for condition in conditions:
+        if condition and condition not in terms:
+            terms.append(condition)
+    return " && ".join(terms) or None
+
+
 def split_fields(text: str) -> list[str]:
     """Top-level comma-separated fields of one entry's inner text (paren/
     bracket depth tracked so a field like `foo(a, b)` -- not used by either
@@ -302,6 +347,8 @@ def build_attributes() -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def build_functions() -> list[dict[str, Any]]:
+    lines = EVAL_C.read_text(encoding="utf-8").splitlines()
+    conditions = preprocessor_conditions(lines, EVAL_C)
     entries = scan_array_block(EVAL_C, FUNC_TABLE_DECL)
     records: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -321,7 +368,7 @@ def build_functions() -> list[dict[str, Any]]:
         preproc = (fields[5] if len(fields) > 5 and fields[5] != "NULL"
                    else None)
 
-        records.append({
+        record = {
             "name": name,
             "nargs": nargs,
             "variadic": nargs == -1,
@@ -330,7 +377,11 @@ def build_functions() -> list[dict[str, Any]]:
             "dtor": dtor is not None,
             "preproc": preproc is not None,
             "source": {"file": rel(EVAL_C), "line": line},
-        })
+        }
+        condition = conditions[line - 1]
+        if condition:
+            record["condition"] = condition
+        records.append(record)
     records.sort(key=lambda r: r["name"])
     return records
 
@@ -342,14 +393,22 @@ def build_functions() -> list[dict[str, Any]]:
 def build_widgets() -> list[dict[str, Any]]:
     files = sorted(GLW_DIR.glob("glw_*.c"))
 
-    registered: set[str] = set()
+    file_contents: dict[Path, tuple[list[str], list[str | None]]] = {}
     for f in files:
-        registered.update(REGISTER_RE.findall(f.read_text(encoding="utf-8")))
+        lines = f.read_text(encoding="utf-8").splitlines()
+        file_contents[f] = (lines, preprocessor_conditions(lines, f))
+
+    registrations: dict[str, list[str | None]] = {}
+    for f in files:
+        lines, conditions = file_contents[f]
+        for i, line in enumerate(lines):
+            for match in REGISTER_RE.finditer(line):
+                registrations.setdefault(match.group(1), []).append(conditions[i])
 
     records: list[dict[str, Any]] = []
     seen: set[str] = set()
     for f in files:
-        lines = f.read_text(encoding="utf-8").splitlines()
+        lines, conditions = file_contents[f]
         n = len(lines)
         i = 0
         while i < n:
@@ -380,13 +439,18 @@ def build_widgets() -> list[dict[str, Any]]:
             if gc_name in seen:
                 raise GenError("duplicate widget gc_name: %s" % gc_name)
             seen.add(gc_name)
-            records.append({
+            record = {
                 "name": gc_name,
                 "aliases": [gc_name2] if gc_name2 else [],
                 "symbol": symbol,
-                "registered": symbol in registered,
+                "registered": symbol in registrations,
                 "source": {"file": rel(f), "line": gc_name_line},
-            })
+            }
+            condition = combine_conditions(
+                conditions[gc_name_line - 1], *registrations.get(symbol, []))
+            if condition:
+                record["condition"] = condition
+            records.append(record)
             i = j
     records.sort(key=lambda r: r["name"])
     return records
@@ -403,17 +467,39 @@ def load_curated(path: Path, required_keys: set[str]) -> list[dict[str, Any]]:
     if not isinstance(data, list):
         raise GenError("%s: expected a top-level JSON array" % path)
     for entry in data:
-        missing = required_keys - entry.keys()
+        if not isinstance(entry, dict):
+            raise GenError("%s: entry is not an object: %r" % (path, entry))
+        entry_name = entry.get("name")
+        if entry_name is None:
+            symbols = entry.get("symbols")
+            entry_name = symbols[0] if isinstance(symbols, list) and symbols else entry
+        missing = (required_keys | {"anchor"}) - entry.keys()
         if missing:
-            raise GenError("%s: entry missing keys %s: %r"
-                            % (path, sorted(missing), entry))
+            raise GenError("%s: entry %r missing keys %s"
+                           % (path, entry_name, sorted(missing)))
         src = entry["source"]
         if not isinstance(src, dict) or "file" not in src or "line" not in src:
-            raise GenError("%s: entry has malformed source: %r" % (path, entry))
+            raise GenError("%s: entry %r has malformed source"
+                           % (path, entry_name))
+        anchor = entry["anchor"]
+        if not isinstance(anchor, str) or not anchor:
+            raise GenError("%s: entry %r has malformed anchor: %r"
+                           % (path, entry_name, anchor))
         src_path = REPO_ROOT / src["file"]
         if not src_path.is_file():
-            raise GenError("%s: source.file does not exist: %s"
-                            % (path, src["file"]))
+            raise GenError("%s: entry %r source.file does not exist: %s"
+                           % (path, entry_name, src["file"]))
+        line = src["line"]
+        if not isinstance(line, int) or isinstance(line, bool) or line < 1:
+            raise GenError("%s: entry %r has invalid source.line: %r"
+                           % (path, entry_name, line))
+        lines = src_path.read_text(encoding="utf-8").splitlines()
+        if line > len(lines):
+            raise GenError("%s: entry %r source.line is out of range: %s:%d"
+                           % (path, entry_name, src["file"], line))
+        if anchor not in lines[line - 1]:
+            raise GenError("%s: entry %r anchor %r not found at %s:%d"
+                           % (path, entry_name, anchor, src["file"], line))
     return data
 
 
@@ -515,10 +601,8 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 
 def _without_line(record: dict[str, Any]) -> dict[str, Any]:
-    """`record` with `source.line` blanked out -- an unrelated insertion
-    earlier in the same C table shifts every later entry's line number,
-    which is real but not "drift" worth reporting as a changed record; the
-    added/removed name lists already carry that signal."""
+    """`record` with `source.line` blanked out to classify semantic changes
+    separately from line-only stale anchors (which are reported as lineOnly)."""
     clone = dict(record)
     src = dict(clone.get("source") or {})
     src["line"] = None
@@ -542,9 +626,13 @@ def diff_artifacts(committed: dict[str, Any],
             n for n in (set(f) & set(c))
             if _without_line(f[n]) != _without_line(c[n])
         )
-        if added or removed or changed:
+        line_only = sorted(
+            n for n in (set(f) & set(c))
+            if f[n] != c[n] and _without_line(f[n]) == _without_line(c[n])
+        )
+        if added or removed or changed or line_only:
             result[section] = {"added": added, "removed": removed,
-                                "changed": changed}
+                                "changed": changed, "lineOnly": line_only}
     if committed.get("js") != fresh.get("js"):
         result["js"] = {"committed": committed.get("js"),
                          "fresh": fresh.get("js")}
@@ -558,13 +646,16 @@ def diff_artifacts(committed: dict[str, Any],
 def format_diff(diff: dict[str, Any]) -> list[str]:
     lines = []
     for section, d in diff.items():
-        if "added" in d or "removed" in d or "changed" in d:
+        if ("added" in d or "removed" in d or "changed" in d
+                or "lineOnly" in d):
             for name in d.get("added", []):
                 lines.append("added (%s): %s" % (section, name))
             for name in d.get("removed", []):
                 lines.append("removed (%s): %s" % (section, name))
             for name in d.get("changed", []):
                 lines.append("changed (%s): %s" % (section, name))
+            for name in d.get("lineOnly", []):
+                lines.append("line-moved (%s): %s" % (section, name))
         else:
             lines.append("changed (%s)" % section)
     return lines
