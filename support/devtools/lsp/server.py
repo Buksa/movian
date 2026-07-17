@@ -241,6 +241,8 @@ class LspServer:
         self.documents: dict[str, Document] = {}
         self.documents_lock = threading.RLock()
         self.output_lock = threading.Lock()
+        self.analyzer_semaphore = threading.Semaphore(
+            max(2, min(os.cpu_count() or 2, 4)))
         self.shutdown_requested = False
         self.exiting = False
 
@@ -453,17 +455,25 @@ class LspServer:
         uri = text_document["uri"]
         with self.documents_lock:
             document = self.documents.pop(uri, None)
-        if document is None:
-            return
+            if document is None:
+                return
+            with document.lock:
+                uris = set(document.diagnostic_uris)
+            claimed_by_open_documents: set[str] = set()
+            for other in self.documents.values():
+                with other.lock:
+                    claimed_by_open_documents.update(other.diagnostic_uris)
+            uris.add(document.uri)
+            uris.difference_update(claimed_by_open_documents)
+            # Keep membership locked through the clears. An in-flight analysis
+            # either publishes before close reaches this point, or observes the
+            # removed document and drops its result.
+            for diagnostic_uri in sorted(uris):
+                self._notify("textDocument/publishDiagnostics", {
+                    "uri": diagnostic_uri,
+                    "diagnostics": [],
+                })
         self._cancel_timer(document)
-        with document.lock:
-            uris = set(document.diagnostic_uris)
-        uris.add(document.uri)
-        for diagnostic_uri in sorted(uris):
-            self._notify("textDocument/publishDiagnostics", {
-                "uri": diagnostic_uri,
-                "diagnostics": [],
-            })
 
     def _document(self, uri: str) -> Document | None:
         with self.documents_lock:
@@ -516,13 +526,15 @@ class LspServer:
                 if document.generation != expected_generation:
                     return
                 text = document.text
+                analyzed_version = document.version
             temporary_path: Path | None = None
             try:
                 temporary_path = self._write_buffer_snapshot(document, text)
-                check, check_failure = self._run_analyzer(
-                    "--check", temporary_path)
-                tokens, _tokens_failure = self._run_analyzer(
-                    "--tokens", temporary_path)
+                with self.analyzer_semaphore:
+                    check, check_failure = self._run_analyzer(
+                        "--check", temporary_path)
+                    tokens, _tokens_failure = self._run_analyzer(
+                        "--tokens", temporary_path)
             finally:
                 if temporary_path is not None:
                     try:
@@ -556,7 +568,8 @@ class LspServer:
                     document.tokens = document.last_good_tokens
                     document.token_text = document.last_good_text
                     document.using_token_fallback = token_fallback
-            self._publish_diagnostics(document, diagnostics)
+            self._publish_diagnostics(document, diagnostics,
+                                      expected_generation, analyzed_version)
 
     def _write_buffer_snapshot(self, document: Document, text: str) -> Path:
         """Write a short-lived ``.view`` clone, preferring the source directory.
@@ -579,7 +592,9 @@ class LspServer:
             snapshot.write(text.encode("utf-8"))
         return Path(name)
 
-    def _run_analyzer(self, mode: str, temporary_path: Path) -> tuple[JSON | None, str | None]:
+    def _analyzer_command(self, mode: str, temporary_path: Path) -> list[str]:
+        """Build one analyzer invocation for a live-buffer snapshot."""
+
         # The analyzer's error text deliberately preserves the spelling of a
         # relative source path.  When the snapshot lives under this checkout,
         # pass it relative to the analyzer's cwd so an include failure keeps
@@ -588,13 +603,18 @@ class LspServer:
             analyzer_path = str(temporary_path.relative_to(self.repo_root))
         except ValueError:
             analyzer_path = str(temporary_path)
-        command = [
+        return [
             str(self.analyzer),
             mode,
             "--root",
             str(self.workspace_root),
+            "--skin",
+            str(self.skin_root),
             analyzer_path,
         ]
+
+    def _run_analyzer(self, mode: str, temporary_path: Path) -> tuple[JSON | None, str | None]:
+        command = self._analyzer_command(mode, temporary_path)
         try:
             completed = subprocess.run(
                 command,
@@ -684,20 +704,35 @@ class LspServer:
         }
 
     def _publish_diagnostics(self, document: Document,
-                             diagnostics: dict[str, list[JSON]]) -> None:
-        with document.lock:
-            previous_uris = set(document.diagnostic_uris)
-            document.diagnostic_uris = set(diagnostics)
-            version = document.version
-        target_uris = previous_uris | set(diagnostics) | {document.uri}
-        for uri in sorted(target_uris):
-            payload: JSON = {
-                "uri": uri,
-                "diagnostics": diagnostics.get(uri, []),
-            }
-            if version is not None and uri == document.uri:
-                payload["version"] = version
-            self._notify("textDocument/publishDiagnostics", payload)
+                             diagnostics: dict[str, list[JSON]],
+                             expected_generation: int,
+                             analyzed_version: int | None) -> None:
+        """Publish only results still owned by the same document revision."""
+
+        with self.documents_lock:
+            # A debounce cancel cannot stop an analysis that already started.
+            # Do not let such a detached document re-publish after didClose.
+            if self.documents.get(document.uri) is not document:
+                return
+            with document.lock:
+                # Pair diagnostics with the snapshot's version, not whatever
+                # didChange may have installed while the analyzer was running.
+                if document.generation != expected_generation:
+                    return
+                previous_uris = set(document.diagnostic_uris)
+                document.diagnostic_uris = set(diagnostics)
+                target_uris = previous_uris | set(diagnostics) | {document.uri}
+                # Hold both locks while writing the frames: didClose and
+                # didChange then cannot interleave a stale publish after this
+                # membership/generation check.
+                for uri in sorted(target_uris):
+                    payload: JSON = {
+                        "uri": uri,
+                        "diagnostics": diagnostics.get(uri, []),
+                    }
+                    if analyzed_version is not None and uri == document.uri:
+                        payload["version"] = analyzed_version
+                    self._notify("textDocument/publishDiagnostics", payload)
 
     # ------------------------------------------------------------------
     # LSP feature handlers
@@ -834,7 +869,8 @@ class LspServer:
             return symbols
         for candidate in sorted(self.workspace_root.rglob("*.view"),
                                 key=lambda path: path.as_posix().casefold()):
-            if not candidate.is_file() or needle not in candidate.name.casefold():
+            if candidate.name.startswith(".") or not candidate.is_file() \
+                    or needle not in candidate.name.casefold():
                 continue
             try:
                 relative = candidate.relative_to(self.workspace_root).as_posix()
@@ -924,6 +960,26 @@ class LspServer:
             else:
                 candidates.append(self.workspace_root / candidate)
         for candidate in candidates:
-            if candidate.is_file():
+            if candidate.is_file() and self._is_confined_definition_target(
+                    candidate):
                 return candidate.resolve()
         return None
+
+    def _is_confined_definition_target(self, candidate: Path) -> bool:
+        """Match the analyzer's root/skin confinement for definitions."""
+
+        try:
+            resolved_candidate = Path(os.path.realpath(candidate))
+            allowed_roots = (
+                Path(os.path.realpath(self.workspace_root)),
+                Path(os.path.realpath(self.skin_root)),
+            )
+        except OSError:
+            return False
+        for root in allowed_roots:
+            try:
+                resolved_candidate.relative_to(root)
+                return True
+            except ValueError:
+                continue
+        return False
