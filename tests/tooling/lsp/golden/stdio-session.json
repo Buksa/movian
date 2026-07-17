@@ -1,0 +1,32 @@
+{
+  "changedDiagnostic": {
+    "line": 60,
+    "message": "Invalid char '`'",
+    "source": "movian-glw"
+  },
+  "definition": "glwskins/flat/theme.view",
+  "hoverNeedles": {
+    "container_x": "GLW widget from Movian metadata.",
+    "source": "source: string|string[]",
+    "translate": "translate(...args)"
+  },
+  "initialize": {
+    "capabilities": {
+      "definitionProvider": true,
+      "documentSymbolProvider": true,
+      "hoverProvider": true,
+      "textDocumentSync": 1,
+      "workspaceSymbolProvider": true
+    },
+    "serverInfo": {
+      "name": "movian-lsp",
+      "version": "0.1.0"
+    }
+  },
+  "symbolNames": [
+    "#import skin://theme.view",
+    "container_z",
+    "container_x"
+  ],
+  "workspaceSymbol": "log.view"
+}
