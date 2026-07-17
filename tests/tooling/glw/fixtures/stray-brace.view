@@ -1,0 +1,5 @@
+// Fixture (#97): parser error -- stray closing brace.
+widget(label, {
+  caption: "ok";
+});
+}

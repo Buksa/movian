@@ -1,0 +1,3 @@
+// Fixture (#103): repeated #include must splice the target twice.
+#include "repeated-include-target.view"
+#include "repeated-include-target.view"
