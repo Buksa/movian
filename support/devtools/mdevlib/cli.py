@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from . import harness
+from . import lspdoctor
 from . import viewdoc
 from .harness import Instance, MdevError
 
@@ -550,6 +551,14 @@ def cmd_viewdoc(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# lsp (issue #100 -- editor integration preflight)
+# ---------------------------------------------------------------------------
+
+def cmd_lsp_doctor(_args: argparse.Namespace) -> int:
+    return lspdoctor.run()
+
+
+# ---------------------------------------------------------------------------
 # parser
 # ---------------------------------------------------------------------------
 
@@ -720,6 +729,17 @@ def build_parser() -> argparse.ArgumentParser:
     viewdoc_.add_argument("--json", action="store_true",
                           help="machine-readable JSON output")
     viewdoc_.set_defaults(func=cmd_viewdoc)
+
+    lsp = sub.add_parser(
+        "lsp",
+        help="movian-lsp editor-integration tools",
+    )
+    lsp_sub = lsp.add_subparsers(dest="lsp_command", required=True)
+    doctor = lsp_sub.add_parser(
+        "doctor",
+        help="check movian-lsp prerequisites and one stdio initialize round-trip",
+    )
+    doctor.set_defaults(func=cmd_lsp_doctor)
 
     return parser
 
