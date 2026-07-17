@@ -85,14 +85,34 @@ never logs `Opening <url>`" as an instance-health failure, not a route
 bug.
 
 Follow-up (2026-07-14, PR #95 review smokes): the same wedge can hit a
-FRESH instance immediately at launch when the WSLg vGPU path has no
-active viewer (RDP surface not being presented) — GL vsync/present
-blocks the GLW loop, so even X11 keypresses go undispatched. Two
-additions:
-- Health probe: `GET /api/screenshot/raw` on a wedged instance returns a
-  small error HTML instead of a PNG after ~5 s — cheap way to tell "GLW
-  loop dead" from "route bug" without waiting on a 20 s open timeout.
-- Workaround: launch mdev instances with `LIBGL_ALWAYS_SOFTWARE=1
-  GALLIUM_DRIVER=llvmpipe` in the environment (mdev's child inherits it).
-  Rendering falls back to llvmpipe and the event loop stays live with no
-  viewer attached; screenshots and `mdev preview` work normally.
+FRESH instance immediately at launch, so even X11 keypresses go
+undispatched. Health probe: `GET /api/screenshot/raw` on a wedged
+instance returns a small error HTML instead of a PNG after ~5 s — cheap
+way to tell "GLW loop dead" from "route bug" without waiting on a 20 s
+open timeout. Server-side signature in the instance log:
+`HTTPSRV [ERROR]: 504 /api/screenshot/raw -- Screenshot timed out`
+(src/api/screenshot.c: 5 s cond-wait for a delivered frame, then 504).
+
+CORRECTION (2026-07-15, measured): the previously recommended
+`LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe` env is a NO-OP on this
+stand and is NOT a workaround. A/B run (4 mdev instances, with/without
+the env) showed Mesa selects llvmpipe by default here anyway (`glxinfo`
+renderer = llvmpipe even with the vars unset, despite /dev/dxg and
+libd3d12 being present), and both wedged instances that night HAD the
+env set. The 2026-07-14 "fix" coincided with a relaunch, not with the
+variables. What is actually known about the wedge:
+- It is a flaky, time-clustered launch condition: wedged instances have
+  a LIVE main loop (ticking ~60 Hz in the usleep branch) and answer
+  HTTP, but eventSink events (OPENURL, screenshot requests) are never
+  dispatched — not even the startup `Opening page:home` nav trace
+  appears.
+- The same binary launched directly (e.g. under gdb) and a manually
+  launched instance on the same display worked while mdev-launched
+  ones were wedged; later mdev launches on the same stand were fine.
+  Correlation with WSLg compositor/viewer state is suspected but not
+  proven.
+- Policy: after ANY launch, health-check before trusting event-driven
+  results — require BOTH the startup `navigator ... Opening` trace in
+  the log AND `/api/screenshot/raw` returning 200/PNG. On failure:
+  `mdev stop` + relaunch (env tweaks are cargo cult); if it persists,
+  report the stand as degraded instead of looping.
