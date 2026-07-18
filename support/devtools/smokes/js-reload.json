@@ -1,0 +1,19 @@
+{
+  "name": "js-reload",
+  "describe": "Reload the viewpreview development plugin JavaScript.",
+  "needs": {
+    "plugin": "support/devtools/viewpreview",
+    "binary": "build.debug/movian"
+  },
+  "steps": [
+    {
+      "do": "preview",
+      "view": "support/devtools/viewpreview/views/demo-list.view",
+      "fixture": "support/devtools/viewpreview/fixtures/directory-nodes.json"
+    },
+    {
+      "do": "reload",
+      "js": true
+    }
+  ]
+}

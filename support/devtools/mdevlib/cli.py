@@ -1,7 +1,7 @@
 """mdev subcommand implementations and argument parsing (issue #85).
 
-Exit codes: 0 = verified success, 2 = stale-process guard refusal,
-1 = any other failure (one-line reason on stderr).
+Exit codes: 0 = verified success, 1 = assertion/operation failure,
+2 = stale-process guard refusal or smoke instance-health failure.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from typing import Any
 
 from . import harness
 from . import lspdoctor
+from . import smoke
 from . import viewdoc
 from .harness import Instance, MdevError
 
@@ -564,6 +565,35 @@ def cmd_lsp_doctor(_args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# smoke (issue #90 -- declarative regression smokes)
+# ---------------------------------------------------------------------------
+
+def cmd_smoke_list(args: argparse.Namespace) -> int:
+    definitions = smoke.load_definitions()
+    data = {
+        "smokes": [
+            {"name": item["name"], "describe": item["describe"]}
+            for item in definitions
+        ]
+    }
+    human = "\n".join(
+        "%-16s %s" % (item["name"], item["describe"])
+        for item in definitions
+    )
+    emit(args, data, human)
+    return 0
+
+
+def cmd_smoke_run(args: argparse.Namespace) -> int:
+    definitions = smoke.load_definitions()
+    code, data, human = smoke.run(
+        definitions, args.smoke_name, args.name, viewpreview_route
+    )
+    emit(args, data, human)
+    return code
+
+
+# ---------------------------------------------------------------------------
 # parser
 # ---------------------------------------------------------------------------
 
@@ -571,7 +601,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mdev",
         description="Single-entrypoint Movian dev/test harness "
-                    "(isolated launch, open, shot, props, log, reload, watch)."
+                    "(isolated launch, open, smoke, shot, props, log, reload, watch)."
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -709,6 +739,39 @@ def build_parser() -> argparse.ArgumentParser:
     preview.add_argument("--shot", action="store_true",
                          help="screenshot after a clean render")
     preview.set_defaults(func=cmd_preview)
+
+    smoke_parser = sub.add_parser(
+        "smoke",
+        help="list or run declarative regression smokes (issue #90)",
+    )
+    smoke_sub = smoke_parser.add_subparsers(
+        dest="smoke_command", required=True
+    )
+    smoke_list = smoke_sub.add_parser(
+        "list",
+        help="list available regression smokes",
+    )
+    smoke_list.add_argument(
+        "--json", action="store_true", help="machine-readable JSON output"
+    )
+    smoke_list.set_defaults(func=cmd_smoke_list)
+
+    smoke_run = smoke_sub.add_parser(
+        "run",
+        help="run one regression smoke or the full health-first set",
+    )
+    smoke_run.add_argument(
+        "smoke_name", metavar="NAME|all",
+        help="smoke name from `mdev smoke list`, or all",
+    )
+    smoke_run.add_argument(
+        "--name", default="smoke",
+        help="instance name; state in /tmp/mdev/<name>/ (default: smoke)",
+    )
+    smoke_run.add_argument(
+        "--json", action="store_true", help="machine-readable JSON output"
+    )
+    smoke_run.set_defaults(func=cmd_smoke_run)
 
     # No instance/--name: viewdoc reads files only, never talks to a
     # running Movian.

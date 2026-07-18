@@ -144,6 +144,29 @@ mdev watch --js [--dir <plugin-dir>] [--name NAME] [--shot]
 - `mdev shot [--out PATH]` — PNG via `/api/screenshot/raw`; default path is
   `/tmp/mdev/<name>/shots/<timestamp>.<ext>`.
 
+## Regression smokes
+
+Before opening a PR that changes `mdev`, `support/devtools/viewpreview`, or
+GLW-adjacent C, run the declarative regression gate from the repository root:
+
+```
+python3 support/devtools/mdev smoke run all --name smoke-pr
+```
+
+Exit 0 means every smoke passed; exit 1 is a scenario assertion failure; exit
+2 is an instance-health wedge and calls for stop+relaunch rather than a code
+diagnosis. `run all` assumes a fresh instance — `mdev stop --name smoke-pr`
+first if one is alive: `keyboard-mode` asserts the pristine
+`$ui.keyboard` precondition and will correctly fail on a reused instance
+that already entered keyboard mode; an `assert_log` in the first
+step of a smoke matches the whole instance log, not a delta (`health`
+instead uses the dedicated polling `health` verb, immune to the
+launch/nav-trace race). A failure prints its bundle directory as the last stderr line.
+Read `steps.json` first for the failing step index, verb, and evidence, then
+use `log-tail.txt` and `props.json` to correlate log and current-page state;
+`shot.png` is best-effort and is deliberately skipped for a wedge.
+
+
 ## Quickstart
 
 Run every step from the repo root; stop the instance when done so no test

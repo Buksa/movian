@@ -622,14 +622,18 @@ def reload_js_fail_lines(text: str) -> list[str]:
 def reload_line_matches_dir(line: str, plugin_dir: str) -> bool:
     """True when a reload-result log line refers to `plugin_dir`: the path
     token it names is the dir itself ("Reloaded dev plugin <dir>") or a
-    file under it (the compile-error line names a .js file). A plain
-    substring test would also credit a sibling dir like <dir>-extra's
-    lines to <dir>."""
+    file under it (the compile-error line names a .js file). Core logs the
+    successful directory as a file:// URL, while state.json records a plain
+    absolute path, so normalize that URL before comparing. A plain substring
+    test would also credit a sibling dir like <dir>-extra's lines to <dir>.
+    """
     for pattern in (RELOAD_JS_OK_RE, RELOAD_JS_FAIL_RE,
                     RELOAD_JS_COMPILE_ERROR_RE):
         match = pattern.search(line)
         if match:
             path = match.group(1)
+            if path.startswith("file://"):
+                path = urllib.parse.unquote(urllib.parse.urlparse(path).path)
             return (path == plugin_dir
                     or path.startswith(plugin_dir.rstrip("/") + "/"))
     return False
