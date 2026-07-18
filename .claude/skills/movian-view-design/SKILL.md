@@ -143,6 +143,67 @@ Key facts worth restating here:
   `viewpreview:show:...` route. Use a fresh/dedicated name, or
   `mdev stop --name preview` first, if in doubt.
 
+## The mockup → view loop (issue #89, proven on the pilot page)
+
+Turning a reference image (screenshot/mockup pasted into the session) into
+a working `.view`. Proven end-to-end on
+`support/devtools/viewpreview/views/pilot-series.view` +
+`fixtures/pilot-series.json` (a series-episodes page: navbar, poster+info
+column, focused season card, episode list) — 7 rounds to convergence.
+Follow this exact sequence:
+
+1. **Fixture first.** Extract every piece of text/data visible in the
+   reference into a viewpreview schema-v1 fixture (`metadata` for
+   page-level fields, extra top-level keys land on `$self.model.*`,
+   `nodes[]` for list rows — per-node extra keys land on the node root,
+   e.g. `$self.episode` inside a cloner). Generate placeholder PNGs for
+   artwork (never commit third-party images); relative `source:` paths
+   resolve against the *view file's directory* (`glw_resolve_path` →
+   `fa_absolute_path`, `src/ui/glw/glw_view_attrib.c:36-59`), so
+   `"../fixtures/" + $self.metadata.icon` works from `views/`.
+2. **Write convergence criteria before the first render**: element
+   presence/nesting, column proportions, alignment, focus state = must
+   match; fonts/AA, exact colors, placeholder art, icon glyphs = accepted
+   deltas. Without this list you will chase pixels forever.
+3. **Static gate before every render**:
+   `./build.debug/movian-analyze --check <view>` (instant; catches parse
+   errors without touching the instance). Macro note: GLW `#define`
+   bodies must be `{ ... }` blocks — expression-shaped macros don't parse.
+4. **Render + screenshot**:
+   `mdev preview <view> --fixture <fixture.json> --shot`, then iterate
+   with `mdev reload --name preview` + `mdev shot --name preview` (reload
+   keeps the page; a fresh `--shot` via preview re-opens it).
+   **Health-check on first launch**: if the page never opens or
+   `/api/screenshot/raw` 504s, the instance is wedged — `mdev stop
+   --name preview` and relaunch (see CONSTRAINTS.md in
+   movian-plugin-testing).
+5. **Compare multimodally** (read the shot next to the reference), fix
+   the worst structural delta first, repeat. Layout gotchas that cost
+   rounds on the pilot:
+   - In a `container_x`, a child column with its own content constraint
+     ignores `weight:` — set `filterConstraintX: true;` on the column to
+     make weights govern the split.
+   - Right-aligning a trailing label in a row: interpose
+     `widget(dummy, { });` and make the row's parent column
+     `filterConstraintX: true;`.
+   - Progress bars: `container_z` of a dim full-width quad + a
+     `container_x` of `quad(weight: $self.progress)` /
+     `dummy(weight: 1 - $self.progress)`.
+   - `backdrop` border-scaling renders only the vertical border bands on
+     this stand (top/bottom bands never draw, with skin or custom
+     9-slice PNGs alike) — build outline frames from 4 quads instead
+     (see `FRAME()` in the pilot view).
+6. **Focus states need the #114 fix** (`/api/input/action` events carry
+   `EVENT_KEYPRESS` so keyboard mode engages): the *first* arrow sent to
+   a fresh instance is consumed by the mouse→keyboard mode switch, and
+   initial focus lands by weight at page-load — drive focus to the
+   target widget with a few `/api/input/action/up|down` calls before the
+   comparison shot, and verify it visually (`isFocused()`-driven
+   highlights).
+7. **Before the PR**: `mdev viewdoc --check`, `make BUILD=debug
+   movian-analyze-corpus`, and a final full-page shot pass against the
+   convergence criteria, per-criterion.
+
 ## Widget-local debug tracing (`debug: true`)
 
 Add the `.view` attribute `debug: true` to one widget to get layout-box,
