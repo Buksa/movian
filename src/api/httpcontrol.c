@@ -228,10 +228,31 @@ hc_action(http_connection_t *hc, const char *remain, void *opaque,
     return 404;
 
   event_t *e = event_create_action_str(remain);
-  // The HTTP control API acts as a remote control; mark its events as
-  // keypresses like the other remote paths (lirc, devevent, stdin,
-  // libcec) so GLW engages keyboard mode and focus becomes visible.
-  e->e_flags |= EVENT_KEYPRESS;
+  // The HTTP control API acts as a remote control; mark navigation
+  // events as keypresses like the other remote paths (lirc, devevent,
+  // stdin, libcec) so GLW engages keyboard mode and focus becomes
+  // visible. Only navigation/user-input actions get the flag: with an
+  // active screensaver a keypress event is consumed by waking the
+  // screen (src/ui/glw/glw.c:2516), which must not swallow control
+  // actions like ReloadUI posted by tooling.
+  switch(action_str2code(remain)) {
+  case ACTION_UP:
+  case ACTION_DOWN:
+  case ACTION_LEFT:
+  case ACTION_RIGHT:
+  case ACTION_ACTIVATE:
+  case ACTION_NAV_BACK:
+  case ACTION_FOCUS_NEXT:
+  case ACTION_FOCUS_PREV:
+  case ACTION_PAGE_UP:
+  case ACTION_PAGE_DOWN:
+  case ACTION_TOP:
+  case ACTION_BOTTOM:
+    e->e_flags |= EVENT_KEYPRESS;
+    break;
+  default:
+    break;
+  }
   event_to_ui(e);
   return HTTP_STATUS_OK;
 }
