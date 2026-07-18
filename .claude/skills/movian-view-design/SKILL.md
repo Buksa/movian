@@ -28,6 +28,11 @@ guide is still a tracked follow-up; this file itself covers the
 edit/reload loop and the core mechanisms it depends on, each with its
 source anchor.
 
+For editor diagnostics, hover, and `#include` definitions, see
+`docs/Guides/language-tooling.md`; from the repository root, build
+`movian-analyze` and run `./support/devtools/mdev lsp doctor` before
+configuring an editor.
+
 ## The edit/reload loop
 
 For a view already reachable in a running app (e.g. anything under
