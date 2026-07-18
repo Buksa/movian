@@ -56,6 +56,17 @@
               "match": "\\\\."
             }
           ]
+        },
+        {
+          "name": "string.quoted.single.movian-view",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.movian-view",
+              "match": "\\\\."
+            }
+          ]
         }
       ]
     },
@@ -63,7 +74,11 @@
       "patterns": [
         {
           "name": "keyword.control.movian-view",
-          "match": "\\b(?:else|if|in|true|false|null)\\b"
+          "match": "\\bvoid\\b"
+        },
+        {
+          "name": "constant.language.movian-view",
+          "match": "\\b(?:true|false)\\b"
         }
       ]
     },

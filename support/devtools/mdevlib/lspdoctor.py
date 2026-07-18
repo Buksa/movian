@@ -40,19 +40,23 @@ def _check_analyzer() -> tuple[bool, str]:
                        "make BUILD=debug -j$(nproc) movian-analyze")
     try:
         completed = subprocess.run(
-            ["make", "BUILD=debug", "-n", "movian-analyze"],
+            ["make", "BUILD=debug", "-q", "movian-analyze"],
             cwd=REPOSITORY_ROOT,
             capture_output=True,
             text=True,
             timeout=30,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, "make BUILD=debug -n movian-analyze could not run: %s" % exc
+    except (OSError, subprocess.TimeoutExpired):
+        return False, ("make BUILD=debug -q movian-analyze could not run; "
+                       "run ./support/configure-linux-debug.sh")
+    if completed.returncode == 1:
+        return False, ("build.debug/movian-analyze is stale; run make "
+                       "BUILD=debug -j$(nproc) movian-analyze")
     if completed.returncode:
-        return False, ("make BUILD=debug -n movian-analyze failed; run "
+        return False, ("make BUILD=debug -q movian-analyze failed; run "
                        "./support/configure-linux-debug.sh")
-    return True, "build.debug/movian-analyze is executable and make target resolves"
+    return True, "build.debug/movian-analyze is executable and up to date"
 
 
 def _check_metadata() -> tuple[bool, str]:
