@@ -112,7 +112,9 @@ variables. What is actually known about the wedge:
   Correlation with WSLg compositor/viewer state is suspected but not
   proven.
 - Policy: after ANY launch, run
-  `python3 support/devtools/mdev smoke run health --name smoke-health`
+  `python3 support/devtools/mdev smoke run health --name <that-instance>`
+  -- with the SAME `--name` you just launched, otherwise you probe a
+  different process than the one you are about to trust --
   before trusting event-driven results. It requires BOTH the startup
   `navigator ... Opening` trace and `/api/screenshot/raw` returning 200/PNG.
   Exit 2 means `mdev stop` + relaunch (env tweaks are cargo cult); if the

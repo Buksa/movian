@@ -7,12 +7,7 @@
   },
   "steps": [
     {
-      "do": "assert_log",
-      "must_match": "navigator.*Opening\\s+\\S+"
-    },
-    {
-      "do": "shot",
-      "tag": "health"
+      "do": "health"
     }
   ]
 }

@@ -26,6 +26,7 @@ SMOKE_ORDER = (
     "js-reload",
 )
 STEP_FIELDS = {
+    "health": {"do"},
     "open": {"do", "url"},
     "preview": {"do", "view", "fixture"},
     "action": {"do", "name", "count"},
@@ -74,6 +75,7 @@ def _validate_definition(path: Path, data: Any) -> dict[str, Any]:
             raise MdevError("smoke %s step %d has unknown fields: %s" % (
                 data["name"], index, ", ".join(sorted(unknown))))
         required = {
+            "health": set(),
             "open": {"url"},
             "preview": {"view", "fixture"},
             "action": {"name", "count"},
@@ -254,7 +256,9 @@ def _execute_step(
     verb = step["do"]
     offset = harness.log_size(inst)
 
-    if verb == "open":
+    if verb == "health":
+        detail = _health_step(inst)
+    elif verb == "open":
         result = harness.open_and_wait(inst, step["url"])
         detail = "opened %s title=%s nodes=%d" % (
             result["url"], result["title"], result["nodes"])
@@ -307,6 +311,33 @@ def _execute_step(
         raise StepFailure("unsupported verb %s" % verb)
 
     return detail, harness.read_log_delta(inst, offset)
+
+
+def _health_step(inst: Instance, timeout: float = 20.0) -> str:
+    """Dedicated polling health verb: the startup navigator trace can
+    legitimately arrive after ensure_running() returns (launch() only
+    waits for the HTTP port line), so poll for it instead of judging a
+    single early log snapshot -- a false wedge here turns into exit 2."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if inst.live_pid() is None:
+            raise StepFailure("instance process is not alive")
+        if harness.NAV_OPENING_RE.search(harness.read_log(inst)) is not None:
+            break
+        time.sleep(0.3)
+    else:
+        raise StepFailure(
+            "startup navigator Opening trace did not appear within %gs" % timeout)
+    probe = inst.dir / ".smoke-health.png"
+    try:
+        _take_png(inst, probe)
+    except MdevError as error:
+        raise StepFailure("screenshot probe failed: %s" % error)
+    try:
+        probe.unlink()
+    except OSError:
+        pass
+    return "startup navigator Opening trace and screenshot PNG present"
 
 
 def _probe_health(inst: Instance) -> tuple[bool, str]:
