@@ -518,11 +518,16 @@ def cmd_viewdoc(args: argparse.Namespace) -> int:
     if not args.check:
         # No --check: dump the source-side inventories (handy for doc work).
         inv = viewdoc.inventory()
+        enum_values = viewdoc.attribute_enum_values()
         if args.json:
-            print(json.dumps(inv, ensure_ascii=False, indent=2))
+            print(json.dumps({**inv, "attributeEnumValues": enum_values},
+                             ensure_ascii=False, indent=2))
         else:
             for kind, names in inv.items():
                 print("%s (%d): %s" % (kind, len(names), " ".join(names)))
+            for name, values in enum_values.items():
+                print("attribute %s values: %s"
+                      % (name, " | ".join(values)))
         return 0
 
     result = viewdoc.run_check()

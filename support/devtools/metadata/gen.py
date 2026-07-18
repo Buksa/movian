@@ -9,7 +9,9 @@ committed metadata artifact for the GLW view language, grown from
                       (name, nargs/variadic, ctor/dtor/preproc presence).
 - glw.attributes  -- `token_attrib_t attribtab[]`, src/ui/glw/glw_view_attrib.c
                       (name, valueType inferred from the setter function,
-                      raw setter/attribConst/fn fields, noSubscription flag).
+                      raw setter/attribConst/fn fields, noSubscription flag,
+                      and optional enumValues in C source order for setters
+                      backed by an explicitly mapped strtab).
 - glw.widgets     -- every `glw_class_t` designated initializer
                       (`.gc_name`/`.gc_name2`) across src/ui/glw/glw_*.c,
                       cross-referenced against `GLW_REGISTER_CLASS(...)`
@@ -100,6 +102,14 @@ VALUE_TYPE_MAP: dict[str, tuple[str, str]] = {
     "set_transition_effect": ("enum", "high"),
     "set_args": ("block", "high"),
     "set_propref": ("propref", "high"),
+}
+
+# Enum provenance is intentionally explicit: each setter maps to the C strtab
+# that defines its legal values. Attribute records using a mapped setter carry
+# optional `enumValues`, preserving the table's source order.
+ENUM_TABLE_MAP: dict[str, str] = {
+    "set_align": "aligntab",
+    "set_transition_effect": "transitiontab",
 }
 
 
@@ -307,8 +317,26 @@ def unquote(field: str) -> str:
 # glw.attributes -- attribtab[]
 # ---------------------------------------------------------------------------
 
+def scan_strtab(table_name: str) -> list[str]:
+    entries = scan_array_block(
+        ATTRIB_C, "struct strtab %s[] = {" % table_name)
+    values: list[str] = []
+    for text, line in entries:
+        fields = split_fields(text)
+        if not fields or len(fields[0]) < 2 or not (
+                fields[0].startswith('"') and fields[0].endswith('"')):
+            raise GenError("invalid string entry in strtab %s at %s:%d"
+                           % (table_name, ATTRIB_C, line))
+        values.append(unquote(fields[0]))
+    return values
+
+
 def build_attributes() -> list[dict[str, Any]]:
     entries = scan_array_block(ATTRIB_C, ATTRIB_TABLE_DECL)
+    enum_values = {
+        setter: scan_strtab(table_name)
+        for setter, table_name in ENUM_TABLE_MAP.items()
+    }
     records: list[dict[str, Any]] = []
     seen: set[str] = set()
     for text, line in entries:
@@ -328,7 +356,7 @@ def build_attributes() -> list[dict[str, Any]]:
                   and fields[4] == "GLW_ATTRIB_FLAG_NO_SUBSCRIPTION")
         value_type, confidence = VALUE_TYPE_MAP.get(setter, ("unknown", "low"))
 
-        records.append({
+        record = {
             "name": name,
             "valueType": value_type,
             "confidence": confidence,
@@ -337,7 +365,10 @@ def build_attributes() -> list[dict[str, Any]]:
             "fn": fn,
             "noSubscription": no_sub,
             "source": {"file": rel(ATTRIB_C), "line": line},
-        })
+        }
+        if setter in enum_values:
+            record["enumValues"] = enum_values[setter]
+        records.append(record)
     records.sort(key=lambda r: r["name"])
     return records
 
