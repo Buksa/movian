@@ -44,6 +44,18 @@
       {
         "attribConst": null,
         "confidence": "high",
+        "enumValues": [
+          "center",
+          "left",
+          "right",
+          "top",
+          "bottom",
+          "topLeft",
+          "topRight",
+          "bottomLeft",
+          "bottomRight",
+          "justified"
+        ],
         "fn": null,
         "name": "align",
         "noSubscription": false,
@@ -655,6 +667,13 @@
       {
         "attribConst": null,
         "confidence": "high",
+        "enumValues": [
+          "blend",
+          "flipHorizontal",
+          "flipVertical",
+          "slideHorizontal",
+          "slideVertical"
+        ],
         "fn": null,
         "name": "effect",
         "noSubscription": false,
@@ -3459,6 +3478,6 @@
     ]
   },
   "js": {},
-  "movianRevision": "6042a3b5e7514f68723e81d39e5cc10ccf947517",
+  "movianRevision": "468e6ea61c6a2351d128e59b35ecea65ddfa252c",
   "schemaVersion": 1
 }

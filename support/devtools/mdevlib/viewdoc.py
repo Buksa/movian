@@ -146,3 +146,13 @@ def inventory() -> dict:
         "attributes": sorted(set(artifact_names(artifact, "attributes"))),
         "functions": sorted(set(artifact_names(artifact, "functions"))),
     }
+
+
+def attribute_enum_values() -> dict[str, list[str]]:
+    """Attribute enum values from the artifact, in attribute/source order."""
+    artifact = load_artifact()
+    return {
+        record["name"]: record["enumValues"]
+        for record in artifact["glw"]["attributes"]
+        if "enumValues" in record
+    }
