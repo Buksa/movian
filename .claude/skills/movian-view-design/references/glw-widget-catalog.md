@@ -18,8 +18,14 @@ grep -rhoE "GLW_REGISTER_CLASS\([a-z_0-9]+\)" src/ui/glw/*.c \
 constructor-attribute `INITIALIZER` that calls `glw_register_class(&n)` at
 process startup — this is the *only* code path that registers a class with
 `glw_class_find_by_name()` (used by `widget()`/`cloner()`/bare-name
-sugar), so counting its call sites is exhaustive and exact (0 duplicates
-after `sort -u`). The DSL-facing name is the class's `.gc_name` field
+sugar), so counting its call sites is exhaustive and exact for
+*registered* classes (0 duplicates after `sort -u`). Two `glw_class_t`
+initializers never register and are invisible to this grep: `style`
+(`src/ui/glw/glw_style.c`) and `view` (`src/ui/glw/glw_view.c`) —
+pseudo-classes instantiated directly by core code, never resolvable from
+a view by name. The full census lives in
+`generated/movian-metadata.json`, whose widget records carry a
+`registered` flag (51 registered + 2 unregistered as of this note). The DSL-facing name is the class's `.gc_name` field
 (**not** the C symbol) — e.g. `glw_container_x`'s `gc_name` is
 `"container_x"`, and it additionally has a `gc_name2` alias `"hbox"`. Two
 classes are compiled from the same C function pointers with only the name
@@ -204,7 +210,9 @@ Intentionally **not** documented at the same depth:
 - **`glw_settings.c`, `glw_navigation.c`, `glw_event.c`, `glw_style.c`** —
   cross-cutting support modules (settings-prop wiring, focus/nav search,
   event bubbling, style cascade) referenced from the tables above but not
-  separately cataloged as widgets, because they don't register one.
+  separately cataloged as widgets, because they don't register one
+  (`glw_style.c` does define the unregistered `style` pseudo-class — see
+  the counting note at the top).
 - Exact pixel-level layout math for `container_x/y`'s weighted-space
   distribution and `slider`'s knob/edge math is anchored above but not
   reproduced formula-by-formula — read the cited functions directly for

@@ -22,3 +22,5 @@ android/Showtime/libs/
 project.xcworkspace/
 xcuserdata/
 InfoPlist.h
+__pycache__/
+*.pyc
