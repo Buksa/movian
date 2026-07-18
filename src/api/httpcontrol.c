@@ -227,7 +227,12 @@ hc_action(http_connection_t *hc, const char *remain, void *opaque,
   if(remain == NULL)
     return 404;
 
-  event_to_ui(event_create_action_str(remain));
+  event_t *e = event_create_action_str(remain);
+  // The HTTP control API acts as a remote control; mark its events as
+  // keypresses like the other remote paths (lirc, devevent, stdin,
+  // libcec) so GLW engages keyboard mode and focus becomes visible.
+  e->e_flags |= EVENT_KEYPRESS;
+  event_to_ui(e);
   return HTTP_STATUS_OK;
 }
 
