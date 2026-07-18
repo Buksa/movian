@@ -1,0 +1,33 @@
+{
+  "name": "preview-pilot",
+  "describe": "Render the 10-episode pilot view with its title and capture it.",
+  "needs": {
+    "plugin": "support/devtools/viewpreview",
+    "binary": "build.debug/movian"
+  },
+  "steps": [
+    {
+      "do": "preview",
+      "view": "support/devtools/viewpreview/views/pilot-series.view",
+      "fixture": "support/devtools/viewpreview/fixtures/pilot-series.json"
+    },
+    {
+      "do": "assert_log",
+      "must_not_match": "(?:GLW\\s+\\[ERROR\\]|viewpreview:\\s*ERROR:)"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/nodes",
+      "equals": 10
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "Укрытие"
+    },
+    {
+      "do": "shot",
+      "tag": "pilot"
+    }
+  ]
+}
