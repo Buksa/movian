@@ -919,19 +919,19 @@ ${PROG}.ziptail: $(OBJS) $(ALLDEPS) $(STAMPS) $(EXT_ARTIFACTS) $(BUILDDIR)/suppo
 	$(CC) -o $@ $(OBJS) $(BUILDDIR)/support/dataroot/ziptail.o $(LDFLAGS) ${LDFLAGS_cfg}
 
 
-${BUILDDIR}/%.o: %.c $(ALLDEPS) | $(STAMPS)
+${BUILDDIR}/%.o: %.c $(ALLDEPS) $(STAMPS)
 	@mkdir -p $(dir $@)
 	$(CC) -MD -MP $(CFLAGS_com) $(CFLAGS) $(CFLAGS_cfg) -c -o $@ $(C)/$<
 
-${BUILDDIR}/%.o: %.S $(ALLDEPS) | $(STAMPS)
+${BUILDDIR}/%.o: %.S $(ALLDEPS) $(STAMPS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_com) $(CFLAGS) $(CFLAGS_cfg) -c -o $@ $(C)/$<
 
-${BUILDDIR}/%.o: %.m $(ALLDEPS) | $(STAMPS)
+${BUILDDIR}/%.o: %.m $(ALLDEPS) $(STAMPS)
 	@mkdir -p $(dir $@)
 	$(CC) -MD -MP $(CFLAGS_com) $(CFLAGS) $(CFLAGS_cfg) -c -o $@ $(C)/$<
 
-${BUILDDIR}/%.o: %.cpp $(ALLDEPS) | $(STAMPS)
+${BUILDDIR}/%.o: %.cpp $(ALLDEPS) $(STAMPS)
 	@mkdir -p $(dir $@)
 	$(CXX) -MD -MP $(CFLAGS_com) $(CFLAGS_cfg) -c -o $@ $(C)/$<
 
