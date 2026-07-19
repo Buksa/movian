@@ -23,6 +23,66 @@ The doctor requires Python 3.10 or newer, confirms that
 `require('movian/page')` definition. Re-run it after changing the build or
 metadata inputs.
 
+## JavaScript type declarations (movian-api.d.ts)
+
+`generated/movian-api.d.ts` provides TypeScript declarations for Movian's
+ES5.1 CommonJS plugin API. All types are `any` in v1; the honest signal is
+exact arity encoded via `@arity` JSDoc tags on native ES_MODULE functions.
+
+The file is generated from the same `js.*` metadata as
+`movian-metadata.json` by `support/devtools/metadata/gen.py`:
+
+```sh
+python3 support/devtools/metadata/gen.py
+```
+
+This writes both `generated/movian-metadata.json` and
+`generated/movian-api.d.ts` in one pass. Drift-check covers both artifacts:
+
+```sh
+python3 support/devtools/metadata/gen.py --check
+```
+
+### Editor wiring
+
+To enable editor completion and hover for `require('movian/page')` etc.,
+add a `jsconfig.json` to the project root (or copy the worked example from
+`support/devtools/lsp/editors/jsconfig.json`):
+
+```json
+{
+  "compilerOptions": {
+    "target": "es5",
+    "module": "commonjs",
+    "typeRoots": ["./generated"]
+  },
+  "include": [
+    "generated/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "build.*"
+  ]
+}
+```
+
+With this configuration, VS Code's built-in TypeScript language service
+resolves `require('movian/page')` to the generated declarations and
+provides completion for exported functions. No tsc or Node.js is required
+for the declarations to work; the optional tsc validation lane below is
+purely for catching regressions in the generated file.
+
+### Optional tsc validation
+
+If `tsc` is already on PATH, you can validate the generated file:
+
+```sh
+tsc --noEmit --strict false generated/movian-api.d.ts
+```
+
+If `tsc` is not installed, this step is silently skipped. The absence of
+`tsc` must never fail any repository guard.
+
 ## JavaScript support and limits
 
 For `.js` documents inside the workspace or flat-skin root, `movian-lsp` sends
