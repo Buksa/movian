@@ -21,6 +21,7 @@ APPNAME="Movian"
 OPTLEVEL=2
 PLUGINREPO="https://movian.tv/api/plugins/plugins-v1.json"
 LINKER="\${CC}" # Default is to link with c-compiler
+EXT_CACHE_ENABLED=yes
 
 CONFIG_LIST="
  airplay
@@ -228,6 +229,7 @@ common_help(){
   echo "  --extra-cflags           Extra cflags"
   echo "  --extra-ldflags          Extra ldflags"
   echo "  --downloadcache          Where to download files during build [$DOWNLOADCACHE]"
+  echo "  --no-ext-cache           Disable the shared external dependency cache"
   echo " --optlevel=LEVEL          Optimization level [$OPTLEVEL]"
   echo " --plugin-repo=URL         URL to plugin repo [$PLUGINREPO]"
   echo ""
@@ -251,6 +253,9 @@ common_opt(){
   --downloadcache=*) DOWNLOADCACHE="$2"
   ;;
   --plugin-repo=*) PLUGINREPO="$2"
+  ;;
+
+  --no-ext-cache) EXT_CACHE_ENABLED=no
   ;;
 
   --enable-?*|--disable-?*)
@@ -286,8 +291,38 @@ common_opt(){
 }
 
 
+tool_id() {
+    local tool=${1#ccache }
+    ${tool} --version 2>/dev/null | ${SHASUM} | awk '{print $1}'
+}
+
+ext_config_hash() {
+    local value=$1
+    value=${value//${TOPDIR}/@TOPDIR@}
+    value=${value//${BUILDDIR}/@BUILDDIR@}
+    printf '%s\n' "$value" | ${SHASUM} | awk '{print $1}'
+}
+
 add_stamp() {
-    echo >>${CONFIG_MAK} "STAMPS += ${BUILDDIR}/stamps/$1.stamp"
+    local dep=$1
+    local config_hash=`ext_config_hash "$2"`
+    local artifacts=
+    local artifact
+    for artifact in $3; do
+        artifacts="${artifacts} ${EXT_INSTALL_DIR}/${artifact}"
+    done
+    cat >>${CONFIG_MAK} << EOF
+STAMPS += ${BUILDDIR}/stamps/${dep}.stamp
+EXTDEPS += ${dep}
+EXTDEP_${dep}_CONFIG_HASH=${config_hash}
+EXTDEP_${dep}_ARTIFACTS=${artifacts}
+EXTDEP_${dep}_STAMP=${BUILDDIR}/stamps/${dep}.stamp
+EXT_ARTIFACTS +=${artifacts}
+${BUILDDIR}/stamps/${dep}.stamp: EXTDEP_NAME=${dep}
+${BUILDDIR}/stamps/${dep}.stamp: EXTDEP_CONFIG_HASH=${config_hash}
+${BUILDDIR}/stamps/${dep}.stamp: EXTDEP_ARTIFACTS=${artifacts}
+${artifacts}: ${BUILDDIR}/stamps/${dep}.stamp
+EOF
 }
 
 setup_env(){
@@ -342,6 +377,7 @@ CONFIGURE_POSTFIX=$CONFIGURE_POSTFIX
 OPTLEVEL=${OPTLEVEL}
 CFLAGS_cfg += ${EXTRA_CFLAGS}
 LDFLAGS_cfg += ${EXTRA_LDFLAGS}
+EXT_CACHE_ENABLED=${EXT_CACHE_ENABLED}
 EOF
    
     # Create config.h
@@ -418,7 +454,9 @@ libav_setup() {
     echo >>${CONFIG_MAK} "LIBAV_BUILD_DIR=${LIBAV_BUILD_DIR}"
     echo >>${CONFIG_MAK} "LIBAV_INSTALL_DIR=${LIBAV_INSTALL_DIR}"
 
-    add_stamp libav
+    add_stamp libav \
+        "cc=${CC};ccid=`tool_id "${CC}"`;arch=${LIBAV_ARCH_FLAGS};common=${LIBAV_COMMON_FLAGS};cflags=${LIBAV_CFLAGS} ${EXTRA_CFLAGS};ldflags=${LIBAV_LDFLAGS} ${EXTRA_LDFLAGS}" \
+        "lib/libavcodec.a lib/libavdevice.a lib/libavformat.a lib/libavresample.a lib/libavutil.a lib/libswresample.a lib/libswscale.a"
 }
 
 
@@ -505,7 +543,9 @@ libsmb2_setup() {
 
     echo >>${CONFIG_MAK} "LIBSMB2_BUILD_DIR=${LIBSMB2_BUILD_DIR}"
     echo >>${CONFIG_MAK} "LDFLAGS_cfg += -lsmb2"
-    add_stamp libsmb2
+    add_stamp libsmb2 \
+        "cc=${LIBSMB2_CC};ccid=`tool_id "${LIBSMB2_CC}"`;launcher=${LIBSMB2_CMAKE_LAUNCHER};type=${LIBSMB2_CMAKE_BUILD_TYPE};pic=ON;shared=OFF;examples=OFF;krb5=OFF;gssapi=OFF" \
+        "lib/libsmb2.a"
 }
 
 
@@ -514,8 +554,10 @@ libsmb2_setup() {
 #
 libyuv_setup() {
     echo >>${CONFIG_MAK} "LDFLAGS_cfg += -lyuv"
-    add_stamp libyuv
     update_ext_submodule libyuv
+    add_stamp libyuv \
+        "cxx=${CXX};cxxid=`tool_id "${CXX}"`;ar=${AR};ranlib=${RANLIB};optflags=${OPTFLAGS};arch=${ARCH_CFLAGS}" \
+        "lib/libyuv.a"
 }
 
 
