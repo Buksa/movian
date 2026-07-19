@@ -134,6 +134,23 @@ install_complete() {
   done
 }
 
+relocate_pkgconfig() {
+  pc_dir="$install_dir/lib/pkgconfig"
+  [ -d "$pc_dir" ] || return 0
+  for pc in "$pc_dir"/*.pc; do
+    [ -f "$pc" ] || continue
+    tmp_pc="$pc.tmp"
+    awk -v prefix="$install_dir" '
+      /^prefix=/ { print "prefix=" prefix; next }
+      /^exec_prefix=/ { print "exec_prefix=${prefix}"; next }
+      /^libdir=/ { print "libdir=${prefix}/lib"; next }
+      /^includedir=/ { print "includedir=${prefix}/include"; next }
+      { print }
+    ' "$pc" >"$tmp_pc"
+    mv "$tmp_pc" "$pc"
+  done
+}
+
 if cache_valid; then
   echo "ext-cache: $dep cache hit"
   mkdir -p "$install_dir"
@@ -141,6 +158,7 @@ if cache_valid; then
     rm -rf "$install_dir/$path"
   done
   tar -xf "$entry/payload.tar" -C "$install_dir"
+  relocate_pkgconfig
   if ! install_complete; then
     echo "ext-cache: $dep cache entry is incomplete; rebuilding" >&2
     rm -rf "$entry"
