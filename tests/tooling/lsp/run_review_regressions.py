@@ -305,7 +305,7 @@ def run_js_lifecycle_and_metadata_definition() -> None:
     source = REPOSITORY_ROOT / "plugin_examples" / "async_page_load" / \
         "async_page_load.js"
     uri = source.as_uri()
-    broken = "var valid = 1;\nvar broken = ;\n"
+    broken = "var valid = 1;\nvar identity = (x) => x;\n"
     clean = "var page = require('movian/page');\n// require('movian/page');\n"
     client = LspClient(SERVER, REPOSITORY_ROOT)
     try:

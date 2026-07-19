@@ -160,7 +160,7 @@ def _check_lsp_javascript() -> tuple[bool, str]:
             "uri": uri,
             "languageId": "javascript",
             "version": 1,
-            "text": "var valid = 1;\nvar broken = ;\n",
+            "text": "var valid = 1;\nvar identity = (x) => x;\n",
         }})
         opened = client.wait_for_notification(
             "textDocument/publishDiagnostics",
