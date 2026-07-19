@@ -802,18 +802,10 @@ def render_dts(artifact: dict[str, Any]) -> str:
             lines.append("  // native ES_MODULE exports")
             for func in funcs:
                 fname = func["name"]
-                nargs = func.get("nargs", 0)
-                variadic = func.get("variadic", False)
-                if variadic:
-                    sig = "...args: any[]"
-                else:
-                    sig = ", ".join(
-                        "a%d: any" % i for i in range(nargs))
+                nargs = func["nargs"]
+                lines.append("  /** @arity %s */" % nargs)
                 lines.append(
-                    "  /** @arity %s */" % (
-                        str(nargs) if nargs >= 0 else "..."))
-                lines.append(
-                    "  function %s(%s): any;" % (fname, sig))
+                    "  function %s(...args: any[]): any;" % fname)
         elif kind == "commonjs":
             exports = mod.get("exports", [])
             if not exports:
@@ -840,6 +832,16 @@ def _strip_revision(artifact: dict[str, Any]) -> dict[str, Any]:
     return clone
 
 
+def _strip_dts_revision(text: str) -> str:
+    """Normalize the generated revision just like ``_strip_revision()``."""
+    lines = text.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        if line.startswith("// movianRevision: "):
+            lines[index] = "// movianRevision: <normalized>\n"
+            break
+    return "".join(lines)
+
+
 def cmd_generate(_args: argparse.Namespace) -> int:
     artifact = build_artifact()
     ARTIFACT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -864,15 +866,12 @@ def cmd_check(args: argparse.Namespace) -> int:
 
     metadata_ok = (fresh_norm == committed_norm)
 
-    # Check d.ts drift
     fresh_dts = render_dts(fresh)
-    dts_ok = True
+    dts_ok = False
     if DTS_PATH.is_file():
         committed_dts = DTS_PATH.read_text(encoding="utf-8")
-        if fresh_dts != committed_dts:
-            dts_ok = False
-    else:
-        dts_ok = False
+        dts_ok = (_strip_dts_revision(fresh_dts)
+                  == _strip_dts_revision(committed_dts))
 
     if metadata_ok and dts_ok:
         if args.json:
@@ -884,24 +883,27 @@ def cmd_check(args: argparse.Namespace) -> int:
             print("DTS OK")
         return 0
 
-    exit_code = 0
+    diff = None
     if not metadata_ok:
         diff = diff_artifacts(committed_norm, fresh_norm)
-        if args.json:
-            print(json.dumps({"metadata": "drift", "diff": diff},
-                              ensure_ascii=False, indent=2, sort_keys=True))
-        else:
+
+    if args.json:
+        result = {
+            "metadata": "ok" if metadata_ok else "drift",
+            "dts": "ok" if dts_ok else "drift",
+        }
+        if diff is not None:
+            result["diff"] = diff
+        print(json.dumps(result, ensure_ascii=False, indent=2,
+                         sort_keys=True))
+    else:
+        if not metadata_ok:
             print("METADATA DRIFT")
-            for line in format_diff(diff):
+            for line in format_diff(diff or {}):
                 print(line)
-        exit_code = 1
-
-    if not dts_ok:
-        if not args.json:
+        if not dts_ok:
             print("DTS DRIFT")
-        exit_code = 1
-
-    return exit_code
+    return 1
 
 
 def _without_line(record: dict[str, Any]) -> dict[str, Any]:

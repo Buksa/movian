@@ -5,6 +5,7 @@
     "typeRoots": ["./generated"]
   },
   "include": [
+    "**/*.js",
     "generated/**/*.d.ts"
   ],
   "exclude": [

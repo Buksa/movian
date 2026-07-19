@@ -57,6 +57,7 @@ add a `jsconfig.json` to the project root (or copy the worked example from
     "typeRoots": ["./generated"]
   },
   "include": [
+    "**/*.js",
     "generated/**/*.d.ts"
   ],
   "exclude": [
@@ -77,7 +78,9 @@ purely for catching regressions in the generated file.
 If `tsc` is already on PATH, you can validate the generated file:
 
 ```sh
-tsc --noEmit --strict false generated/movian-api.d.ts
+if command -v tsc >/dev/null 2>&1; then
+  tsc --noEmit --strict false generated/movian-api.d.ts
+fi
 ```
 
 If `tsc` is not installed, this step is silently skipped. The absence of
