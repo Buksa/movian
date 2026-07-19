@@ -27,6 +27,32 @@ Expected result:
 - `make` produces `build.debug/movian`.
 - `--help` prints the Movian version and option list.
 
+## External dependency cache and worktrees
+
+Stamped submodule dependencies (`libav`, `libsmb2`, and `libyuv`) are cached
+under `~/.cache/movian-ext` by gitlink, build flavor, configure flags, and
+toolchain identity. Set `MOVIAN_EXT_CACHE_DIR` to use another local cache root,
+or pass `--no-ext-cache` to configure when diagnosing a suspected cache issue.
+Cache entries are checksum-verified before extraction; missing, incomplete, or
+damaged entries rebuild and repopulate automatically.
+
+Each worktree should configure and own its build directory:
+
+```sh
+./support/configure-linux-debug.sh
+make BUILD=debug -j$(nproc)
+```
+
+This replaces symlinking `build.debug` from the main checkout. The dependency
+cache avoids recompiling unchanged external libraries while keeping object
+timestamps and generated files local to the worktree. An unchanged private
+build supports `make BUILD=debug -q` normally.
+
+Legacy worktrees that still have a shared `build.debug` symlink retain the old
+mtime mismatch: run `make -q` staleness gates only in the checkout that owns
+that build directory. Remove the symlink and configure a private build before
+moving those gates into the worktree.
+
 For release-policy changes that touch the GLW recorder, also verify the
 recorder defaults:
 

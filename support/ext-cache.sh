@@ -1,0 +1,241 @@
+#!/bin/sh
+
+set -eu
+
+mode=${1:-}
+case "$mode" in
+  check)
+    [ "$#" -eq 8 ] || {
+      echo "usage: $0 check DEP FLAVOR CONFIG_HASH ARTIFACTS STAMP C BUILDDIR" >&2
+      exit 2
+    }
+    ;;
+  build)
+    [ "$#" -eq 9 ] || {
+      echo "usage: $0 build DEP FLAVOR CONFIG_HASH ARTIFACTS STAMP C BUILDDIR CACHE_ENABLED" >&2
+      exit 2
+    }
+    ;;
+  *)
+    echo "usage: $0 check|build ..." >&2
+    exit 2
+    ;;
+esac
+
+dep=$2
+flavor=$3
+config_hash=$4
+artifacts=$5
+stamp=$6
+C=$7
+BUILDDIR=$8
+cache_enabled=${9:-yes}
+source_dir="$C/ext/$dep"
+install_dir="$BUILDDIR/inst"
+
+if command -v sha256sum >/dev/null 2>&1; then
+  SHA256=sha256sum
+elif command -v shasum >/dev/null 2>&1; then
+  SHA256="shasum -a 256"
+else
+  echo "ext-cache: no SHA-256 tool found" >&2
+  exit 1
+fi
+
+gitlink=$(git ls-tree HEAD -- "ext/$dep" | awk 'NR == 1 { print $3 }')
+if [ -z "$gitlink" ]; then
+  echo "ext-cache: $dep has no gitlink in HEAD" >&2
+  exit 1
+fi
+
+actual=$(git -C "$source_dir" rev-parse HEAD)
+dirty=no
+if [ "$actual" != "$gitlink" ] ||
+    [ -n "$(git -C "$source_dir" status --porcelain --untracked-files=normal)" ]; then
+  dirty=yes
+fi
+
+key="$gitlink $flavor $config_hash"
+artifacts_present=yes
+for artifact in $artifacts; do
+  if [ ! -f "$artifact" ]; then
+    artifacts_present=no
+    break
+  fi
+done
+
+if [ "$dirty" = no ] && [ "$artifacts_present" = yes ] &&
+    [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$key" ]; then
+  exit 0
+fi
+if [ "$mode" = check ]; then
+  rm -f "$stamp"
+  exit 0
+fi
+
+build_dep() {
+  make -f "$C/ext/$dep.mk" build
+  for artifact in $artifacts; do
+    if [ ! -f "$artifact" ]; then
+      echo "ext-cache: $dep build did not install $artifact" >&2
+      exit 1
+    fi
+  done
+}
+
+if [ "$dirty" = yes ]; then
+  echo "ext-cache: $dep is dirty; rebuilding without cache"
+  build_dep
+  mkdir -p "$(dirname "$stamp")"
+  printf 'dirty %s\n' "$key" >"$stamp"
+  exit 0
+fi
+
+artifact_paths=
+for artifact in $artifacts; do
+  case "$artifact" in
+    "$install_dir"/*)
+      artifact_paths="$artifact_paths ${artifact#"$install_dir"/}"
+      ;;
+    *)
+      echo "ext-cache: artifact outside install directory: $artifact" >&2
+      exit 1
+      ;;
+  esac
+done
+
+shared_libav=no
+case "$dep" in
+  libav)
+    cache_paths="
+      include/libavcodec include/libavdevice include/libavformat
+      include/libavresample include/libavutil include/libswresample
+      include/libswscale $artifact_paths lib/pkgconfig/libavcodec.pc
+      lib/pkgconfig/libavdevice.pc lib/pkgconfig/libavformat.pc
+      lib/pkgconfig/libavresample.pc lib/pkgconfig/libavutil.pc
+      lib/pkgconfig/libswresample.pc lib/pkgconfig/libswscale.pc"
+    case " $artifact_paths " in
+      *" lib/libavcodec.so "*) shared_libav=yes ;;
+    esac
+    ;;
+  libsmb2)
+    cache_paths="include/smb2 $artifact_paths lib/pkgconfig/libsmb2.pc lib/cmake/libsmb2"
+    ;;
+  libyuv)
+    cache_paths="include/libyuv include/libyuv.h $artifact_paths"
+    ;;
+  *)
+    echo "ext-cache: unsupported dependency $dep" >&2
+    exit 1
+    ;;
+esac
+
+if [ "$cache_enabled" != yes ]; then
+  echo "ext-cache: $dep cache disabled; building"
+  build_dep
+  mkdir -p "$(dirname "$stamp")"
+  printf '%s\n' "$key" >"$stamp"
+  exit 0
+fi
+
+cache_base=${MOVIAN_EXT_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME:?}/.cache}/movian-ext}
+cache_key=$(printf '%s\n' "$key" | ${SHA256} | awk '{print $1}')
+dep_cache="$cache_base/$dep"
+entry="$dep_cache/$cache_key"
+
+cache_valid() {
+  [ -f "$entry/key" ] &&
+    [ "$(cat "$entry/key")" = "$key" ] &&
+    [ -f "$entry/payload.tar" ] &&
+    [ -f "$entry/payload.sha256" ] &&
+    (cd "$entry" && ${SHA256} -c payload.sha256 >/dev/null 2>&1) &&
+    tar -tf "$entry/payload.tar" >/dev/null 2>&1
+}
+
+install_complete() {
+  for path in $cache_paths; do
+    [ -e "$install_dir/$path" ] || return 1
+  done
+}
+
+relocate_pkgconfig() {
+  pc_dir="$install_dir/lib/pkgconfig"
+  [ -d "$pc_dir" ] || return 0
+  for pc in "$pc_dir"/*.pc; do
+    [ -f "$pc" ] || continue
+    tmp_pc="$pc.tmp"
+    awk -v prefix="$install_dir" '
+      /^prefix=/ { print "prefix=" prefix; next }
+      /^exec_prefix=/ { print "exec_prefix=${prefix}"; next }
+      /^libdir=/ { print "libdir=${prefix}/lib"; next }
+      /^includedir=/ { print "includedir=${prefix}/include"; next }
+      { print }
+    ' "$pc" >"$tmp_pc"
+    mv "$tmp_pc" "$pc"
+  done
+}
+
+if cache_valid; then
+  echo "ext-cache: $dep cache hit"
+  mkdir -p "$install_dir"
+  for path in $cache_paths; do
+    rm -rf "$install_dir/$path"
+  done
+  if [ "$shared_libav" = yes ]; then
+    for library in avcodec avdevice avformat avresample avutil swresample swscale; do
+      rm -f "$install_dir/lib/lib${library}.so"*
+    done
+  fi
+  tar -xf "$entry/payload.tar" -C "$install_dir"
+  relocate_pkgconfig
+  if ! install_complete; then
+    echo "ext-cache: $dep cache entry is incomplete; rebuilding" >&2
+    rm -rf "$entry"
+    build_dep
+  else
+    for artifact in $artifacts; do
+      touch "$artifact"
+    done
+  fi
+else
+  if [ -e "$entry" ]; then
+    echo "ext-cache: $dep cache entry is invalid; rebuilding"
+    rm -rf "$entry"
+  else
+    echo "ext-cache: $dep cache miss; building"
+  fi
+  build_dep
+fi
+
+mkdir -p "$(dirname "$stamp")"
+printf '%s\n' "$key" >"$stamp"
+
+if ! cache_valid; then
+  mkdir -p "$dep_cache"
+  if [ "$shared_libav" = yes ]; then
+    for library in avcodec avdevice avformat avresample avutil swresample swscale; do
+      for shared in "$install_dir/lib/lib${library}.so".*; do
+        [ -e "$shared" ] || continue
+        cache_paths="$cache_paths ${shared#"$install_dir"/}"
+      done
+    done
+  fi
+  tmp_entry=$(mktemp -d "$dep_cache/.tmp.XXXXXX")
+  trap 'rm -rf "$tmp_entry"' EXIT HUP INT TERM
+  mkdir -p "$tmp_entry/inst"
+  for path in $cache_paths; do
+    if [ ! -e "$install_dir/$path" ]; then
+      echo "ext-cache: $dep install is incomplete: missing $path" >&2
+      exit 1
+    fi
+    mkdir -p "$tmp_entry/inst/$(dirname "$path")"
+    cp -a "$install_dir/$path" "$tmp_entry/inst/$(dirname "$path")/"
+  done
+  tar -cf "$tmp_entry/payload.tar" -C "$tmp_entry/inst" $cache_paths
+  printf '%s\n' "$key" >"$tmp_entry/key"
+  (cd "$tmp_entry" && ${SHA256} payload.tar >payload.sha256)
+  rm -rf "$tmp_entry/inst" "$entry"
+  mv "$tmp_entry" "$entry"
+  trap - EXIT HUP INT TERM
+  echo "ext-cache: $dep cache populated"
+fi

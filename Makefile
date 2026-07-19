@@ -35,7 +35,6 @@ BUILDDIR ?= ${C}/build.${BUILD}
 # All targets deps on Makefile, but we can comment that out during dev:ing
 ALLDEPS=${BUILDDIR}/config.mak Makefile src/arch/${PLATFORM}/${PLATFORM}.mk
 
-ALLDEPS += ${STAMPS}
 
 OPTFLAGS ?= -O${OPTLEVEL}
 
@@ -45,6 +44,13 @@ PROG=${BUILDDIR}/movian
 LIB=${BUILDDIR}/libmovian
 
 include ${BUILDDIR}/config.mak
+EXTDEP_CHECK_FAILURES := $(foreach dep,$(EXTDEPS),$(shell \
+    $(C)/support/ext-cache.sh check "$(dep)" "$(BUILD)" \
+    "$(EXTDEP_$(dep)_CONFIG_HASH)" "$(EXTDEP_$(dep)_ARTIFACTS)" \
+    "$(EXTDEP_$(dep)_STAMP)" "$(C)" "$(BUILDDIR)" >/dev/null || echo "$(dep)"))
+ifneq ($(strip $(EXTDEP_CHECK_FAILURES)),)
+$(error External dependency check failed: $(EXTDEP_CHECK_FAILURES))
+endif
 
 CFLAGS_std_noerror += -Wall -Wwrite-strings -Wno-deprecated-declarations \
 		-Wmissing-prototypes -Wno-multichar  -Iext/dvd -std=gnu99
@@ -883,21 +889,21 @@ $(foreach VAR,$(BRIEF), \
     $(eval $(VAR) = @$$(call ECHO,$(VAR),$$(MSG)); $($(VAR))))
 endif
 
-.PHONY:	clean distclean makever build-%
+.PHONY: clean distclean makever build-%
 
-${PROG}: $(OBJS) $(ALLDEPS)  ${BUILDDIR}/support/dataroot/wd.o
+${PROG}: $(OBJS) $(ALLDEPS) $(STAMPS) $(EXT_ARTIFACTS) ${BUILDDIR}/support/dataroot/wd.o
 	$(LINKER) -o $@ $(OBJS) ${BUILDDIR}/support/dataroot/wd.o $(LDFLAGS) ${LDFLAGS_cfg}
 
-${PROG}.bundle: $(OBJS) $(BUNDLE_OBJS) $(ALLDEPS) ${BUILDDIR}/support/dataroot/bundle.o
+${PROG}.bundle: $(OBJS) $(BUNDLE_OBJS) $(ALLDEPS) $(STAMPS) $(EXT_ARTIFACTS) ${BUILDDIR}/support/dataroot/bundle.o
 	$(LINKER) -o $@ $(OBJS) ${BUILDDIR}/support/dataroot/bundle.o $(BUNDLE_OBJS) $(LDFLAGS) ${LDFLAGS_cfg}
 
 ${PROG}.sbundle: ${PROG}.bundle $(ALLDEPS)
 	$(STRIP) -o $@ $<
 
-${PROG}.datadir: $(OBJS) $(ALLDEPS) ${BUILDDIR}/support/dataroot/datadir.o
+${PROG}.datadir: $(OBJS) $(ALLDEPS) $(STAMPS) $(EXT_ARTIFACTS) ${BUILDDIR}/support/dataroot/datadir.o
 	$(LINKER) -o $@ $(OBJS) ${BUILDDIR}/support/dataroot/datadir.o $(LDFLAGS) ${LDFLAGS_cfg}
 
-${LIB}.so: $(OBJS) $(BUNDLE_OBJS) $(ALLDEPS)  support/dataroot/bundle.c
+${LIB}.so: $(OBJS) $(BUNDLE_OBJS) $(ALLDEPS) $(STAMPS) $(EXT_ARTIFACTS) support/dataroot/bundle.c
 	$(LINKER) -shared -o $@ $(OBJS) support/dataroot/bundle.c $(BUNDLE_OBJS) ${LDFLAGS_cfg}
 
 .PHONY: ${BUILDDIR}/zipbundles/bundle.zip
@@ -909,23 +915,23 @@ ${BUILDDIR}/zipbundles/bundle.zip:
 
 $(BUILDDIR)/support/dataroot/ziptail.o: src/main.h
 
-${PROG}.ziptail: $(OBJS) $(ALLDEPS) $(BUILDDIR)/support/dataroot/ziptail.o
+${PROG}.ziptail: $(OBJS) $(ALLDEPS) $(STAMPS) $(EXT_ARTIFACTS) $(BUILDDIR)/support/dataroot/ziptail.o
 	$(CC) -o $@ $(OBJS) $(BUILDDIR)/support/dataroot/ziptail.o $(LDFLAGS) ${LDFLAGS_cfg}
 
 
-${BUILDDIR}/%.o: %.c $(ALLDEPS)
+${BUILDDIR}/%.o: %.c $(ALLDEPS) $(STAMPS)
 	@mkdir -p $(dir $@)
 	$(CC) -MD -MP $(CFLAGS_com) $(CFLAGS) $(CFLAGS_cfg) -c -o $@ $(C)/$<
 
-${BUILDDIR}/%.o: %.S $(ALLDEPS)
+${BUILDDIR}/%.o: %.S $(ALLDEPS) $(STAMPS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_com) $(CFLAGS) $(CFLAGS_cfg) -c -o $@ $(C)/$<
 
-${BUILDDIR}/%.o: %.m $(ALLDEPS)
+${BUILDDIR}/%.o: %.m $(ALLDEPS) $(STAMPS)
 	@mkdir -p $(dir $@)
 	$(CC) -MD -MP $(CFLAGS_com) $(CFLAGS) $(CFLAGS_cfg) -c -o $@ $(C)/$<
 
-${BUILDDIR}/%.o: %.cpp $(ALLDEPS)
+${BUILDDIR}/%.o: %.cpp $(ALLDEPS) $(STAMPS)
 	@mkdir -p $(dir $@)
 	$(CXX) -MD -MP $(CFLAGS_com) $(CFLAGS_cfg) -c -o $@ $(C)/$<
 
@@ -966,6 +972,11 @@ export OPTFLAGS
 $(BUILDDIR)/stamps/%.stamp: build-%
 	@mkdir -p $(dir $@)
 	touch $@
+
+$(EXT_STAMPS):
+	+@$(C)/support/ext-cache.sh build "$(EXTDEP_NAME)" "$(BUILD)" \
+	    "$(EXTDEP_CONFIG_HASH)" "$(EXTDEP_ARTIFACTS)" "$@" \
+	    "$(C)" "$(BUILDDIR)" "$(EXT_CACHE_ENABLED)"
 
 build-%:
 	${MAKE} -f ${C}/ext/$*.mk build
