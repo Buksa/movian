@@ -857,8 +857,7 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     lines.append("    new (...args: any[]): any;")
                     lines.append("  };")
                 else:
-                    lines.append(
-                        "  function %s(...args: any[]): any;" % ename)
+                    lines.append("  const %s: any;" % ename)
 
         lines.append("}")
         lines.append("")
