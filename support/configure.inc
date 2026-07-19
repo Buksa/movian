@@ -305,6 +305,14 @@ ext_config_hash() {
 
 add_stamp() {
     local dep=$1
+    if [ "$#" -eq 1 ]; then
+        cat >>${CONFIG_MAK} << EOF
+STAMPS += ${BUILDDIR}/stamps/${dep}.stamp
+LEGACY_STAMPS += ${BUILDDIR}/stamps/${dep}.stamp
+EOF
+        return
+    fi
+
     local config_hash=`ext_config_hash "$2"`
     local artifacts=
     local artifact
@@ -313,6 +321,7 @@ add_stamp() {
     done
     cat >>${CONFIG_MAK} << EOF
 STAMPS += ${BUILDDIR}/stamps/${dep}.stamp
+EXT_STAMPS += ${BUILDDIR}/stamps/${dep}.stamp
 EXTDEPS += ${dep}
 EXTDEP_${dep}_CONFIG_HASH=${config_hash}
 EXTDEP_${dep}_ARTIFACTS=${artifacts}
@@ -454,9 +463,14 @@ libav_setup() {
     echo >>${CONFIG_MAK} "LIBAV_BUILD_DIR=${LIBAV_BUILD_DIR}"
     echo >>${CONFIG_MAK} "LIBAV_INSTALL_DIR=${LIBAV_INSTALL_DIR}"
 
+    case " ${LIBAV_ARCH_FLAGS} " in
+      *" --enable-shared "*) LIBAV_ARTIFACT_SUFFIX=so ;;
+      *) LIBAV_ARTIFACT_SUFFIX=a ;;
+    esac
+
     add_stamp libav \
         "cc=${CC};ccid=`tool_id "${CC}"`;arch=${LIBAV_ARCH_FLAGS};common=${LIBAV_COMMON_FLAGS};cflags=${LIBAV_CFLAGS} ${EXTRA_CFLAGS};ldflags=${LIBAV_LDFLAGS} ${EXTRA_LDFLAGS}" \
-        "lib/libavcodec.a lib/libavdevice.a lib/libavformat.a lib/libavresample.a lib/libavutil.a lib/libswresample.a lib/libswscale.a"
+        "lib/libavcodec.${LIBAV_ARTIFACT_SUFFIX} lib/libavdevice.${LIBAV_ARTIFACT_SUFFIX} lib/libavformat.${LIBAV_ARTIFACT_SUFFIX} lib/libavresample.${LIBAV_ARTIFACT_SUFFIX} lib/libavutil.${LIBAV_ARTIFACT_SUFFIX} lib/libswresample.${LIBAV_ARTIFACT_SUFFIX} lib/libswscale.${LIBAV_ARTIFACT_SUFFIX}"
 }
 
 
@@ -556,7 +570,7 @@ libyuv_setup() {
     echo >>${CONFIG_MAK} "LDFLAGS_cfg += -lyuv"
     update_ext_submodule libyuv
     add_stamp libyuv \
-        "cxx=${CXX};cxxid=`tool_id "${CXX}"`;ar=${AR};ranlib=${RANLIB};optflags=${OPTFLAGS};arch=${ARCH_CFLAGS}" \
+        "cxx=${CXX};cxxid=`tool_id "${CXX}"`;ar=${AR};ranlib=${RANLIB};optlevel=${OPTLEVEL};arch=${ARCH_CFLAGS}" \
         "lib/libyuv.a"
 }
 

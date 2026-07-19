@@ -969,7 +969,11 @@ export BUILDDIR
 export OPTFLAGS
 
 # External builds
-$(BUILDDIR)/stamps/%.stamp:
+$(BUILDDIR)/stamps/%.stamp: build-%
+	@mkdir -p $(dir $@)
+	touch $@
+
+$(EXT_STAMPS):
 	+@$(C)/support/ext-cache.sh build "$(EXTDEP_NAME)" "$(BUILD)" \
 	    "$(EXTDEP_CONFIG_HASH)" "$(EXTDEP_ARTIFACTS)" "$@" \
 	    "$(C)" "$(BUILDDIR)" "$(EXT_CACHE_ENABLED)"

@@ -33,6 +33,15 @@ cache_enabled=${9:-yes}
 source_dir="$C/ext/$dep"
 install_dir="$BUILDDIR/inst"
 
+if command -v sha256sum >/dev/null 2>&1; then
+  SHA256=sha256sum
+elif command -v shasum >/dev/null 2>&1; then
+  SHA256="shasum -a 256"
+else
+  echo "ext-cache: no SHA-256 tool found" >&2
+  exit 1
+fi
+
 gitlink=$(git ls-tree HEAD -- "ext/$dep" | awk 'NR == 1 { print $3 }')
 if [ -z "$gitlink" ]; then
   echo "ext-cache: $dep has no gitlink in HEAD" >&2
@@ -82,23 +91,38 @@ if [ "$dirty" = yes ]; then
   exit 0
 fi
 
+artifact_paths=
+for artifact in $artifacts; do
+  case "$artifact" in
+    "$install_dir"/*)
+      artifact_paths="$artifact_paths ${artifact#"$install_dir"/}"
+      ;;
+    *)
+      echo "ext-cache: artifact outside install directory: $artifact" >&2
+      exit 1
+      ;;
+  esac
+done
+
+shared_libav=no
 case "$dep" in
   libav)
     cache_paths="
       include/libavcodec include/libavdevice include/libavformat
       include/libavresample include/libavutil include/libswresample
-      include/libswscale lib/libavcodec.a lib/libavdevice.a
-      lib/libavformat.a lib/libavresample.a lib/libavutil.a
-      lib/libswresample.a lib/libswscale.a lib/pkgconfig/libavcodec.pc
+      include/libswscale $artifact_paths lib/pkgconfig/libavcodec.pc
       lib/pkgconfig/libavdevice.pc lib/pkgconfig/libavformat.pc
       lib/pkgconfig/libavresample.pc lib/pkgconfig/libavutil.pc
       lib/pkgconfig/libswresample.pc lib/pkgconfig/libswscale.pc"
+    case " $artifact_paths " in
+      *" lib/libavcodec.so "*) shared_libav=yes ;;
+    esac
     ;;
   libsmb2)
-    cache_paths="include/smb2 lib/libsmb2.a lib/pkgconfig/libsmb2.pc lib/cmake/libsmb2"
+    cache_paths="include/smb2 $artifact_paths lib/pkgconfig/libsmb2.pc lib/cmake/libsmb2"
     ;;
   libyuv)
-    cache_paths="include/libyuv include/libyuv.h lib/libyuv.a"
+    cache_paths="include/libyuv include/libyuv.h $artifact_paths"
     ;;
   *)
     echo "ext-cache: unsupported dependency $dep" >&2
@@ -115,7 +139,7 @@ if [ "$cache_enabled" != yes ]; then
 fi
 
 cache_base=${MOVIAN_EXT_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME:?}/.cache}/movian-ext}
-cache_key=$(printf '%s\n' "$key" | sha256sum | awk '{print $1}')
+cache_key=$(printf '%s\n' "$key" | ${SHA256} | awk '{print $1}')
 dep_cache="$cache_base/$dep"
 entry="$dep_cache/$cache_key"
 
@@ -124,7 +148,7 @@ cache_valid() {
     [ "$(cat "$entry/key")" = "$key" ] &&
     [ -f "$entry/payload.tar" ] &&
     [ -f "$entry/payload.sha256" ] &&
-    (cd "$entry" && sha256sum -c payload.sha256 >/dev/null 2>&1) &&
+    (cd "$entry" && ${SHA256} -c payload.sha256 >/dev/null 2>&1) &&
     tar -tf "$entry/payload.tar" >/dev/null 2>&1
 }
 
@@ -157,6 +181,11 @@ if cache_valid; then
   for path in $cache_paths; do
     rm -rf "$install_dir/$path"
   done
+  if [ "$shared_libav" = yes ]; then
+    for library in avcodec avdevice avformat avresample avutil swresample swscale; do
+      rm -f "$install_dir/lib/lib${library}.so"*
+    done
+  fi
   tar -xf "$entry/payload.tar" -C "$install_dir"
   relocate_pkgconfig
   if ! install_complete; then
@@ -183,6 +212,14 @@ printf '%s\n' "$key" >"$stamp"
 
 if ! cache_valid; then
   mkdir -p "$dep_cache"
+  if [ "$shared_libav" = yes ]; then
+    for library in avcodec avdevice avformat avresample avutil swresample swscale; do
+      for shared in "$install_dir/lib/lib${library}.so".*; do
+        [ -e "$shared" ] || continue
+        cache_paths="$cache_paths ${shared#"$install_dir"/}"
+      done
+    done
+  fi
   tmp_entry=$(mktemp -d "$dep_cache/.tmp.XXXXXX")
   trap 'rm -rf "$tmp_entry"' EXIT HUP INT TERM
   mkdir -p "$tmp_entry/inst"
@@ -196,7 +233,7 @@ if ! cache_valid; then
   done
   tar -cf "$tmp_entry/payload.tar" -C "$tmp_entry/inst" $cache_paths
   printf '%s\n' "$key" >"$tmp_entry/key"
-  (cd "$tmp_entry" && sha256sum payload.tar >payload.sha256)
+  (cd "$tmp_entry" && ${SHA256} payload.tar >payload.sha256)
   rm -rf "$tmp_entry/inst" "$entry"
   mv "$tmp_entry" "$entry"
   trap - EXIT HUP INT TERM
