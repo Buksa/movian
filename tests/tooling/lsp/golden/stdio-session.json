@@ -15,7 +15,13 @@
       "definitionProvider": true,
       "documentSymbolProvider": true,
       "hoverProvider": true,
-      "textDocumentSync": 1,
+      "textDocumentSync": {
+        "change": 1,
+        "openClose": true,
+        "save": {
+          "includeText": true
+        }
+      },
       "workspaceSymbolProvider": true
     },
     "serverInfo": {
