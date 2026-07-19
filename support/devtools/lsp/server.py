@@ -1,9 +1,9 @@
-"""A small, stdlib-only stdio LSP server for Movian GLW view files.
+"""A small, stdlib-only stdio LSP server for Movian GLW and JavaScript files.
 
 The semantic authority stays in ``movian-analyze``.  This module only owns
 the editor-facing pieces the analyzer intentionally does not know about:
-buffer snapshots, UTF-16 ranges, JSON-RPC framing, metadata hover text, and
-the last-good lexer-token fallback needed while a document is being edited.
+buffer snapshots, UTF-16 ranges, JSON-RPC framing, metadata lookups, and the
+last-good GLW lexer-token fallback needed while a document is being edited.
 """
 
 from __future__ import annotations
@@ -26,6 +26,11 @@ JSON = dict[str, Any]
 DEFAULT_DEBOUNCE_MS = 150
 ANALYZER_TIMEOUT_SECONDS = 2.0
 DIAGNOSTIC_SOURCE = "movian-glw"
+JAVASCRIPT_DIAGNOSTIC_SOURCE = "duktape"
+
+REQUIRE_LITERAL = re.compile(
+    r"(?<![A-Za-z0-9_$\.])require[ \t]*\([ \t]*"
+    r"(?P<quote>['\"])(?P<target>[^'\"\\\r\n]*)(?P=quote)[ \t]*\)")
 
 # LSP SymbolKind values.  Keeping the numeric protocol values local avoids a
 # dependency on a Python LSP package.
@@ -114,6 +119,58 @@ def word_at_utf16_position(line: str, character: int) -> str | None:
     return None
 
 
+def codepoint_index_at_utf16_position(line: str, character: int) -> int | None:
+    """Translate one LSP UTF-16 offset to a Python string index."""
+
+    if character < 0:
+        return None
+    units = 0
+    for index, char in enumerate(line):
+        width = 2 if ord(char) > 0xFFFF else 1
+        if character < units + width:
+            return index
+        units += width
+        if character == units:
+            return index + 1
+    return len(line) if character == units else None
+
+
+def javascript_offset_is_code(text: str, offset: int) -> bool:
+    """Reject regex matches inside JS strings and comments without an AST."""
+
+    state = "code"
+    index = 0
+    while index < offset:
+        char = text[index]
+        following = text[index + 1] if index + 1 < offset else ""
+        if state == "code":
+            if char == "/" and following == "/":
+                state = "line-comment"
+                index += 2
+                continue
+            if char == "/" and following == "*":
+                state = "block-comment"
+                index += 2
+                continue
+            if char in ("'", '"', "`"):
+                state = char
+        elif state == "line-comment":
+            if char == "\n":
+                state = "code"
+        elif state == "block-comment":
+            if char == "*" and following == "/":
+                state = "code"
+                index += 2
+                continue
+        elif char == "\\":
+            index += 2
+            continue
+        elif char == state:
+            state = "code"
+        index += 1
+    return state == "code"
+
+
 @dataclass
 class Document:
     uri: str
@@ -153,6 +210,11 @@ class Metadata:
             self.widgets[record["name"]] = record
             for alias in record.get("aliases", []):
                 self.widgets[alias] = record
+        js = artifact.get("js", {})
+        self.modules = {
+            record["name"]: record for record in js.get("modules", [])
+            if isinstance(record, dict) and isinstance(record.get("name"), str)
+        }
 
     def hover(self, word: str) -> str | None:
         if word in self.functions:
@@ -224,7 +286,7 @@ class Metadata:
 
 
 class LspServer:
-    """Own GLW LSP state while delegating parsing to ``movian-analyze``."""
+    """Own editor state while delegating parsing to ``movian-analyze``."""
 
     def __init__(self, input_stream: BinaryIO | None = None,
                  output_stream: BinaryIO | None = None,
@@ -342,6 +404,9 @@ class LspServer:
             elif method == "textDocument/didChange":
                 self._did_change(message.get("params", {}))
                 result = None
+            elif method == "textDocument/didSave":
+                self._did_save(message.get("params", {}))
+                result = None
             elif method == "textDocument/didClose":
                 self._did_close(message.get("params", {}))
                 result = None
@@ -378,7 +443,11 @@ class LspServer:
             self.workspace_root = workspace
         return {
             "capabilities": {
-                "textDocumentSync": 1,
+                "textDocumentSync": {
+                    "openClose": True,
+                    "change": 1,
+                    "save": {"includeText": True},
+                },
                 "documentSymbolProvider": True,
                 "hoverProvider": True,
                 "definitionProvider": True,
@@ -446,6 +515,24 @@ class LspServer:
         with document.lock:
             document.text = normalize_text(text)
             document.version = text_document.get("version", document.version)
+            document.generation += 1
+            document.analyzed_generation = -1
+        if not self._path_has_javascript_suffix(document.path):
+            self._schedule_analysis(document)
+
+    def _did_save(self, params: JSON) -> None:
+        text_document = params["textDocument"]
+        uri = text_document["uri"]
+        document = self._document(uri)
+        if document is None:
+            return
+        text = params.get("text")
+        if text is not None and not isinstance(text, str):
+            raise ValueError("text must be a string when provided")
+        self._cancel_timer(document)
+        with document.lock:
+            if text is not None:
+                document.text = normalize_text(text)
             document.generation += 1
             document.analyzed_generation = -1
         self._schedule_analysis(document)
@@ -527,6 +614,19 @@ class LspServer:
                     return
                 text = document.text
                 analyzed_version = document.version
+            if self._path_has_javascript_suffix(document.path):
+                if self._is_javascript_document(document):
+                    self._analyze_javascript(
+                        document, expected_generation, analyzed_version, text)
+                else:
+                    with document.lock:
+                        if document.generation != expected_generation:
+                            return
+                        document.analyzed_generation = expected_generation
+                    self._publish_diagnostics(
+                        document, {document.uri: []}, expected_generation,
+                        analyzed_version)
+                return
             temporary_path: Path | None = None
             try:
                 temporary_path = self._write_buffer_snapshot(document, text)
@@ -571,12 +671,37 @@ class LspServer:
             self._publish_diagnostics(document, diagnostics,
                                       expected_generation, analyzed_version)
 
+    def _analyze_javascript(self, document: Document, expected_generation: int,
+                            analyzed_version: int | None, text: str) -> None:
+        """Run Duktape's single-error compile check for one JS snapshot."""
+
+        temporary_path: Path | None = None
+        try:
+            temporary_path = self._write_buffer_snapshot(document, text)
+            with self.analyzer_semaphore:
+                check, failure = self._run_analyzer("--js", temporary_path)
+        finally:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink()
+                except FileNotFoundError:
+                    pass
+        diagnostics = self._diagnostics_from_check(
+            document, temporary_path, check, failure,
+            source=JAVASCRIPT_DIAGNOSTIC_SOURCE)
+        with document.lock:
+            if document.generation != expected_generation:
+                return
+            document.analyzed_generation = expected_generation
+        self._publish_diagnostics(document, diagnostics, expected_generation,
+                                  analyzed_version)
+
     def _write_buffer_snapshot(self, document: Document, text: str) -> Path:
-        """Write a short-lived ``.view`` clone, preferring the source directory.
+        """Write a short-lived source clone, preferring the source directory.
 
         Keeping the clone beside an on-disk document preserves relative
-        #include/#import resolution.  The clone is always removed after both
-        analyzer passes, so the analyzer never reads stale on-disk source.
+        #include/#import resolution.  The clone is always removed after the
+        analyzer pass or passes, so analysis never reads stale on-disk source.
         """
 
         directory: str | None = None
@@ -584,10 +709,12 @@ class LspServer:
             directory = str(document.path.parent)
         try:
             descriptor, name = tempfile.mkstemp(
-                prefix=".movian-lsp-", suffix=".view", dir=directory)
+                prefix=".movian-lsp-", suffix=document.path.suffix
+                if document.path is not None else ".view", dir=directory)
         except OSError:
             descriptor, name = tempfile.mkstemp(
-                prefix=".movian-lsp-", suffix=".view")
+                prefix=".movian-lsp-", suffix=document.path.suffix
+                if document.path is not None else ".view")
         with os.fdopen(descriptor, "wb") as snapshot:
             snapshot.write(text.encode("utf-8"))
         return Path(name)
@@ -665,13 +792,15 @@ class LspServer:
     def _diagnostics_from_check(self, document: Document,
                                 temporary_path: Path | None,
                                 check: JSON | None,
-                                failure: str | None) -> dict[str, list[JSON]]:
+                                failure: str | None, *,
+                                source: str = DIAGNOSTIC_SOURCE
+                                ) -> dict[str, list[JSON]]:
         if failure is not None:
             return {
                 document.uri: [{
                     "range": range_for_line(document.text, 0),
                     "severity": 1,
-                    "source": DIAGNOSTIC_SOURCE,
+                    "source": source,
                     "message": failure,
                 }]
             }
@@ -686,7 +815,7 @@ class LspServer:
                 document.uri: [{
                     "range": range_for_line(document.text, 0),
                     "severity": 1,
-                    "source": DIAGNOSTIC_SOURCE,
+                    "source": source,
                     "message": "movian-analyze emitted an invalid diagnostic",
                 }]
             }
@@ -698,7 +827,7 @@ class LspServer:
             diagnostic_uri: [{
                 "range": range_for_line(diagnostic_text, line),
                 "severity": 1,
-                "source": DIAGNOSTIC_SOURCE,
+                "source": source,
                 "message": error,
             }]
         }
@@ -829,6 +958,10 @@ class LspServer:
         document = self._document(uri)
         if document is None:
             return None
+        if self._path_has_javascript_suffix(document.path):
+            if not self._is_javascript_document(document):
+                return None
+            return self._javascript_definition(document, position)
         self._ensure_analysis(document)
         requested_line = position["line"] + 1
         with document.lock:
@@ -855,6 +988,41 @@ class LspServer:
                 "range": {
                     "start": {"line": 0, "character": 0},
                     "end": {"line": 0, "character": 0},
+                },
+            }]
+        return None
+
+    def _javascript_definition(self, document: Document,
+                               position: JSON) -> list[JSON] | None:
+        line_number = position["line"]
+        character = position["character"]
+        with document.lock:
+            text = document.text
+        lines = text.split("\n")
+        if not isinstance(line_number, int) or not isinstance(character, int) \
+                or line_number < 0 or line_number >= len(lines):
+            return None
+        column = codepoint_index_at_utf16_position(lines[line_number], character)
+        if column is None:
+            return None
+        absolute_offset = sum(len(line) + 1 for line in lines[:line_number]) + column
+        for match in REQUIRE_LITERAL.finditer(text):
+            literal_start = match.start("target") - 1
+            literal_end = match.end("target") + 1
+            if not literal_start <= absolute_offset <= literal_end:
+                continue
+            if not javascript_offset_is_code(text, match.start()):
+                return None
+            resolved = self._resolve_javascript_require(
+                document, match.group("target"))
+            if resolved is None:
+                return None
+            target, line = resolved
+            return [{
+                "uri": path_to_uri(target),
+                "range": {
+                    "start": {"line": line, "character": 0},
+                    "end": {"line": line, "character": 0},
                 },
             }]
         return None
@@ -964,6 +1132,50 @@ class LspServer:
                     candidate):
                 return candidate.resolve()
         return None
+
+    def _resolve_javascript_require(self, document: Document,
+                                    target: str) -> tuple[Path, int] | None:
+        module = self.metadata.modules.get(target)
+        if module is not None:
+            source = module.get("source")
+            raw_file = source.get("file") if isinstance(source, dict) else None
+            raw_line = source.get("line") if isinstance(source, dict) else None
+            if not isinstance(raw_file, str) or not isinstance(raw_line, int):
+                return None
+            relative = Path(raw_file)
+            if relative.is_absolute() or ".." in relative.parts:
+                return None
+            candidate = self.repo_root / relative
+            try:
+                candidate.resolve(strict=False).relative_to(
+                    self.repo_root.resolve(strict=False))
+            except (OSError, ValueError):
+                return None
+            if candidate.is_file():
+                return candidate.resolve(), max(raw_line - 1, 0)
+            return None
+
+        if not target.startswith(("./", "../")) or document.path is None:
+            return None
+        relative = Path(target)
+        if relative.is_absolute():
+            return None
+        # Match es_modsearch(): the requested ID is joined to the plugin's
+        # load directory and then receives exactly one ".js" suffix.
+        candidate = Path(str(document.path.parent / relative) + ".js")
+        if candidate.is_file() \
+                and self._is_confined_definition_target(candidate):
+            return candidate.resolve(), 0
+        return None
+
+    @staticmethod
+    def _path_has_javascript_suffix(path: Path | None) -> bool:
+        return path is not None and path.suffix.casefold() == ".js"
+
+    def _is_javascript_document(self, document: Document) -> bool:
+        return self._path_has_javascript_suffix(document.path) \
+            and document.path is not None \
+            and self._is_confined_definition_target(document.path)
 
     def _is_confined_definition_target(self, candidate: Path) -> bool:
         """Match the analyzer's root/skin confinement for definitions."""

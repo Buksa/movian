@@ -1,9 +1,10 @@
-# Movian `.view` language tooling
+# Movian language tooling
 
 `movian-lsp` supplies diagnostics, hover information, document symbols, and
-`#include`/`#import` definitions for GLW `.view` files. It runs from a Movian
-checkout, so each configuration below assumes the editor and checkout share a
-Linux or WSL environment.
+`#include`/`#import` definitions for GLW `.view` files. It also supplies
+JavaScript syntax diagnostics and `require()` definitions for `.js` files. It
+runs from a Movian checkout, so each configuration below assumes the editor
+and checkout share a Linux or WSL environment.
 
 ## Prepare the checkout
 
@@ -17,17 +18,42 @@ make BUILD=debug -j$(nproc) movian-analyze
 ```
 
 The doctor requires Python 3.10 or newer, confirms that
-`generated/movian-metadata.json` is fresh, and performs one framed stdio LSP
-`initialize`/`shutdown` exchange. Re-run it after changing the build or
+`generated/movian-metadata.json` is fresh, performs a framed stdio LSP
+`initialize`/`shutdown` exchange, and probes JavaScript diagnostics plus a
+`require('movian/page')` definition. Re-run it after changing the build or
 metadata inputs.
+
+## JavaScript support and limits
+
+For `.js` documents inside the workspace or flat-skin root, `movian-lsp` sends
+the current editor buffer to `movian-analyze --js` after open and save
+notifications; full-text changes update the saved buffer but do not run the
+analyzer until save. The analyzer compiles without executing the
+file using Movian's vendored Duktape, reports at most the first syntax error,
+and labels that diagnostic source `duktape`. Its accepted JavaScript syntax is
+therefore the syntax supported by Movian's Duktape, not the syntax of a current
+browser or Node.js runtime.
+
+Definition works only when the cursor is on the quoted string literal of a
+direct `require('module')` call. Generated `js.modules` metadata resolves
+Movian IDs such as `movian/page` and `native/fs`; `./` and `../` targets resolve
+only to existing `.js` files that remain inside the workspace or skin root.
+Dynamic arguments, escaped string literals, package discovery, JavaScript AST
+features, completion, type declarations, and plugin-manifest validation are
+outside this server's scope.
+
+The project `.lsp.json` associates `movian-lsp` with both `.view` and `.js`.
+For other editors, add JavaScript to the client-side file-type association if
+you want this server alongside (or instead of) another JavaScript language
+server.
 
 ## Oh My Pi (OMP)
 
 OMP v17 discovers a project-root `.lsp.json` before its lower-priority LSP
 locations. This checkout includes a ready-to-use template at
 [`/.lsp.json`](../../.lsp.json): keep it at the root of the Movian checkout,
-then open that checkout with `omp` and open a `.view` file. The relative server
-path is intentionally resolved from the project root.
+then open that checkout with `omp` and open a `.view` or `.js` file. The
+relative server path is intentionally resolved from the project root.
 
 ```json
 {
@@ -35,7 +61,7 @@ path is intentionally resolved from the project root.
     "movian-lsp": {
       "command": "python3",
       "args": ["support/devtools/movian-lsp", "--stdio"],
-      "fileTypes": [".view"],
+      "fileTypes": [".view", ".js"],
       "rootMarkers": [".git"]
     }
   }
