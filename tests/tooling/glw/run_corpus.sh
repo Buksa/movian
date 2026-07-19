@@ -42,6 +42,8 @@ crash=0
 n_flat=0
 n_other=0
 n_fixtures=0
+n_js=0
+n_js_fixtures=0
 
 check_one() {
   # $1 = view path
@@ -256,8 +258,52 @@ rm -f /tmp/movian-analyze-corpus.golden.tokens \
   /tmp/movian-analyze-corpus.self-include.tokens \
   /tmp/movian-analyze-corpus.self-include.stderr
 
+echo "== JavaScript runtime and plugin examples (strict compile-only) =="
+for f in $(find res/ecmascript support/devtools/viewpreview -name '*.js' | sort); do
+  n_js=$((n_js + 1))
+  "$ANALYZE" --js "$f" \
+    > /tmp/movian-analyze-corpus.js \
+    2> /tmp/movian-analyze-corpus.js.stderr
+  js_rc=$?
+  if [ "$js_rc" != 0 ] || \
+     [ -s /tmp/movian-analyze-corpus.js.stderr ]; then
+    echo "JAVASCRIPT CORPUS REGRESSION (exit $js_rc): $f" >&2
+    sed 's/^/  stdout: /' /tmp/movian-analyze-corpus.js >&2
+    sed 's/^/  stderr: /' /tmp/movian-analyze-corpus.js.stderr >&2
+    fail=1
+  fi
+done
+
+echo "== JavaScript intentional failures (must reject cleanly) =="
+for f in tests/tooling/js/fixtures/*.js; do
+  [ -f "$f" ] || continue
+  n_js_fixtures=$((n_js_fixtures + 1))
+  "$ANALYZE" --js "$f" \
+    > /tmp/movian-analyze-corpus.js \
+    2> /tmp/movian-analyze-corpus.js.stderr
+  js_rc=$?
+  if [ "$js_rc" != 1 ] || \
+     [ -s /tmp/movian-analyze-corpus.js.stderr ] || \
+     ! grep -q '^{"file":.*,"line":1,"error":".*"}$' \
+       /tmp/movian-analyze-corpus.js; then
+    echo "JAVASCRIPT FAILURE REGRESSION (exit $js_rc): $f" >&2
+    sed 's/^/  stdout: /' /tmp/movian-analyze-corpus.js >&2
+    sed 's/^/  stderr: /' /tmp/movian-analyze-corpus.js.stderr >&2
+    fail=1
+  fi
+done
+
+if [ "$n_js_fixtures" != 3 ]; then
+  echo "JAVASCRIPT FIXTURE REGRESSION: found $n_js_fixtures, expected 3" >&2
+  fail=1
+fi
+
+rm -f /tmp/movian-analyze-corpus.js \
+  /tmp/movian-analyze-corpus.js.stderr
+
 echo
 echo "flat+golden: $n_flat, glwskins/old: $n_other, fixtures: $n_fixtures, crashes: $crash, flat regressions: $flat_fail, golden mismatches: $golden_fail"
+echo "javascript: $n_js strict files, $n_js_fixtures intentional failures"
 
 if [ "$fail" != 0 ]; then
   echo "CORPUS GUARD FAILED" >&2
