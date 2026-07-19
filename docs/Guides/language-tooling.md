@@ -28,6 +28,8 @@ metadata inputs.
 `generated/movian-api.d.ts` provides TypeScript declarations for Movian's
 ES5.1 CommonJS plugin API. All types are `any` in v1; the honest signal is
 exact arity encoded via `@arity` JSDoc tags on native ES_MODULE functions.
+Constructor-style CommonJS exports carry construct signatures derived from
+the same metadata.
 
 The file is generated from the same `js.*` metadata as
 `movian-metadata.json` by `support/devtools/metadata/gen.py`:

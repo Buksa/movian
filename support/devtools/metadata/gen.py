@@ -614,24 +614,61 @@ def _mask_js_comments(line: str, in_block: bool) -> tuple[str, bool]:
     return "".join(chars), in_block
 
 
+def _mask_js_strings(line: str) -> str:
+    """Mask quoted JS strings while retaining source columns."""
+    chars = list(line)
+    i = 0
+    quote: str | None = None
+    while i < len(chars):
+        if quote is not None:
+            if chars[i] == "\\" and i + 1 < len(chars):
+                chars[i] = chars[i + 1] = " "
+                i += 2
+                continue
+            if chars[i] == quote:
+                quote = None
+            chars[i] = " "
+        elif chars[i] in ('"', "'"):
+            quote = chars[i]
+            chars[i] = " "
+        i += 1
+    return "".join(chars)
+
+
 def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
+    raw_lines = path.read_text(encoding="utf-8").splitlines()
+    masked_lines: list[str] = []
+    in_block_comment = False
+    for raw_line in raw_lines:
+        line, in_block_comment = _mask_js_comments(
+            raw_line, in_block_comment)
+        masked_lines.append(line)
+
+    candidates: list[tuple[int, str]] = []
+    for line_index, line in enumerate(masked_lines):
+        match = COMMONJS_EXPORT_RE.match(line)
+        if match is not None:
+            candidates.append((line_index, match.group(1) or match.group(3)))
+
     exports: list[dict[str, Any]] = []
     seen: set[str] = set()
-    in_block_comment = False
-    for line_number, raw_line in enumerate(
-            path.read_text(encoding="utf-8").splitlines(), 1):
-        line, in_block_comment = _mask_js_comments(raw_line, in_block_comment)
-        match = COMMONJS_EXPORT_RE.match(line)
-        if match is None:
-            continue
-        export_name = match.group(1) or match.group(3)
+    for candidate_index, (line_index, export_name) in enumerate(candidates):
         if export_name in seen:
             continue
         seen.add(export_name)
-        exports.append({
+        next_line = (candidates[candidate_index + 1][0]
+                     if candidate_index + 1 < len(candidates)
+                     else len(masked_lines))
+        region = "\n".join(
+            _mask_js_strings(line)
+            for line in masked_lines[line_index:next_line])
+        record = {
             "name": export_name,
-            "source": {"file": rel(path), "line": line_number},
-        })
+            "source": {"file": rel(path), "line": line_index + 1},
+        }
+        if re.search(r"\bthis\b", region):
+            record["constructor"] = True
+        exports.append(record)
     exports.sort(key=lambda r: r["name"])
     return exports
 
@@ -815,12 +852,18 @@ def render_dts(artifact: dict[str, Any]) -> str:
             lines.append("  // CommonJS exports")
             for exp in exports:
                 ename = exp["name"]
-                lines.append("  function %s(...args: any[]): any;" % ename)
+                if exp.get("constructor"):
+                    lines.append("  const %s: {" % ename)
+                    lines.append("    new (...args: any[]): any;")
+                    lines.append("  };")
+                else:
+                    lines.append(
+                        "  function %s(...args: any[]): any;" % ename)
 
         lines.append("}")
         lines.append("")
 
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines)
 
 
 def _strip_revision(artifact: dict[str, Any]) -> dict[str, Any]:
@@ -991,11 +1034,10 @@ def format_diff(diff: dict[str, Any]) -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="gen.py",
-        description="Generate/check generated/movian-metadata.json "
-                     "(issue #98).")
+        description="Generate/check Movian metadata and API declarations.")
     parser.add_argument("--check", action="store_true",
                          help="diff regenerated content against the "
-                              "committed artifact (movianRevision "
+                              "committed artifacts (movianRevision "
                               "ignored); exit 1 on drift")
     parser.add_argument("--json", action="store_true",
                          help="machine-readable JSON output (--check only)")
