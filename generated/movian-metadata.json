@@ -3477,7 +3477,1895 @@
       }
     ]
   },
-  "js": {},
-  "movianRevision": "468e6ea61c6a2351d128e59b35ecea65ddfa252c",
+  "js": {
+    "modules": [
+      {
+        "exports": [
+          {
+            "name": "mkdirSync",
+            "source": {
+              "file": "res/ecmascript/modules/fs.js",
+              "line": 34
+            }
+          },
+          {
+            "name": "readFileSync",
+            "source": {
+              "file": "res/ecmascript/modules/fs.js",
+              "line": 14
+            }
+          },
+          {
+            "name": "readdirSync",
+            "source": {
+              "file": "res/ecmascript/modules/fs.js",
+              "line": 26
+            }
+          },
+          {
+            "name": "rmdirSync",
+            "source": {
+              "file": "res/ecmascript/modules/fs.js",
+              "line": 38
+            }
+          },
+          {
+            "name": "unlinkSync",
+            "source": {
+              "file": "res/ecmascript/modules/fs.js",
+              "line": 30
+            }
+          },
+          {
+            "name": "writeFileSync",
+            "source": {
+              "file": "res/ecmascript/modules/fs.js",
+              "line": 3
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "fs",
+        "source": {
+          "file": "res/ecmascript/modules/fs.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "get",
+            "source": {
+              "file": "res/ecmascript/modules/http.js",
+              "line": 67
+            }
+          },
+          {
+            "name": "request",
+            "source": {
+              "file": "res/ecmascript/modules/http.js",
+              "line": 61
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "http",
+        "source": {
+          "file": "res/ecmascript/modules/http.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "get",
+            "source": {
+              "file": "res/ecmascript/modules/https.js",
+              "line": 6
+            }
+          },
+          {
+            "name": "request",
+            "source": {
+              "file": "res/ecmascript/modules/https.js",
+              "line": 3
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "https",
+        "source": {
+          "file": "res/ecmascript/modules/https.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "parse",
+            "source": {
+              "file": "res/ecmascript/modules/movian/html.js",
+              "line": 88
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/html",
+        "source": {
+          "file": "res/ecmascript/modules/movian/html.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "request",
+            "source": {
+              "file": "res/ecmascript/modules/movian/http.js",
+              "line": 75
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/http",
+        "source": {
+          "file": "res/ecmascript/modules/movian/http.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "create",
+            "source": {
+              "file": "res/ecmascript/modules/movian/itemhook.js",
+              "line": 3
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/itemhook",
+        "source": {
+          "file": "res/ecmascript/modules/movian/itemhook.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "Route",
+            "source": {
+              "file": "res/ecmascript/modules/movian/page.js",
+              "line": 384
+            }
+          },
+          {
+            "name": "Searcher",
+            "source": {
+              "file": "res/ecmascript/modules/movian/page.js",
+              "line": 413
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/page",
+        "source": {
+          "file": "res/ecmascript/modules/movian/page.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "notify",
+            "source": {
+              "file": "res/ecmascript/modules/movian/popup.js",
+              "line": 3
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/popup",
+        "source": {
+          "file": "res/ecmascript/modules/movian/popup.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "__proto__",
+            "source": {
+              "file": "res/ecmascript/modules/movian/prop.js",
+              "line": 89
+            }
+          },
+          {
+            "name": "createRoot",
+            "source": {
+              "file": "res/ecmascript/modules/movian/prop.js",
+              "line": 97
+            }
+          },
+          {
+            "name": "global",
+            "source": {
+              "file": "res/ecmascript/modules/movian/prop.js",
+              "line": 94
+            }
+          },
+          {
+            "name": "makeProp",
+            "source": {
+              "file": "res/ecmascript/modules/movian/prop.js",
+              "line": 95
+            }
+          },
+          {
+            "name": "subscribeValue",
+            "source": {
+              "file": "res/ecmascript/modules/movian/prop.js",
+              "line": 101
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/prop",
+        "source": {
+          "file": "res/ecmascript/modules/movian/prop.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "create",
+            "source": {
+              "file": "res/ecmascript/modules/movian/service.js",
+              "line": 27
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/service",
+        "source": {
+          "file": "res/ecmascript/modules/movian/service.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "globalSettings",
+            "source": {
+              "file": "res/ecmascript/modules/movian/settings.js",
+              "line": 266
+            }
+          },
+          {
+            "name": "kvstoreSettings",
+            "source": {
+              "file": "res/ecmascript/modules/movian/settings.js",
+              "line": 309
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/settings",
+        "source": {
+          "file": "res/ecmascript/modules/movian/settings.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "DB",
+            "source": {
+              "file": "res/ecmascript/modules/movian/sqlite.js",
+              "line": 4
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/sqlite",
+        "source": {
+          "file": "res/ecmascript/modules/movian/sqlite.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "create",
+            "source": {
+              "file": "res/ecmascript/modules/movian/store.js",
+              "line": 56
+            }
+          },
+          {
+            "name": "createFromPath",
+            "source": {
+              "file": "res/ecmascript/modules/movian/store.js",
+              "line": 33
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/store",
+        "source": {
+          "file": "res/ecmascript/modules/movian/store.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "addProvider",
+            "source": {
+              "file": "res/ecmascript/modules/movian/subtitles.js",
+              "line": 4
+            }
+          },
+          {
+            "name": "getLanguages",
+            "source": {
+              "file": "res/ecmascript/modules/movian/subtitles.js",
+              "line": 17
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/subtitles",
+        "source": {
+          "file": "res/ecmascript/modules/movian/subtitles.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "VideoScrobbler",
+            "source": {
+              "file": "res/ecmascript/modules/movian/videoscrobbler.js",
+              "line": 4
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/videoscrobbler",
+        "source": {
+          "file": "res/ecmascript/modules/movian/videoscrobbler.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "htsmsg",
+            "source": {
+              "file": "res/ecmascript/modules/movian/xml.js",
+              "line": 74
+            }
+          },
+          {
+            "name": "parse",
+            "source": {
+              "file": "res/ecmascript/modules/movian/xml.js",
+              "line": 69
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/xml",
+        "source": {
+          "file": "res/ecmascript/modules/movian/xml.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "call",
+            "source": {
+              "file": "res/ecmascript/modules/movian/xmlrpc.js",
+              "line": 1
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/xmlrpc",
+        "source": {
+          "file": "res/ecmascript/modules/movian/xmlrpc.js",
+          "line": 1
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "hashCreate",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_crypto.c",
+              "line": 156
+            },
+            "variadic": false
+          },
+          {
+            "name": "hashFinalize",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_crypto.c",
+              "line": 158
+            },
+            "variadic": false
+          },
+          {
+            "name": "hashUpdate",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_crypto.c",
+              "line": 157
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/crypto",
+        "source": {
+          "file": "src/ecmascript/es_crypto.c",
+          "line": 162
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "closeRespond",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 745
+            },
+            "variadic": false
+          },
+          {
+            "name": "openRespond",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 743
+            },
+            "variadic": false
+          },
+          {
+            "name": "readRespond",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 744
+            },
+            "variadic": false
+          },
+          {
+            "name": "redirectRespond",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 747
+            },
+            "variadic": false
+          },
+          {
+            "name": "register",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 742
+            },
+            "variadic": false
+          },
+          {
+            "name": "setSize",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 748
+            },
+            "variadic": false
+          },
+          {
+            "name": "statRespond",
+            "nargs": 5,
+            "source": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 746
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/faprovider",
+        "source": {
+          "file": "src/ecmascript/es_faprovider.c",
+          "line": 752
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "basename",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 481
+            },
+            "variadic": false
+          },
+          {
+            "name": "copyfile",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 482
+            },
+            "variadic": false
+          },
+          {
+            "name": "dirname",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 480
+            },
+            "variadic": false
+          },
+          {
+            "name": "fsize",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 472
+            },
+            "variadic": false
+          },
+          {
+            "name": "ftruncate",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 473
+            },
+            "variadic": false
+          },
+          {
+            "name": "ftrunctae",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 474
+            },
+            "variadic": false
+          },
+          {
+            "name": "mkdirs",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 476
+            },
+            "variadic": false
+          },
+          {
+            "name": "open",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 469
+            },
+            "variadic": false
+          },
+          {
+            "name": "read",
+            "nargs": 5,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 470
+            },
+            "variadic": false
+          },
+          {
+            "name": "readdir",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 479
+            },
+            "variadic": false
+          },
+          {
+            "name": "rename",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 475
+            },
+            "variadic": false
+          },
+          {
+            "name": "rmdir",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 478
+            },
+            "variadic": false
+          },
+          {
+            "name": "unlink",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 477
+            },
+            "variadic": false
+          },
+          {
+            "name": "write",
+            "nargs": 5,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 471
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/fs",
+        "source": {
+          "file": "src/ecmascript/es_fs.c",
+          "line": 486
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "findByClassName",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 415
+            },
+            "variadic": false
+          },
+          {
+            "name": "findById",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 413
+            },
+            "variadic": false
+          },
+          {
+            "name": "findByTagName",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 414
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeAttributes",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 411
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeChilds",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 410
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeName",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 409
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeTextContent",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 412
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeType",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 408
+            },
+            "variadic": false
+          },
+          {
+            "name": "parse",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 407
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/gumbo",
+        "source": {
+          "file": "src/ecmascript/es_gumbo.c",
+          "line": 419
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "register",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_hook.c",
+              "line": 152
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/hook",
+        "source": {
+          "file": "src/ecmascript/es_hook.c",
+          "line": 156
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "createFromXML",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 213
+            },
+            "variadic": false
+          },
+          {
+            "name": "enumerate",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 215
+            },
+            "variadic": false
+          },
+          {
+            "name": "get",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 214
+            },
+            "variadic": false
+          },
+          {
+            "name": "getName",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 217
+            },
+            "variadic": false
+          },
+          {
+            "name": "length",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 216
+            },
+            "variadic": false
+          },
+          {
+            "name": "print",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 218
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/htsmsg",
+        "source": {
+          "file": "src/ecmascript/es_htsmsg.c",
+          "line": 223
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "httpInspectorCreate",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_io.c",
+              "line": 919
+            },
+            "variadic": false
+          },
+          {
+            "name": "httpReq",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_io.c",
+              "line": 918
+            },
+            "variadic": false
+          },
+          {
+            "name": "probe",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_io.c",
+              "line": 920
+            },
+            "variadic": false
+          },
+          {
+            "name": "xmlrpc",
+            "nargs": -1,
+            "source": {
+              "file": "src/ecmascript/es_io.c",
+              "line": 921
+            },
+            "variadic": true
+          }
+        ],
+        "kind": "native",
+        "name": "native/io",
+        "source": {
+          "file": "src/ecmascript/es_io.c",
+          "line": 925
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "getBoolean",
+            "nargs": 4,
+            "source": {
+              "file": "src/ecmascript/es_kvstore.c",
+              "line": 124
+            },
+            "variadic": false
+          },
+          {
+            "name": "getInteger",
+            "nargs": 4,
+            "source": {
+              "file": "src/ecmascript/es_kvstore.c",
+              "line": 123
+            },
+            "variadic": false
+          },
+          {
+            "name": "getString",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_kvstore.c",
+              "line": 122
+            },
+            "variadic": false
+          },
+          {
+            "name": "set",
+            "nargs": 4,
+            "source": {
+              "file": "src/ecmascript/es_kvstore.c",
+              "line": 125
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/kvstore",
+        "source": {
+          "file": "src/ecmascript/es_kvstore.c",
+          "line": 129
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "bindPlayInfo",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_metadata.c",
+              "line": 121
+            },
+            "variadic": false
+          },
+          {
+            "name": "videoMetadataBind",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_metadata.c",
+              "line": 120
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/metadata",
+        "source": {
+          "file": "src/ecmascript/es_metadata.c",
+          "line": 125
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "cacheGet",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 314
+            },
+            "variadic": false
+          },
+          {
+            "name": "cachePut",
+            "nargs": 4,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 313
+            },
+            "variadic": false
+          },
+          {
+            "condition": "#if ENABLE_PLUGINS",
+            "name": "selectView",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 317
+            },
+            "variadic": false
+          },
+          {
+            "name": "systemIpAddress",
+            "nargs": 0,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 315
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/misc",
+        "source": {
+          "file": "src/ecmascript/es_misc.c",
+          "line": 322
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "getAuthCredentials",
+            "nargs": 5,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 328
+            },
+            "variadic": false
+          },
+          {
+            "name": "message",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 329
+            },
+            "variadic": false
+          },
+          {
+            "name": "notify",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 331
+            },
+            "variadic": false
+          },
+          {
+            "name": "textDialog",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 330
+            },
+            "variadic": false
+          },
+          {
+            "name": "webpopup",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 327
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/popup",
+        "source": {
+          "file": "src/ecmascript/es_misc.c",
+          "line": 335
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "atomicAdd",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1112
+            },
+            "variadic": false
+          },
+          {
+            "name": "create",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1091
+            },
+            "variadic": false
+          },
+          {
+            "name": "deleteChild",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1104
+            },
+            "variadic": false
+          },
+          {
+            "name": "deleteChilds",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1105
+            },
+            "variadic": false
+          },
+          {
+            "name": "destroy",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1106
+            },
+            "variadic": false
+          },
+          {
+            "name": "enumerate",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1102
+            },
+            "variadic": false
+          },
+          {
+            "name": "getChild",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1094
+            },
+            "variadic": false
+          },
+          {
+            "name": "getName",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1093
+            },
+            "variadic": false
+          },
+          {
+            "name": "getValue",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1092
+            },
+            "variadic": false
+          },
+          {
+            "name": "global",
+            "nargs": 0,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1101
+            },
+            "variadic": false
+          },
+          {
+            "name": "has",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1103
+            },
+            "variadic": false
+          },
+          {
+            "name": "haveMore",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1099
+            },
+            "variadic": false
+          },
+          {
+            "name": "isSame",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1113
+            },
+            "variadic": false
+          },
+          {
+            "name": "isValue",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1111
+            },
+            "variadic": false
+          },
+          {
+            "name": "isZombie",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1116
+            },
+            "variadic": false
+          },
+          {
+            "name": "link",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1108
+            },
+            "variadic": false
+          },
+          {
+            "name": "makeUrl",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1100
+            },
+            "variadic": false
+          },
+          {
+            "name": "moveBefore",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1114
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeFilterAddPred",
+            "nargs": 6,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1123
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeFilterCreate",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1122
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeFilterDelPred",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1124
+            },
+            "variadic": false
+          },
+          {
+            "name": "print",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1089
+            },
+            "variadic": false
+          },
+          {
+            "name": "release",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1090
+            },
+            "variadic": false
+          },
+          {
+            "name": "select",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1107
+            },
+            "variadic": false
+          },
+          {
+            "name": "sendEvent",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1110
+            },
+            "variadic": false
+          },
+          {
+            "name": "set",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1095
+            },
+            "variadic": false
+          },
+          {
+            "name": "setClipRange",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1117
+            },
+            "variadic": false
+          },
+          {
+            "name": "setParent",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1097
+            },
+            "variadic": false
+          },
+          {
+            "name": "setRichStr",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1096
+            },
+            "variadic": false
+          },
+          {
+            "name": "subscribe",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1098
+            },
+            "variadic": false
+          },
+          {
+            "name": "tagClear",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1119
+            },
+            "variadic": false
+          },
+          {
+            "name": "tagGet",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1120
+            },
+            "variadic": false
+          },
+          {
+            "name": "tagSet",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1118
+            },
+            "variadic": false
+          },
+          {
+            "name": "unlink",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1109
+            },
+            "variadic": false
+          },
+          {
+            "name": "unloadDestroy",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1115
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/prop",
+        "source": {
+          "file": "src/ecmascript/es_prop.c",
+          "line": 1131
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "backendOpen",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_route.c",
+              "line": 281
+            },
+            "variadic": false
+          },
+          {
+            "name": "create",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_route.c",
+              "line": 280
+            },
+            "variadic": false
+          },
+          {
+            "name": "test",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_route.c",
+              "line": 282
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/route",
+        "source": {
+          "file": "src/ecmascript/es_route.c",
+          "line": 286
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "create",
+            "nargs": 6,
+            "source": {
+              "file": "src/ecmascript/es_service.c",
+              "line": 170
+            },
+            "variadic": false
+          },
+          {
+            "name": "enable",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_service.c",
+              "line": 171
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/service",
+        "source": {
+          "file": "src/ecmascript/es_service.c",
+          "line": 175
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "changes",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 321
+            },
+            "variadic": false
+          },
+          {
+            "name": "create",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 319
+            },
+            "variadic": false
+          },
+          {
+            "name": "lastErrorCode",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 323
+            },
+            "variadic": false
+          },
+          {
+            "name": "lastErrorString",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 324
+            },
+            "variadic": false
+          },
+          {
+            "name": "lastRowId",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 325
+            },
+            "variadic": false
+          },
+          {
+            "name": "query",
+            "nargs": -1,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 320
+            },
+            "variadic": true
+          },
+          {
+            "name": "step",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 322
+            },
+            "variadic": false
+          },
+          {
+            "name": "upgradeSchema",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 326
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/sqlite",
+        "source": {
+          "file": "src/ecmascript/es_sqlite.c",
+          "line": 331
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "durationToString",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 384
+            },
+            "variadic": false
+          },
+          {
+            "name": "entityDecode",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 380
+            },
+            "variadic": false
+          },
+          {
+            "name": "isUtf8",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 378
+            },
+            "variadic": false
+          },
+          {
+            "name": "paramEscape",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 383
+            },
+            "variadic": false
+          },
+          {
+            "name": "parseTime",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 385
+            },
+            "variadic": false
+          },
+          {
+            "name": "parseURL",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 386
+            },
+            "variadic": false
+          },
+          {
+            "name": "pathEscape",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 382
+            },
+            "variadic": false
+          },
+          {
+            "name": "queryStringSplit",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 381
+            },
+            "variadic": false
+          },
+          {
+            "name": "resolveURL",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 387
+            },
+            "variadic": false
+          },
+          {
+            "name": "utf8FromBytes",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 379
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/string",
+        "source": {
+          "file": "src/ecmascript/es_string.c",
+          "line": 391
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "addItem",
+            "nargs": 8,
+            "source": {
+              "file": "src/ecmascript/es_subtitles.c",
+              "line": 280
+            },
+            "variadic": false
+          },
+          {
+            "name": "addProvider",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_subtitles.c",
+              "line": 279
+            },
+            "variadic": false
+          },
+          {
+            "name": "getLanguages",
+            "nargs": 0,
+            "source": {
+              "file": "src/ecmascript/es_subtitles.c",
+              "line": 281
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/subtitle",
+        "source": {
+          "file": "src/ecmascript/es_subtitles.c",
+          "line": 285
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "clientCreate",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_websocket.c",
+              "line": 1112
+            },
+            "variadic": false
+          },
+          {
+            "name": "clientSend",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_websocket.c",
+              "line": 1113
+            },
+            "variadic": false
+          },
+          {
+            "name": "serverCreate",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_websocket.c",
+              "line": 1115
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/websocket",
+        "source": {
+          "file": "src/ecmascript/es_websocket.c",
+          "line": 1120
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "parse",
+            "source": {
+              "file": "res/ecmascript/modules/querystring.js",
+              "line": 3
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "querystring",
+        "source": {
+          "file": "res/ecmascript/modules/querystring.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "format",
+            "source": {
+              "file": "res/ecmascript/modules/url.js",
+              "line": 6
+            }
+          },
+          {
+            "name": "parse",
+            "source": {
+              "file": "res/ecmascript/modules/url.js",
+              "line": 35
+            }
+          },
+          {
+            "name": "resolve",
+            "source": {
+              "file": "res/ecmascript/modules/url.js",
+              "line": 37
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "url",
+        "source": {
+          "file": "res/ecmascript/modules/url.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "w3cwebsocket",
+            "source": {
+              "file": "res/ecmascript/modules/websocket.js",
+              "line": 4
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "websocket",
+        "source": {
+          "file": "res/ecmascript/modules/websocket.js",
+          "line": 1
+        }
+      }
+    ],
+    "pluginManifest": [
+      {
+        "anchor": "htsmsg_get_u32_or_default(ctrl, \"apiversion\", 1)",
+        "key": "apiversion",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 712
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(pm, \"author\")",
+        "key": "author",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 445
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(pm, \"category\")",
+        "key": "category",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 416
+        }
+      },
+      {
+        "anchor": "htsmsg_get_u32_or_default(ctrl, \"debug\", 0)",
+        "key": "debug",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 715
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(pm, \"description\")",
+        "key": "description",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 437
+        }
+      },
+      {
+        "anchor": "htsmsg_get_map(ctrl, \"entitlements\")",
+        "key": "entitlements",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 718
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(ctrl, \"file\")",
+        "key": "file",
+        "mandatory": false,
+        "mandatoryWhen": [
+          "type=ecmascript"
+        ],
+        "source": {
+          "file": "src/plugins.c",
+          "line": 704
+        }
+      },
+      {
+        "anchor": "htsmsg_get_list(ctrl, \"glwviews\")",
+        "key": "glwviews",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 751
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(pm, \"icon\")",
+        "key": "icon",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 415
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(ctrl, \"id\")",
+        "key": "id",
+        "mandatory": true,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 633
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(pm, \"synopsis\")",
+        "key": "synopsis",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 442
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(ctrl, \"title\")",
+        "key": "title",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 652
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(ctrl, \"type\")",
+        "key": "type",
+        "mandatory": true,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 632
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(ctrl, \"version\")",
+        "key": "version",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 634
+        }
+      }
+    ]
+  },
+  "movianRevision": "d8cbd7184c53fb8bdedfea82a4a57ad4a89b93c1",
   "schemaVersion": 1
 }
