@@ -5294,6 +5294,7 @@
         "key": "file",
         "mandatory": false,
         "mandatoryWhen": [
+          "type=bitcode",
           "type=ecmascript"
         ],
         "source": {
@@ -5366,6 +5367,6 @@
       }
     ]
   },
-  "movianRevision": "d8cbd7184c53fb8bdedfea82a4a57ad4a89b93c1",
+  "movianRevision": "2df5fbe3c38e9127915ff21bf50139fa87083dc2",
   "schemaVersion": 1
 }

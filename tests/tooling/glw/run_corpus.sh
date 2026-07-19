@@ -300,7 +300,8 @@ else
 fi
 
 echo "== JavaScript runtime and plugin examples (strict compile-only) =="
-for f in $(find res/ecmascript support/devtools/viewpreview -name '*.js' | sort); do
+for f in $(find plugin_examples res/ecmascript support/devtools/viewpreview \
+  -name '*.js' | sort); do
   n_js=$((n_js + 1))
   "$ANALYZE" --js "$f" \
     > /tmp/movian-analyze-corpus.js \

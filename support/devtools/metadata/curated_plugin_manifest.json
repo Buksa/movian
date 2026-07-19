@@ -26,7 +26,7 @@
   {
     "key": "file",
     "mandatory": false,
-    "mandatoryWhen": ["type=ecmascript"],
+    "mandatoryWhen": ["type=bitcode", "type=ecmascript"],
     "anchor": "htsmsg_get_str(ctrl, \"file\")",
     "source": {"file": "src/plugins.c", "line": 704}
   },
