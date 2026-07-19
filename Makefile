@@ -995,7 +995,8 @@ MOVIAN_ANALYZE_BIN = ${BUILDDIR}/movian-analyze
 # compiled as part of src/ui/glw/*.c); our driver/shim live under
 # support/devtools/analyze/ instead, so they need src/ui/glw explicitly
 # on the quote-include path.
-${MOVIAN_ANALYZE_BUILDDIR}/%.o : CFLAGS += -iquote${C}/src/ui/glw
+${MOVIAN_ANALYZE_BUILDDIR}/%.o : CFLAGS += -iquote${C}/src/ui/glw \
+	-iquote${C}/ext/duktape
 
 MOVIAN_ANALYZE_CORE_OBJS = \
 	${BUILDDIR}/src/ui/glw/glw_view_lexer.o \
@@ -1007,6 +1008,9 @@ MOVIAN_ANALYZE_CORE_OBJS = \
 	${BUILDDIR}/src/misc/pool.o \
 	${BUILDDIR}/src/misc/rstr.o \
 	${BUILDDIR}/src/misc/buf.o
+
+MOVIAN_ANALYZE_JS_OBJS = \
+	${BUILDDIR}/ext/duktape/duktape.o
 
 MOVIAN_ANALYZE_OWN_OBJS = \
 	${MOVIAN_ANALYZE_BUILDDIR}/movian_analyze.o \
@@ -1024,17 +1028,19 @@ movian-analyze: ${MOVIAN_ANALYZE_BIN}
 # the normal build uses, e.g. -ffast-math for src/ui/glw/%.o); asking
 # for them here just builds/reuses those same objects, never copies or
 # recompiles with different flags.
-${MOVIAN_ANALYZE_STUBS_C}: ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_OWN_OBJS} \
+${MOVIAN_ANALYZE_STUBS_C}: ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_JS_OBJS} \
+    ${MOVIAN_ANALYZE_OWN_OBJS} \
     ${C}/${MOVIAN_ANALYZE_DIR}/gen-abort-stubs.sh
 	@mkdir -p $(dir $@)
 	PROBE_LDFLAGS='${LDFLAGS}' ${C}/${MOVIAN_ANALYZE_DIR}/gen-abort-stubs.sh $@ \
-	    ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_OWN_OBJS}
+	    ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_JS_OBJS} \
+	    ${MOVIAN_ANALYZE_OWN_OBJS}
 
 ${MOVIAN_ANALYZE_STUBS_O}: ${MOVIAN_ANALYZE_STUBS_C}
 	$(CC) -c -o $@ $<
 
-${MOVIAN_ANALYZE_BIN}: ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_OWN_OBJS} \
-    ${MOVIAN_ANALYZE_STUBS_O}
+${MOVIAN_ANALYZE_BIN}: ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_JS_OBJS} \
+    ${MOVIAN_ANALYZE_OWN_OBJS} ${MOVIAN_ANALYZE_STUBS_O}
 	$(LINKER) -o $@ $^ -lm -lpthread
 
 movian-analyze-corpus: ${MOVIAN_ANALYZE_BIN}

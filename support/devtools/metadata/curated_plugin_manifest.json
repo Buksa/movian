@@ -1,0 +1,87 @@
+[
+  {
+    "key": "type",
+    "mandatory": true,
+    "anchor": "htsmsg_get_str(ctrl, \"type\")",
+    "source": {"file": "src/plugins.c", "line": 632}
+  },
+  {
+    "key": "id",
+    "mandatory": true,
+    "anchor": "htsmsg_get_str(ctrl, \"id\")",
+    "source": {"file": "src/plugins.c", "line": 633}
+  },
+  {
+    "key": "version",
+    "mandatory": false,
+    "anchor": "htsmsg_get_str(ctrl, \"version\")",
+    "source": {"file": "src/plugins.c", "line": 634}
+  },
+  {
+    "key": "title",
+    "mandatory": false,
+    "anchor": "htsmsg_get_str(ctrl, \"title\")",
+    "source": {"file": "src/plugins.c", "line": 652}
+  },
+  {
+    "key": "file",
+    "mandatory": false,
+    "mandatoryWhen": ["type=bitcode", "type=ecmascript"],
+    "anchor": "htsmsg_get_str(ctrl, \"file\")",
+    "source": {"file": "src/plugins.c", "line": 704}
+  },
+  {
+    "key": "apiversion",
+    "mandatory": false,
+    "anchor": "htsmsg_get_u32_or_default(ctrl, \"apiversion\", 1)",
+    "source": {"file": "src/plugins.c", "line": 712}
+  },
+  {
+    "key": "debug",
+    "mandatory": false,
+    "anchor": "htsmsg_get_u32_or_default(ctrl, \"debug\", 0)",
+    "source": {"file": "src/plugins.c", "line": 715}
+  },
+  {
+    "key": "entitlements",
+    "mandatory": false,
+    "anchor": "htsmsg_get_map(ctrl, \"entitlements\")",
+    "source": {"file": "src/plugins.c", "line": 718}
+  },
+  {
+    "key": "glwviews",
+    "mandatory": false,
+    "anchor": "htsmsg_get_list(ctrl, \"glwviews\")",
+    "source": {"file": "src/plugins.c", "line": 751}
+  },
+  {
+    "key": "icon",
+    "mandatory": false,
+    "anchor": "htsmsg_get_str(pm, \"icon\")",
+    "source": {"file": "src/plugins.c", "line": 415}
+  },
+  {
+    "key": "category",
+    "mandatory": false,
+    "anchor": "htsmsg_get_str(pm, \"category\")",
+    "source": {"file": "src/plugins.c", "line": 416}
+  },
+  {
+    "key": "description",
+    "mandatory": false,
+    "anchor": "htsmsg_get_str(pm, \"description\")",
+    "source": {"file": "src/plugins.c", "line": 437}
+  },
+  {
+    "key": "synopsis",
+    "mandatory": false,
+    "anchor": "htsmsg_get_str(pm, \"synopsis\")",
+    "source": {"file": "src/plugins.c", "line": 442}
+  },
+  {
+    "key": "author",
+    "mandatory": false,
+    "anchor": "htsmsg_get_str(pm, \"author\")",
+    "source": {"file": "src/plugins.c", "line": 445}
+  }
+]

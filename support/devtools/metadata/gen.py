@@ -21,7 +21,12 @@ committed metadata artifact for the GLW view language, grown from
                       resolvable by name from a `.view` file).
 - glw.operators   -- curated, `curated_operators.json` next to this file.
 - glw.scopes      -- curated, `curated_scopes.json` next to this file.
-- js.*            -- v1-wave stub (empty), see issue #96 follow-ups E-I.
+- js.modules      -- native `ES_MODULE` registrations from
+                     src/ecmascript/es_*.c (function names and arities), plus
+                     statically scanned CommonJS exports from
+                     res/ecmascript/modules/**/*.js.
+- js.pluginManifest -- curated plugin.json keys and mandatory status,
+                       anchored to the loader in src/plugins.c.
 
 Every record carries `source: {file, line}` pointing at the defining line
 in the C source (scanned, not hand-typed -- see the table-entry scanner
@@ -61,9 +66,12 @@ ARTIFACT_PATH = REPO_ROOT / "generated" / "movian-metadata.json"
 ATTRIB_C = REPO_ROOT / "src" / "ui" / "glw" / "glw_view_attrib.c"
 EVAL_C = REPO_ROOT / "src" / "ui" / "glw" / "glw_view_eval.c"
 GLW_DIR = REPO_ROOT / "src" / "ui" / "glw"
+ECMASCRIPT_DIR = REPO_ROOT / "src" / "ecmascript"
+COMMONJS_DIR = REPO_ROOT / "res" / "ecmascript" / "modules"
 
 CURATED_OPERATORS = METADATA_DIR / "curated_operators.json"
 CURATED_SCOPES = METADATA_DIR / "curated_scopes.json"
+CURATED_PLUGIN_MANIFEST = METADATA_DIR / "curated_plugin_manifest.json"
 
 SCHEMA_VERSION = 1
 GENERATED_BY = "support/devtools/metadata/gen.py"
@@ -75,6 +83,11 @@ WIDGET_DECL_RE = re.compile(r'^(?:static\s+)?glw_class_t\s+(\w+)\s*=\s*\{')
 GC_NAME_RE = re.compile(r'\.gc_name\s*=\s*"([^"]+)"')
 GC_NAME2_RE = re.compile(r'\.gc_name2\s*=\s*"([^"]+)"')
 REGISTER_RE = re.compile(r'GLW_REGISTER_CLASS\((\w+)\)')
+ES_MODULE_RE = re.compile(
+    r'^\s*ES_MODULE\("([^"]+)",\s*([A-Za-z_]\w*)\s*\);')
+COMMONJS_EXPORT_RE = re.compile(
+    r'^\s*(?:module\.)?exports(?:\.([A-Za-z_$][A-Za-z0-9_$]*)'
+    r'|\[\s*([\'\"])([^\'\"]+)\2\s*\])\s*=')
 
 # Value type + confidence inferred from attribtab[]'s setter function (2nd
 # field). A `|`-joined value type is a union; an `[]` suffix means a vector of
@@ -488,7 +501,166 @@ def build_widgets() -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# glw.operators / glw.scopes -- curated, hand-authored next to this file
+# js.modules -- native ES_MODULE tables and static CommonJS exports
+# ---------------------------------------------------------------------------
+
+def build_native_modules() -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    seen_modules: set[str] = set()
+    for path in sorted(ECMASCRIPT_DIR.glob("es_*.c")):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        conditions = preprocessor_conditions(lines, path)
+        for line_index, line_text in enumerate(lines):
+            module_match = ES_MODULE_RE.match(line_text)
+            if module_match is None:
+                continue
+            native_name, table_name = module_match.groups()
+            module_name = "native/%s" % native_name
+            if module_name in seen_modules:
+                raise GenError("duplicate native module name: %s" % module_name)
+            seen_modules.add(module_name)
+
+            entries = scan_array_block(
+                path, "duk_function_list_entry %s[] = {" % table_name)
+            functions: list[dict[str, Any]] = []
+            seen_functions: set[str] = set()
+            for entry_text, entry_line in entries:
+                fields = split_fields(entry_text)
+                if not fields or fields[0] == "NULL":
+                    continue
+                if len(fields) < 3 or not (fields[0].startswith('"')
+                                            and fields[0].endswith('"')):
+                    raise GenError("invalid native function entry at %s:%d"
+                                   % (path, entry_line))
+                function_name = unquote(fields[0])
+                if function_name in seen_functions:
+                    raise GenError("duplicate function %s in native module %s"
+                                   % (function_name, module_name))
+                seen_functions.add(function_name)
+                if fields[2] == "DUK_VARARGS":
+                    nargs = -1
+                else:
+                    try:
+                        nargs = int(fields[2])
+                    except ValueError as error:
+                        raise GenError(
+                            "invalid nargs %r for %s.%s at %s:%d"
+                            % (fields[2], module_name, function_name,
+                               path, entry_line)) from error
+                function = {
+                    "name": function_name,
+                    "nargs": nargs,
+                    "variadic": nargs == -1,
+                    "source": {"file": rel(path), "line": entry_line},
+                }
+                condition = conditions[entry_line - 1]
+                if condition:
+                    function["condition"] = condition
+                functions.append(function)
+            functions.sort(key=lambda r: r["name"])
+
+            module = {
+                "name": module_name,
+                "kind": "native",
+                "functions": functions,
+                "source": {"file": rel(path), "line": line_index + 1},
+            }
+            condition = conditions[line_index]
+            if condition:
+                module["condition"] = condition
+            records.append(module)
+    records.sort(key=lambda r: r["name"])
+    return records
+
+
+def _mask_js_comments(line: str, in_block: bool) -> tuple[str, bool]:
+    """Mask JS comments while retaining source columns and string literals."""
+    chars = list(line)
+    i = 0
+    quote: str | None = None
+    while i < len(chars):
+        if in_block:
+            if i + 1 < len(chars) and chars[i] == "*" and chars[i + 1] == "/":
+                chars[i] = chars[i + 1] = " "
+                in_block = False
+                i += 2
+            else:
+                chars[i] = " "
+                i += 1
+            continue
+        if quote is not None:
+            if chars[i] == "\\" and i + 1 < len(chars):
+                i += 2
+                continue
+            if chars[i] == quote:
+                quote = None
+            i += 1
+            continue
+        if chars[i] in ('"', "'"):
+            quote = chars[i]
+            i += 1
+            continue
+        if i + 1 < len(chars) and chars[i] == "/" and chars[i + 1] == "/":
+            for j in range(i, len(chars)):
+                chars[j] = " "
+            break
+        if i + 1 < len(chars) and chars[i] == "/" and chars[i + 1] == "*":
+            chars[i] = chars[i + 1] = " "
+            in_block = True
+            i += 2
+            continue
+        i += 1
+    return "".join(chars), in_block
+
+
+def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
+    exports: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    in_block_comment = False
+    for line_number, raw_line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), 1):
+        line, in_block_comment = _mask_js_comments(raw_line, in_block_comment)
+        match = COMMONJS_EXPORT_RE.match(line)
+        if match is None:
+            continue
+        export_name = match.group(1) or match.group(3)
+        if export_name in seen:
+            continue
+        seen.add(export_name)
+        exports.append({
+            "name": export_name,
+            "source": {"file": rel(path), "line": line_number},
+        })
+    exports.sort(key=lambda r: r["name"])
+    return exports
+
+
+def build_commonjs_modules() -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for path in sorted(COMMONJS_DIR.rglob("*.js")):
+        module_name = path.relative_to(COMMONJS_DIR).with_suffix("").as_posix()
+        if module_name in seen:
+            raise GenError("duplicate CommonJS module name: %s" % module_name)
+        seen.add(module_name)
+        records.append({
+            "name": module_name,
+            "kind": "commonjs",
+            "exports": scan_commonjs_exports(path),
+            "source": {"file": rel(path), "line": 1},
+        })
+    records.sort(key=lambda r: r["name"])
+    return records
+
+
+def build_modules() -> list[dict[str, Any]]:
+    modules = build_native_modules() + build_commonjs_modules()
+    modules.sort(key=lambda r: r["name"])
+    return modules
+
+
+# ---------------------------------------------------------------------------
+# glw.operators / glw.scopes / js.pluginManifest -- curated inputs
 # ---------------------------------------------------------------------------
 
 def load_curated(path: Path, required_keys: set[str]) -> list[dict[str, Any]]:
@@ -501,6 +673,8 @@ def load_curated(path: Path, required_keys: set[str]) -> list[dict[str, Any]]:
         if not isinstance(entry, dict):
             raise GenError("%s: entry is not an object: %r" % (path, entry))
         entry_name = entry.get("name")
+        if entry_name is None:
+            entry_name = entry.get("key")
         if entry_name is None:
             symbols = entry.get("symbols")
             entry_name = symbols[0] if isinstance(symbols, list) and symbols else entry
@@ -547,6 +721,13 @@ def build_scopes() -> list[dict[str, Any]]:
     return scopes
 
 
+def build_plugin_manifest() -> list[dict[str, Any]]:
+    keys = load_curated(
+        CURATED_PLUGIN_MANIFEST, {"key", "mandatory", "source"})
+    keys.sort(key=lambda r: r["key"])
+    return keys
+
+
 # ---------------------------------------------------------------------------
 # top level
 # ---------------------------------------------------------------------------
@@ -574,7 +755,10 @@ def build_artifact() -> dict[str, Any]:
             "operators": build_operators(),
             "scopes": build_scopes(),
         },
-        "js": {},
+        "js": {
+            "modules": build_modules(),
+            "pluginManifest": build_plugin_manifest(),
+        },
     }
 
 
@@ -664,9 +848,30 @@ def diff_artifacts(committed: dict[str, Any],
         if added or removed or changed or line_only:
             result[section] = {"added": added, "removed": removed,
                                 "changed": changed, "lineOnly": line_only}
-    if committed.get("js") != fresh.get("js"):
-        result["js"] = {"committed": committed.get("js"),
-                         "fresh": fresh.get("js")}
+    committed_js = committed.get("js") or {}
+    fresh_js = fresh.get("js") or {}
+    committed_modules = {
+        r["name"]: r for r in committed_js.get("modules", [])
+    }
+    fresh_modules = {r["name"]: r for r in fresh_js.get("modules", [])}
+    added = sorted(set(fresh_modules) - set(committed_modules))
+    removed = sorted(set(committed_modules) - set(fresh_modules))
+    changed = sorted(
+        name for name in set(fresh_modules) & set(committed_modules)
+        if fresh_modules[name] != committed_modules[name]
+    )
+    if added or removed or changed:
+        result["js.modules"] = {
+            "added": added,
+            "removed": removed,
+            "changed": changed,
+            "lineOnly": [],
+        }
+    if (committed_js.get("pluginManifest")
+            != fresh_js.get("pluginManifest")):
+        result["js.pluginManifest"] = {
+            "note": "curated section changed on disk vs committed artifact"
+        }
     for section in ("operators", "scopes"):
         if committed["glw"][section] != fresh["glw"][section]:
             result[section] = {"note": "curated section changed on disk "

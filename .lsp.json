@@ -3,7 +3,7 @@
     "movian-lsp": {
       "command": "python3",
       "args": ["support/devtools/movian-lsp", "--stdio"],
-      "fileTypes": [".view"],
+      "fileTypes": [".view", ".js"],
       "rootMarkers": [".git"]
     }
   }

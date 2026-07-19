@@ -42,6 +42,8 @@ crash=0
 n_flat=0
 n_other=0
 n_fixtures=0
+n_js=0
+n_js_fixtures=0
 
 check_one() {
   # $1 = view path
@@ -256,8 +258,95 @@ rm -f /tmp/movian-analyze-corpus.golden.tokens \
   /tmp/movian-analyze-corpus.self-include.tokens \
   /tmp/movian-analyze-corpus.self-include.stderr
 
+echo "== JavaScript metadata module coverage =="
+expected_native_modules=$(grep -h '^[[:space:]]*ES_MODULE("' \
+  src/ecmascript/es_*.c | wc -l | tr -d ' ')
+expected_commonjs_modules=$(find res/ecmascript/modules -type f -name '*.js' \
+  | wc -l | tr -d ' ')
+actual_native_modules=unreadable
+actual_commonjs_modules=unreadable
+metadata_counts=$(
+  python3 - generated/movian-metadata.json <<'PY'
+import json
+import sys
+
+modules = json.load(open(sys.argv[1], encoding="utf-8"))["js"]["modules"]
+names = [module["name"] for module in modules]
+if len(names) != len(set(names)):
+    raise SystemExit("duplicate js.modules names")
+print(sum(module["kind"] == "native" for module in modules),
+      sum(module["kind"] == "commonjs" for module in modules))
+PY
+)
+metadata_rc=$?
+if [ "$metadata_rc" != 0 ]; then
+  echo "JAVASCRIPT METADATA REGRESSION: unable to read module coverage" >&2
+  fail=1
+else
+  set -- $metadata_counts
+  if [ "$#" != 2 ]; then
+    echo "JAVASCRIPT METADATA REGRESSION: malformed coverage counts" >&2
+    fail=1
+  else
+    actual_native_modules=$1
+    actual_commonjs_modules=$2
+  fi
+  if [ "$#" = 2 ] && \
+     { [ "$actual_native_modules" != "$expected_native_modules" ] || \
+       [ "$actual_commonjs_modules" != "$expected_commonjs_modules" ]; }; then
+    echo "JAVASCRIPT METADATA REGRESSION: native $actual_native_modules/$expected_native_modules, commonjs $actual_commonjs_modules/$expected_commonjs_modules" >&2
+    fail=1
+  fi
+fi
+
+echo "== JavaScript runtime and plugin examples (strict compile-only) =="
+for f in $(find plugin_examples res/ecmascript support/devtools/viewpreview \
+  -name '*.js' | sort); do
+  n_js=$((n_js + 1))
+  "$ANALYZE" --js "$f" \
+    > /tmp/movian-analyze-corpus.js \
+    2> /tmp/movian-analyze-corpus.js.stderr
+  js_rc=$?
+  if [ "$js_rc" != 0 ] || \
+     [ -s /tmp/movian-analyze-corpus.js.stderr ]; then
+    echo "JAVASCRIPT CORPUS REGRESSION (exit $js_rc): $f" >&2
+    sed 's/^/  stdout: /' /tmp/movian-analyze-corpus.js >&2
+    sed 's/^/  stderr: /' /tmp/movian-analyze-corpus.js.stderr >&2
+    fail=1
+  fi
+done
+
+echo "== JavaScript intentional failures (must reject cleanly) =="
+for f in tests/tooling/js/fixtures/*.js; do
+  [ -f "$f" ] || continue
+  n_js_fixtures=$((n_js_fixtures + 1))
+  "$ANALYZE" --js "$f" \
+    > /tmp/movian-analyze-corpus.js \
+    2> /tmp/movian-analyze-corpus.js.stderr
+  js_rc=$?
+  if [ "$js_rc" != 1 ] || \
+     [ -s /tmp/movian-analyze-corpus.js.stderr ] || \
+     ! grep -q '^{"file":.*,"line":1,"error":".*"}$' \
+       /tmp/movian-analyze-corpus.js; then
+    echo "JAVASCRIPT FAILURE REGRESSION (exit $js_rc): $f" >&2
+    sed 's/^/  stdout: /' /tmp/movian-analyze-corpus.js >&2
+    sed 's/^/  stderr: /' /tmp/movian-analyze-corpus.js.stderr >&2
+    fail=1
+  fi
+done
+
+if [ "$n_js_fixtures" != 3 ]; then
+  echo "JAVASCRIPT FIXTURE REGRESSION: found $n_js_fixtures, expected 3" >&2
+  fail=1
+fi
+
+rm -f /tmp/movian-analyze-corpus.js \
+  /tmp/movian-analyze-corpus.js.stderr
+
 echo
 echo "flat+golden: $n_flat, glwskins/old: $n_other, fixtures: $n_fixtures, crashes: $crash, flat regressions: $flat_fail, golden mismatches: $golden_fail"
+echo "metadata modules: $actual_native_modules native, $actual_commonjs_modules commonjs"
+echo "javascript: $n_js strict files, $n_js_fixtures intentional failures"
 
 if [ "$fail" != 0 ]; then
   echo "CORPUS GUARD FAILED" >&2
