@@ -173,12 +173,13 @@ class Instance:
 # ---------------------------------------------------------------------------
 
 def movian_procs() -> list[tuple[int, str]]:
-    """All live (pid, cmdline) pairs whose command line invokes a movian
-    binary. `cmdline` is the raw `pgrep -fa` argv string (space-joined).
+    """All live (pid, cmdline) pairs that run the movian binary.
+    `cmdline` is the raw `pgrep -fa` argv string (space-joined).
 
-    Uses `pgrep -fa movian` and keeps only processes where some argv token's
-    basename is exactly "movian" (avoids matching unrelated processes whose
-    command line merely contains the substring).
+    Uses `pgrep -fa movian` for broad candidate collection, then accepts
+    either a direct movian process via /proc/<pid>/comm or a wrapper whose
+    argv names an existing movian executable. Requiring an executable path
+    avoids repository-name false positives such as `buksa/movian` (#119).
     """
     try:
         out = subprocess.run(
@@ -193,10 +194,15 @@ def movian_procs() -> list[tuple[int, str]]:
             pid_str, cmdline = line.split(" ", 1)
         except ValueError:
             continue
-        for token in cmdline.split():
-            if os.path.basename(token) == "movian":
-                procs.append((int(pid_str), cmdline))
-                break
+        pid = int(pid_str)
+        if not pid_is_movian(pid) and not any(
+            "/" in token
+            and os.path.basename(token) == "movian"
+            and os.path.isfile(token)
+            for token in cmdline.split()
+        ):
+            continue  # /proc disappeared or no movian executable
+        procs.append((pid, cmdline))
     return [(p, c) for p, c in procs if p != os.getpid()]
 
 
