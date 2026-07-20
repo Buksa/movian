@@ -103,6 +103,30 @@ already applies this set. Ignore known noise: repository/update checks
 against dead `movian.tv` show network errors unrelated to the task unless
 repo/update behavior is itself under test.
 
+## Hash-before-vision rule (issue #129)
+
+`mdev shot` computes the screenshot's SHA-256 and prints `sha256=<hex>`.
+The hash is also stored in the instance's `state.json` as `last_shot_hash`.
+
+**Rule: hash first, vision only on a verdict-cache miss.** Before sending a
+screenshot to a vision model, query the verdict cache with its `sha256` and
+the exact question:
+
+- If `(hash, question)` is cached, reuse that verdict and do not re-send the
+  image.
+- If no matching verdict exists, send the image and cache the answer under
+  `(hash, question)`, even when another question was already judged for the
+  same image.
+- `mdev shot --if-changed` exits with code 3 when the bytes match the last
+  capture and no duplicate file was written. Exit 3 alone is not a verdict
+  cache hit: on a cache miss, send the retained `last_shot_path` reported by
+  the command.
+
+This saves external quota: GLW static-page rendering is deterministic, so
+a content hash is a reliable "same picture" signal. The hash proves
+identity; it never proves non-identity (dynamic pages may produce the same
+hash by coincidence, but different hashes always mean different images).
+
 ## Verification minimums per change class
 
 - **Plugin JS change**: `node --check`, `git diff --check`, a focused Movian
