@@ -118,9 +118,22 @@ def cmd_open(args: argparse.Namespace) -> int:
 
 def cmd_shot(args: argparse.Namespace) -> int:
     inst = Instance(args.name)
-    path = harness.take_shot(inst, args.out)
-    emit(args, {"path": str(path), "bytes": path.stat().st_size},
-         str(path))
+    path, sha256_hex = harness.take_shot(inst, args.out)
+
+    if args.if_changed:
+        state = inst.load_state() or {}
+        prev_hash = state.get("last_shot_hash")
+        if prev_hash == sha256_hex:
+            return 3
+
+    inst.record_shot_hash(sha256_hex, path)
+    if getattr(args, "json", False):
+        print(json.dumps({"path": str(path), "bytes": path.stat().st_size,
+                           "sha256": sha256_hex},
+                          ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(str(path))
+        print("sha256=%s" % sha256_hex)
     return 0
 
 
@@ -208,7 +221,9 @@ def _maybe_shot(args: argparse.Namespace) -> str | None:
     """Screenshot path when --shot was passed, else None (shared by every
     shot-on-success reporter)."""
     if getattr(args, "shot", False):
-        return str(harness.take_shot(Instance(args.name)))
+        path, sha256_hex = harness.take_shot(Instance(args.name))
+        Instance(args.name).record_shot_hash(sha256_hex, path)
+        return str(path)
     return None
 
 
@@ -341,7 +356,9 @@ def _watch_tick(args: argparse.Namespace, inst: Instance, stamp: str,
         if ok:
             line = "[%s] JS %s: RELOAD JS OK" % (stamp, ", ".join(changed_js))
             if args.shot and not changed_view:
-                line += " shot=%s" % harness.take_shot(inst)
+                path, sha256_hex = harness.take_shot(inst)
+                inst.record_shot_hash(sha256_hex, path)
+                line += " shot=%s" % path
         else:
             failed = next(p for p in per_plugin if not p["ok"])
             line = "[%s] JS %s: FAILED: %s" % (
@@ -357,7 +374,9 @@ def _watch_tick(args: argparse.Namespace, inst: Instance, stamp: str,
     if ok:
         line = "[%s] %s: RELOAD OK" % (stamp, ", ".join(changed_view))
         if args.shot:
-            line += " shot=%s" % harness.take_shot(inst)
+            path, sha256_hex = harness.take_shot(inst)
+            inst.record_shot_hash(sha256_hex, path)
+            line += " shot=%s" % path
     else:
         line = "[%s] %s: %d error(s): %s" % (
             stamp, ", ".join(changed_view), len(errors), errors[0])
@@ -501,7 +520,9 @@ def cmd_preview(args: argparse.Namespace) -> int:
         # blend visually finishes. A short settle avoids a screenshot
         # that still shows the previous preview mid-transition.
         time.sleep(0.3)
-        shot_path = str(harness.take_shot(inst))
+        shot_path_raw, sha256_hex = harness.take_shot(inst)
+        Instance(args.name).record_shot_hash(sha256_hex, shot_path_raw)
+        shot_path = str(shot_path_raw)
 
     emit(args,
          {**result, "shot": shot_path},
@@ -657,6 +678,8 @@ def build_parser() -> argparse.ArgumentParser:
                           help="take a screenshot via /api/screenshot/raw")
     shot.add_argument("--out", metavar="PATH",
                       help="output file (default: shots/<ts>.<ext>)")
+    shot.add_argument("--if-changed", action="store_true",
+                      help="skip write and exit 3 if hash unchanged")
     shot.set_defaults(func=cmd_shot)
 
     props = sub.add_parser("props", parents=[common],

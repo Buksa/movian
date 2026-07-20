@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sys
@@ -234,8 +235,9 @@ def _assert_log(step: dict[str, Any], delta: str) -> str:
     return "; ".join(evidence) if evidence else "forbidden pattern absent"
 
 
-def _take_png(inst: Instance, out: Path, timeout: float = 15.0) -> Path:
-    path = harness.take_shot(inst, str(out), timeout=timeout)
+def _take_png(inst: Instance, out: Path, timeout: float = 15.0) -> tuple[Path, str]:
+    """Capture a screenshot, validate PNG, return (path, sha256_hex)."""
+    path, sha256_hex = harness.take_shot(inst, str(out), timeout=timeout)
     try:
         with path.open("rb") as image:
             magic = image.read(8)
@@ -243,7 +245,7 @@ def _take_png(inst: Instance, out: Path, timeout: float = 15.0) -> Path:
         raise MdevError("cannot read screenshot %s: %s" % (path, error))
     if magic != b"\x89PNG\r\n\x1a\n":
         raise MdevError("screenshot is not PNG: magic=%s" % magic.hex())
-    return path
+    return path, sha256_hex
 
 
 def _execute_step(
@@ -252,12 +254,18 @@ def _execute_step(
     step: dict[str, Any],
     previous_delta: str,
     route_builder: Callable[[str, str | None], str],
-) -> tuple[str, str]:
+) -> tuple[str, str, str | None]:
+    """Execute one smoke step. Returns (detail, log_delta, hash_or_none).
+
+    `hash_or_none` is the SHA-256 hex for steps that capture a screenshot
+    (health probe, shot verb); None for other verbs.
+    """
     verb = step["do"]
     offset = harness.log_size(inst)
 
     if verb == "health":
-        detail = _health_step(inst)
+        detail, health_hash = _health_step(inst)
+        return detail, harness.read_log_delta(inst, offset), health_hash
     elif verb == "open":
         result = harness.open_and_wait(inst, step["url"])
         detail = "opened %s title=%s nodes=%d" % (
@@ -298,26 +306,30 @@ def _execute_step(
     elif verb == "assert_prop":
         detail = _assert_prop(inst, step)
     elif verb == "assert_log":
-        return _assert_log(step, previous_delta), ""
+        return _assert_log(step, previous_delta), "", None
     elif verb == "shot":
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         out = inst.shots / ("%s-%s-%s.png" % (smoke_name, step["tag"], stamp))
-        path = _take_png(inst, out)
+        path, shot_hash = _take_png(inst, out)
         detail = "shot %s" % path
+        return detail, harness.read_log_delta(inst, offset), shot_hash
     elif verb == "sleep":
         time.sleep(step["seconds"])
         detail = "slept %.3gs" % step["seconds"]
     else:  # validation makes this unreachable
         raise StepFailure("unsupported verb %s" % verb)
 
-    return detail, harness.read_log_delta(inst, offset)
+    return detail, harness.read_log_delta(inst, offset), None
 
 
-def _health_step(inst: Instance, timeout: float = 20.0) -> str:
+def _health_step(inst: Instance, timeout: float = 20.0) -> tuple[str, str]:
     """Dedicated polling health verb: the startup navigator trace can
     legitimately arrive after ensure_running() returns (launch() only
     waits for the HTTP port line), so poll for it instead of judging a
-    single early log snapshot -- a false wedge here turns into exit 2."""
+    single early log snapshot -- a false wedge here turns into exit 2.
+
+    Returns (detail, sha256_hex) where sha256_hex is from the probe screenshot.
+    """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if inst.live_pid() is None:
@@ -330,14 +342,14 @@ def _health_step(inst: Instance, timeout: float = 20.0) -> str:
             "startup navigator Opening trace did not appear within %gs" % timeout)
     probe = inst.dir / ".smoke-health.png"
     try:
-        _take_png(inst, probe)
+        _, probe_hash = _take_png(inst, probe)
     except MdevError as error:
         raise StepFailure("screenshot probe failed: %s" % error)
     try:
         probe.unlink()
     except OSError:
         pass
-    return "startup navigator Opening trace and screenshot PNG present"
+    return "startup navigator Opening trace and screenshot PNG present", probe_hash
 
 
 def _probe_health(inst: Instance) -> tuple[bool, str]:
@@ -421,9 +433,11 @@ def _run_one(
             "step": step,
         }
         try:
-            detail, previous_delta = _execute_step(
+            detail, previous_delta, step_hash = _execute_step(
                 inst, definition["name"], step, previous_delta, route_builder)
             record.update({"verdict": "pass", "detail": detail})
+            if step_hash is not None:
+                record["hash"] = step_hash
             records.append(record)
         except (MdevError, StepFailure) as error:
             record.update({"verdict": "fail", "detail": str(error)})

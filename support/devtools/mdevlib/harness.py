@@ -6,6 +6,7 @@ Python 3 stdlib only.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -126,6 +127,13 @@ class Instance:
         self.state_path.write_text(
             json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
+
+    def record_shot_hash(self, sha256_hex: str, shot_path: Path) -> None:
+        """Atomically record last_shot_hash and last_shot_path in state.json."""
+        state = self.load_state() or {}
+        state["last_shot_hash"] = sha256_hex
+        state["last_shot_path"] = str(shot_path)
+        self.save_state(state)
 
     def live_pid(self) -> int | None:
         """Pid from state.json if it is alive and still THIS instance's
@@ -780,7 +788,12 @@ def sniff_image(body: bytes) -> str | None:
 
 
 def take_shot(inst: Instance, out: str | None = None,
-              timeout: float = 15.0) -> Path:
+              timeout: float = 15.0) -> tuple[Path, str]:
+    """Capture a screenshot and return (path, sha256_hex).
+
+    The SHA-256 is computed from the raw response bytes before writing,
+    so callers can use it for change detection without reading back.
+    """
     base = inst.base_url()
     result = http_request(base, "/api/screenshot/raw", timeout=timeout)
     if not result.get("ok"):
@@ -791,6 +804,7 @@ def take_shot(inst: Instance, out: str | None = None,
     body = result["body"]
     if not body:
         raise MdevError("screenshot is empty")
+    sha256_hex = hashlib.sha256(body).hexdigest()
     ext = sniff_image(body)
     if ext is None:
         raise MdevError(
@@ -803,4 +817,4 @@ def take_shot(inst: Instance, out: str | None = None,
         path = inst.shots / (time.strftime("%Y%m%d-%H%M%S") + "." + ext)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(body)
-    return path
+    return path, sha256_hex
