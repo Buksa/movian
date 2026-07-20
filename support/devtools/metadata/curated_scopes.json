@@ -45,7 +45,7 @@
     "name": "ui",
     "meaning": "Global per-glw_root_t UI prop tree ($ui.width, $ui.aspect, $ui.keyboard, $ui.pointerVisible, ...); resolves because the prop node itself is named \"ui\", not via an explicit named-root tag.",
     "anchor": "prop_create_root(\"ui\")",
-    "source": {"file": "src/ui/glw/glw_x11.c", "line": 1431}
+    "source": {"file": "src/ui/glw/glw_x11.c", "line": 1430}
   },
   {
     "name": "nav",

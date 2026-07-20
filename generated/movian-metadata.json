@@ -2923,7 +2923,7 @@
         "name": "ui",
         "source": {
           "file": "src/ui/glw/glw_x11.c",
-          "line": 1431
+          "line": 1430
         }
       },
       {
@@ -5374,6 +5374,6 @@
       }
     ]
   },
-  "movianRevision": "0233d2ba033c9ac514f972e3e8b0b010748946bd",
+  "movianRevision": "23da3771fbeea89e6f8dc9db493815c98f8c7535",
   "schemaVersion": 1
 }
