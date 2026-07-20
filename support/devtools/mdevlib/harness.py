@@ -6,6 +6,7 @@ Python 3 stdlib only.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -122,18 +123,28 @@ class Instance:
         except (OSError, ValueError):
             return None
 
-    def save_state(self, state: dict[str, Any]) -> None:
-        self.ensure_dirs()
-        self.state_path.write_text(
+    def _write_state(self, state: dict[str, Any]) -> None:
+        temporary = self.state_path.with_suffix(".json.tmp")
+        temporary.write_text(
             json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
+        temporary.replace(self.state_path)
+
+    def save_state(self, state: dict[str, Any]) -> None:
+        self.ensure_dirs()
+        with (self.dir / "state.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            self._write_state(state)
 
     def record_shot_hash(self, sha256_hex: str, shot_path: Path) -> None:
-        """Record last_shot_hash and last_shot_path in state.json."""
-        state = self.load_state() or {}
-        state["last_shot_hash"] = sha256_hex
-        state["last_shot_path"] = str(shot_path)
-        self.save_state(state)
+        """Atomically merge screenshot metadata into current process state."""
+        self.ensure_dirs()
+        with (self.dir / "state.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            state = self.load_state() or {}
+            state["last_shot_hash"] = sha256_hex
+            state["last_shot_path"] = str(shot_path.resolve())
+            self._write_state(state)
 
     def live_pid(self) -> int | None:
         """Pid from state.json if it is alive and still THIS instance's

@@ -108,15 +108,19 @@ repo/update behavior is itself under test.
 `mdev shot` computes the screenshot's SHA-256 and prints `sha256=<hex>`.
 The hash is also stored in the instance's `state.json` as `last_shot_hash`.
 
-**Rule: hash first, vision only on change.** Before sending a screenshot to
-a vision model, compare its `sha256` hash against the previously-judged hash:
+**Rule: hash first, vision only on a verdict-cache miss.** Before sending a
+screenshot to a vision model, query the verdict cache with its `sha256` and
+the exact question:
 
-- If the hash matches the last judgment, reuse the cached verdict — do not
-  re-send the image to the vision role.
-- If the hash differs (or no prior judgment exists), send the image and
-  cache the verdict keyed by `(hash, question)`.
-- `mdev shot --if-changed` exits with code 3 when the hash is unchanged;
-  agents skip the vision call on exit 3.
+- If `(hash, question)` is cached, reuse that verdict and do not re-send the
+  image.
+- If no matching verdict exists, send the image and cache the answer under
+  `(hash, question)`, even when another question was already judged for the
+  same image.
+- `mdev shot --if-changed` exits with code 3 when the bytes match the last
+  capture and no duplicate file was written. Exit 3 alone is not a verdict
+  cache hit: on a cache miss, send the retained `last_shot_path` reported by
+  the command.
 
 This saves external quota: GLW static-page rendering is deterministic, so
 a content hash is a reliable "same picture" signal. The hash proves
