@@ -375,15 +375,28 @@ def _collect_props(base: str, path: str, depth: int) -> dict[str, Any]:
     return node
 
 
+def stop_wedged_instance(inst: Instance) -> str:
+    """Stop a wedged instance owned by this state dir.  Returns the stop
+    outcome from ``harness.kill_owned_pid`` (``"stopped-clean"``,
+    ``"killed-after-timeout"``, or ``"still-alive"``)."""
+    pid = inst.live_pid()
+    if pid is None:
+        return "stopped-clean"
+    return harness.kill_owned_pid(inst, pid)
+
+
 def _write_bundle(
     inst: Instance,
     smoke_name: str,
     transcript: dict[str, Any],
     wedge: bool,
+    stop_outcome: str | None = None,
 ) -> Path:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     bundle = inst.dir / "smoke-fail" / ("%s-%s" % (smoke_name, stamp))
     bundle.mkdir(parents=True, exist_ok=False)
+    if stop_outcome is not None:
+        transcript["stop_outcome"] = stop_outcome
     (bundle / "steps.json").write_text(
         json.dumps(transcript, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8")
@@ -457,10 +470,26 @@ def _run_one(
         "failure": failure,
         "steps": records,
     }
-    bundle = _write_bundle(inst, definition["name"], transcript, wedge)
+    stop_outcome = None
     if wedge:
-        print("instance-health failure (wedge), stop+relaunch: %s" % health_detail,
-              file=sys.stderr)
+        stop_outcome = stop_wedged_instance(inst)
+        if stop_outcome == "still-alive":
+            pid = inst.live_pid()
+            bundle = _write_bundle(inst, definition["name"], transcript, wedge,
+                                   stop_outcome=stop_outcome)
+            print("instance-health failure (wedge), stop+relaunch [%s]: %s"
+                  % (stop_outcome, health_detail), file=sys.stderr)
+            print(str(bundle), file=sys.stderr)
+            raise MdevError(
+                "pid %d still alive after SIGKILL -- cannot relaunch safely"
+                % (pid or 0),
+                exit_code=2,
+            )
+    bundle = _write_bundle(inst, definition["name"], transcript, wedge,
+                           stop_outcome=stop_outcome)
+    if wedge:
+        print("instance-health failure (wedge), stop+relaunch [%s]: %s"
+              % (stop_outcome, health_detail), file=sys.stderr)
     else:
         print("smoke %s failed at step %d (%s): %s" % (
             definition["name"], failure["step_index"], failure["verb"],
@@ -494,12 +523,20 @@ def run(
                             "detail": detail},
                 "steps": [],
             }
-            bundle = _write_bundle(inst, selected[0]["name"], transcript, True)
-            print("instance-health failure (wedge), stop+relaunch: %s" % detail,
-                  file=sys.stderr)
+            stop_outcome = stop_wedged_instance(inst)
+            bundle = _write_bundle(inst, selected[0]["name"], transcript, True,
+                                   stop_outcome=stop_outcome)
+            print("instance-health failure (wedge), stop+relaunch [%s]: %s"
+                  % (stop_outcome, detail), file=sys.stderr)
             print(str(bundle), file=sys.stderr)
+            if stop_outcome == "still-alive":
+                data = {"instance": inst.name, "green": 0, "total": 1,
+                        "results": [transcript], "bundles": [str(bundle)],
+                        "stop_outcome": stop_outcome}
+                return 2, data, "0/1 green (still-alive)"
             data = {"instance": inst.name, "green": 0, "total": 1,
-                    "results": [transcript], "bundles": [str(bundle)]}
+                    "results": [transcript], "bundles": [str(bundle)],
+                    "stop_outcome": stop_outcome}
             return 2, data, "0/1 green"
 
     for definition in selected:

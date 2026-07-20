@@ -87,15 +87,16 @@ def cmd_stop(args: argparse.Namespace) -> int:
                     "reason": "not running"},
              "instance %r is not running" % args.name)
         return 0
-    harness.kill_owned_pid(inst, pid)
-    if inst.owns_pid(pid):
+    outcome = harness.kill_owned_pid(inst, pid)
+    if outcome == "still-alive":
         raise MdevError("pid %d still alive after SIGKILL" % pid)
     state = inst.load_state() or {}
     state.pop("pid", None)
     state.pop("port", None)
     inst.save_state(state)
-    emit(args, {"name": args.name, "stopped": True, "pid": pid},
-         "stopped %s (pid %d)" % (args.name, pid))
+    emit(args, {"name": args.name, "stopped": True, "pid": pid,
+                "stop_outcome": outcome},
+         "stopped %s (pid %d) [%s]" % (args.name, pid, outcome))
     return 0
 
 
