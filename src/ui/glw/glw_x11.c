@@ -83,7 +83,6 @@ typedef struct glw_x11 {
   glw_root_t gr;
 
   int *running;
-  hts_thread_t thread;
 
   Display *display;
   int screen;
@@ -1375,10 +1374,10 @@ glw_x11_thread(void *aux)
   setenv("__GL_SYNC_TO_VBLANK", "1", 1);
 
   if(glw_x11_init(gx11))
-     return NULL;
+    return gx11;
 
   if(glw_init(gr))
-    return NULL;
+    return gx11;
 
 #ifdef CONFIG_NVCTRL
   gx11->nvidia = nvidia_init(gx11->display, gx11->screen,
@@ -1432,9 +1431,8 @@ glw_x11_main(int *running)
   gx11->gr.gr_prop_nav = nav_spawn();
   gx11->running = running;
 
-  glw_x11_thread(gx11);
-  hts_thread_create_joinable("glw", &gx11->thread,
-			     glw_x11_thread, gx11, 0);
+  if(glw_x11_thread(gx11) != NULL)
+    TRACE(TRACE_ERROR, "GLW", "X11 UI initialization failed; shutting down");
 
   glw_root_t *gr = &gx11->gr;
   prop_destroy(gr->gr_prop_ui);
