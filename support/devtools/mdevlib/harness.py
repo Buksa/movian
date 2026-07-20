@@ -267,27 +267,35 @@ def pid_is_movian(pid: int) -> bool:
     return comm == "movian"
 
 
-def kill_owned_pid(inst: "Instance", pid: int, timeout: float = 5.0) -> None:
+def kill_owned_pid(inst: "Instance", pid: int, timeout: float = 5.0) -> str:
     """Terminate a pid this instance owns per state.json.  Refuses to
     signal anything whose comm+cmdline do not prove it is this instance's
     own movian (stale-pid safety: a recycled pid -- even one recycled by
-    another movian -- is hands-off)."""
+    another movian -- is hands-off).
+
+    Returns the stop outcome: ``"stopped-clean"`` (SIGTERM was sufficient
+    or the pid was already gone), ``"killed-after-timeout"`` (SIGKILL
+    escalation was needed), or ``"still-alive"`` (the owned pid still
+    appeared live after SIGKILL)."""
     if not inst.owns_pid(pid):
-        return  # already gone or pid recycled: hands off
+        return "stopped-clean"  # already gone or pid recycled: hands off
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
-        return
+        return "stopped-clean"
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if not inst.owns_pid(pid):
-            return
+            return "stopped-clean"
         time.sleep(0.1)
     try:
         os.kill(pid, signal.SIGKILL)
     except ProcessLookupError:
-        pass
+        return "killed-after-timeout"
     time.sleep(0.2)
+    if inst.owns_pid(pid):
+        return "still-alive"
+    return "killed-after-timeout"
 
 
 # ---------------------------------------------------------------------------

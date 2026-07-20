@@ -340,12 +340,18 @@ def _health_step(inst: Instance, timeout: float = 20.0) -> str:
     return "startup navigator Opening trace and screenshot PNG present"
 
 
-def _probe_health(inst: Instance) -> tuple[bool, str]:
-    if inst.live_pid() is None:
-        return False, "instance process is not alive"
-    log = harness.read_log(inst)
-    if harness.NAV_OPENING_RE.search(log) is None:
-        return False, "startup navigator Opening trace is absent"
+def _probe_health(inst: Instance, timeout: float = 20.0) -> tuple[bool, str]:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if inst.live_pid() is None:
+            return False, "instance process is not alive"
+        if harness.NAV_OPENING_RE.search(harness.read_log(inst)) is not None:
+            break
+        time.sleep(0.3)
+    else:
+        return False, (
+            "startup navigator Opening trace did not appear within %gs" % timeout
+        )
     probe = inst.dir / ".smoke-health.png"
     try:
         _take_png(inst, probe, timeout=7.0)
@@ -373,6 +379,16 @@ def _collect_props(base: str, path: str, depth: int) -> dict[str, Any]:
                 node["children"][ref] = _collect_props(
                     base, path + "/" + ref, depth - 1)
     return node
+
+
+def stop_wedged_instance(inst: Instance) -> str:
+    """Stop a wedged instance owned by this state dir.  Returns the stop
+    outcome from ``harness.kill_owned_pid`` (``"stopped-clean"``,
+    ``"killed-after-timeout"``, or ``"still-alive"``)."""
+    pid = inst.live_pid()
+    if pid is None:
+        return "stopped-clean"
+    return harness.kill_owned_pid(inst, pid)
 
 
 def _write_bundle(
@@ -403,6 +419,17 @@ def _write_bundle(
         except MdevError:
             pass
     return bundle
+
+
+def _record_stop_outcome(
+    bundle: Path,
+    transcript: dict[str, Any],
+    stop_outcome: str,
+) -> None:
+    transcript["stop_outcome"] = stop_outcome
+    (bundle / "steps.json").write_text(
+        json.dumps(transcript, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8")
 
 
 def _run_one(
@@ -458,9 +485,23 @@ def _run_one(
         "steps": records,
     }
     bundle = _write_bundle(inst, definition["name"], transcript, wedge)
+    stop_outcome = None
     if wedge:
-        print("instance-health failure (wedge), stop+relaunch: %s" % health_detail,
-              file=sys.stderr)
+        stop_outcome = stop_wedged_instance(inst)
+        _record_stop_outcome(bundle, transcript, stop_outcome)
+        if stop_outcome == "still-alive":
+            pid = inst.live_pid()
+            print("instance-health failure (wedge), stop+relaunch [%s]: %s"
+                  % (stop_outcome, health_detail), file=sys.stderr)
+            print(str(bundle), file=sys.stderr)
+            raise MdevError(
+                "pid %d still alive after SIGKILL -- cannot relaunch safely"
+                % (pid or 0),
+                exit_code=2,
+            )
+    if wedge:
+        print("instance-health failure (wedge), stop+relaunch [%s]: %s"
+              % (stop_outcome, health_detail), file=sys.stderr)
     else:
         print("smoke %s failed at step %d (%s): %s" % (
             definition["name"], failure["step_index"], failure["verb"],
@@ -495,11 +536,19 @@ def run(
                 "steps": [],
             }
             bundle = _write_bundle(inst, selected[0]["name"], transcript, True)
-            print("instance-health failure (wedge), stop+relaunch: %s" % detail,
-                  file=sys.stderr)
+            stop_outcome = stop_wedged_instance(inst)
+            _record_stop_outcome(bundle, transcript, stop_outcome)
+            print("instance-health failure (wedge), stop+relaunch [%s]: %s"
+                  % (stop_outcome, detail), file=sys.stderr)
             print(str(bundle), file=sys.stderr)
+            if stop_outcome == "still-alive":
+                data = {"instance": inst.name, "green": 0, "total": 1,
+                        "results": [transcript], "bundles": [str(bundle)],
+                        "stop_outcome": stop_outcome}
+                return 2, data, "0/1 green (still-alive)"
             data = {"instance": inst.name, "green": 0, "total": 1,
-                    "results": [transcript], "bundles": [str(bundle)]}
+                    "results": [transcript], "bundles": [str(bundle)],
+                    "stop_outcome": stop_outcome}
             return 2, data, "0/1 green"
 
     for definition in selected:
