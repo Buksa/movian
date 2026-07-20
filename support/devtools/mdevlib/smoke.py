@@ -340,12 +340,18 @@ def _health_step(inst: Instance, timeout: float = 20.0) -> str:
     return "startup navigator Opening trace and screenshot PNG present"
 
 
-def _probe_health(inst: Instance) -> tuple[bool, str]:
-    if inst.live_pid() is None:
-        return False, "instance process is not alive"
-    log = harness.read_log(inst)
-    if harness.NAV_OPENING_RE.search(log) is None:
-        return False, "startup navigator Opening trace is absent"
+def _probe_health(inst: Instance, timeout: float = 20.0) -> tuple[bool, str]:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if inst.live_pid() is None:
+            return False, "instance process is not alive"
+        if harness.NAV_OPENING_RE.search(harness.read_log(inst)) is not None:
+            break
+        time.sleep(0.3)
+    else:
+        return False, (
+            "startup navigator Opening trace did not appear within %gs" % timeout
+        )
     probe = inst.dir / ".smoke-health.png"
     try:
         _take_png(inst, probe, timeout=7.0)
@@ -390,13 +396,10 @@ def _write_bundle(
     smoke_name: str,
     transcript: dict[str, Any],
     wedge: bool,
-    stop_outcome: str | None = None,
 ) -> Path:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     bundle = inst.dir / "smoke-fail" / ("%s-%s" % (smoke_name, stamp))
     bundle.mkdir(parents=True, exist_ok=False)
-    if stop_outcome is not None:
-        transcript["stop_outcome"] = stop_outcome
     (bundle / "steps.json").write_text(
         json.dumps(transcript, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8")
@@ -416,6 +419,17 @@ def _write_bundle(
         except MdevError:
             pass
     return bundle
+
+
+def _record_stop_outcome(
+    bundle: Path,
+    transcript: dict[str, Any],
+    stop_outcome: str,
+) -> None:
+    transcript["stop_outcome"] = stop_outcome
+    (bundle / "steps.json").write_text(
+        json.dumps(transcript, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8")
 
 
 def _run_one(
@@ -470,13 +484,13 @@ def _run_one(
         "failure": failure,
         "steps": records,
     }
+    bundle = _write_bundle(inst, definition["name"], transcript, wedge)
     stop_outcome = None
     if wedge:
         stop_outcome = stop_wedged_instance(inst)
+        _record_stop_outcome(bundle, transcript, stop_outcome)
         if stop_outcome == "still-alive":
             pid = inst.live_pid()
-            bundle = _write_bundle(inst, definition["name"], transcript, wedge,
-                                   stop_outcome=stop_outcome)
             print("instance-health failure (wedge), stop+relaunch [%s]: %s"
                   % (stop_outcome, health_detail), file=sys.stderr)
             print(str(bundle), file=sys.stderr)
@@ -485,8 +499,6 @@ def _run_one(
                 % (pid or 0),
                 exit_code=2,
             )
-    bundle = _write_bundle(inst, definition["name"], transcript, wedge,
-                           stop_outcome=stop_outcome)
     if wedge:
         print("instance-health failure (wedge), stop+relaunch [%s]: %s"
               % (stop_outcome, health_detail), file=sys.stderr)
@@ -523,9 +535,9 @@ def run(
                             "detail": detail},
                 "steps": [],
             }
+            bundle = _write_bundle(inst, selected[0]["name"], transcript, True)
             stop_outcome = stop_wedged_instance(inst)
-            bundle = _write_bundle(inst, selected[0]["name"], transcript, True,
-                                   stop_outcome=stop_outcome)
+            _record_stop_outcome(bundle, transcript, stop_outcome)
             print("instance-health failure (wedge), stop+relaunch [%s]: %s"
                   % (stop_outcome, detail), file=sys.stderr)
             print(str(bundle), file=sys.stderr)
