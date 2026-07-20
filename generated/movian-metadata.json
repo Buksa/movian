@@ -3633,6 +3633,7 @@
       {
         "exports": [
           {
+            "constructor": true,
             "name": "Route",
             "source": {
               "file": "res/ecmascript/modules/movian/page.js",
@@ -3640,6 +3641,7 @@
             }
           },
           {
+            "constructor": true,
             "name": "Searcher",
             "source": {
               "file": "res/ecmascript/modules/movian/page.js",
@@ -3736,6 +3738,7 @@
       {
         "exports": [
           {
+            "constructor": true,
             "name": "globalSettings",
             "source": {
               "file": "res/ecmascript/modules/movian/settings.js",
@@ -3743,6 +3746,7 @@
             }
           },
           {
+            "constructor": true,
             "name": "kvstoreSettings",
             "source": {
               "file": "res/ecmascript/modules/movian/settings.js",
@@ -3760,6 +3764,7 @@
       {
         "exports": [
           {
+            "constructor": true,
             "name": "DB",
             "source": {
               "file": "res/ecmascript/modules/movian/sqlite.js",
@@ -3825,6 +3830,7 @@
       {
         "exports": [
           {
+            "constructor": true,
             "name": "VideoScrobbler",
             "source": {
               "file": "res/ecmascript/modules/movian/videoscrobbler.js",
@@ -5219,6 +5225,7 @@
       {
         "exports": [
           {
+            "constructor": true,
             "name": "w3cwebsocket",
             "source": {
               "file": "res/ecmascript/modules/websocket.js",
@@ -5367,6 +5374,6 @@
       }
     ]
   },
-  "movianRevision": "2df5fbe3c38e9127915ff21bf50139fa87083dc2",
+  "movianRevision": "0233d2ba033c9ac514f972e3e8b0b010748946bd",
   "schemaVersion": 1
 }
