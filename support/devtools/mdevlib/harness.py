@@ -275,8 +275,8 @@ def kill_owned_pid(inst: "Instance", pid: int, timeout: float = 5.0) -> str:
 
     Returns the stop outcome: ``"stopped-clean"`` (SIGTERM was sufficient
     or the pid was already gone), ``"killed-after-timeout"`` (SIGKILL
-    escalation was needed), or ``"still-alive"`` (the pid survived
-    SIGKILL, e.g. a zombie or a SIGSTOPped process)."""
+    escalation was needed), or ``"still-alive"`` (the owned pid still
+    appeared live after SIGKILL)."""
     if not inst.owns_pid(pid):
         return "stopped-clean"  # already gone or pid recycled: hands off
     try:
