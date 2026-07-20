@@ -129,7 +129,7 @@ class Instance:
         )
 
     def record_shot_hash(self, sha256_hex: str, shot_path: Path) -> None:
-        """Atomically record last_shot_hash and last_shot_path in state.json."""
+        """Record last_shot_hash and last_shot_path in state.json."""
         state = self.load_state() or {}
         state["last_shot_hash"] = sha256_hex
         state["last_shot_path"] = str(shot_path)
@@ -787,12 +787,17 @@ def sniff_image(body: bytes) -> str | None:
     return None
 
 
-def take_shot(inst: Instance, out: str | None = None,
-              timeout: float = 15.0) -> tuple[Path, str]:
+def take_shot(
+    inst: Instance,
+    out: str | None = None,
+    timeout: float = 15.0,
+    if_changed_hash: str | None = None,
+) -> tuple[Path | None, str]:
     """Capture a screenshot and return (path, sha256_hex).
 
-    The SHA-256 is computed from the raw response bytes before writing,
-    so callers can use it for change detection without reading back.
+    The SHA-256 is computed from the raw response bytes before writing.
+    When ``if_changed_hash`` matches, return ``None`` as the path without
+    creating, overwriting, or deleting a file.
     """
     base = inst.base_url()
     result = http_request(base, "/api/screenshot/raw", timeout=timeout)
@@ -810,6 +815,8 @@ def take_shot(inst: Instance, out: str | None = None,
         raise MdevError(
             "screenshot has unknown magic bytes: %s" % body[:8].hex()
         )
+    if if_changed_hash == sha256_hex:
+        return None, sha256_hex
     if out:
         path = Path(out)
     else:

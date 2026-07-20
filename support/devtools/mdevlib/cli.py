@@ -118,22 +118,30 @@ def cmd_open(args: argparse.Namespace) -> int:
 
 def cmd_shot(args: argparse.Namespace) -> int:
     inst = Instance(args.name)
-    path, sha256_hex = harness.take_shot(inst, args.out)
+    state = inst.load_state() or {}
+    previous_hash = state.get("last_shot_hash") if args.if_changed else None
+    path, sha256_hex = harness.take_shot(
+        inst, args.out, if_changed_hash=previous_hash)
 
-    if args.if_changed:
-        state = inst.load_state() or {}
-        prev_hash = state.get("last_shot_hash")
-        if prev_hash == sha256_hex:
-            return 3
+    if path is None:
+        previous_path = state.get("last_shot_path")
+        emit(args, {
+            "path": previous_path,
+            "sha256": sha256_hex,
+            "unchanged": True,
+        }, "unchanged%s sha256=%s" % (
+            (" " + previous_path) if previous_path else "",
+            sha256_hex,
+        ))
+        return 3
 
     inst.record_shot_hash(sha256_hex, path)
-    if getattr(args, "json", False):
-        print(json.dumps({"path": str(path), "bytes": path.stat().st_size,
-                           "sha256": sha256_hex},
-                          ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        print(str(path))
-        print("sha256=%s" % sha256_hex)
+    emit(args, {
+        "path": str(path),
+        "bytes": path.stat().st_size,
+        "sha256": sha256_hex,
+        "unchanged": False,
+    }, "%s sha256=%s" % (path, sha256_hex))
     return 0
 
 
@@ -221,8 +229,10 @@ def _maybe_shot(args: argparse.Namespace) -> str | None:
     """Screenshot path when --shot was passed, else None (shared by every
     shot-on-success reporter)."""
     if getattr(args, "shot", False):
-        path, sha256_hex = harness.take_shot(Instance(args.name))
-        Instance(args.name).record_shot_hash(sha256_hex, path)
+        inst = Instance(args.name)
+        path, sha256_hex = harness.take_shot(inst)
+        assert path is not None
+        inst.record_shot_hash(sha256_hex, path)
         return str(path)
     return None
 
@@ -357,6 +367,7 @@ def _watch_tick(args: argparse.Namespace, inst: Instance, stamp: str,
             line = "[%s] JS %s: RELOAD JS OK" % (stamp, ", ".join(changed_js))
             if args.shot and not changed_view:
                 path, sha256_hex = harness.take_shot(inst)
+                assert path is not None
                 inst.record_shot_hash(sha256_hex, path)
                 line += " shot=%s" % path
         else:
@@ -375,6 +386,7 @@ def _watch_tick(args: argparse.Namespace, inst: Instance, stamp: str,
         line = "[%s] %s: RELOAD OK" % (stamp, ", ".join(changed_view))
         if args.shot:
             path, sha256_hex = harness.take_shot(inst)
+            assert path is not None
             inst.record_shot_hash(sha256_hex, path)
             line += " shot=%s" % path
     else:
@@ -521,7 +533,8 @@ def cmd_preview(args: argparse.Namespace) -> int:
         # that still shows the previous preview mid-transition.
         time.sleep(0.3)
         shot_path_raw, sha256_hex = harness.take_shot(inst)
-        Instance(args.name).record_shot_hash(sha256_hex, shot_path_raw)
+        assert shot_path_raw is not None
+        inst.record_shot_hash(sha256_hex, shot_path_raw)
         shot_path = str(shot_path_raw)
 
     emit(args,

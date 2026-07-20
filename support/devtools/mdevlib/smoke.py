@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import sys
@@ -238,6 +237,7 @@ def _assert_log(step: dict[str, Any], delta: str) -> str:
 def _take_png(inst: Instance, out: Path, timeout: float = 15.0) -> tuple[Path, str]:
     """Capture a screenshot, validate PNG, return (path, sha256_hex)."""
     path, sha256_hex = harness.take_shot(inst, str(out), timeout=timeout)
+    assert path is not None
     try:
         with path.open("rb") as image:
             magic = image.read(8)
