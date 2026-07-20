@@ -542,8 +542,8 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
         cur_url = prop_value(base, PAGE_URL)
         loading = prop_value(base, PAGE_LOADING)
         title = prop_value(base, PAGE_TITLE)
-        # Ready when loading is 0 -- or void/absent: routes like
-        # page:settings never create the loading prop at all.
+        # Ready when loading is 0 -- or void/absent: static page:* routes
+        # never create the loading prop at all.
         if loading in ("0", "(void)", None) and prop_has_value(title):
             # Verify navigation actually targeted our URL: either the page
             # url now equals the requested one, or it at least changed away

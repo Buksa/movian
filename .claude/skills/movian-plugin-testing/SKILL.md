@@ -38,8 +38,9 @@ and effect matrix.
 
 "Ready" is not simply `loading == 0`. `mdev open`/`mdev preview` treat a page
 as ready when `model/loading` is `"0"` **or void/absent** — some routes
-never create a `loading` prop at all (`page:settings` is one; the model
-backend that would create it is simply not wired up for that route) — AND
+never create a `loading` prop at all (any `page:*` URL is one: that is the
+static-page backend, which only sets `type` and a title; the real settings
+page is `settings:`) — AND
 the title prop has a real value (not void/absent). See
 `support/devtools/mdevlib/harness.py: open_and_wait()`.
 

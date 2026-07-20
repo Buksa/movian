@@ -175,7 +175,7 @@ Movian lingers:
 ```
 ls build.debug/movian          # build check — rebuild first if missing
 mdev run
-mdev open page:settings
+mdev open settings:
 mdev shot
 mdev stop
 ```
