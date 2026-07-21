@@ -12,7 +12,7 @@ declare module 'movian/http' {
      */
     interface DuktapeBuffer {
         readonly length: number;
-        readonly [index: number]: number;
+        [index: number]: number;
         toString(): string;
     }
 

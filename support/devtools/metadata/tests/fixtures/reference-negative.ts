@@ -19,6 +19,10 @@ const returnedString: string = fixturePage.appendItem( // EXPECT_TS2322
 const bodyString: string = http.request( // EXPECT_TS2322
     'https://example.invalid/reference'
 ).bytes;
+const bodyBytes = http.request('https://example.invalid/reference').bytes;
+if (bodyBytes !== undefined) {
+    bodyBytes[0] = 'x'; // EXPECT_TS2322
+}
 
 declare const numberProp: prop.Property<number>;
 prop.subscribeValue(numberProp, value => {
@@ -32,8 +36,12 @@ const wrongTypedChild: prop.Property<number> = typed.title; // EXPECT_TS2322
 declare const dynamic: prop.Property<Record<string, unknown>>;
 const overNarrowDynamic: prop.Property<string> = dynamic.runtimeChild; // EXPECT_TS2322
 prop.release(prop.createRoot()); // EXPECT_TS2345
+const wronglyPresent: prop.Property<unknown> = // EXPECT_TS2322
+    prop.getChild(typed, 0);
+prop.sendEvent(dynamic, 'redirect', {}); // EXPECT_TS2345
 
 void returnedString;
 void bodyString;
 void wrongTypedChild;
 void overNarrowDynamic;
+void wronglyPresent;

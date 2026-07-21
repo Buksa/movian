@@ -40,8 +40,8 @@ declare module 'movian/prop' {
         actionAsArray?: boolean;
     }
 
-    /** Source: es_prop_get_value_duk() and es_prop_set_value_duk(). */
-    type PropertyValue = string | number | boolean | null;
+    /** Source: es_prop_set_value_duk() maps null and undefined to PROP_SET_VOID. */
+    type PropertyValue = string | number | boolean | null | undefined;
 
     /**
      * Source: es_sub_cb(). Event payloads vary by event; unknown marks the
@@ -100,13 +100,21 @@ declare module 'movian/prop' {
     export function getName(prop: Property): string;
 
     /**
-     * Source: fnlist_prop.getChild / es_prop_get_child_duk(); numeric lookup
-     * can run past the child list, hence undefined.
+     * Source: es_prop_get_child_duk(); named lookup always creates/returns a
+     * child, while numeric lookup returns undefined past the child list.
      */
-    export function getChild<T, K extends string | number>(
+    export function getChild<T, K extends string>(
         prop: Property<T>,
         name: K
-    ): K extends keyof T ? Property<T[K]> : Property<unknown> | undefined;
+    ): K extends keyof T ? Property<T[K]> : Property<unknown>;
+    export function getChild<T>(
+        prop: Property<T>,
+        name: number
+    ): Property<unknown> | undefined;
+    export function getChild<T>(
+        prop: Property<T>,
+        name: string | number
+    ): Property<unknown> | undefined;
 
     /** Source: fnlist_prop.set / es_prop_set_value_duk(). */
     export function set(
@@ -162,14 +170,17 @@ declare module 'movian/prop' {
     /** Source: fnlist_prop.unlink / es_prop_unlink(). */
     export function unlink(prop: Property): void;
 
-    /**
-     * Source: fnlist_prop.sendEvent / es_prop_send_event(); payload shape is
-     * event-type-specific, so it remains unknown at this calibration layer.
-     */
-    export function sendEvent(
+    /** Source: es_prop_send_event() requires a string redirect target. */
+    export interface OpenUrlEvent {
+        url?: string;
+        view?: string;
+        how?: string;
+        parenturl?: string;
+    }
+    export function sendEvent<T extends 'redirect' | 'openurl'>(
         eventSink: Property,
-        type: 'redirect' | 'openurl',
-        value: unknown
+        type: T,
+        value: T extends 'redirect' ? string : OpenUrlEvent
     ): void;
 
     /** Source: fnlist_prop.isValue / es_prop_is_value(). */

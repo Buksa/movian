@@ -46,6 +46,7 @@ const syncResponse: http.HttpResponse = http.request(
 if (syncResponse.bytes !== undefined) {
     const firstBodyByte: number = syncResponse.bytes[0];
     void firstBodyByte;
+    syncResponse.bytes[0] = firstBodyByte;
 }
 
 http.request(
@@ -79,3 +80,15 @@ void typedCount;
 declare const dynamic: prop.Property<Record<string, unknown>>;
 const dynamicChild: prop.Property<unknown> = dynamic.runtimeChild;
 void dynamicChild;
+
+prop.set(dynamic, 'cleared', undefined);
+const namedChild: prop.Property<unknown> = prop.getChild(typed, 'runtimeChild');
+const indexedChild: prop.Property<unknown> | undefined =
+    prop.getChild(typed, 0);
+prop.sendEvent(dynamic, 'redirect', 'page:home');
+prop.sendEvent(dynamic, 'openurl', {
+    url: 'https://example.invalid/reference',
+    view: 'reference',
+});
+void namedChild;
+void indexedChild;
