@@ -47,6 +47,7 @@ COMPLETION_CLASS = 7
 COMPLETION_PROPERTY = 10
 COMPLETION_VALUE = 12
 COMPLETION_FILE = 17
+COMPLETION_FOLDER = 19
 
 
 def normalize_text(text: str) -> str:
@@ -216,15 +217,17 @@ class Metadata:
         self.scopes = {
             record["name"]: record for record in glw.get("scopes", [])
         }
-        self.registered_widgets = {
-            record["name"]: record for record in glw.get("widgets", [])
-            if record.get("registered") is True
-        }
+        self.registered_widgets: dict[str, JSON] = {}
         self.widgets: dict[str, JSON] = {}
         for record in glw.get("widgets", []):
-            self.widgets[record["name"]] = record
+            name = record["name"]
+            self.widgets[name] = record
+            if record.get("registered") is True:
+                self.registered_widgets[name] = record
             for alias in record.get("aliases", []):
                 self.widgets[alias] = record
+                if record.get("registered") is True:
+                    self.registered_widgets[alias] = record
         js = artifact.get("js", {})
         self.modules = {
             record["name"]: record for record in js.get("modules", [])
@@ -1040,8 +1043,11 @@ class LspServer:
             line_prefix)
         if path_match is not None:
             return [
-                self._completion_item(candidate, COMPLETION_FILE,
-                                      "GLW include/import target")
+                self._completion_item(
+                    candidate,
+                    COMPLETION_FOLDER if candidate.endswith("/")
+                    else COMPLETION_FILE,
+                    "GLW include/import target")
                 for candidate in self._include_completion_candidates(
                     document, path_match.group("path"))
             ]
@@ -1083,9 +1089,16 @@ class LspServer:
                 for name in sorted(self.metadata.registered_widgets)
             ]
 
+        block_depth = self._completion_block_depth(
+            local_tokens, line_number, line_prefix, text_before_cursor)
+        context_prefix = line_prefix
+        if block_depth > 0 and "{" in line_prefix:
+            context_prefix = line_prefix.rsplit("{", 1)[-1]
+
         macros = self._local_macro_names(local_tokens, line_number + 1)
         identifier_match = re.match(
-            r"^[ \t]*(?P<prefix>[A-Za-z_][A-Za-z0-9_]*)$", line_prefix)
+            r"^[ \t]*(?P<prefix>[A-Za-z_][A-Za-z0-9_]*)$",
+            context_prefix)
         if identifier_match is not None:
             prefix = identifier_match.group("prefix")
             matching_macros = [name for name in macros
@@ -1097,11 +1110,9 @@ class LspServer:
                     for name in matching_macros
                 ]
 
-        block_depth = self._completion_block_depth(
-            local_tokens, line_number, line_prefix, text_before_cursor)
         if block_depth > 0 \
                 and re.match(r"^[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*)?$",
-                             line_prefix):
+                             context_prefix):
             return [
                 self._completion_item(
                     name, COMPLETION_PROPERTY,
@@ -1130,22 +1141,30 @@ class LspServer:
         if cursor is None:
             return None
         _line_number, line_prefix, _text_before_cursor = cursor
-        depth = 0
-        call_name = None
-        for index in range(len(line_prefix) - 1, -1, -1):
-            character = line_prefix[index]
-            if character == ")":
-                depth += 1
+        open_parentheses: list[int] = []
+        quote: str | None = None
+        escaped = False
+        for index, character in enumerate(line_prefix):
+            if quote is not None:
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == quote:
+                    quote = None
+                continue
+            if character in ("'", '"'):
+                quote = character
             elif character == "(":
-                if depth > 0:
-                    depth -= 1
-                    continue
-                name_match = re.search(
-                    r"([A-Za-z_][A-Za-z0-9_]*)[ \t]*$",
-                    line_prefix[:index])
-                if name_match is not None:
-                    call_name = name_match.group(1)
-                break
+                open_parentheses.append(index)
+            elif character == ")" and open_parentheses:
+                open_parentheses.pop()
+        if not open_parentheses:
+            return None
+        name_match = re.search(
+            r"([A-Za-z_][A-Za-z0-9_]*)[ \t]*$",
+            line_prefix[:open_parentheses[-1]])
+        call_name = name_match.group(1) if name_match is not None else None
         if call_name is None:
             return None
         record = self.metadata.functions.get(call_name)
@@ -1442,14 +1461,18 @@ class LspServer:
             if not directory.is_dir() \
                     or not self._is_confined_definition_target(directory):
                 return []
+            labels: set[str] = set()
             try:
-                children = directory.iterdir()
-                labels = {
-                    path_to_uri(child) for child in children
-                    if child.is_file() and child.name.startswith(fragment)
-                    and self._resolve_include(document,
-                                              path_to_uri(child)) is not None
-                }
+                for child in directory.iterdir():
+                    if not child.name.startswith(fragment):
+                        continue
+                    label = path_to_uri(child)
+                    if child.is_dir() \
+                            and self._is_confined_definition_target(child):
+                        labels.add(label + "/")
+                    elif child.is_file() \
+                            and self._resolve_include(document, label) is not None:
+                        labels.add(label)
             except OSError:
                 return []
             return sorted(labels, key=str.casefold)
@@ -1475,12 +1498,16 @@ class LspServer:
             except OSError:
                 continue
             for child in children:
-                if not child.is_file() or not child.name.startswith(fragment):
+                if not child.name.startswith(fragment):
                     continue
                 relative_label = ((relative_directory + "/")
                                   if separator else "") + child.name
                 label = scheme + relative_label
-                if self._resolve_include(document, label) is not None:
+                if child.is_dir() \
+                        and self._is_confined_definition_target(child):
+                    labels.add(label + "/")
+                elif child.is_file() \
+                        and self._resolve_include(document, label) is not None:
                     labels.add(label)
         return sorted(labels, key=str.casefold)
 

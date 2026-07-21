@@ -583,8 +583,11 @@ def run_completion_contexts() -> None:
         (REPOSITORY_ROOT / "generated" / "movian-metadata.json").read_text(
             encoding="utf-8"))
     glw = artifact["glw"]
-    widgets = sorted(record["name"] for record in glw["widgets"]
-                     if record.get("registered") is True)
+    widgets = sorted({
+        name for record in glw["widgets"]
+        if record.get("registered") is True
+        for name in [record["name"], *record.get("aliases", [])]
+    })
     attributes = sorted(record["name"] for record in glw["attributes"])
     attribute_records = {record["name"]: record
                          for record in glw["attributes"]}
@@ -667,6 +670,11 @@ def run_completion_contexts() -> None:
             complete("completion/attribute-image", uri,
                      cursor_after(text, 4, "  so")),
             exact=attributes)
+        assert_completion(
+            "completion/attribute-inline-widget",
+            complete("completion/attribute-inline-widget", uri,
+                     cursor_after(text, 6, "widget(label, { al")),
+            exact=attributes)
 
         uri, text = open_fixture("function.view")
         function_result = complete(
@@ -697,12 +705,18 @@ def run_completion_contexts() -> None:
             "textDocument": {"uri": uri},
             "position": cursor_after(text, 4, "fmt(clamp(0, 1, 2), "),
         })
+        request_id += 1
+        quoted = client.request(request_id, "textDocument/signatureHelp", {
+            "textDocument": {"uri": uri},
+            "position": cursor_after(text, 5, 'fmt("(", '),
+        })
         expected_fixed = "clamp() [%d arguments]" % functions["clamp"]["nargs"]
         expected_variadic = "fmt(...) [variadic]"
         for context, result, expected in (
                 ("signature/fixed", fixed, expected_fixed),
                 ("signature/variadic", variadic, expected_variadic),
-                ("signature/nested", nested, expected_variadic)):
+                ("signature/nested", nested, expected_variadic),
+                ("signature/quoted-parenthesis", quoted, expected_variadic)):
             signatures = result.get("signatures") if isinstance(result, dict) \
                 else None
             if not isinstance(signatures, list) or len(signatures) != 1 \
@@ -731,11 +745,17 @@ def run_completion_contexts() -> None:
             exact=enum_values)
 
         uri, text = open_fixture("path.view")
+        relative_result = complete(
+            "completion/path-relative", uri,
+            cursor_after(text, 0, '#include "./'), "/")
         assert_completion(
-            "completion/path-relative",
-            complete("completion/path-relative", uri,
-                     cursor_after(text, 0, '#include "./'), "/"),
-            contains=("./widget.view",))
+            "completion/path-relative", relative_result,
+            contains=("./menu/", "./widget.view"))
+        menu_item = next((item for item in relative_result
+                          if item.get("label") == "./menu/"), None)
+        if menu_item is None or menu_item.get("kind") != 19:
+            raise AssertionError("completion/path directory kind mismatch: %s" %
+                                 menu_item)
         assert_completion(
             "completion/path-import",
             complete("completion/path-import", uri,
@@ -747,9 +767,14 @@ def run_completion_contexts() -> None:
                      cursor_after(text, 3, '# import "./'), "/"),
             contains=("./widget.view",))
         assert_completion(
+            "completion/path-directory-child",
+            complete("completion/path-directory-child", uri,
+                     cursor_after(text, 4, '#include "./menu/'), "/"),
+            contains=("./menu/child.view",))
+        assert_completion(
             "completion/path-traversal",
             complete("completion/path-traversal", uri,
-                     cursor_after(text, 1, '#include "../../../../'), "/"),
+                     cursor_after(text, 1, '#include "../../../../../../'), "/"),
             exact=[])
         moved_uri = (COMPLETION_FIXTURES / "moved" / "path.view").as_uri()
         moved, moved_text = open_fixture("path.view", uri=moved_uri)
