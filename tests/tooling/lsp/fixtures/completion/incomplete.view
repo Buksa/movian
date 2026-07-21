@@ -1,0 +1,2 @@
+widget(label, {
+  alpha: 1;

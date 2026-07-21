@@ -40,6 +40,14 @@ SYMBOL_CLASS = 5
 SYMBOL_PROPERTY = 7
 SYMBOL_FUNCTION = 12
 
+# LSP CompletionItemKind values.
+COMPLETION_FUNCTION = 3
+COMPLETION_VARIABLE = 6
+COMPLETION_CLASS = 7
+COMPLETION_PROPERTY = 10
+COMPLETION_VALUE = 12
+COMPLETION_FILE = 17
+
 
 def normalize_text(text: str) -> str:
     """Apply LSP full-text-sync newline normalization."""
@@ -204,6 +212,13 @@ class Metadata:
         }
         self.attributes = {
             record["name"]: record for record in glw.get("attributes", [])
+        }
+        self.scopes = {
+            record["name"]: record for record in glw.get("scopes", [])
+        }
+        self.registered_widgets = {
+            record["name"]: record for record in glw.get("widgets", [])
+            if record.get("registered") is True
         }
         self.widgets: dict[str, JSON] = {}
         for record in glw.get("widgets", []):
@@ -416,6 +431,10 @@ class LspServer:
                 result = self._hover(message.get("params", {}))
             elif method == "textDocument/definition":
                 result = self._definition(message.get("params", {}))
+            elif method == "textDocument/completion":
+                result = self._completion(message.get("params", {}))
+            elif method == "textDocument/signatureHelp":
+                result = self._signature_help(message.get("params", {}))
             elif method == "workspace/symbol":
                 result = self._workspace_symbols(message.get("params", {}))
             else:
@@ -451,6 +470,12 @@ class LspServer:
                 "documentSymbolProvider": True,
                 "hoverProvider": True,
                 "definitionProvider": True,
+                "completionProvider": {
+                    "triggerCharacters": [".", "$", "/"],
+                },
+                "signatureHelpProvider": {
+                    "triggerCharacters": ["(", ","],
+                },
                 "workspaceSymbolProvider": True,
             },
             "serverInfo": {"name": "movian-lsp", "version": "0.1.0"},
@@ -992,6 +1017,241 @@ class LspServer:
             }]
         return None
 
+    def _completion(self, params: JSON) -> list[JSON]:
+        """Return only completions justified by GLW metadata or local tokens."""
+
+        uri = params["textDocument"]["uri"]
+        position = params["position"]
+        document = self._document(uri)
+        if document is None or self._path_has_javascript_suffix(document.path):
+            return []
+        self._ensure_analysis(document)
+        cursor = self._completion_cursor(document, position)
+        if cursor is None:
+            return []
+        line_number, line_prefix, text_before_cursor = cursor
+        with document.lock:
+            tokens = list(document.tokens)
+        local_tokens = [token for token in tokens
+                        if self._token_is_from_document(token, document)]
+
+        path_match = re.match(
+            r"^[ \t]*#(?:include|import)[ \t]+(?P<quote>['\"])(?P<path>[^'\"]*)$",
+            line_prefix)
+        if path_match is not None:
+            return [
+                self._completion_item(candidate, COMPLETION_FILE,
+                                      "GLW include/import target")
+                for candidate in self._include_completion_candidates(
+                    document, path_match.group("path"))
+            ]
+
+        root_match = re.search(r"\$[A-Za-z_][A-Za-z0-9_]*$|\$$", line_prefix)
+        if root_match is not None:
+            return [
+                self._completion_item(name, COMPLETION_VARIABLE,
+                                      record.get("meaning", "GLW scope root"))
+                for name, record in sorted(self.metadata.scopes.items())
+            ]
+        # Metadata has no child schema for any scope root.  A dot after a root
+        # is therefore an intentionally empty completion context.
+        if re.search(r"\$[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z0-9_]*$", line_prefix):
+            return []
+
+        enum_match = re.match(
+            r"^[ \t]*(?P<attribute>[A-Za-z_][A-Za-z0-9_]*)[ \t]*:"
+            r"[ \t]*[A-Za-z_][A-Za-z0-9_]*$|"
+            r"^[ \t]*(?P<empty_attribute>[A-Za-z_][A-Za-z0-9_]*)[ \t]*:"
+            r"[ \t]*$", line_prefix)
+        if enum_match is not None:
+            attribute_name = (enum_match.group("attribute") or
+                              enum_match.group("empty_attribute"))
+            attribute = self.metadata.attributes.get(attribute_name)
+            enum_values = attribute.get("enumValues") if attribute else None
+            if isinstance(enum_values, list):
+                return [
+                    self._completion_item(value, COMPLETION_VALUE,
+                                          "%s enum value" % attribute_name)
+                    for value in enum_values if isinstance(value, str)
+                ]
+
+        if re.search(r"\bwidget[ \t]*\([ \t]*[A-Za-z_][A-Za-z0-9_]*$|"
+                     r"\bwidget[ \t]*\([ \t]*$", line_prefix):
+            return [
+                self._completion_item(name, COMPLETION_CLASS,
+                                      "registered GLW widget")
+                for name in sorted(self.metadata.registered_widgets)
+            ]
+
+        macros = self._local_macro_names(local_tokens)
+        if macros and re.match(r"^[ \t]*[A-Za-z_][A-Za-z0-9_]*$", line_prefix):
+            return [
+                self._completion_item(name, COMPLETION_FUNCTION,
+                                      "macro from current document")
+                for name in macros
+            ]
+
+        block_depth = self._completion_block_depth(
+            local_tokens, line_number, line_prefix, text_before_cursor)
+        if block_depth > 0 \
+                and re.match(r"^[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*)?$",
+                             line_prefix):
+            return [
+                self._completion_item(
+                    name, COMPLETION_PROPERTY,
+                    "%s; confidence: %s" % (
+                        record.get("valueType", "unknown"),
+                        record.get("confidence", "unknown")))
+                for name, record in sorted(self.metadata.attributes.items())
+            ]
+
+        if re.search(r"(?:[:=,(]|\breturn\b)[ \t]*"
+                     r"(?:[A-Za-z_][A-Za-z0-9_]*)?$", line_prefix):
+            return [
+                self._completion_item(name, COMPLETION_FUNCTION,
+                                      self._function_arity_detail(record))
+                for name, record in sorted(self.metadata.functions.items())
+            ]
+        return []
+
+    def _signature_help(self, params: JSON) -> JSON | None:
+        uri = params["textDocument"]["uri"]
+        document = self._document(uri)
+        if document is None or self._path_has_javascript_suffix(document.path):
+            return None
+        cursor = self._completion_cursor(document, params["position"])
+        if cursor is None:
+            return None
+        _line_number, line_prefix, _text_before_cursor = cursor
+        calls = list(re.finditer(
+            r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)[ \t]*\([^()]*$",
+            line_prefix))
+        if not calls:
+            return None
+        record = self.metadata.functions.get(calls[-1].group("name"))
+        if record is None:
+            return None
+        name = record["name"]
+        if record.get("variadic") is True:
+            label = "%s(...) [variadic]" % name
+            documentation = "Variadic GLW function from Movian metadata."
+        else:
+            nargs = record.get("nargs")
+            if not isinstance(nargs, int) or nargs < 0:
+                return None
+            label = "%s() [%d argument%s]" % (
+                name, nargs, "" if nargs == 1 else "s")
+            documentation = "Fixed arity from Movian metadata: %d." % nargs
+        return {
+            "signatures": [{
+                "label": label,
+                "documentation": documentation,
+            }],
+            "activeSignature": 0,
+        }
+
+    @staticmethod
+    def _completion_item(label: str, kind: int, detail: object) -> JSON:
+        return {"label": label, "kind": kind, "detail": str(detail)}
+
+    @staticmethod
+    def _function_arity_detail(record: JSON) -> str:
+        if record.get("variadic") is True:
+            return "variadic GLW function"
+        return "GLW function; nargs: %s" % record.get("nargs", "unknown")
+
+    @staticmethod
+    def _completion_cursor(document: Document,
+                           position: JSON) -> tuple[int, str, str] | None:
+        line_number = position["line"]
+        character = position["character"]
+        with document.lock:
+            text = document.text
+        lines = text.split("\n")
+        if not isinstance(line_number, int) or not isinstance(character, int) \
+                or line_number < 0 or line_number >= len(lines):
+            return None
+        column = codepoint_index_at_utf16_position(lines[line_number], character)
+        if column is None:
+            return None
+        line_prefix = lines[line_number][:column]
+        text_before_cursor = "\n".join(lines[:line_number] + [line_prefix])
+        return line_number, line_prefix, text_before_cursor
+
+    @staticmethod
+    def _local_macro_names(tokens: list[JSON]) -> list[str]:
+        names: set[str] = set()
+        for index, token in enumerate(tokens[:-2]):
+            directive = tokens[index + 1]
+            name = tokens[index + 2]
+            if token.get("type") == "HASH" \
+                    and directive.get("type") == "IDENTIFIER" \
+                    and directive.get("value") == "define" \
+                    and name.get("type") == "IDENTIFIER" \
+                    and isinstance(name.get("value"), str):
+                names.add(name["value"])
+        return sorted(names)
+
+    @staticmethod
+    def _completion_block_depth(tokens: list[JSON], line_number: int,
+                                line_prefix: str,
+                                text_before_cursor: str) -> int:
+        depth = 0
+        for token in tokens:
+            token_line = token.get("line")
+            if not isinstance(token_line, int) or token_line >= line_number + 1:
+                continue
+            if token.get("type") == "BLOCK_OPEN":
+                depth += 1
+            elif token.get("type") == "BLOCK_CLOSE":
+                depth = max(depth - 1, 0)
+        if tokens:
+            depth += line_prefix.count("{") - line_prefix.count("}")
+            return max(depth, 0)
+        # On the first invalid snapshot there is no last-good stream yet.  The
+        # lexer punctuation has a one-to-one spelling, so brace balance is the
+        # bounded fallback that keeps an unclosed block useful.
+        return LspServer._raw_block_depth(text_before_cursor)
+
+    @staticmethod
+    def _raw_block_depth(text: str) -> int:
+        depth = 0
+        state = "code"
+        index = 0
+        while index < len(text):
+            char = text[index]
+            following = text[index + 1] if index + 1 < len(text) else ""
+            if state == "code":
+                if char == "/" and following == "/":
+                    state = "line-comment"
+                    index += 2
+                    continue
+                if char == "/" and following == "*":
+                    state = "block-comment"
+                    index += 2
+                    continue
+                if char in ("'", '"'):
+                    state = char
+                elif char == "{":
+                    depth += 1
+                elif char == "}":
+                    depth = max(depth - 1, 0)
+            elif state == "line-comment":
+                if char == "\n":
+                    state = "code"
+            elif state == "block-comment":
+                if char == "*" and following == "/":
+                    state = "code"
+                    index += 2
+                    continue
+            elif char == "\\":
+                index += 2
+                continue
+            elif char == state:
+                state = "code"
+            index += 1
+        return depth
+
     def _javascript_definition(self, document: Document,
                                position: JSON) -> list[JSON] | None:
         line_number = position["line"]
@@ -1132,6 +1392,72 @@ class LspServer:
                     candidate):
                 return candidate.resolve()
         return None
+
+    def _include_completion_candidates(self, document: Document,
+                                       prefix: str) -> list[str]:
+        """List one directory and validate every result through definition."""
+
+        roots: list[tuple[Path, str]] = []
+        relative_prefix = prefix
+        if prefix.startswith("skin://"):
+            relative_prefix = prefix[len("skin://"):]
+            roots.extend([
+                (self.workspace_root / "glwskins" / "flat", "skin://"),
+                (self.skin_root, "skin://"),
+            ])
+        elif prefix.startswith("dataroot://"):
+            relative_prefix = prefix[len("dataroot://"):]
+            roots.append((self.workspace_root, "dataroot://"))
+        elif prefix.startswith("file://"):
+            candidate = uri_to_path(prefix)
+            if candidate is None:
+                return []
+            directory = candidate if prefix.endswith("/") else candidate.parent
+            fragment = "" if prefix.endswith("/") else candidate.name
+            if not directory.is_dir() \
+                    or not self._is_confined_definition_target(directory):
+                return []
+            try:
+                children = directory.iterdir()
+                labels = {
+                    path_to_uri(child) for child in children
+                    if child.is_file() and child.name.startswith(fragment)
+                    and self._resolve_include(document,
+                                              path_to_uri(child)) is not None
+                }
+            except OSError:
+                return []
+            return sorted(labels, key=str.casefold)
+        elif Path(prefix).is_absolute():
+            roots.append((Path("/"), "/"))
+            relative_prefix = prefix[1:]
+        elif document.path is not None:
+            roots.append((document.path.parent, ""))
+        else:
+            roots.append((self.workspace_root, ""))
+
+        directory_part, separator, fragment = relative_prefix.rpartition("/")
+        relative_directory = directory_part if separator else ""
+        fragment = fragment if separator else relative_prefix
+        labels: set[str] = set()
+        for root, scheme in roots:
+            directory = root / relative_directory
+            if not directory.is_dir() \
+                    or not self._is_confined_definition_target(directory):
+                continue
+            try:
+                children = list(directory.iterdir())
+            except OSError:
+                continue
+            for child in children:
+                if not child.is_file() or not child.name.startswith(fragment):
+                    continue
+                relative_label = ((relative_directory + "/")
+                                  if separator else "") + child.name
+                label = scheme + relative_label
+                if self._resolve_include(document, label) is not None:
+                    labels.add(label)
+        return sorted(labels, key=str.casefold)
 
     def _resolve_javascript_require(self, document: Document,
                                     target: str) -> tuple[Path, int] | None:
