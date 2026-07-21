@@ -4,4 +4,9 @@
 LocalCard();
 widget(label, {
   al
+  Loc
 });
+Fut
+#define FutureCard() {
+  widget(label, {});
+}
