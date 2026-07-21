@@ -153,8 +153,9 @@ def _check_lsp_completion() -> tuple[bool, str]:
             raise RuntimeError("completion fixture is missing: %s" % fixture)
         artifact = json.loads(metadata.read_text(encoding="utf-8"))
         expected = sorted(
-            record["name"] for record in artifact["glw"]["widgets"]
-            if record.get("registered") is True)
+            {name for record in artifact["glw"]["widgets"]
+             if record.get("registered") is True
+             for name in [record["name"], *record.get("aliases", [])]})
         text = fixture.read_text(encoding="utf-8")
         client = _load_lsp_client()(resolved_server, REPOSITORY_ROOT)
         initialized = client.request(
