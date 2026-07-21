@@ -749,6 +749,11 @@ def run_completion_contexts() -> None:
             complete("completion/local-macro", uri,
                      cursor_after(text, 3, "Loc")),
             contains=("LocalCard",), excludes=("clamp", "label"))
+        assert_completion(
+            "completion/attribute-with-local-macro",
+            complete("completion/attribute-with-local-macro", uri,
+                     cursor_after(text, 5, "  al")),
+            exact=attributes)
 
         uri, text = open_fixture("incomplete.view")
         assert_completion(
