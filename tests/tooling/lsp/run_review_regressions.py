@@ -692,11 +692,17 @@ def run_completion_contexts() -> None:
             "textDocument": {"uri": uri},
             "position": cursor_after(text, 2, "  caption: fmt("),
         })
+        request_id += 1
+        nested = client.request(request_id, "textDocument/signatureHelp", {
+            "textDocument": {"uri": uri},
+            "position": cursor_after(text, 4, "fmt(clamp(0, 1, 2), "),
+        })
         expected_fixed = "clamp() [%d arguments]" % functions["clamp"]["nargs"]
         expected_variadic = "fmt(...) [variadic]"
         for context, result, expected in (
                 ("signature/fixed", fixed, expected_fixed),
-                ("signature/variadic", variadic, expected_variadic)):
+                ("signature/variadic", variadic, expected_variadic),
+                ("signature/nested", nested, expected_variadic)):
             signatures = result.get("signatures") if isinstance(result, dict) \
                 else None
             if not isinstance(signatures, list) or len(signatures) != 1 \
@@ -736,6 +742,11 @@ def run_completion_contexts() -> None:
                      cursor_after(text, 2, '#import "./'), "/"),
             contains=("./widget.view",))
         assert_completion(
+            "completion/path-spaced-import",
+            complete("completion/path-spaced-import", uri,
+                     cursor_after(text, 3, '# import "./'), "/"),
+            contains=("./widget.view",))
+        assert_completion(
             "completion/path-traversal",
             complete("completion/path-traversal", uri,
                      cursor_after(text, 1, '#include "../../../../'), "/"),
@@ -759,6 +770,16 @@ def run_completion_contexts() -> None:
             complete("completion/attribute-with-local-macro", uri,
                      cursor_after(text, 5, "  al")),
             exact=attributes)
+        assert_completion(
+            "completion/nested-local-macro",
+            complete("completion/nested-local-macro", uri,
+                     cursor_after(text, 6, "  Loc")),
+            contains=("LocalCard",), excludes=("align", "clamp"))
+        assert_completion(
+            "completion/future-macro",
+            complete("completion/future-macro", uri,
+                     cursor_after(text, 8, "Fut")),
+            exact=[])
 
         uri, text = open_fixture("incomplete.view")
         assert_completion(

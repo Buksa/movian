@@ -1036,7 +1036,7 @@ class LspServer:
                         if self._token_is_from_document(token, document)]
 
         path_match = re.match(
-            r"^[ \t]*#(?:include|import)[ \t]+(?P<quote>['\"])(?P<path>[^'\"]*)$",
+            r"^[ \t]*#[ \t]*(?:include|import)[ \t]+(?P<quote>['\"])(?P<path>[^'\"]*)$",
             line_prefix)
         if path_match is not None:
             return [
@@ -1083,6 +1083,19 @@ class LspServer:
                 for name in sorted(self.metadata.registered_widgets)
             ]
 
+        macros = self._local_macro_names(local_tokens, line_number + 1)
+        identifier_match = re.match(
+            r"^[ \t]*(?P<prefix>[A-Za-z_][A-Za-z0-9_]*)$", line_prefix)
+        if identifier_match is not None:
+            prefix = identifier_match.group("prefix")
+            matching_macros = [name for name in macros
+                               if name.startswith(prefix)]
+            if matching_macros:
+                return [
+                    self._completion_item(name, COMPLETION_FUNCTION,
+                                          "macro from current document")
+                    for name in matching_macros
+                ]
 
         block_depth = self._completion_block_depth(
             local_tokens, line_number, line_prefix, text_before_cursor)
@@ -1096,13 +1109,6 @@ class LspServer:
                         record.get("valueType", "unknown"),
                         record.get("confidence", "unknown")))
                 for name, record in sorted(self.metadata.attributes.items())
-            ]
-        macros = self._local_macro_names(local_tokens)
-        if macros and re.match(r"^[ \t]*[A-Za-z_][A-Za-z0-9_]*$", line_prefix):
-            return [
-                self._completion_item(name, COMPLETION_FUNCTION,
-                                      "macro from current document")
-                for name in macros
             ]
 
 
@@ -1124,12 +1130,25 @@ class LspServer:
         if cursor is None:
             return None
         _line_number, line_prefix, _text_before_cursor = cursor
-        calls = list(re.finditer(
-            r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)[ \t]*\([^()]*$",
-            line_prefix))
-        if not calls:
+        depth = 0
+        call_name = None
+        for index in range(len(line_prefix) - 1, -1, -1):
+            character = line_prefix[index]
+            if character == ")":
+                depth += 1
+            elif character == "(":
+                if depth > 0:
+                    depth -= 1
+                    continue
+                name_match = re.search(
+                    r"([A-Za-z_][A-Za-z0-9_]*)[ \t]*$",
+                    line_prefix[:index])
+                if name_match is not None:
+                    call_name = name_match.group(1)
+                break
+        if call_name is None:
             return None
-        record = self.metadata.functions.get(calls[-1].group("name"))
+        record = self.metadata.functions.get(call_name)
         if record is None:
             return None
         name = record["name"]
@@ -1180,11 +1199,16 @@ class LspServer:
         return line_number, line_prefix, text_before_cursor
 
     @staticmethod
-    def _local_macro_names(tokens: list[JSON]) -> list[str]:
+    def _local_macro_names(tokens: list[JSON], before_line: int) -> list[str]:
         names: set[str] = set()
         for index, token in enumerate(tokens[:-2]):
             directive = tokens[index + 1]
             name = tokens[index + 2]
+            token_line = token.get("line")
+            if not isinstance(token_line, int) or token_line >= before_line \
+                    or directive.get("line") != token_line \
+                    or name.get("line") != token_line:
+                continue
             if token.get("type") == "HASH" \
                     and directive.get("type") == "IDENTIFIER" \
                     and directive.get("value") == "define" \
