@@ -4,3 +4,4 @@ widget(label, {
 widget(image, {
   source: "fixture";
 });
+widget(label, { al
