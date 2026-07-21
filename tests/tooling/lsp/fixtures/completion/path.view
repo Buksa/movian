@@ -1,2 +1,3 @@
 #include "./widget.view"
 #include "../../../../"
+#import "./widget.view"

@@ -731,6 +731,11 @@ def run_completion_contexts() -> None:
                      cursor_after(text, 0, '#include "./'), "/"),
             contains=("./widget.view",))
         assert_completion(
+            "completion/path-import",
+            complete("completion/path-import", uri,
+                     cursor_after(text, 2, '#import "./'), "/"),
+            contains=("./widget.view",))
+        assert_completion(
             "completion/path-traversal",
             complete("completion/path-traversal", uri,
                      cursor_after(text, 1, '#include "../../../../'), "/"),
