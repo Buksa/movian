@@ -3,6 +3,7 @@ import prop = require('movian/prop');
 import http = require('movian/http');
 
 new page.Route(42, () => {}); // EXPECT_TS2345
+new page.Route(/foo/, () => {}); // EXPECT_TS2345
 new page.Searcher('Search', 'icon', (_page, query) => {
     const queryNumber: number = query; // EXPECT_TS2322
     void queryNumber;
@@ -30,6 +31,7 @@ const wrongTypedChild: prop.Property<number> = typed.title; // EXPECT_TS2322
 
 declare const dynamic: prop.Property<Record<string, unknown>>;
 const overNarrowDynamic: prop.Property<string> = dynamic.runtimeChild; // EXPECT_TS2322
+prop.release(prop.createRoot()); // EXPECT_TS2345
 
 void returnedString;
 void bodyString;

@@ -53,6 +53,15 @@ declare module 'movian/prop' {
     /** Source: exports.global = makeProp(np.global()). */
     export const global: Property;
 
+    /**
+     * Source: es_prop_release_duk() requires a raw Duktape pointer. No public
+     * producer exists because makeProp() exposes a Proxy-backed Property.
+     */
+    const rawPropertyBrand: unique symbol;
+    export interface RawProperty {
+        readonly [rawPropertyBrand]: never;
+    }
+
     /** Source: makeProp() returns new Proxy(prop, propHandler). */
     export function makeProp<T = Record<string, unknown>>(
         rawProp: unknown
@@ -76,8 +85,8 @@ declare module 'movian/prop' {
     /** Source: fnlist_prop.print / es_prop_print_duk(). */
     export function print(prop: Property): void;
 
-    /** Source: fnlist_prop.release / es_prop_release_duk(). */
-    export function release(prop: Property): void;
+    /** Source: fnlist_prop.release requires an unwrapped raw property pointer. */
+    export function release(prop: RawProperty): void;
 
     /** Source: fnlist_prop.create / es_prop_create_duk(). */
     export function create<T = Record<string, unknown>>(

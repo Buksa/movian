@@ -177,10 +177,10 @@ declare module 'movian/page' {
 
     class Route {
         /**
-         * Source: exports.Route(re, callback) and es_route_create(), whose
-         * duk_safe_to_string conversion accepts string or RegExp patterns.
+         * Source: es_route_create() prepends "^" to the string pattern.
+         * RegExp stringification retains slash delimiters as literal input.
          */
-        constructor(pattern: string | RegExp, callback: RouteCallback);
+        constructor(pattern: string, callback: RouteCallback);
 
         /** Source: exports.Route.prototype.destroy. */
         destroy(): void;
