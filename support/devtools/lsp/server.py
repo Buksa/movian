@@ -1083,13 +1083,6 @@ class LspServer:
                 for name in sorted(self.metadata.registered_widgets)
             ]
 
-        macros = self._local_macro_names(local_tokens)
-        if macros and re.match(r"^[ \t]*[A-Za-z_][A-Za-z0-9_]*$", line_prefix):
-            return [
-                self._completion_item(name, COMPLETION_FUNCTION,
-                                      "macro from current document")
-                for name in macros
-            ]
 
         block_depth = self._completion_block_depth(
             local_tokens, line_number, line_prefix, text_before_cursor)
@@ -1104,6 +1097,14 @@ class LspServer:
                         record.get("confidence", "unknown")))
                 for name, record in sorted(self.metadata.attributes.items())
             ]
+        macros = self._local_macro_names(local_tokens)
+        if macros and re.match(r"^[ \t]*[A-Za-z_][A-Za-z0-9_]*$", line_prefix):
+            return [
+                self._completion_item(name, COMPLETION_FUNCTION,
+                                      "macro from current document")
+                for name in macros
+            ]
+
 
         if re.search(r"(?:[:=,(]|\breturn\b)[ \t]*"
                      r"(?:[A-Za-z_][A-Za-z0-9_]*)?$", line_prefix):
