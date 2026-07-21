@@ -1,0 +1,4 @@
+#define LocalCard() {
+  widget(label, {});
+}
+LocalCard();

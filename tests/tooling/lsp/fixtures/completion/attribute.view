@@ -1,0 +1,6 @@
+widget(label, {
+  alpha: 1;
+});
+widget(image, {
+  source: "fixture";
+});
