@@ -12,9 +12,22 @@
   },
   "initialize": {
     "capabilities": {
+      "completionProvider": {
+        "triggerCharacters": [
+          ".",
+          "$",
+          "/"
+        ]
+      },
       "definitionProvider": true,
       "documentSymbolProvider": true,
       "hoverProvider": true,
+      "signatureHelpProvider": {
+        "triggerCharacters": [
+          "(",
+          ","
+        ]
+      },
       "textDocumentSync": {
         "change": 1,
         "openClose": true,

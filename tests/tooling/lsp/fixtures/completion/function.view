@@ -1,0 +1,10 @@
+widget(label, {
+  alpha: clamp(0, 1, 1);
+  caption: fmt("%s", "fixture");
+});
+fmt(clamp(0, 1, 2), value);
+fmt(")", value);
+fmt(
+  "%s",
+  value);
+fmt(/* ) */ "%s", value);

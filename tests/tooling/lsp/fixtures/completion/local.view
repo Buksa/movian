@@ -1,0 +1,12 @@
+#define LocalCard() {
+  widget(label, {});
+}
+LocalCard();
+widget(label, {
+  alpha: 1;
+  LocalCard();
+});
+FutureCard();
+#define FutureCard() {
+  widget(label, {});
+}

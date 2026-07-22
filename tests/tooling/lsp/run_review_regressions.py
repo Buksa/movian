@@ -22,9 +22,12 @@ if str(DEVTOOLS_ROOT) not in sys.path:
 
 from lsp.server import LspServer  # noqa: E402
 from lsp_client import LspClient  # noqa: E402
+from mdevlib.lspdoctor import _completion_labels  # noqa: E402
+
 
 
 SERVER = REPOSITORY_ROOT / "support" / "devtools" / "movian-lsp"
+COMPLETION_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "completion"
 
 
 def did_open(uri: str, text: str, version: int = 1,
@@ -52,6 +55,52 @@ def abort(client: LspClient) -> None:
     if client.process.poll() is None:
         client.process.kill()
         client.process.wait()
+
+
+def completion_items(context: str, result: Any) -> list[dict[str, Any]]:
+    if isinstance(result, dict):
+        result = result.get("items")
+    if not isinstance(result, list):
+        raise AssertionError("%s returned non-list completion: %s" %
+                             (context, result))
+    for item in result:
+        if not isinstance(item, dict) or not isinstance(item.get("label"), str):
+            raise AssertionError("%s returned invalid item: %s" %
+                                 (context, item))
+    return result
+
+
+def completion_labels(context: str, result: Any) -> list[str]:
+    return [item["label"] for item in completion_items(context, result)]
+
+
+def assert_completion(context: str, result: Any, *,
+                      exact: list[str] | None = None,
+                      contains: tuple[str, ...] = (),
+                      excludes: tuple[str, ...] = ()) -> list[str]:
+    labels = completion_labels(context, result)
+    if exact is not None and labels != exact:
+        raise AssertionError("%s list mismatch: expected=%s actual=%s" %
+                             (context, exact, labels))
+    missing = [label for label in contains if label not in labels]
+    forbidden = [label for label in excludes if label in labels]
+    if missing or forbidden:
+        raise AssertionError("%s membership mismatch: missing=%s forbidden=%s "
+                             "actual=%s" %
+                             (context, missing, forbidden, labels))
+    return labels
+
+
+def fixture_text(name: str) -> str:
+    return (COMPLETION_FIXTURES / name).read_text(encoding="utf-8")
+
+
+def cursor_after(text: str, line: int, prefix: str) -> dict[str, int]:
+    source_line = text.splitlines()[line]
+    if not source_line.startswith(prefix):
+        raise AssertionError("fixture line %d does not start with %r: %r" %
+                             (line, prefix, source_line))
+    return {"line": line, "character": len(prefix)}
 
 
 def assert_no_empty_diagnostics(client: LspClient, uri: str,
@@ -531,6 +580,349 @@ def run_js_relative_definition_confinement() -> None:
             raise
 
 
+def run_completion_contexts() -> None:
+    """Exercise all eight metadata-honest GLW completion contexts."""
+
+    artifact = json.loads(
+        (REPOSITORY_ROOT / "generated" / "movian-metadata.json").read_text(
+            encoding="utf-8"))
+    glw = artifact["glw"]
+    widgets = sorted({
+        name for record in glw["widgets"]
+        if record.get("registered") is True
+        for name in [record["name"], *record.get("aliases", [])]
+    })
+    attributes = sorted(record["name"] for record in glw["attributes"])
+    attribute_records = {record["name"]: record
+                         for record in glw["attributes"]}
+    roots = sorted(record["name"] for record in glw["scopes"])
+    align = next(record for record in glw["attributes"]
+                 if record["name"] == "align")
+    enum_values = align["enumValues"]
+    functions = {record["name"]: record for record in glw["functions"]}
+    if roots != sorted(("args", "clone", "core", "global", "nav", "parent",
+                        "parentview", "self", "ui", "view")):
+        raise AssertionError("completion/root artifact inventory changed: %s" %
+                             roots)
+
+    client = LspClient(SERVER, REPOSITORY_ROOT)
+    opened: list[str] = []
+    request_id = 100
+
+    def open_fixture(name: str, *, uri: str | None = None) -> tuple[str, str]:
+        nonlocal request_id
+        text = fixture_text(name)
+        target_uri = uri or (COMPLETION_FIXTURES / name).as_uri()
+        client.notify("textDocument/didOpen", did_open(target_uri, text))
+        opened.append(target_uri)
+        request_id += 1
+        return target_uri, text
+
+    def complete(context: str, uri: str, position: dict[str, int],
+                 trigger: str | None = None) -> Any:
+        nonlocal request_id
+        request_id += 1
+        params: dict[str, Any] = {
+            "textDocument": {"uri": uri},
+            "position": position,
+        }
+        if trigger is not None:
+            params["context"] = {"triggerKind": 2,
+                                 "triggerCharacter": trigger}
+        return client.request(request_id, "textDocument/completion", params)
+
+    def assert_path_item(context: str, result: Any, label: str, kind: int,
+                         position: dict[str, int],
+                         start_character: int) -> None:
+        item = next((candidate for candidate in completion_items(context, result)
+                     if candidate["label"] == label), None)
+        expected_edit = {
+            "range": {
+                "start": {
+                    "line": position["line"],
+                    "character": start_character,
+                },
+                "end": position,
+            },
+            "newText": label,
+        }
+        if item is None or item.get("kind") != kind \
+                or item.get("textEdit") != expected_edit:
+            raise AssertionError("%s item mismatch: %s" % (context, item))
+
+    try:
+        initialized = client.request(
+            request_id, "initialize", {"rootUri": REPOSITORY_ROOT.as_uri()})
+        triggers = initialized.get("capabilities", {}).get(
+            "completionProvider", {}).get("triggerCharacters")
+        if triggers != [".", "$", "/"]:
+            raise AssertionError("completion/capabilities triggers=%s" % triggers)
+        signature_triggers = initialized.get("capabilities", {}).get(
+            "signatureHelpProvider", {}).get("triggerCharacters")
+        if signature_triggers != ["(", ","]:
+            raise AssertionError("completion/signature capabilities=%s" %
+                                 signature_triggers)
+        client.notify("initialized", {})
+
+        uri, text = open_fixture("widget.view")
+        assert_completion(
+            "completion/widget",
+            complete("completion/widget", uri,
+                     cursor_after(text, 0, "widget(")),
+            exact=widgets)
+
+        uri, text = open_fixture("attribute.view")
+        attribute_result = complete(
+            "completion/attribute-label", uri,
+            cursor_after(text, 1, "  al"))
+        closed_catalog = assert_completion(
+            "completion/attribute-label",
+            attribute_result,
+            exact=attributes)
+        expected_details = {
+            name: "%s; confidence: %s" %
+            (record["valueType"], record["confidence"])
+            for name, record in attribute_records.items()
+        }
+        actual_details = {item["label"]: item.get("detail")
+                          for item in attribute_result}
+        if actual_details != expected_details:
+            raise AssertionError("completion/attribute detail mismatch")
+        assert_completion(
+            "completion/attribute-image",
+            complete("completion/attribute-image", uri,
+                     cursor_after(text, 4, "  so")),
+            exact=attributes)
+        assert_completion(
+            "completion/attribute-inline-widget",
+            complete("completion/attribute-inline-widget", uri,
+                     cursor_after(text, 6, "widget(label, { al")),
+            exact=attributes)
+        assert_completion(
+            "completion/attribute-same-line-statement",
+            complete("completion/attribute-same-line-statement", uri,
+                     cursor_after(
+                         text, 7, "widget(label, { alpha: 1; al")),
+            exact=attributes)
+        assert_completion(
+            "completion/attribute-comment",
+            complete("completion/attribute-comment", uri,
+                     cursor_after(text, 8, "// { al")),
+            exact=[])
+
+        stale_text = "widget(label, {\n  al"
+        client.notify("textDocument/didChange", {
+            "textDocument": {"uri": uri, "version": 2},
+            "contentChanges": [{"text": stale_text}],
+        })
+        assert_completion(
+            "completion/attribute-unsaved-invalid",
+            complete("completion/attribute-unsaved-invalid", uri,
+                     cursor_after(stale_text, 1, "  al")),
+            exact=attributes)
+        client.notify("textDocument/didChange", {
+            "textDocument": {"uri": uri, "version": 3},
+            "contentChanges": [{"text": text}],
+        })
+
+        uri, text = open_fixture("function.view")
+        function_result = complete(
+            "completion/function", uri,
+            cursor_after(text, 1, "  alpha: cl"))
+        expected_function_details = {
+            name: ("variadic GLW function"
+                   if record.get("variadic") is True
+                   else "GLW function; nargs: %s" %
+                   record.get("nargs", "unknown"))
+            for name, record in functions.items()
+        }
+        assert_completion(
+            "completion/function", function_result,
+            exact=sorted(functions))
+        function_details = {item["label"]: item.get("detail")
+                            for item in function_result}
+        if function_details != expected_function_details:
+            raise AssertionError("completion/function detail mismatch: %s" %
+                                 function_details)
+        request_id += 1
+        fixed = client.request(request_id, "textDocument/signatureHelp", {
+            "textDocument": {"uri": uri},
+            "position": cursor_after(text, 1, "  alpha: clamp("),
+        })
+        request_id += 1
+        variadic = client.request(request_id, "textDocument/signatureHelp", {
+            "textDocument": {"uri": uri},
+            "position": cursor_after(text, 2, "  caption: fmt("),
+        })
+        request_id += 1
+        nested = client.request(request_id, "textDocument/signatureHelp", {
+            "textDocument": {"uri": uri},
+            "position": cursor_after(text, 4, "fmt(clamp(0, 1, 2), "),
+        })
+        request_id += 1
+        quoted = client.request(request_id, "textDocument/signatureHelp", {
+            "textDocument": {"uri": uri},
+            "position": cursor_after(text, 5, 'fmt(")", '),
+        })
+        request_id += 1
+        multiline = client.request(request_id, "textDocument/signatureHelp", {
+            "textDocument": {"uri": uri},
+            "position": cursor_after(text, 7, '  "%s",'),
+        })
+        request_id += 1
+        commented = client.request(request_id, "textDocument/signatureHelp", {
+            "textDocument": {"uri": uri},
+            "position": cursor_after(text, 9, 'fmt(/* ) */ "%s",'),
+        })
+        expected_fixed = "clamp() [%d arguments]" % functions["clamp"]["nargs"]
+        expected_variadic = "fmt(...) [variadic]"
+        for context, result, expected in (
+                ("signature/fixed", fixed, expected_fixed),
+                ("signature/variadic", variadic, expected_variadic),
+                ("signature/nested", nested, expected_variadic),
+                ("signature/quoted-parenthesis", quoted, expected_variadic),
+                ("signature/multiline", multiline, expected_variadic),
+                ("signature/commented-parenthesis", commented,
+                 expected_variadic)):
+            signatures = result.get("signatures") if isinstance(result, dict) \
+                else None
+            if not isinstance(signatures, list) or len(signatures) != 1 \
+                    or signatures[0].get("label") != expected \
+                    or "parameters" in signatures[0]:
+                raise AssertionError("%s exposed unsupported signature: %s" %
+                                     (context, result))
+
+        uri, text = open_fixture("root.view")
+        assert_completion(
+            "completion/root",
+            complete("completion/root", uri,
+                     cursor_after(text, 1, "  caption: $"), "$"),
+            exact=roots, excludes=("event",))
+        assert_completion(
+            "completion/root-children",
+            complete("completion/root-children", uri,
+                     cursor_after(text, 1, "  caption: $self."), "."),
+            exact=[])
+        assert_completion(
+            "completion/root-comment",
+            complete("completion/root-comment", uri,
+                     cursor_after(text, 2, "  // $"), "$"),
+            exact=[])
+        assert_completion(
+            "completion/root-string",
+            complete("completion/root-string", uri,
+                     cursor_after(text, 3, '  caption: "$'), "$"),
+            exact=[])
+
+        uri, text = open_fixture("enum.view")
+        assert_completion(
+            "completion/enum-align",
+            complete("completion/enum-align", uri,
+                     cursor_after(text, 1, "  align: ")),
+            exact=enum_values)
+        assert_completion(
+            "completion/enum-inline",
+            complete("completion/enum-inline", uri,
+                     cursor_after(text, 3, "widget(label, { align: t")),
+            exact=enum_values)
+
+        uri, text = open_fixture("path.view")
+        relative_position = cursor_after(text, 0, '#include "./')
+        relative_result = complete(
+            "completion/path-relative", uri, relative_position, "/")
+        assert_completion(
+            "completion/path-relative", relative_result,
+            contains=("./menu/", "./widget.view"))
+        path_start = len('#include "')
+        assert_path_item(
+            "completion/path-relative-folder", relative_result,
+            "./menu/", 19, relative_position, path_start)
+        assert_path_item(
+            "completion/path-relative-file", relative_result,
+            "./widget.view", 17, relative_position, path_start)
+        assert_completion(
+            "completion/path-import",
+            complete("completion/path-import", uri,
+                     cursor_after(text, 2, '#import "./'), "/"),
+            contains=("./widget.view",))
+        assert_completion(
+            "completion/path-spaced-import",
+            complete("completion/path-spaced-import", uri,
+                     cursor_after(text, 3, '# import "./'), "/"),
+            contains=("./widget.view",))
+        child_position = cursor_after(text, 4, '#include "./menu/')
+        child_result = complete(
+            "completion/path-directory-child", uri, child_position, "/")
+        assert_completion(
+            "completion/path-directory-child", child_result,
+            contains=("./menu/child.view",))
+        assert_path_item(
+            "completion/path-directory-child-file", child_result,
+            "./menu/child.view", 17, child_position, path_start)
+        assert_completion(
+            "completion/path-traversal",
+            complete("completion/path-traversal", uri,
+                     cursor_after(text, 1, '#include "../../../../../../'), "/"),
+            exact=[])
+        moved_uri = (COMPLETION_FIXTURES / "moved" / "path.view").as_uri()
+        moved, moved_text = open_fixture("path.view", uri=moved_uri)
+        assert_completion(
+            "completion/path-uri-relative",
+            complete("completion/path-uri-relative", moved,
+                     cursor_after(moved_text, 0, '#include "./'), "/"),
+            exact=[])
+
+        uri, text = open_fixture("local.view")
+        assert_completion(
+            "completion/local-macro",
+            complete("completion/local-macro", uri,
+                     cursor_after(text, 3, "Loc")),
+            contains=("LocalCard",), excludes=("clamp", "label"))
+        assert_completion(
+            "completion/attribute-with-local-macro",
+            complete("completion/attribute-with-local-macro", uri,
+                     cursor_after(text, 5, "  al")),
+            exact=attributes)
+        assert_completion(
+            "completion/nested-local-macro",
+            complete("completion/nested-local-macro", uri,
+                     cursor_after(text, 6, "  Loc")),
+            contains=("LocalCard",), excludes=("align", "clamp"))
+        assert_completion(
+            "completion/future-macro",
+            complete("completion/future-macro", uri,
+                     cursor_after(text, 8, "Fut")),
+            exact=[])
+
+        uri, text = open_fixture("incomplete.view")
+        assert_completion(
+            "completion/incomplete-block",
+            complete("completion/incomplete-block", uri,
+                     cursor_after(text, 1, "  al")),
+            exact=closed_catalog)
+
+        for opened_uri in opened:
+            client.notify("textDocument/didClose", {
+                "textDocument": {"uri": opened_uri},
+            })
+        shutdown(client, request_id + 1)
+    except BaseException:
+        abort(client)
+        raise
+
+
+def run_doctor_completion_validation() -> None:
+    if _completion_labels([{"label": "widget"}]) != ["widget"]:
+        raise AssertionError("doctor rejected a valid completion list")
+    for malformed in (None, [{"label": "widget"}, None], [{"label": 1}]):
+        try:
+            _completion_labels(malformed)
+        except RuntimeError:
+            continue
+        raise AssertionError("doctor accepted malformed completion: %s" %
+                             (malformed,))
+
+
 def main() -> int:
     run_f1_command_builder()
     run_f2_shared_import_cleanup()
@@ -540,8 +932,10 @@ def main() -> int:
     run_js_lifecycle_and_metadata_definition()
     run_js_stale_save_and_close()
     run_js_relative_definition_confinement()
+    run_completion_contexts()
+    run_doctor_completion_validation()
     print(json.dumps({
-        "checks": 8,
+        "checks": 10,
         "status": "LSP REVIEW REGRESSIONS OK",
     }, sort_keys=True))
     return 0
