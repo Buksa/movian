@@ -906,9 +906,16 @@ def _run_reference_dts_check() -> tuple[bool, str]:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=False,
+            # The checker bounds its own tsc subprocesses, but this call
+            # still needs its own ceiling: a hang anywhere in that chain
+            # must not wedge `gen.py --check` (and mdevlib/lspdoctor.py's
+            # own outer timeout) indefinitely.
+            timeout=120,
         )
     except OSError as error:
         return False, "reference-dts: checker could not run: %s" % error
+    except subprocess.TimeoutExpired as error:
+        return False, "reference-dts: checker timed out: %s" % error
     return result.returncode == 0, result.stdout.rstrip()
 
 

@@ -21,6 +21,14 @@ METADATA_DIR = Path(__file__).resolve().parent
 REFERENCE_DIR = METADATA_DIR / "tests" / "reference"
 FIXTURE_DIR = METADATA_DIR / "tests" / "fixtures"
 
+# subprocess.run(timeout=...) only signals the direct child; a hung tsc
+# grandchild is not reaped when this fires. Bounding it keeps a stuck
+# compiler from wedging `gen.py --check` (and its own outer timeout,
+# mdevlib/lspdoctor.py's `_check_metadata`) indefinitely.
+SUBPROCESS_TIMEOUT_SECONDS = 60
+
+VARARGS_NARGS = -1
+
 
 @dataclass(frozen=True)
 class Signature:
@@ -34,50 +42,75 @@ class ModuleSpec:
     declaration: Path
     javascript: Path
     prototypes: tuple[str, ...]
+    # Native C function table this module's JS wraps, if any. Two shapes:
+    # - "wrapped-exports": `exports.NAME` in the JS is expected to be a
+    #   thin wrapper around a same-named native function (movian/prop's
+    #   pattern) -- full name+arity cross-check.
+    # - "native-calls": JS calls `require('native/X').NAME(...)` (directly
+    #   or via a `var alias = require('native/X')` alias) -- existence
+    #   cross-check only (a full call-site arity audit is out of scope for
+    #   this narrow parser; see _native_call_names). `native_module` is
+    #   the "X" in `native/X` -- required so a file that requires several
+    #   different native/* modules (http.js also uses native/string,
+    #   page.js also uses native/metadata and native/hook) doesn't have
+    #   an unrelated module's calls attributed to this table.
+    native_c: Path | None = None
+    native_table: str | None = None
+    native_module: str | None = None
+    native_kind: str = "wrapped-exports"
 
+
+JS_MODULE_DIR = REPO_ROOT / "res" / "ecmascript" / "modules" / "movian"
+ECMASCRIPT_C_DIR = REPO_ROOT / "src" / "ecmascript"
 
 MODULES = (
     ModuleSpec(
         "movian/page",
         REFERENCE_DIR / "movian-page.d.ts",
-        REPO_ROOT / "res" / "ecmascript" / "modules" / "movian" /
-        "page.js",
+        JS_MODULE_DIR / "page.js",
         ("Item", "Page", "Route", "Searcher"),
+        native_c=ECMASCRIPT_C_DIR / "es_route.c",
+        native_table="fnlist_route",
+        native_module="route",
+        native_kind="native-calls",
     ),
     ModuleSpec(
         "movian/prop",
         REFERENCE_DIR / "movian-prop.d.ts",
-        REPO_ROOT / "res" / "ecmascript" / "modules" / "movian" /
-        "prop.js",
+        JS_MODULE_DIR / "prop.js",
         (),
+        native_c=ECMASCRIPT_C_DIR / "es_prop.c",
+        native_table="fnlist_prop",
+        native_kind="wrapped-exports",
     ),
     ModuleSpec(
         "movian/http",
         REFERENCE_DIR / "movian-http.d.ts",
-        REPO_ROOT / "res" / "ecmascript" / "modules" / "movian" /
-        "http.js",
+        JS_MODULE_DIR / "http.js",
         ("HttpResponse",),
+        native_c=ECMASCRIPT_C_DIR / "es_io.c",
+        native_table="fnlist_io",
+        native_module="io",
+        native_kind="native-calls",
     ),
 )
 
-PROP_C = REPO_ROOT / "src" / "ecmascript" / "es_prop.c"
 POSITIVE_FIXTURE = FIXTURE_DIR / "reference-positive.ts"
 NEGATIVE_FIXTURE = FIXTURE_DIR / "reference-negative.ts"
 
 EXPORT_ASSIGN_RE = re.compile(
     r"^\s*exports\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=", re.MULTILINE)
-EXPORT_FUNCTION_RE = re.compile(
-    r"^\s*exports\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
-    r"function\s*\(([^)]*)\)", re.MULTILINE)
+EXPORT_FUNCTION_HEAD_RE = re.compile(
+    r"^\s*exports\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*function\s*\(",
+    re.MULTILINE)
 EXPORT_ALIAS_RE = re.compile(
     r"^\s*exports\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
     r"([A-Za-z_$][A-Za-z0-9_$]*)\s*;", re.MULTILINE)
-LOCAL_FUNCTION_RE = re.compile(
-    r"^\s*function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([^)]*)\)",
-    re.MULTILINE)
-PROTOTYPE_RE = re.compile(
+LOCAL_FUNCTION_HEAD_RE = re.compile(
+    r"^\s*function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", re.MULTILINE)
+PROTOTYPE_HEAD_RE = re.compile(
     r"^\s*(?:exports\.)?([A-Za-z_$][A-Za-z0-9_$]*)\.prototype\."
-    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*function\s*\(([^)]*)\)",
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*function\s*\(",
     re.MULTILINE)
 DECL_FUNCTION_RE = re.compile(
     r"^\s*export\s+function\s+([A-Za-z_$][A-Za-z0-9_$]*)"
@@ -86,12 +119,28 @@ DECL_VALUE_RE = re.compile(
     r"^\s*export\s+(?:const|var|let)\s+"
     r"([A-Za-z_$][A-Za-z0-9_$]*)\s*:", re.MULTILINE)
 DECL_CLASS_RE = re.compile(
-    r"^\s*(?:export\s+)?class\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\{",
-    re.MULTILINE)
+    r"^\s*(?:export\s+)?class\s+([A-Za-z_$][A-Za-z0-9_$]*)"
+    r"(?:\s+(?:extends|implements)\s+[^{]+)?\s*\{", re.MULTILINE)
 METHOD_RE = re.compile(
     r"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", re.MULTILINE)
+ACCESSOR_RE = re.compile(
+    r"^\s*(get|set)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", re.MULTILINE)
+FIELD_RE = re.compile(
+    r"^\s*(?:readonly\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\??\s*:(?!\s*\()",
+    re.MULTILINE)
 NATIVE_ENTRY_RE = re.compile(
-    r'\{\s*"([^"]+)"\s*,\s*[A-Za-z_]\w*\s*,\s*(-?\d+)\s*\}')
+    r'\{\s*"([^"]+)"\s*,\s*[A-Za-z_]\w*\s*,\s*'
+    r'(-?\d+|DUK_VARARGS)\s*\}')
+DEFINE_PROPERTIES_HEAD_RE = re.compile(
+    r"Object\.defineProperties\(\s*this\s*,\s*\{")
+DEFINE_PROPERTY_ENTRY_RE = re.compile(
+    r"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*\{", re.MULTILINE)
+DEFINE_PROPERTY_GET_RE = re.compile(r"\bget\s*:\s*function\b")
+JS_CONSTRUCTOR_HEAD_RE = re.compile(
+    r"^\s*function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", re.MULTILINE)
+NESTED_FUNCTION_HEAD_RE = re.compile(r"\bfunction\b[^{]*\{")
+THIS_FIELD_RE = re.compile(
+    r"(?<![.\w])this\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
 DIAGNOSTIC_RE = re.compile(
     r"^(.*?)\((\d+),(\d+)\): error TS(\d+):", re.MULTILINE)
 EXPECTED_DIAGNOSTIC_RE = re.compile(r"EXPECT_TS(\d+)")
@@ -102,6 +151,65 @@ def _read(path: Path) -> str:
         raise ValueError("required file is missing: %s" % path.relative_to(
             REPO_ROOT))
     return path.read_text(encoding="utf-8")
+
+
+def _mask_js(text: str, mask_strings: bool = True) -> str:
+    """Blank out // and /* */ comments, preserving line/column positions,
+    so export/call regexes can't misfire on text that only *looks* like a
+    match inside a comment. Quoted strings are ALSO blanked by default
+    (mask_strings=True) for the same reason -- but callers that need to
+    read string contents (e.g. a require('native/x') module path) must
+    pass mask_strings=False, since blanking the quotes themselves would
+    make those strings unrecoverable."""
+    chars = list(text)
+    i = 0
+    length = len(chars)
+    quote: str | None = None
+    in_block_comment = False
+    while i < length:
+        char = chars[i]
+        if in_block_comment:
+            if char == "*" and i + 1 < length and chars[i + 1] == "/":
+                chars[i] = chars[i + 1] = " "
+                in_block_comment = False
+                i += 2
+            else:
+                if char != "\n":
+                    chars[i] = " "
+                i += 1
+            continue
+        if quote is not None:
+            if char == "\\" and i + 1 < length:
+                if mask_strings:
+                    chars[i] = chars[i + 1] = " "
+                i += 2
+                continue
+            if char == quote:
+                quote = None
+            if mask_strings and char != "\n":
+                chars[i] = " "
+            i += 1
+            continue
+        if char in "'\"`":
+            quote = char
+            if mask_strings:
+                chars[i] = " "
+            i += 1
+            continue
+        if char == "/" and i + 1 < length and chars[i + 1] == "/":
+            j = i
+            while j < length and chars[j] != "\n":
+                chars[j] = " "
+                j += 1
+            i = j
+            continue
+        if char == "/" and i + 1 < length and chars[i + 1] == "*":
+            chars[i] = chars[i + 1] = " "
+            in_block_comment = True
+            i += 2
+            continue
+        i += 1
+    return "".join(chars)
 
 
 def _split_parameters(parameters: str) -> list[str]:
@@ -138,18 +246,58 @@ def _split_parameters(parameters: str) -> list[str]:
     return [part for part in parts if part]
 
 
+def _is_required(part: str) -> bool:
+    """A parameter has no default value unless it has a *top-level* `=`
+    (not inside nested brackets/parens/braces, and not part of an
+    arrow-function type's `=>`)."""
+    name_and_type = part.split(":", 1)
+    if "?" in name_and_type[0]:
+        return False
+    depth = 0
+    escaped = False
+    quote: str | None = None
+    chars = part
+    i = 0
+    while i < len(chars):
+        char = chars[i]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            i += 1
+            continue
+        if char in "'\"`":
+            quote = char
+        elif char in "([{<":
+            depth += 1
+        elif char in ")]}>":
+            depth = max(0, depth - 1)
+        elif char == "=" and depth == 0:
+            if chars[i:i + 2] == "=>":
+                i += 2
+                continue
+            return False
+        i += 1
+    return True
+
+
 def _signature(parameters: str) -> Signature:
     parts = _split_parameters(parameters)
-    required = sum(
-        1 for part in parts
-        if "?" not in part.split(":", 1)[0] and "=" not in part
-    )
+    required = sum(1 for part in parts if _is_required(part))
     return Signature(required, len(parts))
+
+
+def _max_arity(signatures: list[Signature]) -> int:
+    return max(signature.total for signature in signatures)
 
 
 def _balanced_content(text: str, open_index: int,
                       opener: str, closer: str) -> tuple[str, int]:
-    if open_index >= len(text) or text[open_index] != opener:
+    if open_index < 0 or open_index >= len(text) or \
+            text[open_index] != opener:
         raise ValueError("narrow parser expected %r at offset %d" %
                          (opener, open_index))
     depth = 0
@@ -178,7 +326,8 @@ def _balanced_content(text: str, open_index: int,
 
 def _declaration_block(text: str, kind: str, name: str) -> str:
     match = re.search(
-        r"^\s*(?:export\s+)?%s\s+%s(?:\s*<[^>{}]*>)?\s*\{" %
+        r"^\s*(?:export\s+)?%s\s+%s(?:\s*<[^>{}]*>)?"
+        r"(?:\s*(?:extends|implements)\s+[^{]+)?\s*\{" %
         (re.escape(kind), re.escape(name)), text, re.MULTILINE)
     if match is None:
         raise ValueError("missing %s %s declaration" % (kind, name))
@@ -186,13 +335,25 @@ def _declaration_block(text: str, kind: str, name: str) -> str:
     return _balanced_content(text, open_index, "{", "}")[0]
 
 
-def _signatures_after_matches(text: str,
-                              matches: list[re.Match[str]]) \
+def _signature_at_paren(text: str, search_start: int) -> Signature:
+    open_index = text.find("(", search_start)
+    parameters, _ = _balanced_content(text, open_index, "(", ")")
+    return _signature(parameters)
+
+
+def _signatures_after_head_matches(text: str,
+                                   matches: list[re.Match[str]],
+                                   name_group: int = 1) \
         -> dict[str, list[Signature]]:
+    """Like _signatures_after_matches, but `matches` are HEAD-only regexes
+    that consume through their own opening '(' (DECL_FUNCTION_RE-style),
+    so the parameter list always starts at match.end() - 1 -- avoiding the
+    "find the first '(' in the whole span" trap when the head contains an
+    earlier unrelated '(' (e.g. a generic constraint's function type)."""
     result: dict[str, list[Signature]] = {}
     for match in matches:
-        name = match.group(1)
-        open_index = text.find("(", match.start(), match.end() + 1)
+        name = match.group(name_group)
+        open_index = match.end() - 1
         parameters, _ = _balanced_content(text, open_index, "(", ")")
         result.setdefault(name, []).append(_signature(parameters))
     return result
@@ -201,7 +362,7 @@ def _signatures_after_matches(text: str,
 def _declared_runtime(text: str) \
         -> tuple[set[str], dict[str, list[Signature]], dict[str, str]]:
     function_matches = list(DECL_FUNCTION_RE.finditer(text))
-    signatures = _signatures_after_matches(text, function_matches)
+    signatures = _signatures_after_head_matches(text, function_matches)
     values = set(signatures)
     kinds = {name: "function" for name in signatures}
 
@@ -218,7 +379,8 @@ def _declared_runtime(text: str) \
         ]
         if not constructor_matches:
             raise ValueError("class %s has no constructor" % name)
-        constructor = _signatures_after_matches(block, constructor_matches)
+        constructor = _signatures_after_head_matches(
+            block, constructor_matches)
         signatures[name] = constructor["constructor"]
         values.add(name)
         kinds[name] = "class"
@@ -234,22 +396,63 @@ def _declared_methods(text: str, type_name: str) \
     matches = [
         match for match in METHOD_RE.finditer(block)
         if match.group(1) != "constructor"
+        and not ACCESSOR_RE.match(
+            block[max(0, match.start() - 4):match.end()])
     ]
-    return _signatures_after_matches(block, matches)
+    return _signatures_after_head_matches(block, matches)
+
+
+def _mask_method_parameter_lists(block: str) -> str:
+    """Blank out every method's `(...)` span so a parameter written on its
+    own line (common with this file's multi-line signature style) can't be
+    misread by FIELD_RE as a top-level `NAME: Type;` interface member."""
+    chars = list(block)
+    for match in METHOD_RE.finditer(block):
+        open_index = match.end() - 1
+        try:
+            _, close_index = _balanced_content(block, open_index, "(", ")")
+        except ValueError:
+            continue
+        for index in range(open_index, close_index + 1):
+            if chars[index] != "\n":
+                chars[index] = " "
+    return "".join(chars)
+
+
+def _declared_members(text: str, type_name: str) -> set[str]:
+    """Every non-method member name declared on an interface/class:
+    accessor pairs (`get X()`/`set X()`) and plain `readonly X: T;` / `X?:
+    T;` fields, unified into one set -- the JS side may realize either as
+    a `this.x = ...` assignment or as an Object.defineProperties() entry
+    (with or without get/set), and that shape is not part of the public
+    contract this checker verifies; only presence of the member is."""
+    kind = "class" if re.search(
+        r"^\s*(?:export\s+)?class\s+%s\b" % re.escape(type_name),
+        text, re.MULTILINE) else "interface"
+    block = _declaration_block(text, kind, type_name)
+    method_names = {match.group(1) for match in METHOD_RE.finditer(block)}
+    accessor_names = {match.group(2) for match in ACCESSOR_RE.finditer(block)}
+    field_block = _mask_method_parameter_lists(block)
+    fields = {
+        match.group(1) for match in FIELD_RE.finditer(field_block)
+        if match.group(1) not in method_names
+    }
+    return accessor_names | fields
 
 
 def _javascript_exports(text: str) \
         -> tuple[set[str], dict[str, Signature]]:
-    names = set(EXPORT_ASSIGN_RE.findall(text)) - {"__proto__"}
+    masked = _mask_js(text)
+    names = set(EXPORT_ASSIGN_RE.findall(masked)) - {"__proto__"}
     callables = {
-        name: _signature(parameters)
-        for name, parameters in EXPORT_FUNCTION_RE.findall(text)
+        match.group(1): _signature_at_paren(masked, match.end() - 1)
+        for match in EXPORT_FUNCTION_HEAD_RE.finditer(masked)
     }
     local_functions = {
-        name: _signature(parameters)
-        for name, parameters in LOCAL_FUNCTION_RE.findall(text)
+        match.group(1): _signature_at_paren(masked, match.end() - 1)
+        for match in LOCAL_FUNCTION_HEAD_RE.finditer(masked)
     }
-    for exported, local in EXPORT_ALIAS_RE.findall(text):
+    for exported, local in EXPORT_ALIAS_RE.findall(masked):
         if local in local_functions:
             callables[exported] = local_functions[local]
     return names, callables
@@ -257,27 +460,127 @@ def _javascript_exports(text: str) \
 
 def _javascript_methods(text: str, type_name: str) \
         -> dict[str, Signature]:
+    masked = _mask_js(text)
     return {
-        method: _signature(parameters)
-        for owner, method, parameters in PROTOTYPE_RE.findall(text)
-        if owner == type_name
+        match.group(2): _signature_at_paren(masked, match.end() - 1)
+        for match in PROTOTYPE_HEAD_RE.finditer(masked)
+        if match.group(1) == type_name
     }
 
 
-def _native_prop_functions() -> dict[str, int]:
-    text = _read(PROP_C)
+def _constructor_body(text: str, type_name: str) -> str | None:
+    match = None
+    for candidate in JS_CONSTRUCTOR_HEAD_RE.finditer(text):
+        if candidate.group(1) == type_name:
+            match = candidate
+            break
+    if match is None:
+        return None
+    open_index = text.find("{", match.end() - 1)
+    if open_index == -1:
+        return None
+    try:
+        body, _ = _balanced_content(text, open_index, "{", "}")
+    except ValueError:
+        return None
+    return body
+
+
+def _mask_nested_functions(body: str) -> str:
+    """Blank out every nested `function(...) {...}` literal in a
+    constructor body so top-level `this.x = ...` assignments can be told
+    apart from assignments inside a closure (event handler, accessor
+    getter/setter) that are not meant to be public instance fields."""
+    chars = list(body)
+    for match in NESTED_FUNCTION_HEAD_RE.finditer(body):
+        open_index = match.end() - 1
+        if chars[open_index] != "{":
+            continue
+        if chars[open_index] == " ":
+            continue  # already masked by an enclosing nested function
+        try:
+            _, close_index = _balanced_content(body, open_index, "{", "}")
+        except ValueError:
+            continue
+        for index in range(match.start(), close_index + 1):
+            if chars[index] != "\n":
+                chars[index] = " "
+    return "".join(chars)
+
+
+def _javascript_defined_properties(body: str) -> set[str]:
+    """Top-level keys of every `Object.defineProperties(this, {...})` call
+    in a constructor body -- covers both accessor entries (`{get, set}`)
+    and plain read-only value entries (`{value: ...}`); the checker does
+    not need to distinguish the two shapes, only that the member exists."""
+    names: set[str] = set()
+    for header in DEFINE_PROPERTIES_HEAD_RE.finditer(body):
+        open_index = header.end() - 1
+        try:
+            block, _ = _balanced_content(body, open_index, "{", "}")
+        except ValueError:
+            continue
+        names.update(
+            entry.group(1) for entry in DEFINE_PROPERTY_ENTRY_RE.finditer(block))
+    return names
+
+
+def _javascript_members(text: str, type_name: str) -> set[str]:
+    """Every non-method member the constructor gives an instance: plain
+    top-level `this.x = ...` assignments (excluding anything inside a
+    nested function literal -- an event-handler closure's own `this.y =`
+    is not an instance field of the type whose constructor hosts it) plus
+    every Object.defineProperties() entry, regardless of its shape."""
+    body = _constructor_body(text, type_name)
+    if body is None:
+        return set()
+    masked_body = _mask_nested_functions(_mask_js(body))
+    fields = set(THIS_FIELD_RE.findall(masked_body)) - {"__proto__"}
+    return fields | _javascript_defined_properties(body)
+
+
+def _native_functions(path: Path, table_name: str) -> dict[str, int]:
+    text = _read(path)
     table_match = re.search(
-        r"static\s+const\s+duk_function_list_entry\s+fnlist_prop\[\]\s*="
-        r"\s*\{(.*?)^\s*\};", text, re.MULTILINE | re.DOTALL)
+        r"static\s+const\s+duk_function_list_entry\s+%s\[\]\s*="
+        r"\s*\{(.*?)^\s*\};" % re.escape(table_name), text,
+        re.MULTILINE | re.DOTALL)
     if table_match is None:
-        raise ValueError("src/ecmascript/es_prop.c: fnlist_prop[] not found")
+        raise ValueError("%s: %s[] not found" %
+                         (path.relative_to(REPO_ROOT), table_name))
     entries = {
-        name: int(nargs)
+        name: (VARARGS_NARGS if nargs == "DUK_VARARGS" else int(nargs))
         for name, nargs in NATIVE_ENTRY_RE.findall(table_match.group(1))
     }
     if not entries:
-        raise ValueError("src/ecmascript/es_prop.c: fnlist_prop[] is empty")
+        raise ValueError("%s: %s[] is empty" %
+                         (path.relative_to(REPO_ROOT), table_name))
     return entries
+
+
+def _native_call_names(javascript: str, native_module: str) -> set[str]:
+    """Names called as `require('native/MODULE').NAME(...)` (directly, or
+    via a `var alias = require('native/MODULE')` alias), scoped to one
+    specific native/MODULE -- a JS file commonly requires several
+    different native/* modules (http.js also uses native/string, page.js
+    also uses native/metadata and native/hook), and a call through one of
+    those must never be attributed to a different module's table."""
+    module = re.escape(native_module)
+    alias_re = re.compile(
+        r"(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
+        r"require\(\s*['\"]native/%s['\"]\s*\)" % module)
+    call_re = re.compile(
+        r"(?:require\(\s*['\"]native/%s['\"]\s*\)|"
+        r"\b([A-Za-z_$][A-Za-z0-9_$]*)\b)"
+        r"\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(" % module)
+    masked = _mask_js(javascript, mask_strings=False)
+    aliases = {match.group(1) for match in alias_re.finditer(masked)}
+    names: set[str] = set()
+    for match in call_re.finditer(masked):
+        receiver = match.group(1)
+        if receiver is None or receiver in aliases:
+            names.add(match.group(2))
+    return names
 
 
 def _compare_name_sets(errors: list[str], module: str, label: str,
@@ -290,82 +593,145 @@ def _compare_name_sets(errors: list[str], module: str, label: str,
         errors.append("%s: phantom declaration %s" % (module, member))
 
 
-def _max_arity(signatures: list[Signature]) -> int:
-    return max(signature.total for signature in signatures)
+def _check_native_table(errors: list[str], spec: ModuleSpec,
+                        declared_signatures: dict[str, list[Signature]],
+                        declared_kinds: dict[str, str],
+                        javascript: str) -> None:
+    if spec.native_c is None or spec.native_table is None:
+        return
+    native = _native_functions(spec.native_c, spec.native_table)
+
+    if spec.native_kind == "native-calls":
+        # Some native tables (fnlist_io, fnlist_route) are shared across
+        # several JS modules (e.g. fnlist_io's `xmlrpc` entry is called
+        # from movian/xmlrpc.js, not http.js) -- this checker only has
+        # this one module's source in scope, so it verifies the direction
+        # it can actually prove: every native call this module's source
+        # DOES make must name a function that genuinely exists in the
+        # table, catching drift where the JS calls something renamed or
+        # removed from the C side. It does not require full table
+        # coverage from a single JS file.
+        called = _native_call_names(javascript, spec.native_module)
+        for name in sorted(called - set(native)):
+            errors.append(
+                "%s: calls native %s.%s, which does not exist in %s" %
+                (spec.name, spec.native_table, name,
+                 spec.native_c.relative_to(REPO_ROOT)))
+        return
+
+    # wrapped-exports: exports.NAME is expected to be a thin wrapper
+    # around the same-named native function (movian/prop's pattern).
+    for name, nargs in sorted(native.items()):
+        if name == "global":
+            if nargs != 0:
+                errors.append(
+                    "%s: native global nargs=%d vs 0 wrapped" %
+                    (spec.name, nargs))
+            if declared_kinds.get(name) != "value":
+                errors.append(
+                    "%s: global must declare the wrapped np.global() "
+                    "value" % spec.name)
+            if not re.search(r"exports\.global\s*=.*np\.global\(\s*\)",
+                             javascript, re.DOTALL):
+                errors.append(
+                    "%s: global does not map fnlist_prop global nargs=0 "
+                    "through np.global()" % spec.name)
+            continue
+        signatures = declared_signatures.get(name)
+        if signatures is None:
+            continue
+        if nargs == VARARGS_NARGS:
+            continue
+        declared_nargs = _max_arity(signatures)
+        if declared_nargs != nargs:
+            errors.append(
+                "%s: native %s nargs=%d vs %d declared" %
+                (spec.name, name, nargs, declared_nargs))
 
 
-def check_source_shapes() -> list[str]:
-    errors: list[str] = []
-    native_prop = _native_prop_functions()
+def _check_module(errors: list[str], spec: ModuleSpec) -> None:
+    declaration = _read(spec.declaration)
+    javascript = _read(spec.javascript)
+    declared_names, declared_signatures, declared_kinds = \
+        _declared_runtime(declaration)
+    js_names, js_callables = _javascript_exports(javascript)
+    runtime_names = set(js_names)
+    if spec.native_c is not None and spec.native_table is not None and \
+            spec.native_kind == "wrapped-exports":
+        runtime_names.update(_native_functions(
+            spec.native_c, spec.native_table))
+    _compare_name_sets(errors, spec.name, "export",
+                       runtime_names, declared_names)
 
-    for spec in MODULES:
-        declaration = _read(spec.declaration)
-        javascript = _read(spec.javascript)
-        declared_names, declared_signatures, declared_kinds = \
-            _declared_runtime(declaration)
-        js_names, js_callables = _javascript_exports(javascript)
-        runtime_names = set(js_names)
-        if spec.name == "movian/prop":
-            runtime_names.update(native_prop)
-        _compare_name_sets(errors, spec.name, "export",
-                           runtime_names, declared_names)
+    # Signature.required is computed (see _is_required) but deliberately
+    # NOT compared here: this codebase's declarations routinely mark a
+    # trailing JS parameter optional in the .d.ts (e.g. Item.prototype.
+    # addOptAction's `subtype`) even though the JS function itself has no
+    # `= default` -- JS callers can omit a trailing argument regardless,
+    # and several accepted fixtures already rely on that looser contract.
+    # A strict required-vs-required check was tried while fixing this
+    # file and produced false positives against those already-accepted
+    # signatures, so only .total (the argument COUNT) is enforced.
+    for name, source_signature in sorted(js_callables.items()):
+        signatures = declared_signatures.get(name)
+        if signatures is None:
+            continue
+        if _max_arity(signatures) != source_signature.total:
+            errors.append(
+                "%s: %s call shape is %d source args vs %d declared" %
+                (spec.name, name, source_signature.total,
+                 _max_arity(signatures)))
 
-        for name, source_signature in sorted(js_callables.items()):
-            signatures = declared_signatures.get(name)
+    for type_name in spec.prototypes:
+        source_methods = _javascript_methods(javascript, type_name)
+        try:
+            declared_methods = _declared_methods(declaration, type_name)
+        except ValueError as error:
+            errors.append("%s: %s" % (spec.name, error))
+            continue
+        _compare_name_sets(errors, spec.name, type_name + ".",
+                           set(source_methods), set(declared_methods))
+        for method, source_signature in sorted(source_methods.items()):
+            signatures = declared_methods.get(method)
             if signatures is None:
                 continue
             if _max_arity(signatures) != source_signature.total:
                 errors.append(
-                    "%s: %s call shape is %d source args vs %d declared" %
-                    (spec.name, name, source_signature.total,
-                     _max_arity(signatures)))
+                    "%s: %s.%s call shape is %d source args vs %d "
+                    "declared" %
+                    (spec.name, type_name, method,
+                     source_signature.total, _max_arity(signatures)))
 
-        for type_name in spec.prototypes:
-            source_methods = _javascript_methods(javascript, type_name)
-            try:
-                declared_methods = _declared_methods(declaration, type_name)
-            except ValueError as error:
-                errors.append("%s: %s" % (spec.name, error))
-                continue
-            _compare_name_sets(errors, spec.name, type_name + ".",
-                               set(source_methods), set(declared_methods))
-            for method, source_signature in sorted(source_methods.items()):
-                signatures = declared_methods.get(method)
-                if signatures is None:
-                    continue
-                if _max_arity(signatures) != source_signature.total:
-                    errors.append(
-                        "%s: %s.%s call shape is %d source args vs %d "
-                        "declared" %
-                        (spec.name, type_name, method,
-                         source_signature.total, _max_arity(signatures)))
+        # Non-method members (accessors and plain fields) are checked in
+        # the PHANTOM direction only: every declared member must actually
+        # exist on the real instance. The reverse (every instance
+        # property must be declared) is deliberately not enforced --
+        # constructors legitimately carry private bookkeeping state
+        # (e.g. Item/Page's internal `eventhandlers`) that was never
+        # meant to be part of the public .d.ts surface, and this narrow
+        # parser cannot reliably distinguish "public" from "private" JS
+        # convention beyond the underscore-suffix idiom (Page's own
+        # `paginator_`) that this file already excludes via the nested-
+        # function masking in _javascript_members.
+        source_members = _javascript_members(javascript, type_name)
+        declared_members = _declared_members(declaration, type_name)
+        for member in sorted(declared_members - source_members):
+            errors.append("%s: phantom declaration %s.%s" %
+                          (spec.name, type_name, member))
 
-        if spec.name == "movian/prop":
-            for name, nargs in sorted(native_prop.items()):
-                if name == "global":
-                    if nargs != 0:
-                        errors.append(
-                            "movian/prop: native global nargs=%d vs 0 wrapped"
-                            % nargs)
-                    if declared_kinds.get(name) != "value":
-                        errors.append(
-                            "movian/prop: global must declare the wrapped "
-                            "np.global() value")
-                    if not re.search(r"exports\.global\s*=.*np\.global\(\s*\)",
-                                     javascript):
-                        errors.append(
-                            "movian/prop: global does not map fnlist_prop "
-                            "global nargs=0 through np.global()")
-                    continue
-                signatures = declared_signatures.get(name)
-                if signatures is None:
-                    continue
-                declared_nargs = _max_arity(signatures)
-                if declared_nargs != nargs:
-                    errors.append(
-                        "movian/prop: native %s nargs=%d vs %d declared" %
-                        (name, nargs, declared_nargs))
+    _check_native_table(errors, spec, declared_signatures, declared_kinds,
+                        javascript)
 
+
+def check_source_shapes() -> list[str]:
+    errors: list[str] = []
+    for spec in MODULES:
+        try:
+            _check_module(errors, spec)
+        except ValueError as error:
+            # A parse failure in one module's source/declaration must not
+            # silently abort verification of the other modules.
+            errors.append("%s: %s" % (spec.name, error))
     return errors
 
 
@@ -391,6 +757,7 @@ def _run_tsc(tsc: str, fixture: Path) -> subprocess.CompletedProcess[str]:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         check=False,
+        timeout=SUBPROCESS_TIMEOUT_SECONDS,
     )
 
 
@@ -437,13 +804,15 @@ def main() -> int:
     try:
         errors = check_source_shapes()
     except (OSError, ValueError) as error:
-        print("reference-dts: %s" % error, file=sys.stderr)
+        print("reference-dts: %s: %s" % (type(error).__name__, error),
+              file=sys.stderr)
         return 1
     if errors:
         for error in errors:
             print("reference-dts: %s" % error, file=sys.stderr)
         return 1
-    print("reference-dts: source shapes OK (3 modules; native names+nargs)")
+    print("reference-dts: source shapes OK (%d modules; native names+nargs)"
+          % len(MODULES))
 
     tsc = shutil.which("tsc")
     if tsc is None:
@@ -452,9 +821,9 @@ def main() -> int:
 
     try:
         errors = check_typescript(tsc)
-    except (OSError, ValueError) as error:
-        print("reference-dts: TypeScript check failed to run: %s" % error,
-              file=sys.stderr)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        print("reference-dts: TypeScript check failed to run: %s: %s" %
+              (type(error).__name__, error), file=sys.stderr)
         return 1
     if errors:
         for error in errors:
