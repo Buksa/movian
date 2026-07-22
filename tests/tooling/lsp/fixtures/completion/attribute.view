@@ -4,4 +4,6 @@ widget(label, {
 widget(image, {
   source: "fixture";
 });
-widget(label, { al
+widget(label, { alpha: 1; });
+widget(label, { alpha: 1; alpha: 1; });
+// { al

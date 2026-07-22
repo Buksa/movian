@@ -1,3 +1,4 @@
 widget(label, {
   align: top;
 });
+widget(label, { align: top; });

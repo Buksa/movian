@@ -22,6 +22,8 @@ if str(DEVTOOLS_ROOT) not in sys.path:
 
 from lsp.server import LspServer  # noqa: E402
 from lsp_client import LspClient  # noqa: E402
+from mdevlib.lspdoctor import _completion_labels  # noqa: E402
+
 
 
 SERVER = REPOSITORY_ROOT / "support" / "devtools" / "movian-lsp"
@@ -55,19 +57,21 @@ def abort(client: LspClient) -> None:
         client.process.wait()
 
 
-def completion_labels(context: str, result: Any) -> list[str]:
+def completion_items(context: str, result: Any) -> list[dict[str, Any]]:
     if isinstance(result, dict):
         result = result.get("items")
     if not isinstance(result, list):
         raise AssertionError("%s returned non-list completion: %s" %
                              (context, result))
-    labels = []
     for item in result:
         if not isinstance(item, dict) or not isinstance(item.get("label"), str):
             raise AssertionError("%s returned invalid item: %s" %
                                  (context, item))
-        labels.append(item["label"])
-    return labels
+    return result
+
+
+def completion_labels(context: str, result: Any) -> list[str]:
+    return [item["label"] for item in completion_items(context, result)]
 
 
 def assert_completion(context: str, result: Any, *,
@@ -627,6 +631,25 @@ def run_completion_contexts() -> None:
                                  "triggerCharacter": trigger}
         return client.request(request_id, "textDocument/completion", params)
 
+    def assert_path_item(context: str, result: Any, label: str, kind: int,
+                         position: dict[str, int],
+                         start_character: int) -> None:
+        item = next((candidate for candidate in completion_items(context, result)
+                     if candidate["label"] == label), None)
+        expected_edit = {
+            "range": {
+                "start": {
+                    "line": position["line"],
+                    "character": start_character,
+                },
+                "end": position,
+            },
+            "newText": label,
+        }
+        if item is None or item.get("kind") != kind \
+                or item.get("textEdit") != expected_edit:
+            raise AssertionError("%s item mismatch: %s" % (context, item))
+
     try:
         initialized = client.request(
             request_id, "initialize", {"rootUri": REPOSITORY_ROOT.as_uri()})
@@ -675,20 +698,51 @@ def run_completion_contexts() -> None:
             complete("completion/attribute-inline-widget", uri,
                      cursor_after(text, 6, "widget(label, { al")),
             exact=attributes)
+        assert_completion(
+            "completion/attribute-same-line-statement",
+            complete("completion/attribute-same-line-statement", uri,
+                     cursor_after(
+                         text, 7, "widget(label, { alpha: 1; al")),
+            exact=attributes)
+        assert_completion(
+            "completion/attribute-comment",
+            complete("completion/attribute-comment", uri,
+                     cursor_after(text, 8, "// { al")),
+            exact=[])
+
+        stale_text = "widget(label, {\n  al"
+        client.notify("textDocument/didChange", {
+            "textDocument": {"uri": uri, "version": 2},
+            "contentChanges": [{"text": stale_text}],
+        })
+        assert_completion(
+            "completion/attribute-unsaved-invalid",
+            complete("completion/attribute-unsaved-invalid", uri,
+                     cursor_after(stale_text, 1, "  al")),
+            exact=attributes)
+        client.notify("textDocument/didChange", {
+            "textDocument": {"uri": uri, "version": 3},
+            "contentChanges": [{"text": text}],
+        })
 
         uri, text = open_fixture("function.view")
         function_result = complete(
             "completion/function", uri,
             cursor_after(text, 1, "  alpha: cl"))
+        expected_function_details = {
+            name: ("variadic GLW function"
+                   if record.get("variadic") is True
+                   else "GLW function; nargs: %s" %
+                   record.get("nargs", "unknown"))
+            for name, record in functions.items()
+        }
         assert_completion(
-            "completion/function",
-            function_result,
-            contains=("clamp", "fmt"), excludes=("align", "self", "$event"))
+            "completion/function", function_result,
+            exact=sorted(functions))
         function_details = {item["label"]: item.get("detail")
                             for item in function_result}
-        if function_details.get("clamp") != "GLW function; nargs: 3" \
-                or function_details.get("fmt") != "variadic GLW function":
-            raise AssertionError("completion/function arity detail mismatch: %s" %
+        if function_details != expected_function_details:
+            raise AssertionError("completion/function detail mismatch: %s" %
                                  function_details)
         request_id += 1
         fixed = client.request(request_id, "textDocument/signatureHelp", {
@@ -708,7 +762,17 @@ def run_completion_contexts() -> None:
         request_id += 1
         quoted = client.request(request_id, "textDocument/signatureHelp", {
             "textDocument": {"uri": uri},
-            "position": cursor_after(text, 5, 'fmt("(", '),
+            "position": cursor_after(text, 5, 'fmt(")", '),
+        })
+        request_id += 1
+        multiline = client.request(request_id, "textDocument/signatureHelp", {
+            "textDocument": {"uri": uri},
+            "position": cursor_after(text, 7, '  "%s",'),
+        })
+        request_id += 1
+        commented = client.request(request_id, "textDocument/signatureHelp", {
+            "textDocument": {"uri": uri},
+            "position": cursor_after(text, 9, 'fmt(/* ) */ "%s",'),
         })
         expected_fixed = "clamp() [%d arguments]" % functions["clamp"]["nargs"]
         expected_variadic = "fmt(...) [variadic]"
@@ -716,7 +780,10 @@ def run_completion_contexts() -> None:
                 ("signature/fixed", fixed, expected_fixed),
                 ("signature/variadic", variadic, expected_variadic),
                 ("signature/nested", nested, expected_variadic),
-                ("signature/quoted-parenthesis", quoted, expected_variadic)):
+                ("signature/quoted-parenthesis", quoted, expected_variadic),
+                ("signature/multiline", multiline, expected_variadic),
+                ("signature/commented-parenthesis", commented,
+                 expected_variadic)):
             signatures = result.get("signatures") if isinstance(result, dict) \
                 else None
             if not isinstance(signatures, list) or len(signatures) != 1 \
@@ -736,6 +803,16 @@ def run_completion_contexts() -> None:
             complete("completion/root-children", uri,
                      cursor_after(text, 1, "  caption: $self."), "."),
             exact=[])
+        assert_completion(
+            "completion/root-comment",
+            complete("completion/root-comment", uri,
+                     cursor_after(text, 2, "  // $"), "$"),
+            exact=[])
+        assert_completion(
+            "completion/root-string",
+            complete("completion/root-string", uri,
+                     cursor_after(text, 3, '  caption: "$'), "$"),
+            exact=[])
 
         uri, text = open_fixture("enum.view")
         assert_completion(
@@ -743,19 +820,26 @@ def run_completion_contexts() -> None:
             complete("completion/enum-align", uri,
                      cursor_after(text, 1, "  align: ")),
             exact=enum_values)
+        assert_completion(
+            "completion/enum-inline",
+            complete("completion/enum-inline", uri,
+                     cursor_after(text, 3, "widget(label, { align: t")),
+            exact=enum_values)
 
         uri, text = open_fixture("path.view")
+        relative_position = cursor_after(text, 0, '#include "./')
         relative_result = complete(
-            "completion/path-relative", uri,
-            cursor_after(text, 0, '#include "./'), "/")
+            "completion/path-relative", uri, relative_position, "/")
         assert_completion(
             "completion/path-relative", relative_result,
             contains=("./menu/", "./widget.view"))
-        menu_item = next((item for item in relative_result
-                          if item.get("label") == "./menu/"), None)
-        if menu_item is None or menu_item.get("kind") != 19:
-            raise AssertionError("completion/path directory kind mismatch: %s" %
-                                 menu_item)
+        path_start = len('#include "')
+        assert_path_item(
+            "completion/path-relative-folder", relative_result,
+            "./menu/", 19, relative_position, path_start)
+        assert_path_item(
+            "completion/path-relative-file", relative_result,
+            "./widget.view", 17, relative_position, path_start)
         assert_completion(
             "completion/path-import",
             complete("completion/path-import", uri,
@@ -766,11 +850,15 @@ def run_completion_contexts() -> None:
             complete("completion/path-spaced-import", uri,
                      cursor_after(text, 3, '# import "./'), "/"),
             contains=("./widget.view",))
+        child_position = cursor_after(text, 4, '#include "./menu/')
+        child_result = complete(
+            "completion/path-directory-child", uri, child_position, "/")
         assert_completion(
-            "completion/path-directory-child",
-            complete("completion/path-directory-child", uri,
-                     cursor_after(text, 4, '#include "./menu/'), "/"),
+            "completion/path-directory-child", child_result,
             contains=("./menu/child.view",))
+        assert_path_item(
+            "completion/path-directory-child-file", child_result,
+            "./menu/child.view", 17, child_position, path_start)
         assert_completion(
             "completion/path-traversal",
             complete("completion/path-traversal", uri,
@@ -823,6 +911,18 @@ def run_completion_contexts() -> None:
         raise
 
 
+def run_doctor_completion_validation() -> None:
+    if _completion_labels([{"label": "widget"}]) != ["widget"]:
+        raise AssertionError("doctor rejected a valid completion list")
+    for malformed in (None, [{"label": "widget"}, None], [{"label": 1}]):
+        try:
+            _completion_labels(malformed)
+        except RuntimeError:
+            continue
+        raise AssertionError("doctor accepted malformed completion: %s" %
+                             (malformed,))
+
+
 def main() -> int:
     run_f1_command_builder()
     run_f2_shared_import_cleanup()
@@ -833,8 +933,9 @@ def main() -> int:
     run_js_stale_save_and_close()
     run_js_relative_definition_confinement()
     run_completion_contexts()
+    run_doctor_completion_validation()
     print(json.dumps({
-        "checks": 9,
+        "checks": 10,
         "status": "LSP REVIEW REGRESSIONS OK",
     }, sort_keys=True))
     return 0
