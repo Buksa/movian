@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -16,6 +17,8 @@ from .harness import Instance, MdevError
 
 SMOKES_DIR = harness.REPO_ROOT / "support" / "devtools" / "smokes"
 CURRENT_PAGE = "global/navigators/current/currentpage"
+WEDGE_BACKTRACE_FILE = "thread-backtrace.txt"
+WEDGE_BACKTRACE_TIMEOUT = 5.0
 SMOKE_ORDER = (
     "health",
     "open-home",
@@ -433,6 +436,104 @@ def _write_bundle(
     return bundle
 
 
+def _capture_wedge_backtrace(
+    inst: Instance,
+    bundle: Path,
+    timeout: float = WEDGE_BACKTRACE_TIMEOUT,
+) -> Path:
+    """Best-effort all-thread GDB capture for an owned wedged instance.
+
+    The fixed-name artifact records success or a bounded, useful failure.  This
+    helper never raises: capture problems must not delay the existing stop and
+    relaunch path beyond ``timeout`` or prevent it from running.
+    """
+    artifact = bundle / WEDGE_BACKTRACE_FILE
+
+    def write_result(
+        status: str,
+        detail: str,
+        pid: int | None = None,
+        output: str = "",
+    ) -> None:
+        lines = [
+            "capture-status: %s" % status,
+            "pid: %s" % (pid if pid is not None else "none"),
+            "timeout-seconds: %g" % timeout,
+            "detail: %s" % detail,
+        ]
+        if output:
+            lines.extend(("", "gdb-output:", output.rstrip()))
+        try:
+            artifact.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+
+    def as_text(value: str | bytes | None) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        return value
+
+    try:
+        pid = inst.live_pid()
+        if pid is None:
+            write_result("skipped", "no live pid proven owned by this instance")
+            return artifact
+        # Re-prove ownership immediately before handing the numeric pid to GDB.
+        # A stale/recycled pid is hands-off, just as it is in kill_owned_pid().
+        if not inst.owns_pid(pid):
+            write_result(
+                "skipped", "pid ownership proof failed before attach", pid=pid)
+            return artifact
+
+        command = [
+            "gdb", "--batch", "--nx", "--quiet", "-p", str(pid),
+            "-ex", "set pagination off",
+            "-ex", "set confirm off",
+            "-ex", "thread apply all bt",
+            "-ex", "detach",
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as error:
+            output = as_text(error.stdout) + as_text(error.stderr)
+            write_result(
+                "timeout", "gdb exceeded the %g-second bound" % timeout,
+                pid=pid, output=output)
+            return artifact
+        except OSError as error:
+            write_result(
+                "error", "could not execute gdb: %s" % error, pid=pid)
+            return artifact
+
+        output = completed.stdout + completed.stderr
+        frame_count = len(re.findall(r"(?m)^#\d+\s", output))
+        if completed.returncode != 0:
+            write_result(
+                "error", "gdb exited with status %d" % completed.returncode,
+                pid=pid, output=output)
+        elif frame_count == 0:
+            write_result(
+                "error", "gdb returned no stack frames", pid=pid, output=output)
+        else:
+            write_result(
+                "success", "captured %d stack frames" % frame_count,
+                pid=pid, output=output)
+    except Exception as error:
+        write_result(
+            "error", "unexpected capture failure: %s: %s" %
+            (type(error).__name__, error))
+    return artifact
+
+
 def _record_stop_outcome(
     bundle: Path,
     transcript: dict[str, Any],
@@ -501,6 +602,7 @@ def _run_one(
     bundle = _write_bundle(inst, definition["name"], transcript, wedge)
     stop_outcome = None
     if wedge:
+        _capture_wedge_backtrace(inst, bundle)
         stop_outcome = stop_wedged_instance(inst)
         _record_stop_outcome(bundle, transcript, stop_outcome)
         if stop_outcome == "still-alive":
@@ -550,6 +652,7 @@ def run(
                 "steps": [],
             }
             bundle = _write_bundle(inst, selected[0]["name"], transcript, True)
+            _capture_wedge_backtrace(inst, bundle)
             stop_outcome = stop_wedged_instance(inst)
             _record_stop_outcome(bundle, transcript, stop_outcome)
             print("instance-health failure (wedge), stop+relaunch [%s]: %s"

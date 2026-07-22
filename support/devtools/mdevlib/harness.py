@@ -29,6 +29,7 @@ STATE_ROOT = Path("/tmp/mdev")
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 MOVIAN_BINARY = "./build.debug/movian"
+MDEV_PTRACE_ENV = "MOVIAN_MDEV_ALLOW_GDB"
 
 # The viewpreview dev plugin (issue #87): `mdev preview` auto-starts an
 # instance with just this plugin loaded if none is running yet.
@@ -375,6 +376,7 @@ def launch(inst: Instance, argv: list[str], timeout: float = 30.0) -> dict[str, 
         proc = subprocess.Popen(
             argv,
             cwd=str(REPO_ROOT),           # dataroot:// resolves against CWD
+            env={**os.environ, MDEV_PTRACE_ENV: "1"},
             stdout=log_fd,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
