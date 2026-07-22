@@ -1034,25 +1034,52 @@ class LspServer:
             return []
         line_number, line_prefix, text_before_cursor = cursor
         with document.lock:
-            tokens = list(document.tokens)
+            tokens = list(document.tokens) \
+                if document.token_text == document.text else []
         local_tokens = [token for token in tokens
                         if self._token_is_from_document(token, document)]
 
         path_match = re.match(
-            r"^[ \t]*#[ \t]*(?:include|import)[ \t]+(?P<quote>['\"])(?P<path>[^'\"]*)$",
+            r"^[ \t]*#[ \t]*(?:include|import)[ \t]+"
+            r"(?P<quote>['\"])(?P<path>[^'\"]*)$",
             line_prefix)
-        if path_match is not None:
-            return [
-                self._completion_item(
+        line_start = len(text_before_cursor) - len(line_prefix)
+        line_starts_in_code = self._completion_context_prefix(
+            text_before_cursor[:line_start]) is not None
+        if path_match is not None and line_starts_in_code:
+            start_character = utf16_length(
+                line_prefix[:path_match.start("path")])
+            edit_range = {
+                "start": {
+                    "line": line_number,
+                    "character": start_character,
+                },
+                "end": {
+                    "line": line_number,
+                    "character": position["character"],
+                },
+            }
+            items: list[JSON] = []
+            for candidate in self._include_completion_candidates(
+                    document, path_match.group("path")):
+                item = self._completion_item(
                     candidate,
                     COMPLETION_FOLDER if candidate.endswith("/")
                     else COMPLETION_FILE,
                     "GLW include/import target")
-                for candidate in self._include_completion_candidates(
-                    document, path_match.group("path"))
-            ]
+                item["textEdit"] = {
+                    "range": edit_range,
+                    "newText": candidate,
+                }
+                items.append(item)
+            return items
 
-        root_match = re.search(r"\$[A-Za-z_][A-Za-z0-9_]*$|\$$", line_prefix)
+        context_prefix = self._completion_context_prefix(text_before_cursor)
+        if context_prefix is None:
+            return []
+
+        root_match = re.search(
+            r"\$[A-Za-z_][A-Za-z0-9_]*$|\$$", context_prefix)
         if root_match is not None:
             return [
                 self._completion_item(name, COMPLETION_VARIABLE,
@@ -1061,14 +1088,16 @@ class LspServer:
             ]
         # Metadata has no child schema for any scope root.  A dot after a root
         # is therefore an intentionally empty completion context.
-        if re.search(r"\$[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z0-9_]*$", line_prefix):
+        if re.search(
+                r"\$[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z0-9_]*$",
+                context_prefix):
             return []
 
         enum_match = re.match(
             r"^[ \t]*(?P<attribute>[A-Za-z_][A-Za-z0-9_]*)[ \t]*:"
             r"[ \t]*[A-Za-z_][A-Za-z0-9_]*$|"
             r"^[ \t]*(?P<empty_attribute>[A-Za-z_][A-Za-z0-9_]*)[ \t]*:"
-            r"[ \t]*$", line_prefix)
+            r"[ \t]*$", context_prefix)
         if enum_match is not None:
             attribute_name = (enum_match.group("attribute") or
                               enum_match.group("empty_attribute"))
@@ -1082,19 +1111,14 @@ class LspServer:
                 ]
 
         if re.search(r"\bwidget[ \t]*\([ \t]*[A-Za-z_][A-Za-z0-9_]*$|"
-                     r"\bwidget[ \t]*\([ \t]*$", line_prefix):
+                     r"\bwidget[ \t]*\([ \t]*$", context_prefix):
             return [
                 self._completion_item(name, COMPLETION_CLASS,
                                       "registered GLW widget")
                 for name in sorted(self.metadata.registered_widgets)
             ]
 
-        block_depth = self._completion_block_depth(
-            local_tokens, line_number, line_prefix, text_before_cursor)
-        context_prefix = line_prefix
-        if block_depth > 0 and "{" in line_prefix:
-            context_prefix = line_prefix.rsplit("{", 1)[-1]
-
+        block_depth = self._raw_block_depth(text_before_cursor)
         macros = self._local_macro_names(local_tokens, line_number + 1)
         identifier_match = re.match(
             r"^[ \t]*(?P<prefix>[A-Za-z_][A-Za-z0-9_]*)$",
@@ -1122,9 +1146,8 @@ class LspServer:
                 for name, record in sorted(self.metadata.attributes.items())
             ]
 
-
         if re.search(r"(?:[:=,(]|\breturn\b)[ \t]*"
-                     r"(?:[A-Za-z_][A-Za-z0-9_]*)?$", line_prefix):
+                     r"(?:[A-Za-z_][A-Za-z0-9_]*)?$", context_prefix):
             return [
                 self._completion_item(name, COMPLETION_FUNCTION,
                                       self._function_arity_detail(record))
@@ -1140,31 +1163,8 @@ class LspServer:
         cursor = self._completion_cursor(document, params["position"])
         if cursor is None:
             return None
-        _line_number, line_prefix, _text_before_cursor = cursor
-        open_parentheses: list[int] = []
-        quote: str | None = None
-        escaped = False
-        for index, character in enumerate(line_prefix):
-            if quote is not None:
-                if escaped:
-                    escaped = False
-                elif character == "\\":
-                    escaped = True
-                elif character == quote:
-                    quote = None
-                continue
-            if character in ("'", '"'):
-                quote = character
-            elif character == "(":
-                open_parentheses.append(index)
-            elif character == ")" and open_parentheses:
-                open_parentheses.pop()
-        if not open_parentheses:
-            return None
-        name_match = re.search(
-            r"([A-Za-z_][A-Za-z0-9_]*)[ \t]*$",
-            line_prefix[:open_parentheses[-1]])
-        call_name = name_match.group(1) if name_match is not None else None
+        _line_number, _line_prefix, text_before_cursor = cursor
+        call_name = self._active_call_name(text_before_cursor)
         if call_name is None:
             return None
         record = self.metadata.functions.get(call_name)
@@ -1218,6 +1218,101 @@ class LspServer:
         return line_number, line_prefix, text_before_cursor
 
     @staticmethod
+    def _completion_context_prefix(text: str) -> str | None:
+        """Return the current code statement, excluding strings and comments."""
+
+        segment: list[str] = []
+        state = "code"
+        escaped = False
+        index = 0
+        while index < len(text):
+            character = text[index]
+            following = text[index + 1] if index + 1 < len(text) else ""
+            if state == "code":
+                if character == "/" and following == "/":
+                    state = "line-comment"
+                    index += 2
+                    continue
+                if character == "/" and following == "*":
+                    state = "block-comment"
+                    index += 2
+                    continue
+                if character in ("'", '"'):
+                    state = character
+                    escaped = False
+                    segment.append(" ")
+                elif character == "\n" or character in "{;":
+                    segment.clear()
+                else:
+                    segment.append(character)
+            elif state == "line-comment":
+                if character == "\n":
+                    state = "code"
+                    segment.clear()
+            elif state == "block-comment":
+                if character == "*" and following == "/":
+                    state = "code"
+                    index += 2
+                    continue
+            elif escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == state:
+                state = "code"
+            index += 1
+        return "".join(segment) if state == "code" else None
+
+    @staticmethod
+    def _active_call_name(text: str) -> str | None:
+        """Return the innermost open call, ignoring strings and comments."""
+
+        open_parentheses: list[int] = []
+        state = "code"
+        escaped = False
+        index = 0
+        while index < len(text):
+            character = text[index]
+            following = text[index + 1] if index + 1 < len(text) else ""
+            if state == "code":
+                if character == "/" and following == "/":
+                    state = "line-comment"
+                    index += 2
+                    continue
+                if character == "/" and following == "*":
+                    state = "block-comment"
+                    index += 2
+                    continue
+                if character in ("'", '"'):
+                    state = character
+                    escaped = False
+                elif character == "(":
+                    open_parentheses.append(index)
+                elif character == ")" and open_parentheses:
+                    open_parentheses.pop()
+            elif state == "line-comment":
+                if character == "\n":
+                    state = "code"
+            elif state == "block-comment":
+                if character == "*" and following == "/":
+                    state = "code"
+                    index += 2
+                    continue
+            elif escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == state:
+                state = "code"
+            index += 1
+        if state != "code" or not open_parentheses:
+            return None
+        name_match = re.search(
+            r"([A-Za-z_][A-Za-z0-9_]*)[ \t]*$",
+            text[:open_parentheses[-1]])
+        return name_match.group(1) if name_match is not None else None
+
+    @staticmethod
     def _local_macro_names(tokens: list[JSON], before_line: int) -> list[str]:
         names: set[str] = set()
         for index, token in enumerate(tokens[:-2]):
@@ -1236,26 +1331,6 @@ class LspServer:
                 names.add(name["value"])
         return sorted(names)
 
-    @staticmethod
-    def _completion_block_depth(tokens: list[JSON], line_number: int,
-                                line_prefix: str,
-                                text_before_cursor: str) -> int:
-        depth = 0
-        for token in tokens:
-            token_line = token.get("line")
-            if not isinstance(token_line, int) or token_line >= line_number + 1:
-                continue
-            if token.get("type") == "BLOCK_OPEN":
-                depth += 1
-            elif token.get("type") == "BLOCK_CLOSE":
-                depth = max(depth - 1, 0)
-        if tokens:
-            depth += line_prefix.count("{") - line_prefix.count("}")
-            return max(depth, 0)
-        # On the first invalid snapshot there is no last-good stream yet.  The
-        # lexer punctuation has a one-to-one spelling, so brace balance is the
-        # bounded fallback that keeps an unclosed block useful.
-        return LspServer._raw_block_depth(text_before_cursor)
 
     @staticmethod
     def _raw_block_depth(text: str) -> int:

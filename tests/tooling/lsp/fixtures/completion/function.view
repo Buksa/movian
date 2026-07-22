@@ -3,4 +3,8 @@ widget(label, {
   caption: fmt("%s", "fixture");
 });
 fmt(clamp(0, 1, 2), value);
-fmt("(", value);
+fmt(")", value);
+fmt(
+  "%s",
+  value);
+fmt(/* ) */ "%s", value);

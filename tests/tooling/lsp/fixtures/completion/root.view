@@ -1,3 +1,5 @@
 widget(label, {
   caption: $self.title;
+  // $
+  caption: "$";
 });

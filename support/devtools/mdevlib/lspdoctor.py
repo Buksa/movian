@@ -25,6 +25,16 @@ def _fail(check: str, reason: str) -> int:
     return 1
 
 
+def _completion_labels(result: Any) -> list[str]:
+    if not isinstance(result, list):
+        raise RuntimeError("completion returned a non-list result")
+    if any(not isinstance(item, dict)
+           or not isinstance(item.get("label"), str)
+           for item in result):
+        raise RuntimeError("completion returned a malformed item")
+    return [item["label"] for item in result]
+
+
 def _check_python() -> tuple[bool, str]:
     version = sys.version_info
     if version[:2] < MINIMUM_PYTHON:
@@ -175,10 +185,7 @@ def _check_lsp_completion() -> tuple[bool, str]:
             "textDocument": {"uri": fixture.as_uri()},
             "position": {"line": 0, "character": len("widget(")},
         })
-        if not isinstance(result, list):
-            raise RuntimeError("completion returned a non-list result")
-        actual = [item.get("label") for item in result
-                  if isinstance(item, dict)]
+        actual = _completion_labels(result)
         if actual != expected:
             raise RuntimeError("widget completion list mismatch")
         client.notify("textDocument/didClose", {

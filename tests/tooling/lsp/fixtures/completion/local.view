@@ -3,10 +3,10 @@
 }
 LocalCard();
 widget(label, {
-  al
-  Loc
+  alpha: 1;
+  LocalCard();
 });
-Fut
+FutureCard();
 #define FutureCard() {
   widget(label, {});
 }
