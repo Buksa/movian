@@ -63,6 +63,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 METADATA_DIR = Path(__file__).resolve().parent
 ARTIFACT_PATH = REPO_ROOT / "generated" / "movian-metadata.json"
 DTS_PATH = REPO_ROOT / "generated" / "movian-api.d.ts"
+REFERENCE_DTS_CHECKER = METADATA_DIR / "check_reference_dts.py"
 
 ATTRIB_C = REPO_ROOT / "src" / "ui" / "glw" / "glw_view_attrib.c"
 EVAL_C = REPO_ROOT / "src" / "ui" / "glw" / "glw_view_eval.c"
@@ -895,6 +896,29 @@ def cmd_generate(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_reference_dts_check() -> tuple[bool, str]:
+    """Run the source/fixture oracle without adding TypeScript as a build dep."""
+    try:
+        result = subprocess.run(
+            [sys.executable, str(REFERENCE_DTS_CHECKER)],
+            cwd=REPO_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            # The checker bounds its own tsc subprocesses, but this call
+            # still needs its own ceiling: a hang anywhere in that chain
+            # must not wedge `gen.py --check` (and mdevlib/lspdoctor.py's
+            # own outer timeout) indefinitely.
+            timeout=120,
+        )
+    except OSError as error:
+        return False, "reference-dts: checker could not run: %s" % error
+    except subprocess.TimeoutExpired as error:
+        return False, "reference-dts: checker timed out: %s" % error
+    return result.returncode == 0, result.stdout.rstrip()
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     fresh = build_artifact()
     if not ARTIFACT_PATH.is_file():
@@ -914,15 +938,22 @@ def cmd_check(args: argparse.Namespace) -> int:
         committed_dts = DTS_PATH.read_text(encoding="utf-8")
         dts_ok = (_strip_dts_revision(fresh_dts)
                   == _strip_dts_revision(committed_dts))
+    reference_dts_ok, reference_dts_output = _run_reference_dts_check()
 
-    if metadata_ok and dts_ok:
+    if metadata_ok and dts_ok and reference_dts_ok:
         if args.json:
-            print(json.dumps({"metadata": "ok", "dts": "ok"}, indent=2))
+            print(json.dumps({
+                "metadata": "ok",
+                "dts": "ok",
+                "referenceDts": "ok",
+            }, indent=2))
         else:
             print("METADATA OK (movianRevision: committed=%s current=%s)"
                   % (committed.get("movianRevision"),
                      fresh.get("movianRevision")))
             print("DTS OK")
+            if reference_dts_output:
+                print(reference_dts_output)
         return 0
 
     diff = None
@@ -933,9 +964,12 @@ def cmd_check(args: argparse.Namespace) -> int:
         result = {
             "metadata": "ok" if metadata_ok else "drift",
             "dts": "ok" if dts_ok else "drift",
+            "referenceDts": "ok" if reference_dts_ok else "failed",
         }
         if diff is not None:
             result["diff"] = diff
+        if not reference_dts_ok and reference_dts_output:
+            result["referenceDtsOutput"] = reference_dts_output
         print(json.dumps(result, ensure_ascii=False, indent=2,
                          sort_keys=True))
     else:
@@ -945,6 +979,8 @@ def cmd_check(args: argparse.Namespace) -> int:
                 print(line)
         if not dts_ok:
             print("DTS DRIFT")
+        if not reference_dts_ok:
+            print(reference_dts_output or "reference-dts: checker failed")
     return 1
 
 
