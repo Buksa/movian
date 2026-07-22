@@ -150,11 +150,29 @@ get_device_id(void)
 
 
 /**
+ * Let GDB attach to an mdev-launched process even when Yama ptrace_scope=1.
+ * This is an explicit dev-harness opt-in; normal Movian launches never set
+ * the environment flag and retain the system ptrace policy unchanged.
+ */
+static void
+allow_mdev_gdb(void)
+{
+  const char *value = getenv("MOVIAN_MDEV_ALLOW_GDB");
+  if(value == NULL || strcmp(value, "1"))
+    return;
+
+  if(prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0))
+    perror("Unable to enable mdev GDB capture");
+}
+
+
+/**
  *
  */
 void
 linux_init(void)
 {
+  allow_mdev_gdb();
   get_device_id();
   linux_trap_init();
   gconf.concurrency = get_system_concurrency();
@@ -169,4 +187,3 @@ arch_malloc_size(void *ptr)
 {
   return malloc_usable_size(ptr);
 }
-
