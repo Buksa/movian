@@ -17,6 +17,7 @@ from .harness import Instance, MdevError
 
 SMOKES_DIR = harness.REPO_ROOT / "support" / "devtools" / "smokes"
 CURRENT_PAGE = "global/navigators/current/currentpage"
+UI_FRAMERATE = "global/userinterfaces/ui/framerate"
 WEDGE_BACKTRACE_FILE = "thread-backtrace.txt"
 WEDGE_BACKTRACE_TIMEOUT = 5.0
 SMOKE_ORDER = (
@@ -325,24 +326,51 @@ def _execute_step(
     return detail, harness.read_log_delta(inst, offset), None
 
 
+def _wait_for_ui_ready(
+    inst: Instance,
+    timeout: float,
+) -> tuple[bool, str]:
+    """Wait until startup navigation and GLW frame dispatch are both active."""
+    deadline = time.monotonic() + timeout
+    nav_seen = False
+    framerate = None
+    if inst.live_pid() is None:
+        return False, "instance process is not alive"
+    try:
+        base = inst.base_url()
+    except MdevError as error:
+        return False, str(error)
+
+    while time.monotonic() < deadline:
+        if inst.live_pid() is None:
+            return False, "instance process is not alive"
+        if not nav_seen:
+            nav_seen = harness.NAV_OPENING_RE.search(
+                harness.read_log(inst)) is not None
+        framerate = harness.prop_value(base, UI_FRAMERATE)
+        if nav_seen and harness.prop_has_value(framerate):
+            return True, "startup navigator Opening trace and UI framerate present"
+        time.sleep(0.3)
+
+    missing = []
+    if not nav_seen:
+        missing.append("navigator Opening trace")
+    if not harness.prop_has_value(framerate):
+        missing.append("%s usable value" % UI_FRAMERATE)
+    return False, "startup readiness did not complete within %gs: missing %s" % (
+        timeout, " and ".join(missing))
+
+
 def _health_step(inst: Instance, timeout: float = 20.0) -> tuple[str, str]:
-    """Dedicated polling health verb: the startup navigator trace can
-    legitimately arrive after ensure_running() returns (launch() only
-    waits for the HTTP port line), so poll for it instead of judging a
-    single early log snapshot -- a false wedge here turns into exit 2.
+    """Dedicated polling health verb: launch() only waits for the HTTP port,
+    so require both startup navigation and active GLW frame/courier dispatch
+    before issuing the first screenshot.
 
     Returns (detail, sha256_hex) where sha256_hex is from the probe screenshot.
     """
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if inst.live_pid() is None:
-            raise StepFailure("instance process is not alive")
-        if harness.NAV_OPENING_RE.search(harness.read_log(inst)) is not None:
-            break
-        time.sleep(0.3)
-    else:
-        raise StepFailure(
-            "startup navigator Opening trace did not appear within %gs" % timeout)
+    ready, detail = _wait_for_ui_ready(inst, timeout)
+    if not ready:
+        raise StepFailure(detail)
     probe = inst.dir / ".smoke-health.png"
     try:
         _, probe_hash = _take_png(inst, probe)
@@ -352,21 +380,13 @@ def _health_step(inst: Instance, timeout: float = 20.0) -> tuple[str, str]:
         probe.unlink()
     except OSError:
         pass
-    return "startup navigator Opening trace and screenshot PNG present", probe_hash
+    return detail + " and screenshot PNG present", probe_hash
 
 
 def _probe_health(inst: Instance, timeout: float = 20.0) -> tuple[bool, str]:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if inst.live_pid() is None:
-            return False, "instance process is not alive"
-        if harness.NAV_OPENING_RE.search(harness.read_log(inst)) is not None:
-            break
-        time.sleep(0.3)
-    else:
-        return False, (
-            "startup navigator Opening trace did not appear within %gs" % timeout
-        )
+    ready, detail = _wait_for_ui_ready(inst, timeout)
+    if not ready:
+        return False, detail
     probe = inst.dir / ".smoke-health.png"
     try:
         _take_png(inst, probe, timeout=7.0)
@@ -376,7 +396,7 @@ def _probe_health(inst: Instance, timeout: float = 20.0) -> tuple[bool, str]:
         probe.unlink()
     except OSError:
         pass
-    return True, "startup navigator Opening trace and screenshot PNG present"
+    return True, detail + " and screenshot PNG present"
 
 
 def _collect_props(base: str, path: str, depth: int) -> dict[str, Any]:
