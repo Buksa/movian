@@ -540,8 +540,8 @@ event_to_prop(prop_t *p, event_t *e)
 void
 event_to_ui(event_t *e)
 {
-  event_to_prop(prop_get_by_name(PNVEC("global", "userinterfaces", "ui", "eventSink"),
-				 1, NULL), e);
+  event_to_prop(prop_find(prop_get_global(), "userinterfaces", "ui",
+                          "eventSink", NULL), e);
   event_release(e);
 }
 
