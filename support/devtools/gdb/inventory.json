@@ -1,7 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "generatedAgainst": "movian6@10361f97ec1d02cf70497349a7711fc75ed36dea",
-  "description": "Static lifecycle symbol inventory for the movian GDB event collector (issue #144). One entry per candidate symbol; INITME uses are enumerated as init-helper hooks whose init/fini pairing is read directly from the INITME line.",
+  "description": "Static lifecycle symbol inventory for the movian GDB event collector (issue #144). One entry per candidate symbol; INITME uses are enumerated as init-helper hooks whose init/fini pairing is read directly from the INITME line. Optional platforms/configFlag metadata documents build availability; pairedWithAll documents many-to-one pairings where a scalar pairedWith is ambiguous; the collector reports symbols absent from the loaded binary as unbound, never armed.",
   "categories": [
     "core-init",
     "shutdown-hook",
@@ -28,7 +28,7 @@
     "glw",
     "service"
   ],
-  "count": 100,
+  "count": 115,
   "initmeUseCount": 45,
   "entries": [
     {
@@ -52,9 +52,9 @@
     {
       "id": "backend_register",
       "symbol": "backend_register",
-      "file": "src/backend/backend.h:189",
+      "file": "src/backend/backend.c:79",
       "category": "backend",
-      "phase": "runtime",
+      "phase": "registration",
       "pairedWith": null,
       "confidence": "source-confirmed"
     },
@@ -113,15 +113,6 @@
       "confidence": "source-confirmed"
     },
     {
-      "id": "callout_arm",
-      "symbol": "callout_arm",
-      "file": "src/misc/callout.h:44",
-      "category": "callout",
-      "phase": "runtime",
-      "pairedWith": null,
-      "confidence": "source-confirmed"
-    },
-    {
       "id": "callout_arm0",
       "symbol": "callout_arm0",
       "file": "src/misc/callout.c:50",
@@ -146,7 +137,11 @@
       "category": "callout",
       "phase": "runtime",
       "pairedWith": "callout_arm0",
-      "confidence": "source-confirmed"
+      "confidence": "source-confirmed",
+      "pairedWithAll": [
+        "callout_arm0",
+        "callout_arm_x"
+      ]
     },
     {
       "id": "callout_init",
@@ -365,7 +360,10 @@
       "group": "INIT_GROUP_API",
       "prio": 0,
       "initFn": "darwin_init_cpu_monitor",
-      "finiFn": null
+      "finiFn": null,
+      "platforms": [
+        "osx"
+      ]
     },
     {
       "id": "devevent_start",
@@ -378,7 +376,11 @@
       "group": "INIT_GROUP_IPC",
       "prio": 0,
       "initFn": "devevent_start",
-      "finiFn": null
+      "finiFn": null,
+      "platforms": [
+        "rpi",
+        "sunxi"
+      ]
     },
     {
       "id": "ecmascript_init",
@@ -495,7 +497,8 @@
       "group": "INIT_GROUP_IPC",
       "prio": 10,
       "initFn": "libcec_init",
-      "finiFn": "libcec_fini"
+      "finiFn": "libcec_fini",
+      "configFlag": "CONFIG_LIBCEC"
     },
     {
       "id": "linux_process_monitor_init",
@@ -547,7 +550,8 @@
       "group": "INIT_GROUP_NET",
       "prio": 0,
       "initFn": "net_ssl_init",
-      "finiFn": null
+      "finiFn": null,
+      "configFlag": "CONFIG_OPENSSL"
     },
     {
       "id": "nmb_init",
@@ -651,7 +655,10 @@
       "group": "INIT_GROUP_API",
       "prio": 0,
       "initFn": "rpi_monitor_init",
-      "finiFn": null
+      "finiFn": null,
+      "platforms": [
+        "rpi"
+      ]
     },
     {
       "id": "rpi_tv_init",
@@ -664,7 +671,10 @@
       "group": "INIT_GROUP_IPC",
       "prio": 10,
       "initFn": "rpi_tv_init",
-      "finiFn": null
+      "finiFn": null,
+      "platforms": [
+        "rpi"
+      ]
     },
     {
       "id": "screenshot_init",
@@ -729,7 +739,10 @@
       "group": "INIT_GROUP_IPC",
       "prio": 0,
       "initFn": "stos_automount_start",
-      "finiFn": "stos_automount_stop"
+      "finiFn": "stos_automount_stop",
+      "platforms": [
+        "rpi"
+      ]
     },
     {
       "id": "stpp_discover_init",
@@ -755,7 +768,10 @@
       "group": "INIT_GROUP_API",
       "prio": 0,
       "initFn": "tlsf_stats_init",
-      "finiFn": null
+      "finiFn": null,
+      "platforms": [
+        "ps3"
+      ]
     },
     {
       "id": "tmdb_init",
@@ -885,7 +901,10 @@
       "group": "INIT_GROUP_API",
       "prio": 0,
       "initFn": "webpopup_init",
-      "finiFn": null
+      "finiFn": null,
+      "platforms": [
+        "ps3"
+      ]
     },
     {
       "id": "ws_init",
@@ -912,15 +931,6 @@
       "prio": 0,
       "initFn": "wsd_init",
       "finiFn": null
-    },
-    {
-      "id": "INITME",
-      "symbol": "INITME",
-      "file": "src/main.h:365",
-      "category": "init-system",
-      "phase": "registration",
-      "pairedWith": null,
-      "confidence": "source-confirmed"
     },
     {
       "id": "fini_group",
@@ -970,7 +980,7 @@
     {
       "id": "nav_open0",
       "symbol": "nav_open0",
-      "file": "src/navigator.c:188",
+      "file": "src/navigator.c:757",
       "category": "navigator",
       "phase": "runtime",
       "pairedWith": null,
@@ -983,7 +993,7 @@
       "category": "navigator",
       "phase": "runtime",
       "pairedWith": null,
-      "confidence": "located"
+      "confidence": "source-confirmed"
     },
     {
       "id": "plugin_load",
@@ -1037,7 +1047,9 @@
       "category": "prop-subscribe",
       "phase": "runtime",
       "pairedWith": "prop_unsubscribe",
-      "confidence": "source-confirmed"
+      "confidence": "source-confirmed",
+      "configFlag": "!PROP_SUB_RECORD_SOURCE",
+      "macroShadowedWhen": "PROP_SUB_RECORD_SOURCE"
     },
     {
       "id": "prop_unsubscribe",
@@ -1046,7 +1058,11 @@
       "category": "prop-subscribe",
       "phase": "runtime",
       "pairedWith": "prop_subscribe",
-      "confidence": "source-confirmed"
+      "confidence": "source-confirmed",
+      "pairedWithAll": [
+        "prop_subscribe",
+        "prop_subscribe_ex"
+      ]
     },
     {
       "id": "service_create",
@@ -1110,6 +1126,192 @@
       "phase": "runtime",
       "pairedWith": null,
       "confidence": "source-confirmed"
+    },
+    {
+      "id": "ecmascript_fini",
+      "symbol": "ecmascript_fini",
+      "file": "src/ecmascript/ecmascript.c:1059",
+      "category": "init-helper",
+      "phase": "shutdown",
+      "pairedWith": "ecmascript_init",
+      "confidence": "source-confirmed",
+      "group": "INIT_GROUP_API",
+      "initFn": null,
+      "finiFn": "ecmascript_fini",
+      "prio": 0
+    },
+    {
+      "id": "http_server_fini",
+      "symbol": "http_server_fini",
+      "file": "src/networking/http_server.c:1194",
+      "category": "init-helper",
+      "phase": "shutdown",
+      "pairedWith": "http_server_init",
+      "confidence": "source-confirmed",
+      "group": "INIT_GROUP_ASYNCIO",
+      "initFn": null,
+      "finiFn": "http_server_fini",
+      "prio": 0
+    },
+    {
+      "id": "libcec_fini",
+      "symbol": "libcec_fini",
+      "file": "src/ipc/libcec.c:286",
+      "category": "init-helper",
+      "phase": "shutdown",
+      "pairedWith": "libcec_init",
+      "confidence": "source-confirmed",
+      "group": "INIT_GROUP_IPC",
+      "initFn": null,
+      "finiFn": "libcec_fini",
+      "prio": 10,
+      "configFlag": "CONFIG_LIBCEC"
+    },
+    {
+      "id": "stos_automount_stop",
+      "symbol": "stos_automount_stop",
+      "file": "src/arch/stos/stos_automount.c:467",
+      "category": "init-helper",
+      "phase": "shutdown",
+      "pairedWith": "stos_automount_start",
+      "confidence": "source-confirmed",
+      "group": "INIT_GROUP_IPC",
+      "initFn": null,
+      "finiFn": "stos_automount_stop",
+      "prio": 0,
+      "platforms": [
+        "rpi"
+      ]
+    },
+    {
+      "id": "stpp_discover_fini",
+      "symbol": "stpp_discover_fini",
+      "file": "src/api/stpp.c:1762",
+      "category": "init-helper",
+      "phase": "shutdown",
+      "pairedWith": "stpp_discover_init",
+      "confidence": "source-confirmed",
+      "group": "INIT_GROUP_ASYNCIO",
+      "initFn": null,
+      "finiFn": "stpp_discover_fini",
+      "prio": 10
+    },
+    {
+      "id": "usage_fini",
+      "symbol": "usage_fini",
+      "file": "src/usage.c:283",
+      "category": "init-helper",
+      "phase": "shutdown",
+      "pairedWith": "usage_init",
+      "confidence": "source-confirmed",
+      "group": "INIT_GROUP_API",
+      "initFn": null,
+      "finiFn": "usage_fini",
+      "prio": 0
+    },
+    {
+      "id": "audio_init",
+      "symbol": "audio_init",
+      "file": "src/audio2/audio.c:111",
+      "category": "core-init",
+      "phase": "startup",
+      "pairedWith": "audio_fini",
+      "confidence": "source-confirmed"
+    },
+    {
+      "id": "audio_fini",
+      "symbol": "audio_fini",
+      "file": "src/audio2/audio.c:156",
+      "category": "core-init",
+      "phase": "shutdown",
+      "pairedWith": "audio_init",
+      "confidence": "source-confirmed"
+    },
+    {
+      "id": "notifications_init",
+      "symbol": "notifications_init",
+      "file": "src/notifications.c:44",
+      "category": "core-init",
+      "phase": "startup",
+      "pairedWith": "notifications_fini",
+      "confidence": "source-confirmed"
+    },
+    {
+      "id": "notifications_fini",
+      "symbol": "notifications_fini",
+      "file": "src/notifications.c:61",
+      "category": "core-init",
+      "phase": "shutdown",
+      "pairedWith": "notifications_init",
+      "confidence": "source-confirmed"
+    },
+    {
+      "id": "trace_init",
+      "symbol": "trace_init",
+      "file": "src/trace.c:300",
+      "category": "core-init",
+      "phase": "startup",
+      "pairedWith": "trace_fini",
+      "confidence": "source-confirmed"
+    },
+    {
+      "id": "trace_fini",
+      "symbol": "trace_fini",
+      "file": "src/trace.c:286",
+      "category": "core-init",
+      "phase": "shutdown",
+      "pairedWith": "trace_init",
+      "confidence": "source-confirmed"
+    },
+    {
+      "id": "metadb_init",
+      "symbol": "metadb_init",
+      "file": "src/metadata/metadb.c:102",
+      "category": "cache",
+      "phase": "startup",
+      "pairedWith": "metadb_fini",
+      "confidence": "source-confirmed",
+      "configFlag": "ENABLE_METADATA"
+    },
+    {
+      "id": "metadb_fini",
+      "symbol": "metadb_fini",
+      "file": "src/metadata/metadb.c:140",
+      "category": "cache",
+      "phase": "shutdown",
+      "pairedWith": "metadb_init",
+      "confidence": "source-confirmed",
+      "configFlag": "ENABLE_METADATA"
+    },
+    {
+      "id": "playqueue_init",
+      "symbol": "playqueue_init",
+      "file": "src/playqueue.c:831",
+      "category": "core-init",
+      "phase": "startup",
+      "pairedWith": "playqueue_fini",
+      "confidence": "source-confirmed",
+      "configFlag": "ENABLE_PLAYQUEUE"
+    },
+    {
+      "id": "playqueue_fini",
+      "symbol": "playqueue_fini",
+      "file": "src/playqueue.c:876",
+      "category": "core-init",
+      "phase": "shutdown",
+      "pairedWith": "playqueue_init",
+      "confidence": "source-confirmed",
+      "configFlag": "ENABLE_PLAYQUEUE"
+    },
+    {
+      "id": "prop_subscribe_ex",
+      "symbol": "prop_subscribe_ex",
+      "file": "src/prop/prop_core.c:2912",
+      "category": "prop-subscribe",
+      "phase": "runtime",
+      "pairedWith": "prop_unsubscribe",
+      "confidence": "source-confirmed",
+      "configFlag": "PROP_SUB_RECORD_SOURCE"
     }
   ]
 }

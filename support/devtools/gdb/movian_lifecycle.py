@@ -30,6 +30,7 @@ import json
 import os
 import re
 import signal
+import shlex
 import subprocess
 import sys
 import time
@@ -212,7 +213,10 @@ if _HAVE_GDB:
             self.category = category
             self.symbol = symbol
             self.arg_exprs = arg_exprs or []
-            self.bound = True
+            try:
+                self.bound = bool(self.locations)
+            except Exception:
+                self.bound = True
 
         def stop(self):
             # Every ordinary lifecycle hit auto-continues; we never return a
@@ -241,6 +245,8 @@ if _HAVE_GDB:
             self._unbound = []
             self._pid_written = False
             self._errors = []
+            self._closed = False
+            self._exit_hook = None
             self._install_exit_hook()
 
         def _cap_for(self, cat):
@@ -252,11 +258,16 @@ if _HAVE_GDB:
 
         # -- event emission --------------------------------------------------
         def emit(self, event):
+            if getattr(self, "_closed", False):
+                return
             self._seq += 1
             event["seq"] = self._seq
             event.setdefault("monotonicNs", _monotonic_ns())
-            self._fh.write(json.dumps(event, separators=(",", ":")) + "\n")
-            self._fh.flush()
+            try:
+                self._fh.write(json.dumps(event, separators=(",", ":")) + "\n")
+                self._fh.flush()
+            except Exception:
+                pass
 
         def note_error(self, exc):
             self._errors.append(repr(exc))
@@ -304,8 +315,8 @@ if _HAVE_GDB:
                 except Exception:
                     arguments[key] = "<unavailable>"
             objects = {k: v for k, v in arguments.items()
-                       if isinstance(v, str) and v and not v.startswith("<")
-                       and not v.startswith("0x")}
+                       if isinstance(v, str) and v.startswith("0x")
+                       and v != "0x0"}
             self.emit({
                 "category": cat,
                 "event": "enter",
@@ -349,14 +360,12 @@ if _HAVE_GDB:
                            "symbol": None, "exitCode": code,
                            "thread": _thread_info(), "arguments": {},
                            "objects": {}, "stack": []})
-                try:
-                    self._fh.flush()
-                except Exception:
-                    pass
+                self.close()
+            self._exit_hook = _on_exit
             try:
                 gdb.events.exited.connect(_on_exit)
             except Exception:
-                pass
+                self._exit_hook = None
 
         def arm_from_inventory(self, inventory, categories, arg_exprs_by_symbol):
             sel = set(categories) if categories else None
@@ -370,17 +379,30 @@ if _HAVE_GDB:
                 arg_exprs = arg_exprs_by_symbol.get(entry["symbol"])
                 try:
                     bp = LifecycleBP(spec, cat, entry["symbol"], arg_exprs)
-                    self._armed.append(bp)
+                    if bp.bound:
+                        self._armed.append(bp)
+                    else:
+                        self._unbound.append("%s (unresolved in loaded binary)" %
+                                             spec)
+                        bp.delete()
                 except Exception as exc:
                     self._unbound.append("%s (%s)" % (spec, exc))
 
         def add_adhoc(self, sym, cat, exprs):
             try:
-                self._armed.append(LifecycleBP(sym, cat, sym, exprs))
+                bp = LifecycleBP(sym, cat, sym, exprs)
+                if bp.bound:
+                    self._armed.append(bp)
+                else:
+                    self._unbound.append(
+                        "%s (unresolved in loaded binary)" % sym)
+                    bp.delete()
             except Exception as exc:
                 self._unbound.append("%s (%s)" % (sym, exc))
 
         def close(self):
+            if getattr(self, "_closed", False):
+                return
             try:
                 self.emit({"category": "collector",
                            "event": "collector-final",
@@ -392,6 +414,19 @@ if _HAVE_GDB:
                            "objects": {}, "stack": []})
             except Exception:
                 pass
+            self._closed = True
+            if self._exit_hook is not None:
+                try:
+                    gdb.events.exited.disconnect(self._exit_hook)
+                except Exception:
+                    pass
+                self._exit_hook = None
+            for bp in self._armed:
+                try:
+                    bp.delete()
+                except Exception:
+                    pass
+            self._armed = []
             try:
                 self._fh.flush()
                 self._fh.close()
@@ -401,20 +436,16 @@ if _HAVE_GDB:
     # -- GDB command wiring --------------------------------------------------
     def _parse_opts(arg):
         opts = {}
-        toks = arg.replace("\\,", "\x00").split()
+        toks = shlex.split(arg)
         i = 0
         while i < len(toks):
-            t = toks[i].replace("\x00", ",")
-            if t.startswith("--"):
-                key = t[2:]
-                if i + 1 < len(toks) and not toks[i + 1].startswith("--"):
-                    opts[key] = toks[i + 1].replace("\x00", ",")
-                    i += 2
-                else:
-                    opts[key] = True
-                    i += 1
-            else:
-                i += 1
+            token = toks[i]
+            if not token.startswith("--"):
+                raise ValueError("unexpected argument: %s" % token)
+            if i + 1 >= len(toks) or toks[i + 1].startswith("--"):
+                raise ValueError("%s requires a value" % token)
+            opts[token[2:]] = toks[i + 1]
+            i += 2
         return opts
 
     class MovianLifecycleStart(gdb.Command):  # type: ignore[misc]
@@ -432,7 +463,10 @@ if _HAVE_GDB:
 
         def invoke(self, arg, from_tty):
             global _COLLECTOR
-            opts = _parse_opts(arg)
+            try:
+                opts = _parse_opts(arg)
+            except ValueError as exc:
+                raise gdb.GdbError("movian-lifecycle-start: %s" % exc)
             events_path = opts.get("events")
             if not events_path:
                 print("movian-lifecycle-start: --events FILE is required")
@@ -478,6 +512,8 @@ if _HAVE_GDB:
                 if exprs:
                     arg_exprs_by_symbol[sym] = exprs
 
+            if _COLLECTOR is not None:
+                _COLLECTOR.close()
             _COLLECTOR = Collector(events_path, default, hv_overrides,
                                    pidfile=opts.get("pidfile"))
             _COLLECTOR.arm_from_inventory(inventory, categories,
@@ -505,13 +541,14 @@ if _HAVE_GDB:
 
     MovianLifecycleStart()
 
-    def _at_gdb_exit(event):
+    def _close_on_gdb_exit(event):
         if _COLLECTOR is not None:
             _COLLECTOR.close()
     try:
-        gdb.events.before_prompt.connect(_at_gdb_exit)
+        gdb.events.gdb_exiting.connect(_close_on_gdb_exit)
     except Exception:
         pass
+
 
 
 # ###########################################################################
@@ -678,21 +715,23 @@ def _gdb_cmdfile(self_path, events_path, inventory_path, state_dir,
         "handle SIGHUP nostop noprint pass",
     ]
     if mode == "gdb-collector":
-        cmd = ("source %(self)s\n"
-               "movian-lifecycle-start --events %(ev)s --inventory %(inv)s "
-               "--pidfile %(pf)s" % {
-                   "self": self_path, "ev": events_path,
-                   "inv": inventory_path, "pf": pidfile})
+        lines.append("source " + self_path)
+        cmd = [
+            "movian-lifecycle-start",
+            "--events", shlex.quote(events_path),
+            "--inventory", shlex.quote(inventory_path),
+            "--pidfile", shlex.quote(pidfile),
+        ]
         if categories:
-            cmd += " --categories %s" % categories
+            cmd += ["--categories", shlex.quote(categories)]
         if cap:
-            cmd += " --cap %d" % cap
+            cmd += ["--cap", str(cap)]
         if hv_cap:
-            cmd += " --hv-cap %d" % hv_cap
+            cmd += ["--hv-cap", str(hv_cap)]
         if probes:
-            cmd += " --probe %s" % probes
-        lines.append(cmd)
-    lines.append("set args " + " ".join('"%s"' % a.replace('"', '\\"')
+            cmd += ["--probe", shlex.quote(probes)]
+        lines.append(" ".join(cmd))
+    lines.append("set args " + " ".join(shlex.quote(a)
                                         for a in movian_args[1:]))
     lines.append("run")
     fd, path = tempfile.mkstemp(prefix="movian_lifecycle_", suffix=".gdb")
@@ -752,6 +791,81 @@ def wait_http_ready(port, timeout=12.0, t0=None):
         time.sleep(0.1)
     return False, last
 
+def classify_run(summary, mode, leave_running):
+    """Pure success contract for a launch summary -> (ok, failureReasons).
+
+    All modes require: a parsed HTTP port, an inferior PID, exact ownership
+    (comm==movian + exact persistent path), HTTP-ready, and a valid cleanup
+    outcome (stopped-clean when not leave-running; left-running only with
+    proven ownership). gdb-collector additionally requires non-empty JSONL
+    with zero validation errors. Deterministic: same summary -> same reasons.
+    """
+    reasons = []
+    own = summary.get("ownership")
+    own = own if isinstance(own, dict) else {}
+    if summary.get("port") is None:
+        reasons.append("no-http-port")
+    if summary.get("inferiorPid") is None:
+        reasons.append("no-inferior-pid")
+    if not own.get("ownsPid"):
+        reasons.append("ownership-not-proven")
+    if summary.get("httpReady") is not True:
+        reasons.append("http-not-ready")
+    if leave_running:
+        if not (own.get("ownsPid") and summary.get("inferiorPid") is not None):
+            reasons.append("leave-running-without-ownership")
+        if summary.get("finalOwnedRemains") is not True:
+            reasons.append("leave-running-inferior-not-live")
+    else:
+        if summary.get("finalOwnedRemains"):
+            reasons.append("orphan-inferior-after-cleanup")
+        if (summary.get("inferiorPid") is not None
+                and summary.get("stopOutcome") != "stopped-clean"):
+            reasons.append("cleanup-not-clean:%s" % summary.get("stopOutcome"))
+        if summary.get("gdbForceKilled"):
+            reasons.append("gdb-force-killed")
+    if mode == "gdb-collector":
+        j = summary.get("jsonl") or {}
+        if not j.get("lines"):
+            reasons.append("empty-jsonl")
+        if j.get("bad"):
+            reasons.append("jsonl-validation-errors:%d" % len(j["bad"]))
+    return (len(reasons) == 0), reasons
+
+
+def cleanup_owned(persistent, proc, pid, leave_running, gdb_timeout=10.0):
+    """Stop the owned inferior and the GDB process, then run a final
+    exact-persistent-path sweep that kills only an inferior this profile still
+    owns. Never signals a foreign process. Returns outcome fields for the
+    summary; finalOwnedRemains is the hard no-orphan gate."""
+    out = {"stopOutcome": "no-inferior", "finalOwnedRemains": False,
+           "gdbReturnCode": None, "gdbForceKilled": False}
+    if leave_running:
+        out["stopOutcome"] = "left-running"
+        out["finalOwnedRemains"] = find_inferior_pid(persistent) is not None
+        return out
+    if pid is not None:
+        out["stopOutcome"] = kill_owned(pid, persistent, timeout=8.0)
+    if proc is not None:
+        try:
+            proc.wait(timeout=gdb_timeout)
+        except subprocess.TimeoutExpired:
+            out["gdbForceKilled"] = True
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+        out["gdbReturnCode"] = proc.returncode
+    # Final exact-path sweep: if the GDB process had to be force-killed before
+    # it forwarded the signal (or anything else slipped), reap only our own.
+    leftover = find_inferior_pid(persistent)
+    if leftover is not None:
+        out["finalScanKill"] = kill_owned(leftover, persistent, timeout=5.0)
+    out["finalOwnedRemains"] = find_inferior_pid(persistent) is not None
+    return out
+
+
 def run_launch(args):
     name = args.name
     persistent = args.persistent or os.path.join(instance_state(name),
@@ -764,134 +878,171 @@ def run_launch(args):
     inventory_path = args.inventory or os.path.join(
         os.path.dirname(self_path), "inventory.json")
 
-    # Fresh isolated dirs per run.
+    events_path = args.events or os.path.join(state_dir, "events.jsonl")
+    log_path = os.path.join(state_dir, "movian.log")
+    summary = {"mode": args.mode, "name": name, "events": events_path,
+               "log": log_path, "persistent": persistent, "cache": cache}
+
     for p in (persistent, cache, os.path.join(cache, "log")):
         os.makedirs(p, exist_ok=True)
-    # Pre-flight: stop any stale movian this exact persistent path still owns
-    # (safe -- kill_owned only ever signals comm==movian + exact-path matches)
-    # and clear the cache log so the port-line we read is provably from THIS
-    # run, not a leftover from a same-name rerun.
+    # Pre-flight: verify GDB and binary exist before spawning anything.
+    # A missing binary makes GDB hang indefinitely waiting for the inferior
+    # to exec; a missing GDB is an immediate failure.
+    import shutil
+    for tool_path, label in ((args.gdb, "gdb"), (binary, "binary")):
+        resolved = (shutil.which(tool_path) if "/" not in tool_path
+                    else tool_path)
+        if resolved is None or not os.path.isfile(resolved) or \
+                not os.access(resolved, os.X_OK):
+            summary["failureReasons"] = [
+                "preflight-%s-not-found:%s" % (label, tool_path)]
+            summary["ok"] = False
+            summary["exitCode"] = 1
+            print("MOVIAN_LIFECYCLE_SUMMARY " + json.dumps(summary,
+                                                           sort_keys=True))
+            return 1
+
+    # Pre-flight (defect #2): prove any exact-profile stale owner is gone
+    # BEFORE spawning. kill_owned only ever signals comm==movian + exact-path
+    # matches (never foreign); killed-after-timeout is acceptable only once
+    # owns_pid is false. Abort if it cannot be proven gone.
     stale = find_inferior_pid(persistent)
     if stale is not None:
         kill_owned(stale, persistent, timeout=4.0)
+        if find_inferior_pid(persistent) is not None:
+            summary["failureReasons"] = ["preflight-stale-owner-not-gone"]
+            summary["ok"] = False
+            summary["exitCode"] = 1
+            print("MOVIAN_LIFECYCLE_SUMMARY " + json.dumps(summary,
+                                                           sort_keys=True))
+            return 1
+    # Clear the cache log so the port-line we read is provably from THIS run.
     _log_dir = os.path.join(cache, "log")
-    if os.path.isdir(_log_dir):
-        for _fn in os.listdir(_log_dir):
-            try:
-                os.unlink(os.path.join(_log_dir, _fn))
-            except OSError:
-                pass
-
-    events_path = args.events or os.path.join(state_dir, "events.jsonl")
-    log_path = os.path.join(state_dir, "movian.log")
+    for _fn in (os.listdir(_log_dir) if os.path.isdir(_log_dir) else []):
+        try:
+            os.unlink(os.path.join(_log_dir, _fn))
+        except OSError:
+            pass
 
     env = dict(os.environ)
     env["DISPLAY"] = args.display
     env["WAYLAND_DISPLAY"] = args.wayland
     env["MOVIAN_MDEV_ALLOW_GDB"] = "1"
 
-    summary = {"mode": args.mode, "name": name, "events": events_path,
-               "log": log_path, "persistent": persistent, "cache": cache}
-
     t0 = time.monotonic()
     proc = None
     cmdfile = None
-    if args.mode == "plain":
-        movian_args = build_movian_argv(binary, persistent, cache, start_url)
-        log_fd = open(log_path, "wb", buffering=0)
-        log_fd.truncate(0)
-        proc = subprocess.Popen(movian_args, cwd=os.getcwd(),
-                                env=env, stdout=log_fd,
-                                stderr=subprocess.STDOUT,
-                                stdin=subprocess.DEVNULL,
-                                start_new_session=True)
-        log_fd.close()
-    else:  # gdb-bare or gdb-collector
-        cmdfile, movian_args = _gdb_cmdfile(
-            self_path, events_path, inventory_path, state_dir, persistent,
-            cache, binary, start_url, args.categories, args.cap, args.hv_cap,
-            args.probe, args.mode)
-        log_fd = open(log_path, "wb", buffering=0)
-        log_fd.truncate(0)
-        gdb_argv = [args.gdb, "-q", "-batch", "-x", cmdfile]
-        proc = subprocess.Popen(gdb_argv, cwd=os.getcwd(), env=env,
-                                stdout=log_fd, stderr=subprocess.STDOUT,
-                                stdin=subprocess.DEVNULL,
-                                start_new_session=True)
-        log_fd.close()
-    summary["argv"] = movian_args
+    movian_args = []
+    pid = None
+    try:
+        if args.mode == "plain":
+            movian_args = build_movian_argv(binary, persistent, cache, start_url)
+            log_fd = open(log_path, "wb", buffering=0)
+            log_fd.truncate(0)
+            proc = subprocess.Popen(movian_args, cwd=os.getcwd(), env=env,
+                                    stdout=log_fd, stderr=subprocess.STDOUT,
+                                    stdin=subprocess.DEVNULL,
+                                    start_new_session=True)
+            log_fd.close()
+        else:  # gdb-bare or gdb-collector
+            cmdfile, movian_args = _gdb_cmdfile(
+                self_path, events_path, inventory_path, state_dir, persistent,
+                cache, binary, start_url, args.categories, args.cap,
+                args.hv_cap, args.probe, args.mode)
+            log_fd = open(log_path, "wb", buffering=0)
+            log_fd.truncate(0)
+            gdb_argv = [args.gdb, "-q", "-batch", "-x", cmdfile]
+            proc = subprocess.Popen(gdb_argv, cwd=os.getcwd(), env=env,
+                                    stdout=log_fd, stderr=subprocess.STDOUT,
+                                    stdin=subprocess.DEVNULL,
+                                    start_new_session=True)
+            log_fd.close()
+        summary["argv"] = movian_args
 
-    port, startup_ms = parse_port_and_startup(cache, timeout=args.startup_timeout)
-    summary["port"] = port
-    summary["startupMsInternal"] = startup_ms
-    summary["externalWallMs"] = int((time.monotonic() - t0) * 1000)
+        port, startup_ms = parse_port_and_startup(
+            cache, timeout=args.startup_timeout)
+        summary["port"] = port
+        summary["startupMsInternal"] = startup_ms
+        summary["externalWallMs"] = int((time.monotonic() - t0) * 1000)
 
-    pid = find_inferior_pid(persistent)
-    summary["inferiorPid"] = pid
+        pid = find_inferior_pid(persistent)
+        summary["inferiorPid"] = pid
 
-    if port is not None and pid is not None:
-        write_state(name, persistent, cache, pid, port, log_path, movian_args,
-                    extra={"collector": args.mode == "gdb-collector",
-                           "events": events_path})
+        if port is not None and pid is not None:
+            write_state(name, persistent, cache, pid, port, log_path,
+                        movian_args,
+                        extra={"collector": args.mode == "gdb-collector",
+                               "events": events_path})
 
-    http_ok = None
-    http_ready_ms = None
-    if port is not None:
-        http_ok, detail = wait_http_ready(port, timeout=12.0, t0=t0)
-        if not http_ok:
-            summary["httpProbeError"] = str(detail)
-        else:
-            http_ready_ms = detail
-    summary["httpReady"] = http_ok
-    summary["httpReadyMs"] = http_ready_ms
+        http_ok = None
+        http_ready_ms = None
+        if port is not None:
+            http_ok, detail = wait_http_ready(port, timeout=12.0, t0=t0)
+            if not http_ok:
+                summary["httpProbeError"] = str(detail)
+            else:
+                http_ready_ms = detail
+        summary["httpReady"] = http_ok
+        summary["httpReadyMs"] = http_ready_ms
 
-    if pid is not None:
-        try:
-            comm = open("/proc/%d/comm" % pid).read().strip()
-            raw = open("/proc/%d/cmdline" % pid, "rb").read()
-            cmdline = raw.replace(b"\x00", b" ").decode(errors="replace").strip()
-            pers_in = _e(str(persistent)) in raw.split(b"\x00")
-        except OSError:
-            comm = cmdline = None
-            pers_in = False
-        summary["ownership"] = {
-            "pid": pid, "comm": comm,
-            "commIsMovian": comm == "movian",
-            "persistentInCmdline": pers_in,
-            "ownsPid": owns_pid(pid, persistent),
-            "cmdline": cmdline,
-        }
-
-    if args.leave_running:
-        summary["stopOutcome"] = "left-running"
-    else:
-        if args.mode == "gdb-collector" and port is not None and args.duration > 0:
-            time.sleep(args.duration)
-        stop_outcome = "no-inferior"
         if pid is not None:
-            stop_outcome = kill_owned(pid, persistent, timeout=8.0)
-        summary["stopOutcome"] = stop_outcome
-        if proc is not None:
             try:
-                proc.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                try:
-                    proc.wait(timeout=5)
-                except Exception:
-                    pass
-    if cmdfile:
-        try:
-            os.unlink(cmdfile)
-        except OSError:
-            pass
+                comm = open("/proc/%d/comm" % pid).read().strip()
+                raw = open("/proc/%d/cmdline" % pid, "rb").read()
+                cmdline = raw.replace(b"\x00", b" ").decode(
+                    errors="replace").strip()
+                pers_in = _e(str(persistent)) in raw.split(b"\x00")
+            except OSError:
+                comm = cmdline = None
+                pers_in = False
+            summary["ownership"] = {
+                "pid": pid, "comm": comm,
+                "commIsMovian": comm == "movian",
+                "persistentInCmdline": pers_in,
+                "ownsPid": owns_pid(pid, persistent),
+                "cmdline": cmdline,
+            }
 
-    if (not args.leave_running and args.mode == "gdb-collector"
-            and os.path.exists(events_path)):
-        summary["jsonl"] = validate_events(events_path)
+        if (not args.leave_running and args.mode == "gdb-collector"
+                and port is not None and args.duration > 0):
+            time.sleep(args.duration)
+    except Exception as exc:
+        summary["exception"] = repr(exc)
+    finally:
+        # Defect #3: guaranteed cleanup regardless of how the body ended --
+        # stop the owned inferior + GDB, then a final exact-persistent-path
+        # sweep so no orphan movian/gdb can remain.
+        cleanup = cleanup_owned(persistent, proc, pid, args.leave_running)
+        summary["stopOutcome"] = cleanup["stopOutcome"]
+        summary["gdbReturnCode"] = cleanup["gdbReturnCode"]
+        summary["finalOwnedRemains"] = cleanup["finalOwnedRemains"]
+        summary["gdbForceKilled"] = cleanup["gdbForceKilled"]
+        if "finalScanKill" in cleanup:
+            summary["finalScanKill"] = cleanup["finalScanKill"]
+        if (not args.leave_running and args.mode == "gdb-collector"
+                and os.path.exists(events_path)):
+            summary["jsonl"] = validate_events(events_path)
+        if cmdfile:
+            try:
+                os.unlink(cmdfile)
+            except OSError:
+                pass
 
+    ok, reasons = classify_run(summary, args.mode, args.leave_running)
+    if summary.get("exception"):
+        reasons.append("exception:%s" % summary["exception"])
+    ok = not reasons
+    summary["failureReasons"] = reasons
+    summary["ok"] = ok
+    summary["exitCode"] = 0 if ok else 1
     print("MOVIAN_LIFECYCLE_SUMMARY " + json.dumps(summary, sort_keys=True))
-    return 0
+    return summary["exitCode"]
+
+
+def run_validate(args):
+    result = validate_events(args.events)
+    print(json.dumps(result, sort_keys=True))
+    return 0 if result["lines"] and not result["bad"] else 1
 
 def build_argparser():
     import argparse
@@ -932,8 +1083,7 @@ def build_argparser():
     lp.set_defaults(func=run_launch)
     vp = sub.add_parser("validate", help="validate a JSONL event log")
     vp.add_argument("events")
-    vp.set_defaults(func=lambda a: (print(json.dumps(
-        validate_events(a.events), sort_keys=True)), 0)[1])
+    vp.set_defaults(func=run_validate)
     return p
 
 
