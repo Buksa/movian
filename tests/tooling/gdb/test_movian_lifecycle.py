@@ -121,6 +121,13 @@ class Failures(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("gdb-force-killed", r)
 
+    def test_natural_exit_not_cleanup_failure(self):
+        ok, r = classify_run(
+            base(stopOutcome="not-owned", inferiorExitedBeforeDuration=True),
+            "gdb-collector", False)
+        self.assertTrue(ok)
+        self.assertNotIn("cleanup-not-clean", " ".join(r))
+
 
 class CommandFile(unittest.TestCase):
     def test_probe_with_spaces_round_trips(self):

@@ -697,10 +697,10 @@ def build_movian_argv(binary, persistent, cache, start_url, extra=None):
 
 def _gdb_cmdfile(self_path, events_path, inventory_path, state_dir,
                  persistent, cache, binary, start_url, categories, cap, hv_cap,
-                 probes, mode):
+                 probes, mode, extra=None):
     """Build a temp gdb command file.  For gdb-collector mode it sources this
     module and arms the collector before `run` so probes bind at exec."""
-    movian_args = build_movian_argv(binary, persistent, cache, start_url)
+    movian_args = build_movian_argv(binary, persistent, cache, start_url, extra)
     pidfile = os.path.join(state_dir, "inferior.pid")
     lines = [
         "set pagination off",
@@ -820,7 +820,8 @@ def classify_run(summary, mode, leave_running):
         if summary.get("finalOwnedRemains"):
             reasons.append("orphan-inferior-after-cleanup")
         if (summary.get("inferiorPid") is not None
-                and summary.get("stopOutcome") != "stopped-clean"):
+                and summary.get("stopOutcome") != "stopped-clean"
+                and not summary.get("inferiorExitedBeforeDuration")):
             reasons.append("cleanup-not-clean:%s" % summary.get("stopOutcome"))
         if summary.get("gdbForceKilled"):
             reasons.append("gdb-force-killed")
@@ -934,9 +935,14 @@ def run_launch(args):
     cmdfile = None
     movian_args = []
     pid = None
+    extra = []
+    for _p in args.plugins:
+        extra += ["-p", _p]
+    extra += list(args.extra_args)
     try:
         if args.mode == "plain":
-            movian_args = build_movian_argv(binary, persistent, cache, start_url)
+            movian_args = build_movian_argv(binary, persistent, cache,
+                                            start_url, extra)
             log_fd = open(log_path, "wb", buffering=0)
             log_fd.truncate(0)
             proc = subprocess.Popen(movian_args, cwd=os.getcwd(), env=env,
@@ -948,7 +954,7 @@ def run_launch(args):
             cmdfile, movian_args = _gdb_cmdfile(
                 self_path, events_path, inventory_path, state_dir, persistent,
                 cache, binary, start_url, args.categories, args.cap,
-                args.hv_cap, args.probe, args.mode)
+                args.hv_cap, args.probe, args.mode, extra)
             log_fd = open(log_path, "wb", buffering=0)
             log_fd.truncate(0)
             gdb_argv = [args.gdb, "-q", "-batch", "-x", cmdfile]
@@ -1005,7 +1011,11 @@ def run_launch(args):
 
         if (not args.leave_running and args.mode == "gdb-collector"
                 and port is not None and args.duration > 0):
-            time.sleep(args.duration)
+            try:
+                proc.wait(timeout=args.duration)
+                summary["inferiorExitedBeforeDuration"] = True
+            except subprocess.TimeoutExpired:
+                pass
     except Exception as exc:
         summary["exception"] = repr(exc)
     finally:
@@ -1059,6 +1069,14 @@ def build_argparser():
     lp.add_argument("--persistent")
     lp.add_argument("--cache")
     lp.add_argument("--start-url", default="page:home")
+    lp.add_argument("-p", "--plugin", action="append", default=[],
+                    dest="plugins",
+                    help="dev plugin dir to load (repeatable); forwarded to "
+                         "movian as -p (issue #145 plugin scenarios)")
+    lp.add_argument("--extra-arg", action="append", default=[],
+                    dest="extra_args",
+                    help="extra movian argv token (repeatable), e.g. "
+                         "--extra-arg --with-restart")
     lp.add_argument("--inventory")
     lp.add_argument("--events")
     lp.add_argument("--categories", default=None,
