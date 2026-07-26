@@ -33,6 +33,7 @@ def base(**over):
     s = {"port": 42000, "inferiorPid": 1234, "ownership": own(True),
          "httpReady": True, "stopOutcome": "stopped-clean",
          "finalOwnedRemains": False, "gdbForceKilled": False,
+         "collectorControlReady": True,
          "jsonl": {"lines": 5, "bad": []}}
     s.update(over)
     return s
@@ -150,6 +151,12 @@ class Failures(unittest.TestCase):
             "gdb-collector", False)
         self.assertFalse(ok)
         self.assertIn("natural-exit-not-clean", r)
+
+    def test_collector_control_is_required(self):
+        ok, r = classify_run(
+            base(collectorControlReady=False), "gdb-collector", False)
+        self.assertFalse(ok)
+        self.assertIn("collector-control-not-ready", r)
 
     def test_expected_natural_exit_must_happen(self):
         ok, r = classify_run(

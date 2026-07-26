@@ -36,15 +36,18 @@ import sys
 import time
 import threading
 import tempfile
+import uuid
 
 # ---------------------------------------------------------------------------
-# Are we running inside GDB?  ``import gdb`` only succeeds when this file is
-# sourced by GDB; the host-launch orchestrator runs under CPython where it
-# raises ImportError.
+# Are we running inside GDB?  CPython test discovery can expose an unrelated
+# namespace package named ``gdb``; require the native API, not import success.
 # ---------------------------------------------------------------------------
 try:
     import gdb  # type: ignore
-    _HAVE_GDB = True
+    _HAVE_GDB = all(hasattr(gdb, name)
+                    for name in ("Breakpoint", "Command", "execute"))
+    if not _HAVE_GDB:
+        gdb = None  # type: ignore
 except Exception:  # pragma: no cover - exercised by the orchestrator path
     gdb = None  # type: ignore
     _HAVE_GDB = False
@@ -69,6 +72,88 @@ DEFAULT_CAP = 400
 # categories; a real crash/wedge surfaces as a signal/exit reported via the gdb
 # event hooks, not by arming a stopping probe.
 STOPPING_CATEGORIES = set()
+
+WEDGE_PROTOCOL = "movian-lifecycle-wedge-v1"
+WEDGE_EVENT = "wedge-capture"
+
+
+def validate_wedge_event(event):
+    """Return deterministic schema errors for one same-session wedge event."""
+    errors = []
+    if event.get("category") != "wedge":
+        errors.append("category must be wedge")
+    if event.get("event") != WEDGE_EVENT:
+        errors.append("event must be %s" % WEDGE_EVENT)
+    for key in ("trigger", "classification", "classificationDetail"):
+        if not isinstance(event.get(key), str) or not event[key]:
+            errors.append("%s must be a non-empty string" % key)
+
+    correlation = event.get("correlation")
+    if not isinstance(correlation, dict):
+        errors.append("correlation must be an object")
+    else:
+        for key in ("subsystem", "resource"):
+            if not isinstance(correlation.get(key), str) or \
+                    not correlation[key]:
+                errors.append("correlation.%s must be a non-empty string" %
+                              key)
+
+    eject = event.get("emergencyEject")
+    if not isinstance(eject, dict):
+        errors.append("emergencyEject must be an object")
+    else:
+        if not isinstance(eject.get("state"), str) or not eject["state"]:
+            errors.append("emergencyEject.state must be a non-empty string")
+        for key in ("requested", "fired"):
+            if not isinstance(eject.get(key), bool):
+                errors.append("emergencyEject.%s must be boolean" % key)
+
+    session = event.get("session")
+    if not isinstance(session, dict):
+        errors.append("session must be an object")
+    else:
+        if not isinstance(session.get("id"), str) or not session["id"]:
+            errors.append("session.id must be a non-empty string")
+        for key in ("gdbPid", "inferiorPid"):
+            if not isinstance(session.get(key), int) or session[key] <= 0:
+                errors.append("session.%s must be a positive integer" % key)
+        if session.get("attachedAtLaunch") is not True:
+            errors.append("session.attachedAtLaunch must be true")
+
+    threads = event.get("remainingThreads")
+    if not isinstance(threads, list):
+        errors.append("remainingThreads must be an array")
+        threads = []
+    else:
+        for index, thread in enumerate(threads):
+            if not isinstance(thread, dict):
+                errors.append("remainingThreads[%d] must be an object" % index)
+                continue
+            for key in ("gdbId", "name", "osTid"):
+                if key not in thread:
+                    errors.append("remainingThreads[%d].%s missing" %
+                                  (index, key))
+
+    capture = event.get("capture")
+    if not isinstance(capture, dict):
+        errors.append("capture must be an object")
+    else:
+        if capture.get("status") not in ("success", "error", "timeout"):
+            errors.append("capture.status is invalid")
+        if not isinstance(capture.get("dumpPath"), str) or \
+                not capture["dumpPath"]:
+            errors.append("capture.dumpPath must be a non-empty string")
+        for key in ("threadCount", "frameCount"):
+            if not isinstance(capture.get(key), int) or capture[key] < 0:
+                errors.append("capture.%s must be a non-negative integer" %
+                              key)
+        if not isinstance(capture.get("movianFramePresent"), bool):
+            errors.append("capture.movianFramePresent must be boolean")
+        if isinstance(threads, list) and \
+                isinstance(capture.get("threadCount"), int) and \
+                capture["threadCount"] != len(threads):
+            errors.append("capture.threadCount does not match remainingThreads")
+    return errors
 
 _COLLECTOR = None  # type: ignore[assignment]
 
@@ -434,6 +519,220 @@ if _HAVE_GDB:
             except Exception:
                 pass
 
+    def _all_thread_info():
+        result = []
+        try:
+            threads = list(gdb.selected_inferior().threads())
+        except Exception:
+            return result
+        for thr in sorted(threads,
+                          key=lambda item: getattr(item, "global_num", 0)):
+            info = {"gdbId": getattr(thr, "global_num", None),
+                    "name": getattr(thr, "name", None), "osTid": None}
+            try:
+                ptid = tuple(thr.ptid)
+                if len(ptid) > 1 and ptid[1]:
+                    info["osTid"] = ptid[1]
+                elif len(ptid) > 2 and ptid[2]:
+                    info["osTid"] = ptid[2]
+                elif ptid:
+                    info["osTid"] = ptid[0] or None
+            except Exception:
+                pass
+            if not info["name"] and info["osTid"]:
+                try:
+                    with open("/proc/%d/comm" % info["osTid"]) as f:
+                        info["name"] = f.read().strip()
+                except OSError:
+                    pass
+            result.append(info)
+        return result
+
+    def _atomic_json(path, payload):
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        temporary = "%s.tmp.%d" % (path, os.getpid())
+        with open(temporary, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, sort_keys=True)
+            f.write("\n")
+        os.replace(temporary, path)
+
+    def _load_json(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                value = json.load(f)
+            return value if isinstance(value, dict) else None
+        except (OSError, ValueError):
+            return None
+
+    def _capture_wedge_request(request_path, response_path, session_id,
+                               request):
+        gdb_pid = os.getpid()
+        try:
+            inferior_pid = int(gdb.selected_inferior().pid)
+        except Exception:
+            inferior_pid = 0
+        request_id = request.get("requestId")
+        response = {
+            "protocol": WEDGE_PROTOCOL,
+            "sessionId": session_id,
+            "requestId": request_id,
+            "gdbPid": gdb_pid,
+            "inferiorPid": inferior_pid,
+            "status": "error",
+            "dumpPath": request.get("dumpPath"),
+            "threadCount": 0,
+            "frameCount": 0,
+            "movianFramePresent": False,
+            "completedMonotonicNs": _monotonic_ns(),
+        }
+        errors = []
+        if request.get("protocol") != WEDGE_PROTOCOL:
+            errors.append("protocol mismatch")
+        if request.get("sessionId") != session_id:
+            errors.append("session mismatch")
+        if request.get("gdbPid") != gdb_pid:
+            errors.append("gdb pid mismatch")
+        if request.get("inferiorPid") != inferior_pid or inferior_pid <= 0:
+            errors.append("inferior pid mismatch")
+        if not isinstance(request_id, str) or not request_id:
+            errors.append("missing request id")
+        for key in ("trigger", "classification", "classificationDetail",
+                    "subsystem", "resource"):
+            if not isinstance(request.get(key), str) or not request[key]:
+                errors.append("missing %s" % key)
+        eject = request.get("emergencyEject")
+        if not isinstance(eject, dict):
+            errors.append("missing emergencyEject")
+        dump_path = request.get("dumpPath")
+        state_dir = os.path.realpath(os.path.dirname(request_path))
+        if not isinstance(dump_path, str) or not dump_path:
+            errors.append("missing dump path")
+        else:
+            resolved_dump = os.path.realpath(dump_path)
+            try:
+                confined = os.path.commonpath(
+                    (state_dir, resolved_dump)) == state_dir
+            except ValueError:
+                confined = False
+            if not confined:
+                errors.append("dump path escapes instance state")
+
+        if errors:
+            response["detail"] = "; ".join(errors)
+            try:
+                _atomic_json(response_path, response)
+            except Exception:
+                pass
+            return response
+
+        threads = _all_thread_info()
+        output = ""
+        detail = ""
+        try:
+            output = gdb.execute("thread apply all bt", to_string=True)
+            frame_count = len(re.findall(r"(?m)^#\d+\s", output))
+            movian_frame = bool(re.search(
+                r"(?m)^#\d+.*(?:/src/|\b(?:main_|glw_|hts_|hc_)\w*)",
+                output))
+            thread_count = len(threads)
+            if thread_count < 2:
+                detail = "only %d thread(s) remained" % thread_count
+            elif frame_count < 10:
+                detail = "captured only %d stack frame(s)" % frame_count
+            elif not movian_frame:
+                detail = "capture contained no Movian function/source frame"
+            else:
+                response["status"] = "success"
+                detail = "captured %d frames across %d threads" % (
+                    frame_count, thread_count)
+            response.update({
+                "threadCount": thread_count,
+                "frameCount": frame_count,
+                "movianFramePresent": movian_frame,
+            })
+        except Exception as exc:
+            detail = "thread apply all bt failed: %s: %s" % (
+                type(exc).__name__, exc)
+
+        response["detail"] = detail
+        response["completedMonotonicNs"] = _monotonic_ns()
+        lines = [
+            "capture-status: %s" % response["status"],
+            "capture-source: launch-attached-gdb",
+            "session-id: %s" % session_id,
+            "gdb-pid: %d" % gdb_pid,
+            "inferior-pid: %d" % inferior_pid,
+            "thread-count: %d" % response["threadCount"],
+            "frame-count: %d" % response["frameCount"],
+            "movian-frame-present: %s" % str(
+                response["movianFramePresent"]).lower(),
+            "trigger: %s" % request["trigger"],
+            "classification: %s" % request["classification"],
+            "subsystem: %s" % request["subsystem"],
+            "resource: %s" % request["resource"],
+            "emergency-eject-state: %s" %
+            request["emergencyEject"].get("state", "unknown"),
+            "detail: %s" % detail,
+        ]
+        if output:
+            lines.extend(("", "gdb-output:", output.rstrip()))
+        try:
+            with open(dump_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        except Exception as exc:
+            response["status"] = "error"
+            response["detail"] = "could not write dump: %s" % exc
+            response["completedMonotonicNs"] = _monotonic_ns()
+
+        event = {
+            "category": "wedge",
+            "event": WEDGE_EVENT,
+            "symbol": None,
+            "trigger": request["trigger"],
+            "classification": request["classification"],
+            "classificationDetail": request["classificationDetail"],
+            "classifiedMonotonicNs": request.get("classifiedMonotonicNs"),
+            "correlation": {
+                "subsystem": request["subsystem"],
+                "resource": request["resource"],
+            },
+            "emergencyEject": request["emergencyEject"],
+            "session": {
+                "id": session_id,
+                "gdbPid": gdb_pid,
+                "inferiorPid": inferior_pid,
+                "attachedAtLaunch": True,
+            },
+            "remainingThreads": threads,
+            "capture": {
+                "status": response["status"],
+                "dumpPath": dump_path,
+                "threadCount": response["threadCount"],
+                "frameCount": response["frameCount"],
+                "movianFramePresent": response["movianFramePresent"],
+                "detail": response["detail"],
+            },
+            "thread": _thread_info(),
+            "arguments": {},
+            "objects": {},
+            "stack": _capture_stack(6),
+        }
+        schema_errors = validate_wedge_event(event)
+        if schema_errors:
+            response["status"] = "error"
+            response["detail"] = "wedge event schema: %s" % \
+                "; ".join(schema_errors)
+            event["capture"]["status"] = "error"
+            event["capture"]["detail"] = response["detail"]
+        if _COLLECTOR is not None:
+            _COLLECTOR.emit(event)
+        try:
+            _atomic_json(response_path, response)
+        except Exception:
+            pass
+        return response
     # -- GDB command wiring --------------------------------------------------
     def _parse_opts(arg):
         opts = {}
@@ -542,6 +841,51 @@ if _HAVE_GDB:
 
     MovianLifecycleStart()
 
+    class MovianLifecycleWedgeControl(gdb.Command):  # type: ignore[misc]
+        """Capture a pending host request whenever the inferior stops."""
+
+        def __init__(self):
+            super().__init__("movian-lifecycle-wedge-control",
+                             gdb.COMMAND_DATA)
+
+        def invoke(self, arg, from_tty):
+            opts = _parse_opts(arg)
+            request_path = opts.get("request")
+            response_path = opts.get("response")
+            session_id = opts.get("session")
+            if not request_path or not response_path or not session_id:
+                raise gdb.GdbError(
+                    "movian-lifecycle-wedge-control requires request, "
+                    "response, and session")
+            processed = set()
+            while True:
+                try:
+                    if not gdb.selected_inferior().pid:
+                        return
+                except Exception:
+                    return
+                request = _load_json(request_path)
+                request_id = (request or {}).get("requestId")
+                if request is not None and request_id not in processed:
+                    processed.add(request_id)
+                    _capture_wedge_request(
+                        request_path, response_path, session_id, request)
+                try:
+                    if not gdb.selected_inferior().pid:
+                        return
+                    gdb.execute("signal 0")
+                except Exception as exc:
+                    try:
+                        if not gdb.selected_inferior().pid:
+                            return
+                    except Exception:
+                        return
+                    print("movian-lifecycle-wedge-control: "
+                          "signal 0 failed: %s" % exc)
+                    return
+
+    MovianLifecycleWedgeControl()
+
     def _close_on_gdb_exit(event):
         if _COLLECTOR is not None:
             _COLLECTOR.close()
@@ -578,6 +922,17 @@ def pid_is_movian(pid):
             return f.read().strip() == "movian"
     except OSError:
         return False
+
+
+def process_start_ticks(pid):
+    """Return Linux /proc start ticks, preventing recycled debugger PID use."""
+    try:
+        with open("/proc/%d/stat" % pid) as f:
+            value = f.read()
+        fields = value[value.rfind(")") + 2:].split()
+        return int(fields[19])
+    except (OSError, ValueError, IndexError):
+        return None
 
 
 def owns_pid(pid, persistent):
@@ -706,7 +1061,7 @@ def build_movian_argv(binary, persistent, cache, start_url, extra=None):
 
 def _gdb_cmdfile(self_path, events_path, inventory_path, state_dir,
                  persistent, cache, binary, start_url, categories, cap, hv_cap,
-                 probes, mode, extra=None):
+                 probes, mode, extra=None, control=None):
     """Build a temp gdb command file.  For gdb-collector mode it sources this
     module and arms the collector before `run` so probes bind at exec."""
     movian_args = build_movian_argv(binary, persistent, cache, start_url, extra)
@@ -717,7 +1072,9 @@ def _gdb_cmdfile(self_path, events_path, inventory_path, state_dir,
         "set print pretty off",
         "file " + os.path.abspath(binary),
         "set breakpoint pending on",
-        # Let shutdown/termination signals flow to movian (no gdb stop).
+        # Cleanup signals flow to Movian. The controller sends SIGSTOP only
+        # after exact ownership + TracerPid proof; GDB's default stop is then
+        # resumed with `signal 0`, so SIGSTOP never reaches the inferior.
         "handle SIGTERM nostop noprint pass",
         "handle SIGINT nostop noprint pass",
         "handle SIGPIPE nostop noprint pass",
@@ -743,6 +1100,14 @@ def _gdb_cmdfile(self_path, events_path, inventory_path, state_dir,
     lines.append("set args " + " ".join(shlex.quote(a)
                                         for a in movian_args[1:]))
     lines.append("run")
+    if mode == "gdb-collector" and control:
+        command = [
+            "movian-lifecycle-wedge-control",
+            "--request", shlex.quote(control["requestPath"]),
+            "--response", shlex.quote(control["responsePath"]),
+            "--session", shlex.quote(control["sessionId"]),
+        ]
+        lines.append(" ".join(command))
     fd, path = tempfile.mkstemp(prefix="movian_lifecycle_", suffix=".gdb")
     with os.fdopen(fd, "w") as f:
         f.write("\n".join(lines) + "\n")
@@ -775,6 +1140,10 @@ def validate_events(events_path):
             for k in ("gdbId", "name", "osTid"):
                 if k not in th:
                     bad.append({"line": ln, "error": "thread.%s missing" % k})
+            if obj.get("category") == "wedge" and \
+                    obj.get("event") == WEDGE_EVENT:
+                for error in validate_wedge_event(obj):
+                    bad.append({"line": ln, "error": "wedge: %s" % error})
             cats[obj.get("category")] = cats.get(obj.get("category"), 0) + 1
             if obj.get("event") == "inferior-exited":
                 inferior_exit_codes.append(obj.get("exitCode"))
@@ -855,6 +1224,8 @@ def classify_run(summary, mode, leave_running):
         if summary.get("gdbForceKilled"):
             reasons.append("gdb-force-killed")
     if mode == "gdb-collector":
+        if summary.get("collectorControlReady") is not True:
+            reasons.append("collector-control-not-ready")
         j = summary.get("jsonl") or {}
         if not j.get("lines"):
             reasons.append("empty-jsonl")
@@ -913,6 +1284,15 @@ def run_launch(args):
     summary = {"mode": args.mode, "name": name, "events": events_path,
                "log": log_path, "persistent": persistent, "cache": cache,
                "expectNaturalExit": args.expect_natural_exit}
+    control = None
+    if args.mode == "gdb-collector":
+        control = {
+            "protocol": WEDGE_PROTOCOL,
+            "sessionId": uuid.uuid4().hex,
+            "requestPath": os.path.join(state_dir, "wedge-request.json"),
+            "responsePath": os.path.join(state_dir, "wedge-response.json"),
+        }
+        summary["collectorSessionId"] = control["sessionId"]
 
     for p in (persistent, cache, os.path.join(cache, "log")):
         os.makedirs(p, exist_ok=True)
@@ -954,6 +1334,12 @@ def run_launch(args):
             os.unlink(os.path.join(_log_dir, _fn))
         except OSError:
             pass
+    if control:
+        for path in (control["requestPath"], control["responsePath"]):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
     env = dict(os.environ)
     env["DISPLAY"] = args.display
@@ -993,7 +1379,7 @@ def run_launch(args):
             cmdfile, movian_args = _gdb_cmdfile(
                 self_path, events_path, inventory_path, state_dir, persistent,
                 cache, binary, start_url, args.categories, args.cap,
-                args.hv_cap, args.probe, args.mode, extra)
+                args.hv_cap, args.probe, args.mode, extra, control)
             log_fd = open(log_path, "wb", buffering=0)
             log_fd.truncate(0)
             gdb_argv = [args.gdb, "-q", "-batch", "-x", cmdfile]
@@ -1002,6 +1388,11 @@ def run_launch(args):
                                     stdin=subprocess.DEVNULL,
                                     start_new_session=True)
             log_fd.close()
+            if control:
+                control["gdbPid"] = proc.pid
+                control["gdbStartTicks"] = process_start_ticks(proc.pid)
+                summary["collectorControlReady"] = (
+                    control["gdbStartTicks"] is not None)
         summary["argv"] = movian_args
 
         port, startup_ms = parse_port_and_startup(
@@ -1013,11 +1404,13 @@ def run_launch(args):
         pid = find_inferior_pid(persistent)
         summary["inferiorPid"] = pid
 
+        state_extra = {"collector": args.mode == "gdb-collector",
+                       "events": events_path}
+        if control:
+            state_extra["collectorControl"] = control
         if port is not None and pid is not None:
             write_state(name, persistent, cache, pid, port, log_path,
-                        movian_args,
-                        extra={"collector": args.mode == "gdb-collector",
-                               "events": events_path})
+                        movian_args, extra=state_extra)
 
         http_ok = None
         http_ready_ms = None
@@ -1070,8 +1463,7 @@ def run_launch(args):
         summary["gdbForceKilled"] = cleanup["gdbForceKilled"]
         if "finalScanKill" in cleanup:
             summary["finalScanKill"] = cleanup["finalScanKill"]
-        if (not args.leave_running and args.mode == "gdb-collector"
-                and os.path.exists(events_path)):
+        if args.mode == "gdb-collector" and os.path.exists(events_path):
             summary["jsonl"] = validate_events(events_path)
         if cmdfile:
             try:

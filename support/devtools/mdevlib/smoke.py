@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import signal
 import subprocess
 import sys
 import time
 import urllib.parse
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -258,18 +261,19 @@ def _execute_step(
     step: dict[str, Any],
     previous_delta: str,
     route_builder: Callable[[str, str | None], str],
-) -> tuple[str, str, str | None]:
-    """Execute one smoke step. Returns (detail, log_delta, hash_or_none).
+) -> tuple[str, str, str | None, dict[str, int]]:
+    """Execute one smoke step.
 
-    `hash_or_none` is the SHA-256 hex for steps that capture a screenshot
-    (health probe, shot verb); None for other verbs.
+    Returns ``(detail, log_delta, screenshot_hash, metrics)``. Healthy
+    screenshot latency is machine-readable in ``metrics``.
     """
     verb = step["do"]
     offset = harness.log_size(inst)
 
     if verb == "health":
-        detail, health_hash = _health_step(inst)
-        return detail, harness.read_log_delta(inst, offset), health_hash
+        detail, health_hash, screenshot_ms = _health_step(inst)
+        return (detail, harness.read_log_delta(inst, offset), health_hash,
+                {"screenshotLatencyMs": screenshot_ms})
     elif verb == "open":
         result = harness.open_and_wait(inst, step["url"])
         detail = "opened %s title=%s nodes=%d" % (
@@ -310,20 +314,20 @@ def _execute_step(
     elif verb == "assert_prop":
         detail = _assert_prop(inst, step)
     elif verb == "assert_log":
-        return _assert_log(step, previous_delta), "", None
+        return _assert_log(step, previous_delta), "", None, {}
     elif verb == "shot":
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
         out = inst.shots / ("%s-%s-%s.png" % (smoke_name, step["tag"], stamp))
         path, shot_hash = _take_png(inst, out)
         detail = "shot %s" % path
-        return detail, harness.read_log_delta(inst, offset), shot_hash
+        return detail, harness.read_log_delta(inst, offset), shot_hash, {}
     elif verb == "sleep":
         time.sleep(step["seconds"])
         detail = "slept %.3gs" % step["seconds"]
     else:  # validation makes this unreachable
         raise StepFailure("unsupported verb %s" % verb)
 
-    return detail, harness.read_log_delta(inst, offset), None
+    return detail, harness.read_log_delta(inst, offset), None, {}
 
 
 def _wait_for_ui_ready(
@@ -361,26 +365,24 @@ def _wait_for_ui_ready(
         timeout, " and ".join(missing))
 
 
-def _health_step(inst: Instance, timeout: float = 20.0) -> tuple[str, str]:
-    """Dedicated polling health verb: launch() only waits for the HTTP port,
-    so require both startup navigation and active GLW frame/courier dispatch
-    before issuing the first screenshot.
-
-    Returns (detail, sha256_hex) where sha256_hex is from the probe screenshot.
-    """
+def _health_step(inst: Instance, timeout: float = 20.0) -> tuple[str, str, int]:
+    """Require UI readiness, then record the healthy screenshot latency."""
     ready, detail = _wait_for_ui_ready(inst, timeout)
     if not ready:
         raise StepFailure(detail)
     probe = inst.dir / ".smoke-health.png"
+    started = time.monotonic()
     try:
         _, probe_hash = _take_png(inst, probe)
     except MdevError as error:
         raise StepFailure("screenshot probe failed: %s" % error)
+    screenshot_ms = int((time.monotonic() - started) * 1000)
     try:
         probe.unlink()
     except OSError:
         pass
-    return detail + " and screenshot PNG present", probe_hash
+    return (detail + " and screenshot PNG present", probe_hash,
+            screenshot_ms)
 
 
 def _probe_health(inst: Instance, timeout: float = 20.0) -> tuple[bool, str]:
@@ -456,56 +458,233 @@ def _write_bundle(
     return bundle
 
 
+WEDGE_PROTOCOL = "movian-lifecycle-wedge-v1"
+
+
+def _proc_start_ticks(pid: int) -> int | None:
+    try:
+        value = Path("/proc/%d/stat" % pid).read_text(encoding="utf-8")
+        fields = value[value.rfind(")") + 2:].split()
+        return int(fields[19])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _proc_tracer_pid(pid: int) -> int | None:
+    try:
+        status = Path("/proc/%d/status" % pid).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = re.search(r"(?m)^TracerPid:\s*(\d+)$", status)
+    return int(match.group(1)) if match else None
+
+
+def _gdb_process_matches(control: dict[str, Any]) -> bool:
+    pid = control.get("gdbPid")
+    start_ticks = control.get("gdbStartTicks")
+    if not isinstance(pid, int) or not isinstance(start_ticks, int):
+        return False
+    try:
+        comm = Path("/proc/%d/comm" % pid).read_text(
+            encoding="utf-8").strip()
+    except OSError:
+        return False
+    return comm == "gdb" and _proc_start_ticks(pid) == start_ticks
+
+
+def _attached_collector_control(
+    inst: Instance,
+    inferior_pid: int,
+) -> dict[str, Any] | None:
+    state = inst.load_state() or {}
+    if state.get("collector") is not True:
+        return None
+    control = state.get("collectorControl")
+    if not isinstance(control, dict):
+        raise MdevError("collector state lacks same-session wedge control")
+    if control.get("protocol") != WEDGE_PROTOCOL:
+        raise MdevError("collector wedge-control protocol mismatch")
+    if state.get("pid") != inferior_pid:
+        raise MdevError("collector state inferior pid mismatch")
+    session_id = control.get("sessionId")
+    if not isinstance(session_id, str) or not session_id:
+        raise MdevError("collector state lacks session identity")
+    if not _gdb_process_matches(control):
+        raise MdevError("launch GDB identity proof failed")
+    gdb_pid = control["gdbPid"]
+    if _proc_tracer_pid(inferior_pid) != gdb_pid:
+        raise MdevError("owned inferior is not traced by launch GDB")
+    state_dir = inst.dir.resolve()
+    for key in ("requestPath", "responsePath"):
+        value = control.get(key)
+        if not isinstance(value, str) or \
+                Path(value).resolve().parent != state_dir:
+            raise MdevError("collector %s escapes instance state" % key)
+    return control
+
+
+def _write_capture_result(
+    artifact: Path,
+    status: str,
+    detail: str,
+    timeout: float,
+    source: str,
+    pid: int | None = None,
+    output: str = "",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    result = dict(extra or {})
+    result.update({
+        "status": status,
+        "source": source,
+        "detail": detail,
+        "dumpPath": str(artifact.resolve()),
+        "pid": pid,
+    })
+    lines = [
+        "capture-status: %s" % status,
+        "capture-source: %s" % source,
+        "pid: %s" % (pid if pid is not None else "none"),
+        "timeout-seconds: %g" % timeout,
+        "detail: %s" % detail,
+    ]
+    if output:
+        lines.extend(("", "gdb-output:", output.rstrip()))
+    try:
+        artifact.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+    return result
+
+
+def _capture_from_attached_gdb(
+    artifact: Path,
+    control: dict[str, Any],
+    inferior_pid: int,
+    timeout: float,
+    trigger: str,
+    classification: str,
+    classification_detail: str,
+    subsystem: str,
+    resource: str,
+) -> dict[str, Any]:
+    request_path = Path(control["requestPath"])
+    response_path = Path(control["responsePath"])
+    request_id = uuid.uuid4().hex
+    request = {
+        "protocol": WEDGE_PROTOCOL,
+        "sessionId": control["sessionId"],
+        "requestId": request_id,
+        "gdbPid": control["gdbPid"],
+        "inferiorPid": inferior_pid,
+        "trigger": trigger,
+        "classification": classification,
+        "classificationDetail": classification_detail,
+        "subsystem": subsystem,
+        "resource": resource,
+        "emergencyEject": {
+            "state": "not-requested-before-capture",
+            "requested": False,
+            "fired": False,
+        },
+        "dumpPath": str(artifact.resolve()),
+        "classifiedMonotonicNs": time.monotonic_ns(),
+    }
+    try:
+        response_path.unlink()
+    except OSError:
+        pass
+    temporary = request_path.with_suffix(".json.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(request, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8")
+        temporary.replace(request_path)
+        os.kill(inferior_pid, signal.SIGSTOP)
+    except OSError as error:
+        return _write_capture_result(
+            artifact, "error", "could not request launch GDB stop: %s" % error,
+            timeout, "launch-attached-gdb", pid=inferior_pid,
+            extra={"sessionId": control["sessionId"],
+                   "gdbPid": control["gdbPid"]})
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            response = json.loads(response_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            time.sleep(0.05)
+            continue
+        if not isinstance(response, dict) or \
+                response.get("protocol") != WEDGE_PROTOCOL or \
+                response.get("sessionId") != control["sessionId"] or \
+                response.get("requestId") != request_id:
+            time.sleep(0.05)
+            continue
+        result = {
+            "status": response.get("status", "error"),
+            "source": "launch-attached-gdb",
+            "detail": response.get("detail", ""),
+            "dumpPath": str(artifact.resolve()),
+            "pid": inferior_pid,
+            "sessionId": control["sessionId"],
+            "gdbPid": control["gdbPid"],
+            "threadCount": response.get("threadCount", 0),
+            "frameCount": response.get("frameCount", 0),
+            "movianFramePresent": response.get(
+                "movianFramePresent", False),
+        }
+        if not artifact.is_file() or artifact.stat().st_size == 0:
+            return _write_capture_result(
+                artifact, "error",
+                "launch GDB response arrived without a non-empty dump",
+                timeout, "launch-attached-gdb", pid=inferior_pid,
+                extra=result)
+        return result
+    return _write_capture_result(
+        artifact, "timeout",
+        "launch GDB capture exceeded the %g-second bound" % timeout,
+        timeout, "launch-attached-gdb", pid=inferior_pid,
+        extra={"sessionId": control["sessionId"],
+               "gdbPid": control["gdbPid"]})
+
+
 def _capture_wedge_backtrace(
     inst: Instance,
     bundle: Path,
     timeout: float = WEDGE_BACKTRACE_TIMEOUT,
-) -> Path:
-    """Best-effort all-thread GDB capture for an owned wedged instance.
-
-    The fixed-name artifact records success or a bounded, useful failure.  This
-    helper never raises: capture problems must not delay the existing stop and
-    relaunch path beyond ``timeout`` or prevent it from running.
-    """
+    trigger: str = "smoke-health",
+    classification: str = "instance-health-wedge",
+    classification_detail: str = "mdev health probe failed",
+    subsystem: str = "screenshot-health",
+    resource: str = "/api/screenshot/raw",
+) -> dict[str, Any]:
+    """Capture before cleanup, preferring the launch-attached GDB session."""
     artifact = bundle / WEDGE_BACKTRACE_FILE
-
-    def write_result(
-        status: str,
-        detail: str,
-        pid: int | None = None,
-        output: str = "",
-    ) -> None:
-        lines = [
-            "capture-status: %s" % status,
-            "pid: %s" % (pid if pid is not None else "none"),
-            "timeout-seconds: %g" % timeout,
-            "detail: %s" % detail,
-        ]
-        if output:
-            lines.extend(("", "gdb-output:", output.rstrip()))
-        try:
-            artifact.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        except OSError:
-            pass
-
-    def as_text(value: str | bytes | None) -> str:
-        if value is None:
-            return ""
-        if isinstance(value, bytes):
-            return value.decode("utf-8", errors="replace")
-        return value
-
     try:
         pid = inst.live_pid()
         if pid is None:
-            write_result("skipped", "no live pid proven owned by this instance")
-            return artifact
-        # Re-prove ownership immediately before handing the numeric pid to GDB.
-        # A stale/recycled pid is hands-off, just as it is in kill_owned_pid().
+            return _write_capture_result(
+                artifact, "skipped",
+                "no live pid proven owned by this instance", timeout,
+                "none")
         if not inst.owns_pid(pid):
-            write_result(
-                "skipped", "pid ownership proof failed before attach", pid=pid)
-            return artifact
+            return _write_capture_result(
+                artifact, "skipped",
+                "pid ownership proof failed before capture", timeout,
+                "none", pid=pid)
+        try:
+            control = _attached_collector_control(inst, pid)
+        except MdevError as error:
+            # A collector-marked run must never fall back to reactive gdb -p:
+            # losing the already-attached session is a hard capture failure.
+            return _write_capture_result(
+                artifact, "error", str(error), timeout,
+                "launch-attached-gdb", pid=pid)
+        if control is not None:
+            return _capture_from_attached_gdb(
+                artifact, control, pid, timeout, trigger, classification,
+                classification_detail, subsystem, resource)
 
         command = [
             "gdb", "--batch", "--nx", "--quiet", "-p", str(pid),
@@ -516,42 +695,81 @@ def _capture_wedge_backtrace(
         ]
         try:
             completed = subprocess.run(
-                command,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=timeout,
-            )
+                command, stdin=subprocess.DEVNULL, capture_output=True,
+                text=True, check=False, timeout=timeout)
         except subprocess.TimeoutExpired as error:
-            output = as_text(error.stdout) + as_text(error.stderr)
-            write_result(
-                "timeout", "gdb exceeded the %g-second bound" % timeout,
-                pid=pid, output=output)
-            return artifact
+            stdout = error.stdout or ""
+            stderr = error.stderr or ""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", errors="replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            return _write_capture_result(
+                artifact, "timeout",
+                "gdb exceeded the %g-second bound" % timeout, timeout,
+                "reactive-gdb-attach", pid=pid, output=stdout + stderr)
         except OSError as error:
-            write_result(
-                "error", "could not execute gdb: %s" % error, pid=pid)
-            return artifact
+            return _write_capture_result(
+                artifact, "error", "could not execute gdb: %s" % error,
+                timeout, "reactive-gdb-attach", pid=pid)
 
         output = completed.stdout + completed.stderr
         frame_count = len(re.findall(r"(?m)^#\d+\s", output))
         if completed.returncode != 0:
-            write_result(
-                "error", "gdb exited with status %d" % completed.returncode,
-                pid=pid, output=output)
+            status = "error"
+            detail = "gdb exited with status %d" % completed.returncode
         elif frame_count == 0:
-            write_result(
-                "error", "gdb returned no stack frames", pid=pid, output=output)
+            status = "error"
+            detail = "gdb returned no stack frames"
         else:
-            write_result(
-                "success", "captured %d stack frames" % frame_count,
-                pid=pid, output=output)
+            status = "success"
+            detail = "captured %d stack frames" % frame_count
+        return _write_capture_result(
+            artifact, status, detail, timeout, "reactive-gdb-attach",
+            pid=pid, output=output, extra={"frameCount": frame_count})
     except Exception as error:
-        write_result(
-            "error", "unexpected capture failure: %s: %s" %
-            (type(error).__name__, error))
-    return artifact
+        return _write_capture_result(
+            artifact, "error", "unexpected capture failure: %s: %s" %
+            (type(error).__name__, error), timeout, "unknown")
+
+
+def _cleanup_collector_debugger(
+    inst: Instance,
+    timeout: float = 3.0,
+) -> dict[str, Any]:
+    state = inst.load_state() or {}
+    if state.get("collector") is not True:
+        return {"status": "not-applicable"}
+    control = state.get("collectorControl")
+    if not isinstance(control, dict):
+        return {"status": "identity-refused",
+                "detail": "missing collectorControl"}
+    gdb_pid = control.get("gdbPid")
+    if not _gdb_process_matches(control):
+        return {"status": "exited", "gdbPid": gdb_pid}
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and _gdb_process_matches(control):
+        time.sleep(0.05)
+    if not _gdb_process_matches(control):
+        return {"status": "exited", "gdbPid": gdb_pid}
+    try:
+        os.kill(gdb_pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return {"status": "exited", "gdbPid": gdb_pid}
+    deadline = time.monotonic() + min(timeout, 2.0)
+    while time.monotonic() < deadline and _gdb_process_matches(control):
+        time.sleep(0.05)
+    if _gdb_process_matches(control):
+        try:
+            os.kill(gdb_pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        time.sleep(0.1)
+        status = "force-killed" if not _gdb_process_matches(control) \
+            else "still-alive"
+    else:
+        status = "terminated"
+    return {"status": status, "gdbPid": gdb_pid}
 
 
 def _record_stop_outcome(
@@ -563,6 +781,41 @@ def _record_stop_outcome(
     (bundle / "steps.json").write_text(
         json.dumps(transcript, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8")
+
+
+def _capture_and_stop_wedge(
+    inst: Instance,
+    bundle: Path,
+    transcript: dict[str, Any],
+    trigger: str,
+    classification_detail: str,
+) -> tuple[str, dict[str, Any]]:
+    lower_detail = classification_detail.lower()
+    if "screenshot" in lower_detail or "504" in lower_detail:
+        subsystem = "screenshot-health"
+        resource = "/api/screenshot/raw"
+    else:
+        subsystem = "startup-readiness"
+        resource = UI_FRAMERATE
+    transcript["ordering"] = ["classified"]
+    capture = _capture_wedge_backtrace(
+        inst, bundle, trigger=trigger,
+        classification="instance-health-wedge",
+        classification_detail=classification_detail,
+        subsystem=subsystem, resource=resource)
+    transcript["wedge_capture"] = capture
+    transcript["ordering"].append("capture:%s" % capture["status"])
+    stop_outcome = stop_wedged_instance(inst)
+    transcript["ordering"].append("owned-cleanup:%s" % stop_outcome)
+    debugger_cleanup = _cleanup_collector_debugger(inst)
+    transcript["collector_gdb_cleanup"] = debugger_cleanup
+    transcript["ordering"].append(
+        "gdb-cleanup:%s" % debugger_cleanup["status"])
+    if inst.live_pid() is not None:
+        stop_outcome = stop_wedged_instance(inst)
+        transcript["ordering"].append("final-owned-cleanup:%s" % stop_outcome)
+    _record_stop_outcome(bundle, transcript, stop_outcome)
+    return stop_outcome, debugger_cleanup
 
 
 def _run_one(
@@ -581,11 +834,13 @@ def _run_one(
             "step": step,
         }
         try:
-            detail, previous_delta, step_hash = _execute_step(
+            detail, previous_delta, step_hash, metrics = _execute_step(
                 inst, definition["name"], step, previous_delta, route_builder)
             record.update({"verdict": "pass", "detail": detail})
             if step_hash is not None:
                 record["hash"] = step_hash
+            if metrics:
+                record["metrics"] = metrics
             records.append(record)
         except (MdevError, StepFailure) as error:
             record.update({"verdict": "fail", "detail": str(error)})
@@ -621,18 +876,25 @@ def _run_one(
     }
     bundle = _write_bundle(inst, definition["name"], transcript, wedge)
     stop_outcome = None
+    debugger_cleanup: dict[str, Any] | None = None
     if wedge:
-        _capture_wedge_backtrace(inst, bundle)
-        stop_outcome = stop_wedged_instance(inst)
-        _record_stop_outcome(bundle, transcript, stop_outcome)
-        if stop_outcome == "still-alive":
+        trigger = ("health-step" if failure["verb"] == "health"
+                   else "post-failure-health-probe:%s" % failure["verb"])
+        classification_detail = (
+            failure["detail"] if definition["name"] == "health"
+            else health_detail)
+        stop_outcome, debugger_cleanup = _capture_and_stop_wedge(
+            inst, bundle, transcript, trigger, classification_detail)
+        if stop_outcome == "still-alive" or \
+                debugger_cleanup["status"] in (
+                    "still-alive", "identity-refused"):
             pid = inst.live_pid()
             print("instance-health failure (wedge), stop+relaunch [%s]: %s"
                   % (stop_outcome, health_detail), file=sys.stderr)
             print(str(bundle), file=sys.stderr)
             raise MdevError(
-                "pid %d still alive after SIGKILL -- cannot relaunch safely"
-                % (pid or 0),
+                "owned cleanup incomplete (pid=%d, gdb=%s)"
+                % (pid or 0, debugger_cleanup["status"]),
                 exit_code=2,
             )
     if wedge:
@@ -672,20 +934,23 @@ def run(
                 "steps": [],
             }
             bundle = _write_bundle(inst, selected[0]["name"], transcript, True)
-            _capture_wedge_backtrace(inst, bundle)
-            stop_outcome = stop_wedged_instance(inst)
-            _record_stop_outcome(bundle, transcript, stop_outcome)
+            stop_outcome, debugger_cleanup = _capture_and_stop_wedge(
+                inst, bundle, transcript, "pre-smoke-health-probe", detail)
             print("instance-health failure (wedge), stop+relaunch [%s]: %s"
                   % (stop_outcome, detail), file=sys.stderr)
             print(str(bundle), file=sys.stderr)
-            if stop_outcome == "still-alive":
+            if stop_outcome == "still-alive" or \
+                    debugger_cleanup["status"] in (
+                        "still-alive", "identity-refused"):
                 data = {"instance": inst.name, "green": 0, "total": 1,
                         "results": [transcript], "bundles": [str(bundle)],
-                        "stop_outcome": stop_outcome}
-                return 2, data, "0/1 green (still-alive)"
+                        "stop_outcome": stop_outcome,
+                        "gdb_cleanup": debugger_cleanup}
+                return 2, data, "0/1 green (cleanup incomplete)"
             data = {"instance": inst.name, "green": 0, "total": 1,
                     "results": [transcript], "bundles": [str(bundle)],
-                    "stop_outcome": stop_outcome}
+                    "stop_outcome": stop_outcome,
+                    "gdb_cleanup": debugger_cleanup}
             return 2, data, "0/1 green"
 
     for definition in selected:
