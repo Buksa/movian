@@ -34,6 +34,7 @@ import shlex
 import subprocess
 import sys
 import time
+import threading
 import tempfile
 
 # ---------------------------------------------------------------------------
@@ -559,6 +560,14 @@ PORT_RE = re.compile(r"http-server: Listening on port (\d+)")
 LOG_TS_RE = re.compile(r"^(\d{2}):(\d{2}):(\d{2})\.(\d{3}): ")
 
 
+
+class LaunchInterrupted(Exception):
+    """Raised by the host launcher so signal-driven aborts still run cleanup."""
+
+    def __init__(self, signum):
+        super().__init__("received signal %d" % signum)
+        self.signum = signum
+
 def _e(s):
     return s.encode(errors="replace") if isinstance(s, str) else s
 
@@ -747,6 +756,7 @@ def validate_events(events_path):
     bad = []
     cats = {}
     sample = None
+    inferior_exit_codes = []
     with open(events_path) as f:
         for ln, line in enumerate(f, 1):
             line = line.strip()
@@ -766,9 +776,12 @@ def validate_events(events_path):
                 if k not in th:
                     bad.append({"line": ln, "error": "thread.%s missing" % k})
             cats[obj.get("category")] = cats.get(obj.get("category"), 0) + 1
+            if obj.get("event") == "inferior-exited":
+                inferior_exit_codes.append(obj.get("exitCode"))
             if sample is None:
                 sample = obj
-    return {"lines": n, "bad": bad[:20], "categories": cats, "sample": sample}
+    return {"lines": n, "bad": bad[:20], "categories": cats,
+            "sample": sample, "inferiorExitCodes": inferior_exit_codes}
 
 
 def wait_http_ready(port, timeout=12.0, t0=None):
@@ -811,6 +824,22 @@ def classify_run(summary, mode, leave_running):
         reasons.append("ownership-not-proven")
     if summary.get("httpReady") is not True:
         reasons.append("http-not-ready")
+    early_exit = summary.get("inferiorExitedBeforeDuration") is True
+    expect_natural_exit = summary.get("expectNaturalExit") is True
+    exit_codes = (summary.get("jsonl") or {}).get("inferiorExitCodes") or []
+    clean_natural_exit = (
+        early_exit
+        and expect_natural_exit
+        and summary.get("gdbReturnCode") == 0
+        and bool(exit_codes)
+        and all(code == 0 for code in exit_codes)
+    )
+    if early_exit and not expect_natural_exit:
+        reasons.append("unexpected-inferior-exit")
+    if expect_natural_exit and not early_exit:
+        reasons.append("expected-natural-exit-not-observed")
+    if early_exit and expect_natural_exit and not clean_natural_exit:
+        reasons.append("natural-exit-not-clean")
     if leave_running:
         if not (own.get("ownsPid") and summary.get("inferiorPid") is not None):
             reasons.append("leave-running-without-ownership")
@@ -821,7 +850,7 @@ def classify_run(summary, mode, leave_running):
             reasons.append("orphan-inferior-after-cleanup")
         if (summary.get("inferiorPid") is not None
                 and summary.get("stopOutcome") != "stopped-clean"
-                and not summary.get("inferiorExitedBeforeDuration")):
+                and not clean_natural_exit):
             reasons.append("cleanup-not-clean:%s" % summary.get("stopOutcome"))
         if summary.get("gdbForceKilled"):
             reasons.append("gdb-force-killed")
@@ -882,7 +911,8 @@ def run_launch(args):
     events_path = args.events or os.path.join(state_dir, "events.jsonl")
     log_path = os.path.join(state_dir, "movian.log")
     summary = {"mode": args.mode, "name": name, "events": events_path,
-               "log": log_path, "persistent": persistent, "cache": cache}
+               "log": log_path, "persistent": persistent, "cache": cache,
+               "expectNaturalExit": args.expect_natural_exit}
 
     for p in (persistent, cache, os.path.join(cache, "log")):
         os.makedirs(p, exist_ok=True)
@@ -939,6 +969,15 @@ def run_launch(args):
     for _p in args.plugins:
         extra += ["-p", _p]
     extra += list(args.extra_args)
+    previous_signal_handlers = {}
+
+    def interrupt_launch(signum, _frame):
+        raise LaunchInterrupted(signum)
+
+    if threading.current_thread() is threading.main_thread():
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous_signal_handlers[signum] = signal.signal(
+                signum, interrupt_launch)
     try:
         if args.mode == "plain":
             movian_args = build_movian_argv(binary, persistent, cache,
@@ -1016,6 +1055,8 @@ def run_launch(args):
                 summary["inferiorExitedBeforeDuration"] = True
             except subprocess.TimeoutExpired:
                 pass
+    except LaunchInterrupted as exc:
+        summary["cancelledBySignal"] = exc.signum
     except Exception as exc:
         summary["exception"] = repr(exc)
     finally:
@@ -1037,10 +1078,15 @@ def run_launch(args):
                 os.unlink(cmdfile)
             except OSError:
                 pass
+        for signum, handler in previous_signal_handlers.items():
+            signal.signal(signum, handler)
 
     ok, reasons = classify_run(summary, args.mode, args.leave_running)
     if summary.get("exception"):
         reasons.append("exception:%s" % summary["exception"])
+    if summary.get("cancelledBySignal"):
+        reasons.append("cancelled-by-signal:%s" %
+                       summary["cancelledBySignal"])
     ok = not reasons
     summary["failureReasons"] = reasons
     summary["ok"] = ok
@@ -1075,8 +1121,8 @@ def build_argparser():
                          "movian as -p (issue #145 plugin scenarios)")
     lp.add_argument("--extra-arg", action="append", default=[],
                     dest="extra_args",
-                    help="extra movian argv token (repeatable), e.g. "
-                         "--extra-arg --with-restart")
+                    help="extra movian argv token (repeatable); use "
+                         "--extra-arg=--option for option-like values")
     lp.add_argument("--inventory")
     lp.add_argument("--events")
     lp.add_argument("--categories", default=None,
@@ -1090,6 +1136,10 @@ def build_argparser():
     lp.add_argument("--duration", type=float, default=1.0,
                     help="extra collection seconds after HTTP-ready "
                          "(collector mode)")
+    lp.add_argument(
+        "--expect-natural-exit", action="store_true",
+        help="require a clean exit before --duration expires; intended for "
+             "scenarios that explicitly send a shutdown action")
     lp.add_argument("--leave-running", action="store_true",
                     help="record state and return without stopping the "
                          "inferior (lets e.g. `mdev stop` prove ownership)")

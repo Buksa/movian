@@ -1,22 +1,18 @@
 /**
  * lifecycle_test.js -- dev-only plugin for issue #145 lifecycle scenarios.
  *
- * On load it creates a bounded, known set of destroyable resources so the
- * reload resource-balance proof (created == destroyed across one reload
- * cycle) has concrete collector signal:
+ * On load it creates five known destroyable resources so the reload
+ * balance proof has concrete collector signal:
  *
- *   - one route            (page.Route)
- *   - one service          (service.create  -> service_create + an es_resource
- *                                                  + a prop subscription)
- *   - two prop subscriptions (prop.subscribe -> prop_subscribe)
- *   - one hook             (hook.register   -> an es_resource)
- *   - one interval timer   (setInterval     -> callout_arm_x)
+ *   - one route
+ *   - one service
+ *   - two prop subscriptions
+ *   - one interval timer
  *
- * The plugin's own es_context (es_context_create) is created automatically by
- * the ecmascript loader.  Every resource above is owned by that context and is
- * torn down (es_resource_destroy / prop_unsubscribe / callout_disarm /
- * service_destroy / es_context_release) when the dev plugin is unloaded by
- * plugins_reload_dev_plugin.
+ * These are ECMAScript resources linked to the plugin's es_context. Service
+ * creation also owns a core service and an internal delete subscription.
+ * Reload unloads the old context and unlinks its resources before loading a
+ * new context with the same five resources.
  *
  * Each step is wrapped so a single API mismatch cannot fail the whole load
  * (a failed-to-compile/execute plugin would make `mdev reload --js` a false
@@ -47,11 +43,9 @@ try {
   log('route error: ' + e);
 }
 
-// 2. Service creation -- generates service_create + one es_resource + one
-//    prop subscription (the uninstall/delete sub) in core.
+// 2. Service creation -- also creates a core service and delete subscription.
 try {
-  service.create('lscen145_svc', 'LSCEN145 Test', 'lscen145:test',
-                 'other', true, null);
+  service.create('LSCEN145 Test', 'lscen145:test', 'other', true, null);
   created += 1;
   log('service created');
 } catch (e) {
@@ -70,7 +64,7 @@ try {
 }
 
 
-// 4. Periodic timer -> callout_arm_x; cleared when the context is torn down.
+// 4. Periodic timer -> a linked ECMAScript timer resource.
 try {
   setInterval(function () {}, 60000);
   created += 1;

@@ -28,7 +28,7 @@
     "glw",
     "service"
   ],
-  "count": 115,
+  "count": 117,
   "initmeUseCount": 45,
   "entries": [
     {
@@ -258,6 +258,24 @@
       "category": "es-resource",
       "phase": "runtime",
       "pairedWith": "es_resource_create",
+      "confidence": "source-confirmed"
+    },
+    {
+      "id": "es_resource_link",
+      "symbol": "es_resource_link",
+      "file": "src/ecmascript/ecmascript.c:215",
+      "category": "es-resource",
+      "phase": "runtime",
+      "pairedWith": "es_resource_unlink",
+      "confidence": "source-confirmed"
+    },
+    {
+      "id": "es_resource_unlink",
+      "symbol": "es_resource_unlink",
+      "file": "src/ecmascript/ecmascript.c:271",
+      "category": "es-resource",
+      "phase": "runtime",
+      "pairedWith": "es_resource_link",
       "confidence": "source-confirmed"
     },
     {

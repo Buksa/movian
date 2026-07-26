@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections import OrderedDict, defaultdict
 
@@ -54,24 +55,40 @@ INIT_GROUP_NAMES = {
 }
 
 # Resource create/destroy symbol pairs, keyed by a short "kind" label used in
-# the balance proof.  Each tuple is (create_symbols, destroy_symbols).
+# the reload balance proof.  es-resource uses link/unlink rather than
+# create/destroy: every resource is linked to its owning context, including
+# routes allocated via es_resource_alloc(), and unlink is the matching
+# ownership transition.
 RESOURCE_PAIRS = OrderedDict([
     ("es-context",   ({"es_context_create"},
-                      {"es_context_release"})),
-    ("es-resource",  ({"es_resource_create"},
-                      {"es_resource_destroy"})),
+                      {"es_context_end"})),
+    ("es-resource",  ({"es_resource_link"},
+                      {"es_resource_unlink"})),
     ("service",      ({"service_create", "service_createp",
                        "service_create_managed"},
                       {"service_destroy"})),
-    ("prop-subscribe", ({"prop_subscribe", "prop_subscribe_ex"},
-                        {"prop_unsubscribe"})),
-    ("callout",      ({"callout_arm0", "callout_arm_x"},
-                      {"callout_disarm"})),
     ("es-plugin",    ({"ecmascript_plugin_load"},
                       {"ecmascript_plugin_unload"})),
     ("plugin",       ({"plugin_load"},
                       {"plugin_unload"})),
 ])
+
+RESOURCE_CATEGORIES = {
+    "es-context": "es-context",
+    "es-resource": "es-resource",
+    "service": "service",
+    "es-plugin": "es-plugin",
+    "plugin": "plugin",
+}
+
+# The issue #145 plugin always exercises these kinds.  A zero/zero result for
+# one of them is missing evidence, not a balance proof.  Plugin-owned routes,
+# subscriptions, services, and timers all cross es_resource_link/unlink;
+# counting their lower-level prop/callout side effects would duplicate
+# resources and mix in unrelated global runtime activity.
+RELOAD_REQUIRED_KINDS = {
+    "es-context", "es-resource", "service", "es-plugin", "plugin",
+}
 
 CREATE_SYMS = set()
 DESTROY_SYMS = set()
@@ -85,22 +102,25 @@ for _c, _d in RESOURCE_PAIRS.values():
 # ===========================================================================
 
 def load_events(paths):
-    """Read all JSONL event files into a list sorted by (monotonicNs, seq)."""
+    """Read exactly one collector JSONL run, ordered by (monotonicNs, seq)."""
+    if len(paths) != 1:
+        raise SystemExit(
+            "exactly one collector event file is required; separate runs "
+            "must be analyzed independently")
     events = []
-    for path in paths:
-        with open(path) as f:
-            for ln, line in enumerate(f, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    sys.stderr.write(
-                        "%s:%d: bad json: %s\n" % (path, ln, exc))
-                    continue
-                obj.setdefault("__src", os.path.basename(path))
-                events.append(obj)
+    path = paths[0]
+    with open(path) as f:
+        for ln, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise SystemExit(
+                    "%s:%d: malformed json: %s" % (path, ln, exc))
+            obj.setdefault("__src", os.path.basename(path))
+            events.append(obj)
     events.sort(key=lambda e: (e.get("monotonicNs", 0), e.get("seq", 0)))
     return events
 
@@ -612,133 +632,402 @@ def derive_graph(events, inv, init_order, fini_order, balance=None):
 # resource-balance.json (plugin reload)
 # ===========================================================================
 
-def _ctx_pointer(event):
-    """Best-effort es-context pointer from a resource event's arguments."""
+def _pointer_argument(event, keys):
     args = event.get("arguments") or {}
     objs = event.get("objects") or {}
-    for key in ("ec", "ctx", "context", "es_context"):
-        if key in objs:
-            return objs[key]
-        if key in args and isinstance(args[key], str) and args[key].startswith("0x"):
-            return args[key]
-    # Fallback: first object pointer.
-    for v in objs.values():
-        return v
+    for key in keys:
+        value = objs.get(key, args.get(key))
+        if (isinstance(value, str) and value.startswith("0x")
+                and value != "0x0"):
+            return value
     return None
+
+
+def _ctx_pointer(event):
+    """Return an explicit es_context_t pointer; never guess from any pointer."""
+    return _pointer_argument(
+        event, ("ec", "context", "es_context", "er->er_ctx"))
 
 
 def _plugin_id_arg(event):
-    """Best-effort plugin/path/id string from a plugin event's arguments."""
+    """Best-effort plugin id/path from captured plugin arguments."""
     args = event.get("arguments") or {}
+    manifest = _cstr(args.get("manifest"))
+    if isinstance(manifest, str):
+        match = re.search(r'"id"\s*:\s*"([^"]+)"', manifest)
+        if match:
+            return match.group(1)
     for key in ("id", "path", "url", "plugin", "name", "file"):
-        v = args.get(key)
-        if isinstance(v, str) and v:
-            return _cstr(v)
-    for v in args.values():
-        if isinstance(v, str) and ("/" in v or v.endswith(".js")):
-            return _cstr(v)
+        value = _cstr(args.get(key))
+        if (isinstance(value, str) and value
+                and not value.startswith(("0x", "<"))):
+            return value
     return None
+
+
+def _plugin_aliases(plugin_id_hint):
+    aliases = set()
+
+    def add(value):
+        value = _cstr(value)
+        if not isinstance(value, str) or not value:
+            return
+        aliases.add(value)
+        path = value[7:] if value.startswith("file://") else value
+        aliases.add(os.path.normpath(path))
+        aliases.add(os.path.basename(path.rstrip("/")))
+
+    add(plugin_id_hint)
+    if plugin_id_hint and os.path.isdir(plugin_id_hint):
+        manifest_path = os.path.join(plugin_id_hint, "plugin.json")
+        try:
+            with open(manifest_path) as f:
+                add(json.load(f).get("id"))
+        except (OSError, ValueError, AttributeError):
+            pass
+    return aliases
+
+
+def _plugin_matches(plugin_id, aliases):
+    if not aliases:
+        return True
+    candidates = _plugin_aliases(plugin_id)
+    return bool(candidates & aliases)
+
+
+def _thread_key(event):
+    thread = event.get("thread") or {}
+    return (thread.get("osTid"), thread.get("gdbId"), thread.get("name"))
+
+
+def _stack_functions(event):
+    return {frame.get("function") for frame in (event.get("stack") or [])
+            if isinstance(frame, dict)}
+
+
+def _context_plugin_map(enters):
+    """Associate plugin contexts with ids from ecmascript_plugin_load."""
+    pending = {}
+    contexts = {}
+    for event in enters:
+        key = _thread_key(event)
+        symbol = event.get("symbol")
+        if symbol == "ecmascript_plugin_load":
+            pending[key] = _plugin_id_arg(event)
+        elif symbol == "es_context_begin" and key in pending:
+            ctx = _ctx_pointer(event)
+            if ctx:
+                contexts[ctx] = pending.pop(key)
+    return contexts
+
+
+def _first_context(events):
+    for event in events:
+        if event.get("symbol") == "es_context_begin":
+            ctx = _ctx_pointer(event)
+            if ctx:
+                return ctx
+    return None
+
+
+def _reload_cycles(enters, reload_event):
+    """Split one reload loop into one synchronous cycle per dev plugin."""
+    start_ns = reload_event.get("monotonicNs", 0)
+    end_ns = start_ns + 6_000_000_000
+    scope = [event for event in enters
+             if start_ns <= event.get("monotonicNs", 0) <= end_ns]
+    load_indexes = [
+        index for index, event in enumerate(scope)
+        if event.get("symbol") == "ecmascript_plugin_load"
+    ]
+    outer_starts = []
+    previous_load = -1
+    for load_index in load_indexes:
+        outer = load_index
+        for index in range(load_index, previous_load, -1):
+            if scope[index].get("symbol") == "plugin_load":
+                outer = index
+                break
+        outer_starts.append(outer)
+        previous_load = load_index
+
+    cycles = []
+    for number, load_index in enumerate(load_indexes):
+        start_index = outer_starts[number]
+        end_index = ((outer_starts[number + 1] - 1)
+                     if number + 1 < len(outer_starts)
+                     else len(scope) - 1)
+        unload_index = None
+        for index in range(start_index, load_index):
+            if scope[index].get("symbol") == "ecmascript_plugin_unload":
+                unload_index = index
+        old_events = scope[(unload_index + 1 if unload_index is not None
+                            else start_index):load_index]
+        new_ctx = _first_context(scope[load_index:end_index + 1])
+        if new_ctx:
+            for index in range(load_index, end_index + 1):
+                event = scope[index]
+                if (event.get("symbol") == "es_context_end"
+                        and _ctx_pointer(event) == new_ctx
+                        and "ecmascript_plugin_load"
+                        in _stack_functions(event)):
+                    end_index = index
+                    break
+        cycles.append({
+            "pluginId": _plugin_id_arg(scope[load_index]),
+            "oldContextPtr": _first_context(old_events),
+            "newContextPtr": new_ctx,
+            "threadKey": _thread_key(scope[load_index]),
+            "startSeq": scope[start_index].get("seq", 0),
+            "endSeq": scope[end_index].get("seq", 0),
+            "events": scope[start_index:end_index + 1],
+        })
+    return cycles
+
+
+def _resource_context_map(enters):
+    contexts = {}
+    for event in enters:
+        if event.get("symbol") != "es_resource_link":
+            continue
+        resource = _pointer_argument(event, ("er", "resource"))
+        ctx = _ctx_pointer(event)
+        if resource and ctx:
+            contexts[resource] = ctx
+    return contexts
+
+
+def _event_context(event, resource_contexts):
+    ctx = _ctx_pointer(event)
+    if ctx:
+        return ctx
+    resource = _pointer_argument(event, ("er", "resource"))
+    return resource_contexts.get(resource)
+
+
+def _belongs_to_cycle(event, contexts, resource_contexts, thread_key):
+    ctx = _event_context(event, resource_contexts)
+    if ctx is not None:
+        return ctx in contexts
+    if thread_key != (None, None, None) and _thread_key(event) == thread_key:
+        return True
+    return bool(
+        {"ecmascript_plugin_load", "ecmascript_plugin_unload"}
+        & _stack_functions(event)
+    )
+
+
+def _probe_coverage(events, kind, end_seq):
+    reasons = []
+    installed = next(
+        (event for event in events
+         if event.get("event") == "collector-installed"), None)
+    armed = set(installed.get("armed") or []) if installed else set()
+    creates, destroys = RESOURCE_PAIRS[kind]
+    if installed is None:
+        reasons.append("collector-installation-not-observed")
+    else:
+        if not (creates & armed):
+            reasons.append("create-probe-not-armed")
+        if not (destroys & armed):
+            reasons.append("destroy-probe-not-armed")
+        if kind == "es-context" and "es_context_begin" not in armed:
+            reasons.append("context-pointer-probe-not-armed")
+    category = RESOURCE_CATEGORIES[kind]
+    if any(event.get("event") == "rate-limited"
+           and event.get("category") == category
+           and event.get("seq", 0) <= end_seq for event in events):
+        reasons.append("category-rate-limited")
+    if any(event.get("event") == "probe-error"
+           and event.get("seq", 0) <= end_seq for event in events):
+        reasons.append("collector-probe-error")
+    return reasons
+
+
+def _indeterminate_window(reload_event, reason, plugin_id_hint):
+    return {
+        "reloadSeq": reload_event.get("seq"),
+        "reloadMonotonicNs": reload_event.get("monotonicNs"),
+        "windowEvents": 0,
+        "pluginId": plugin_id_hint,
+        "oldContextPtr": None,
+        "newContextPtr": None,
+        "correlationKey": {
+            "pluginId": plugin_id_hint,
+            "oldContextPtr": None,
+            "newContextPtr": None,
+        },
+        "balance": {},
+        "status": "indeterminate",
+        "balanced": None,
+        "imbalances": [],
+        "indeterminateReasons": [reason],
+    }
 
 
 def derive_resource_balance(events, plugin_id_hint=None):
     enters = _enter_events(events)
-    reloads = [e for e in enters
-               if e.get("symbol") == "plugins_reload_dev_plugin"]
+    reloads = [event for event in enters
+               if event.get("symbol") == "plugins_reload_dev_plugin"]
     if not reloads:
         return {"reloadWindows": [], "perWindow": [],
                 "note": "no plugins_reload_dev_plugin event; not a reload run"}
 
-    # Build kind lookup from symbol.
     sym_kind = {}
-    for kind, (csyms, dsyms) in RESOURCE_PAIRS.items():
-        for s in csyms:
-            sym_kind[s] = (kind, "create")
-        for s in dsyms:
-            sym_kind[s] = (kind, "destroy")
+    for kind, (create_symbols, destroy_symbols) in RESOURCE_PAIRS.items():
+        for symbol in create_symbols:
+            sym_kind[symbol] = (kind, "create")
+        for symbol in destroy_symbols:
+            sym_kind[symbol] = (kind, "destroy")
 
+    aliases = _plugin_aliases(plugin_id_hint)
+    context_plugins = _context_plugin_map(enters)
+    resource_contexts = _resource_context_map(enters)
     per_window = []
-    all_seqs = [e.get("seq", 0) for e in enters]
-    for rw in reloads:
-        start_ns = rw.get("monotonicNs", 0)
-        # Window: from reload start to +6s (covers unload+load+settle).
-        end_ns = start_ns + 6_000_000_000
-        window = [e for e in enters
-                  if start_ns <= (e.get("monotonicNs", 0)) <= end_ns
-                  and e.get("symbol") in sym_kind]
+    for reload_event in reloads:
+        cycles = _reload_cycles(enters, reload_event)
+        if aliases:
+            matches = [cycle for cycle in cycles
+                       if _plugin_matches(cycle["pluginId"], aliases)]
+        else:
+            matches = cycles
+        if len(matches) != 1:
+            reason = ("target-plugin-cycle-not-observed" if not matches
+                      else "target-plugin-cycle-ambiguous")
+            per_window.append(
+                _indeterminate_window(reload_event, reason, plugin_id_hint))
+            continue
 
+        cycle = matches[0]
+        old_ctx = cycle["oldContextPtr"]
+        new_ctx = cycle["newContextPtr"]
+        detected_plugin = (
+            cycle["pluginId"]
+            or context_plugins.get(old_ctx)
+            or context_plugins.get(new_ctx)
+            or plugin_id_hint
+        )
+        contexts = {ctx for ctx in (old_ctx, new_ctx) if ctx}
         balance = OrderedDict(
             (kind, {"created": 0, "destroyed": 0,
                     "createCtx": [], "destroyCtx": [], "ids": []})
             for kind in RESOURCE_PAIRS)
-        for e in window:
-            kind, op = sym_kind[e["symbol"]]
-            ctx = _ctx_pointer(e)
-            if op == "create":
-                balance[kind]["created"] += 1
-                if ctx:
-                    balance[kind]["createCtx"].append(ctx)
-            else:
-                balance[kind]["destroyed"] += 1
-                if ctx:
-                    balance[kind]["destroyCtx"].append(ctx)
-            pid = _plugin_id_arg(e)
-            if pid:
-                balance[kind]["ids"].append(pid)
 
-        # Old context = destroyed during unload; new = created during load.
-        old_ctx = None
-        new_ctx = None
-        for kind in ("es-context",):
-            if balance[kind]["destroyCtx"]:
-                old_ctx = balance[kind]["destroyCtx"][0]
-            if balance[kind]["createCtx"]:
-                new_ctx = balance[kind]["createCtx"][-1]
+        # Context create/end probes are called for many refcounted begin/end
+        # operations.  Count the one old/new context transition identified by
+        # the plugin unload/load cycle rather than every es_context_end entry.
+        if new_ctx:
+            balance["es-context"]["created"] = 1
+            balance["es-context"]["createCtx"].append(new_ctx)
+        if old_ctx:
+            balance["es-context"]["destroyed"] = 1
+            balance["es-context"]["destroyCtx"].append(old_ctx)
 
-        deltas = {}
+        attributed = []
+        seen_resource_operations = set()
+        for event in cycle["events"]:
+            symbol = event.get("symbol")
+            if symbol not in sym_kind:
+                continue
+            kind, operation = sym_kind[symbol]
+            if kind == "es-context":
+                continue
+            if (kind not in ("plugin", "es-plugin")
+                    and not _belongs_to_cycle(
+                        event, contexts, resource_contexts,
+                        cycle["threadKey"])):
+                continue
+            if kind == "es-resource":
+                resource = _pointer_argument(event, ("er", "resource"))
+                operation_key = (operation, resource)
+                if resource and operation_key in seen_resource_operations:
+                    continue
+                if resource:
+                    seen_resource_operations.add(operation_key)
+            attributed.append(event)
+            ctx = _event_context(event, resource_contexts)
+            count_key = "created" if operation == "create" else "destroyed"
+            balance[kind][count_key] += 1
+            if ctx:
+                balance[kind][operation + "Ctx"].append(ctx)
+            plugin_id = _plugin_id_arg(event)
+            if plugin_id:
+                balance[kind]["ids"].append(plugin_id)
+
         imbalances = []
-        for kind, b in balance.items():
-            delta = b["created"] - b["destroyed"]
-            deltas[kind] = delta
-            if delta != 0:
+        indeterminate = []
+        output_balance = OrderedDict()
+        for kind, values in balance.items():
+            created = values["created"]
+            destroyed = values["destroyed"]
+            delta = created - destroyed
+            coverage_reasons = _probe_coverage(
+                events, kind, cycle["endSeq"])
+            if (kind in RELOAD_REQUIRED_KINDS
+                    and created == 0 and destroyed == 0):
+                coverage_reasons.append("required-kind-not-observed")
+            if coverage_reasons:
+                kind_status = "indeterminate"
+                if kind in RELOAD_REQUIRED_KINDS or created or destroyed:
+                    indeterminate.append({
+                        "kind": kind, "reasons": coverage_reasons,
+                    })
+            elif delta:
+                kind_status = "imbalanced"
                 imbalances.append({
-                    "kind": kind, "created": b["created"],
-                    "destroyed": b["destroyed"], "delta": delta,
+                    "kind": kind, "created": created,
+                    "destroyed": destroyed, "delta": delta,
                 })
+            elif created == 0:
+                kind_status = "not-observed"
+            else:
+                kind_status = "balanced"
+            output_balance[kind] = {
+                "created": created,
+                "destroyed": destroyed,
+                "delta": delta,
+                "status": kind_status,
+                "coverageIssues": coverage_reasons,
+            }
 
-        detected_pid = plugin_id_hint
-        if detected_pid is None:
-            for b in balance.values():
-                if b["ids"]:
-                    detected_pid = b["ids"][0]
-                    break
-
+        if indeterminate:
+            status = "indeterminate"
+        elif imbalances:
+            status = "imbalanced"
+        else:
+            status = "balanced"
         per_window.append({
-            "reloadSeq": rw.get("seq"),
-            "reloadMonotonicNs": rw.get("monotonicNs"),
-            "windowEvents": len(window),
-            "pluginId": detected_pid,
+            "reloadSeq": reload_event.get("seq"),
+            "reloadMonotonicNs": reload_event.get("monotonicNs"),
+            "windowEvents": len(attributed),
+            "pluginId": detected_plugin,
             "oldContextPtr": old_ctx,
             "newContextPtr": new_ctx,
-            "correlationKey": {"pluginId": detected_pid,
-                               "oldContextPtr": old_ctx,
-                               "newContextPtr": new_ctx},
-            "balance": {k: {"created": v["created"], "destroyed": v["destroyed"],
-                            "delta": v["created"] - v["destroyed"]}
-                        for k, v in balance.items()},
-            "balanced": len(imbalances) == 0,
+            "correlationKey": {
+                "pluginId": detected_plugin,
+                "oldContextPtr": old_ctx,
+                "newContextPtr": new_ctx,
+            },
+            "balance": output_balance,
+            "status": status,
+            "balanced": status == "balanced",
             "imbalances": imbalances,
+            "indeterminateReasons": indeterminate,
         })
 
     return {
-        "reloadWindows": [{"seq": r.get("seq"),
-                           "monotonicNs": r.get("monotonicNs")}
-                          for r in reloads],
+        "reloadWindows": [
+            {"seq": event.get("seq"),
+             "monotonicNs": event.get("monotonicNs")}
+            for event in reloads
+        ],
         "perWindow": per_window,
-        "note": ("Balance is correlated per resource KIND within the reload "
-                 "window (plugins_reload_dev_plugin -> unload+load), keyed by "
-                 "plugin id + es-context pointer -- not by raw pointer "
-                 "arithmetic.  The reload window isolates the single dev "
-                 "plugin's resources."),
+        "note": (
+            "Each reload is split into a synchronous cycle per dev plugin. "
+            "Counts include only events attributed by plugin id, old/new "
+            "es-context pointer, or the ecmascript load/unload stack. Missing "
+            "or rate-limited probes produce an indeterminate result."
+        ),
     }
 
 
