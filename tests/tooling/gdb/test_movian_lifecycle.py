@@ -121,6 +121,42 @@ class Failures(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("gdb-force-killed", r)
 
+    def test_expected_natural_exit_is_clean(self):
+        ok, r = classify_run(
+            base(stopOutcome="not-owned", inferiorExitedBeforeDuration=True,
+                 expectNaturalExit=True, gdbReturnCode=0,
+                 jsonl={"lines": 5, "bad": [],
+                        "inferiorExitCodes": [0]}),
+            "gdb-collector", False)
+        self.assertTrue(ok)
+        self.assertNotIn("cleanup-not-clean", " ".join(r))
+
+    def test_unexpected_early_exit_fails(self):
+        ok, r = classify_run(
+            base(stopOutcome="not-owned", inferiorExitedBeforeDuration=True,
+                 gdbReturnCode=0,
+                 jsonl={"lines": 5, "bad": [],
+                        "inferiorExitCodes": [0]}),
+            "gdb-collector", False)
+        self.assertFalse(ok)
+        self.assertIn("unexpected-inferior-exit", r)
+
+    def test_expected_natural_exit_requires_zero_status(self):
+        ok, r = classify_run(
+            base(stopOutcome="not-owned", inferiorExitedBeforeDuration=True,
+                 expectNaturalExit=True, gdbReturnCode=0,
+                 jsonl={"lines": 5, "bad": [],
+                        "inferiorExitCodes": [1]}),
+            "gdb-collector", False)
+        self.assertFalse(ok)
+        self.assertIn("natural-exit-not-clean", r)
+
+    def test_expected_natural_exit_must_happen(self):
+        ok, r = classify_run(
+            base(expectNaturalExit=True), "gdb-collector", False)
+        self.assertFalse(ok)
+        self.assertIn("expected-natural-exit-not-observed", r)
+
 
 class CommandFile(unittest.TestCase):
     def test_probe_with_spaces_round_trips(self):
