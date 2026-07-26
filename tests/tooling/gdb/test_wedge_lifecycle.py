@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Focused deterministic coverage for issue #146 same-session wedge capture."""
 
-from __future__ import annotations
-
+import contextlib
+import io
 import json
 import os
 import shlex
+import shutil
 import signal
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -20,6 +22,9 @@ sys.path.insert(0, str(ROOT / "support" / "devtools" / "gdb"))
 from movian_lifecycle import (  # noqa: E402
     WEDGE_PROTOCOL,
     _gdb_cmdfile,
+    build_argparser,
+    instance_state,
+    run_launch,
     validate_events,
     validate_wedge_event,
 )
@@ -160,9 +165,11 @@ class AttachedCaptureTest(unittest.TestCase):
         }
         self.inst = FakeInstance(self.directory, self.state)
 
-    def test_success_uses_launch_gdb_without_reactive_attach(self) -> None:
-        def stop_and_respond(pid: int, sig: int) -> None:
-            self.assertEqual((pid, sig), (1234, signal.SIGSTOP))
+    def test_success_uses_launch_gdb_via_pidfd_without_reactive_attach(self) -> None:
+        sent: list[tuple] = []
+
+        def send_stop(pidfd: int, sig: int) -> None:
+            sent.append((pidfd, sig))
             request = json.loads(
                 Path(self.control["requestPath"]).read_text(encoding="utf-8")
             )
@@ -192,7 +199,11 @@ class AttachedCaptureTest(unittest.TestCase):
         with (
             mock.patch.object(smoke, "_gdb_process_matches", return_value=True),
             mock.patch.object(smoke, "_proc_tracer_pid", return_value=444),
-            mock.patch.object(smoke.os, "kill", side_effect=stop_and_respond),
+            mock.patch.object(smoke.os, "pidfd_open", return_value=99),
+            mock.patch.object(
+                smoke.signal, "pidfd_send_signal", side_effect=send_stop),
+            mock.patch.object(smoke.os, "close"),
+            mock.patch.object(smoke.os, "kill") as numeric_kill,
             mock.patch.object(smoke.subprocess, "run") as reactive_attach,
         ):
             result = smoke._capture_wedge_backtrace(
@@ -205,7 +216,52 @@ class AttachedCaptureTest(unittest.TestCase):
         self.assertEqual(result["source"], "launch-attached-gdb")
         self.assertEqual(result["threadCount"], 4)
         self.assertEqual(result["frameCount"], 20)
+        # SIGSTOP traveled through the pidfd, never a numeric os.kill.
+        self.assertEqual(sent, [(99, signal.SIGSTOP)])
+        numeric_kill.assert_not_called()
         reactive_attach.assert_not_called()
+
+    def test_pidfd_open_failure_fails_closed_without_reactive_attach(self) -> None:
+        with (
+            mock.patch.object(smoke, "_gdb_process_matches", return_value=True),
+            mock.patch.object(smoke, "_proc_tracer_pid", return_value=444),
+            mock.patch.object(
+                smoke.os, "pidfd_open", side_effect=OSError("no pidfd")),
+            mock.patch.object(smoke.signal, "pidfd_send_signal") as send_stop,
+            mock.patch.object(smoke.os, "kill") as numeric_kill,
+            mock.patch.object(smoke.subprocess, "run") as reactive_attach,
+        ):
+            result = smoke._capture_wedge_backtrace(self.inst, self.bundle)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["source"], "launch-attached-gdb")
+        send_stop.assert_not_called()
+        numeric_kill.assert_not_called()
+        reactive_attach.assert_not_called()
+
+    def test_post_pidfd_revalidation_failure_fails_closed(self) -> None:
+        # Pre-check passes (444) but the inferior is no longer traced by the
+        # launch GDB once re-checked after the pidfd is open (999): no signal
+        # is sent and there is no reactive attach.
+        sent: list[tuple] = []
+        with (
+            mock.patch.object(smoke, "_gdb_process_matches", return_value=True),
+            mock.patch.object(
+                smoke, "_proc_tracer_pid", side_effect=[444, 999]),
+            mock.patch.object(smoke.os, "pidfd_open", return_value=99),
+            mock.patch.object(
+                smoke.signal, "pidfd_send_signal",
+                side_effect=lambda *a: sent.append(a)),
+            mock.patch.object(smoke.os, "close"),
+            mock.patch.object(smoke.os, "kill") as numeric_kill,
+            mock.patch.object(smoke.subprocess, "run") as reactive_attach,
+        ):
+            result = smoke._capture_wedge_backtrace(self.inst, self.bundle)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["source"], "launch-attached-gdb")
+        self.assertEqual(sent, [])
+        numeric_kill.assert_not_called()
+        reactive_attach.assert_not_called()
+
 
     def test_invalid_collector_never_falls_back_to_gdb_attach(self) -> None:
         self.state.pop("collectorControl")
@@ -328,6 +384,87 @@ class OrderingAndCleanupTest(unittest.TestCase):
         self.assertEqual(result["status"], "force-killed")
         self.assertEqual(sent, [signal.SIGTERM, signal.SIGKILL])
         self.assertAlmostEqual(clock["now"], 0.3)
+
+
+class CrashPropagationTest(unittest.TestCase):
+    """A real bounded GDB subprocess must deliver a crash signal verbatim
+    through the wedge-control loop instead of suppressing it with signal 0.
+    This falsifies the pre-rework crash-suppression behavior."""
+
+    def test_sigsegv_is_delivered_and_target_does_not_survive(self) -> None:
+        gdb_bin = shutil.which("gdb")
+        if gdb_bin is None:
+            self.skipTest("gdb not installed")
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        request_path = os.path.join(temporary.name, "wedge-request.json")
+        response_path = os.path.join(temporary.name, "wedge-response.json")
+        module_path = ROOT / "support" / "devtools" / "gdb" / "movian_lifecycle.py"
+        script_lines = [
+            "set pagination off",
+            "set confirm off",
+            "source " + str(module_path),
+            "file /bin/sh",
+            "set args -c " + shlex.quote(
+                "kill -SEGV $$; echo SURVIVED; exit 0"),
+            "run",
+            "movian-lifecycle-wedge-control --request %s --response %s "
+            "--session crash" % (
+                shlex.quote(request_path), shlex.quote(response_path)),
+        ]
+        fd, cmdfile = tempfile.mkstemp(suffix=".gdb")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write("\n".join(script_lines) + "\n")
+            completed = subprocess.run(
+                [gdb_bin, "-q", "--batch", "-x", cmdfile],
+                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                timeout=30, check=False)
+        finally:
+            os.unlink(cmdfile)
+        output = completed.stdout + completed.stderr
+        # The crash signal is delivered verbatim (the inferior terminates with
+        # SIGSEGV) and the post-crash echo never runs.
+        self.assertNotIn("SURVIVED", output)
+        self.assertIn("terminated with signal SIGSEGV", output)
+
+
+class StaleControlClearTest(unittest.TestCase):
+    """A non-ENOENT failure to clear a stale control path must abort the
+    launch before the GDB Popen, not be swallowed."""
+
+    def test_unremovable_request_aborts_before_popen(self) -> None:
+        gdb_bin = shutil.which("gdb")
+        if gdb_bin is None:
+            self.skipTest("gdb not installed")
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        state_dir = Path(temporary.name)
+        # wedge-request.json is a directory: unlink raises IsADirectoryError,
+        # which is NOT FileNotFoundError, so the launch must fail closed here.
+        (state_dir / "wedge-request.json").mkdir()
+        (state_dir / "wedge-response.json").write_text(
+            "stale\n", encoding="utf-8")
+        import movian_lifecycle as ml
+        args = build_argparser().parse_args([
+            "launch", "--name", "stale-clear-test",
+            "--mode", "gdb-collector",
+            "--binary", "/bin/true",
+            "--gdb", gdb_bin,
+            "--persistent", str(state_dir / "persistent"),
+            "--cache", str(state_dir / "cache"),
+        ])
+        summary_buf = io.StringIO()
+        with (
+            mock.patch.object(ml, "instance_state", return_value=str(state_dir)),
+            mock.patch.object(ml, "find_inferior_pid", return_value=None),
+            mock.patch.object(ml.subprocess, "Popen") as popen,
+            contextlib.redirect_stdout(summary_buf),
+        ):
+            code = run_launch(args)
+        self.assertEqual(code, 1)
+        popen.assert_not_called()
+        self.assertIn("stale-control-clear-failed", summary_buf.getvalue())
 
 
 if __name__ == "__main__":

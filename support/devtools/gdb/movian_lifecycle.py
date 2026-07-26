@@ -841,6 +841,46 @@ if _HAVE_GDB:
 
     MovianLifecycleStart()
 
+    # -- Wedge-control stop discrimination (#146) ---------------------------
+    # The post-run control loop may suppress (resume with `signal 0`) ONLY a
+    # SIGSTOP paired with an atomically published, current request whose
+    # protocol / session / GDB pid / inferior pid / request id all match THIS
+    # session.  Any other stop signal (SIGSEGV / SIGABRT / ...) is delivered
+    # with its original signal so the inferior terminates truthfully; no
+    # request is consumed for such a stop and no signal-resume tight loop can
+    # occur.  `gdb.events.stop` fires for every stop, including the one that
+    # makes `run` return, so the recorded signal is current when invoke runs.
+    _last_stop_signal = None
+
+    def _record_stop_signal(event):
+        global _last_stop_signal
+        _last_stop_signal = getattr(event, "stop_signal", None)
+
+    def _current_stop_signal():
+        return _last_stop_signal
+
+    def _request_matches_current(request, session_id):
+        """True only if `request` is a fully-identified wedge request for this
+        exact GDB session and inferior, making it safe to capture and resume."""
+        if not isinstance(request, dict):
+            return False
+        if request.get("protocol") != WEDGE_PROTOCOL:
+            return False
+        if request.get("sessionId") != session_id:
+            return False
+        if request.get("gdbPid") != os.getpid():
+            return False
+        try:
+            inferior_pid = int(gdb.selected_inferior().pid)
+        except Exception:
+            return False
+        if request.get("inferiorPid") != inferior_pid or inferior_pid <= 0:
+            return False
+        request_id = request.get("requestId")
+        if not isinstance(request_id, str) or not request_id:
+            return False
+        return True
+
     class MovianLifecycleWedgeControl(gdb.Command):  # type: ignore[misc]
         """Capture a pending host request whenever the inferior stops."""
 
@@ -864,25 +904,39 @@ if _HAVE_GDB:
                         return
                 except Exception:
                     return
+                stop_signal = _current_stop_signal()
                 request = _load_json(request_path)
-                request_id = (request or {}).get("requestId")
-                if request is not None and request_id not in processed:
-                    processed.add(request_id)
-                    _capture_wedge_request(
-                        request_path, response_path, session_id, request)
-                try:
-                    if not gdb.selected_inferior().pid:
-                        return
-                    gdb.execute("signal 0")
-                except Exception as exc:
+                # Only a SIGSTOP paired with a current, fully-identified
+                # request may be captured and resumed with `signal 0`.  A
+                # stale or mismatched request is never consumed here.
+                if stop_signal == "SIGSTOP" and \
+                        _request_matches_current(request, session_id):
+                    request_id = request.get("requestId")
+                    if request_id not in processed:
+                        processed.add(request_id)
+                        _capture_wedge_request(
+                            request_path, response_path, session_id, request)
                     try:
                         if not gdb.selected_inferior().pid:
                             return
+                        gdb.execute("signal 0")
                     except Exception:
                         return
-                    print("movian-lifecycle-wedge-control: "
-                          "signal 0 failed: %s" % exc)
+                    continue
+                # Any non-SIGSTOP stop (SIGSEGV / SIGABRT / ...) is delivered
+                # with its exact original signal so the inferior terminates
+                # truthfully; the loop then stops (no resume tight loop, no
+                # request consumed for that stop).
+                if stop_signal is not None and stop_signal != "SIGSTOP":
+                    try:
+                        gdb.execute("signal " + stop_signal)
+                    except Exception:
+                        pass
                     return
+                # SIGSTOP without a paired current identity, or an unrecorded
+                # stop reason: never suppress without a proven identity and
+                # never busy-loop.  Leave the inferior stopped for GDB exit.
+                return
 
     MovianLifecycleWedgeControl()
 
@@ -891,6 +945,10 @@ if _HAVE_GDB:
             _COLLECTOR.close()
     try:
         gdb.events.gdb_exiting.connect(_close_on_gdb_exit)
+    except Exception:
+        pass
+    try:
+        gdb.events.stop.connect(_record_stop_signal)
     except Exception:
         pass
 
@@ -1335,11 +1393,25 @@ def run_launch(args):
         except OSError:
             pass
     if control:
+        # Both control paths MUST be absent before the launch GDB Popen so a
+        # stale request from a prior session cannot drive a new capture.
+        # ENOENT is expected; any other removal failure fails closed here.
+        clear_errors = []
         for path in (control["requestPath"], control["responsePath"]):
             try:
                 os.unlink(path)
-            except OSError:
+            except FileNotFoundError:
                 pass
+            except OSError as error:
+                clear_errors.append("%s: %s" % (path, error))
+        if clear_errors:
+            summary["failureReasons"] = (
+                ["stale-control-clear-failed"] + clear_errors)
+            summary["ok"] = False
+            summary["exitCode"] = 1
+            print("MOVIAN_LIFECYCLE_SUMMARY " + json.dumps(
+                summary, sort_keys=True))
+            return 1
 
     env = dict(os.environ)
     env["DISPLAY"] = args.display

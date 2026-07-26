@@ -600,13 +600,49 @@ def _capture_from_attached_gdb(
             json.dumps(request, indent=2, sort_keys=True) + "\n",
             encoding="utf-8")
         temporary.replace(request_path)
-        os.kill(inferior_pid, signal.SIGSTOP)
     except OSError as error:
         return _write_capture_result(
-            artifact, "error", "could not request launch GDB stop: %s" % error,
+            artifact, "error", "could not publish wedge request: %s" % error,
             timeout, "launch-attached-gdb", pid=inferior_pid,
             extra={"sessionId": control["sessionId"],
                    "gdbPid": control["gdbPid"]})
+    # Pin the inferior identity with a pidfd BEFORE signaling, then re-prove
+    # the launch-GDB session still owns it.  A numeric os.kill would race a
+    # recycled PID; the pidfd cannot target the wrong process, and any open /
+    # revalidation / send failure fails closed here (no reactive gdb -p).
+    try:
+        pidfd = os.pidfd_open(inferior_pid)
+    except OSError as error:
+        return _write_capture_result(
+            artifact, "error",
+            "could not open pidfd for inferior: %s" % error,
+            timeout, "launch-attached-gdb", pid=inferior_pid,
+            extra={"sessionId": control["sessionId"],
+                   "gdbPid": control["gdbPid"]})
+    try:
+        if not _gdb_process_matches(control) or \
+                _proc_tracer_pid(inferior_pid) != control["gdbPid"]:
+            return _write_capture_result(
+                artifact, "error",
+                "pidfd revalidation failed: launch GDB no longer traces the "
+                "pinned inferior", timeout, "launch-attached-gdb",
+                pid=inferior_pid,
+                extra={"sessionId": control["sessionId"],
+                       "gdbPid": control["gdbPid"]})
+        try:
+            signal.pidfd_send_signal(pidfd, signal.SIGSTOP)
+        except OSError as error:
+            return _write_capture_result(
+                artifact, "error",
+                "could not send SIGSTOP via pidfd: %s" % error,
+                timeout, "launch-attached-gdb", pid=inferior_pid,
+                extra={"sessionId": control["sessionId"],
+                       "gdbPid": control["gdbPid"]})
+    finally:
+        try:
+            os.close(pidfd)
+        except OSError:
+            pass
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
