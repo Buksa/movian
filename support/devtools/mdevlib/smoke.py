@@ -560,6 +560,7 @@ def _write_capture_result(
 def _capture_from_attached_gdb(
     artifact: Path,
     control: dict[str, Any],
+    inst: Instance,
     inferior_pid: int,
     timeout: float,
     trigger: str,
@@ -620,7 +621,8 @@ def _capture_from_attached_gdb(
             extra={"sessionId": control["sessionId"],
                    "gdbPid": control["gdbPid"]})
     try:
-        if not _gdb_process_matches(control) or \
+        if not inst.owns_pid(inferior_pid) or \
+                not _gdb_process_matches(control) or \
                 _proc_tracer_pid(inferior_pid) != control["gdbPid"]:
             return _write_capture_result(
                 artifact, "error",
@@ -719,7 +721,7 @@ def _capture_wedge_backtrace(
                 "launch-attached-gdb", pid=pid)
         if control is not None:
             return _capture_from_attached_gdb(
-                artifact, control, pid, timeout, trigger, classification,
+                artifact, control, inst, pid, timeout, trigger, classification,
                 classification_detail, subsystem, resource)
 
         command = [

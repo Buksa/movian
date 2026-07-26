@@ -261,7 +261,30 @@ class AttachedCaptureTest(unittest.TestCase):
         self.assertEqual(sent, [])
         numeric_kill.assert_not_called()
         reactive_attach.assert_not_called()
-
+    def test_post_pidfd_owns_pid_false_fails_closed(self) -> None:
+        # Initial owns_pid passes (liveness check in _capture_wedge_backtrace)
+        # but after pidfd opens, the re-check inside _capture_from_attached_gdb
+        # fails: no signal is sent and there is no reactive attach.
+        sent: list[tuple] = []
+        with (
+            mock.patch.object(
+                self.inst, "owns_pid", side_effect=[True, False]),
+            mock.patch.object(smoke, "_gdb_process_matches", return_value=True),
+            mock.patch.object(smoke, "_proc_tracer_pid", return_value=444),
+            mock.patch.object(smoke.os, "pidfd_open", return_value=99),
+            mock.patch.object(
+                smoke.signal, "pidfd_send_signal",
+                side_effect=lambda *a: sent.append(a)),
+            mock.patch.object(smoke.os, "close"),
+            mock.patch.object(smoke.os, "kill") as numeric_kill,
+            mock.patch.object(smoke.subprocess, "run") as reactive_attach,
+        ):
+            result = smoke._capture_wedge_backtrace(self.inst, self.bundle)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["source"], "launch-attached-gdb")
+        self.assertEqual(sent, [])
+        numeric_kill.assert_not_called()
+        reactive_attach.assert_not_called()
 
     def test_invalid_collector_never_falls_back_to_gdb_attach(self) -> None:
         self.state.pop("collectorControl")
@@ -427,6 +450,74 @@ class CrashPropagationTest(unittest.TestCase):
         # SIGSEGV) and the post-crash echo never runs.
         self.assertNotIn("SURVIVED", output)
         self.assertIn("terminated with signal SIGSEGV", output)
+
+class ProcessedRequestTest(unittest.TestCase):
+    """A later SIGSTOP with an already-consumed request ID must not be
+    suppressed with signal 0; the inferior stays stopped for GDB exit."""
+
+    def test_already_consumed_sigstop_returns_without_suppression(self) -> None:
+        gdb_bin = shutil.which("gdb")
+        if gdb_bin is None:
+            self.skipTest("gdb not installed")
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        state_dir = Path(temporary.name)
+        request_path = str(state_dir / "wedge-request.json")
+        response_path = str(state_dir / "wedge-response.json")
+        dump_path = str(state_dir / "thread-backtrace.txt")
+        module_path = ROOT / "support" / "devtools" / "gdb" / "movian_lifecycle.py"
+        shell_cmd = (
+            "kill -STOP $$; echo AFTER_FIRST_STOP; "
+            "kill -STOP $$; echo AFTER_SECOND_STOP; exit 0")
+        # After `run` returns the inferior is stopped with SIGSTOP.  Create
+        # the request file with the real GDB and inferior PIDs so the wedge
+        # control will match it.
+        create_req = (
+            "python import json, os, gdb; "
+            "req = {'protocol': '" + WEDGE_PROTOCOL + "', "
+            "'sessionId': 'processed-test', "
+            "'gdbPid': os.getpid(), "
+            "'inferiorPid': int(gdb.selected_inferior().pid), "
+            "'requestId': 'req-1', "
+            "'trigger': 'health-step', "
+            "'classification': 'instance-health-wedge', "
+            "'classificationDetail': 'test', "
+            "'subsystem': 'test', "
+            "'resource': '/test', "
+            "'emergencyEject': {'state': 'not-requested-before-capture', "
+            "'requested': False, 'fired': False}, "
+            "'dumpPath': '" + dump_path + "', "
+            "'classifiedMonotonicNs': 100}; "
+            "json.dump(req, open('" + request_path + "', 'w'), indent=2)")
+        script_lines = [
+            "set pagination off",
+            "set confirm off",
+            "source " + str(module_path),
+            "file /bin/sh",
+            "set args -c " + shlex.quote(shell_cmd),
+            "run",
+            create_req,
+            "movian-lifecycle-wedge-control --request %s --response %s "
+            "--session processed-test" % (
+                shlex.quote(request_path), shlex.quote(response_path)),
+        ]
+        fd, cmdfile = tempfile.mkstemp(suffix=".gdb")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write("\n".join(script_lines) + "\n")
+            completed = subprocess.run(
+                [gdb_bin, "-q", "--batch", "-x", cmdfile],
+                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                timeout=30, check=False)
+        finally:
+            os.unlink(cmdfile)
+        output = completed.stdout + completed.stderr
+        # The first SIGSTOP was captured and resumed with signal 0 so the
+        # shell printed AFTER_FIRST_STOP.  The second SIGSTOP with the
+        # same requestId was NOT resumed, so AFTER_SECOND_STOP was never
+        # reached and the shell never exited cleanly.
+        self.assertIn("AFTER_FIRST_STOP", output)
+        self.assertNotIn("AFTER_SECOND_STOP", output)
 
 
 class StaleControlClearTest(unittest.TestCase):

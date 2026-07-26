@@ -916,13 +916,17 @@ if _HAVE_GDB:
                         processed.add(request_id)
                         _capture_wedge_request(
                             request_path, response_path, session_id, request)
-                    try:
-                        if not gdb.selected_inferior().pid:
+                        try:
+                            if not gdb.selected_inferior().pid:
+                                return
+                            gdb.execute("signal 0")
+                        except Exception:
                             return
-                        gdb.execute("signal 0")
-                    except Exception:
-                        return
-                    continue
+                        continue
+                    # A later SIGSTOP with the already-consumed request must
+                    # not be suppressed: leave the inferior stopped for GDB
+                    # exit so the stop signal is preserved.
+                    return
                 # Any non-SIGSTOP stop (SIGSEGV / SIGABRT / ...) is delivered
                 # with its exact original signal so the inferior terminates
                 # truthfully; the loop then stops (no resume tight loop, no
