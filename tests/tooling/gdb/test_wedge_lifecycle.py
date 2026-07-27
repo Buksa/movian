@@ -20,6 +20,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "support" / "devtools" / "gdb"))
 
 from movian_lifecycle import (  # noqa: E402
+    EMERGENCY_EJECT_STATES,
+    EmergencyEjectTracker,
     WEDGE_PROTOCOL,
     _gdb_cmdfile,
     build_argparser,
@@ -64,8 +66,10 @@ def success_event() -> dict:
             "resource": "/api/screenshot/raw",
         },
         "emergencyEject": {
-            "state": "not-requested-before-capture",
+            "state": "not-requested",
+            "observed": True,
             "requested": False,
+            "armed": False,
             "fired": False,
         },
         "session": {
@@ -484,8 +488,6 @@ class ProcessedRequestTest(unittest.TestCase):
             "'classificationDetail': 'test', "
             "'subsystem': 'test', "
             "'resource': '/test', "
-            "'emergencyEject': {'state': 'not-requested-before-capture', "
-            "'requested': False, 'fired': False}, "
             "'dumpPath': '" + dump_path + "', "
             "'classifiedMonotonicNs': 100}; "
             "json.dump(req, open('" + request_path + "', 'w'), indent=2)")
@@ -557,6 +559,197 @@ class StaleControlClearTest(unittest.TestCase):
         popen.assert_not_called()
         self.assertIn("stale-control-clear-failed", summary_buf.getvalue())
 
+
+class EmergencyEjectTrackerTest(unittest.TestCase):
+    """State transitions and invariants for the emergency-eject tracker."""
+
+    def test_initial_state_is_unobserved(self) -> None:
+        t = EmergencyEjectTracker()
+        self.assertEqual(t.state, "unobserved")
+        snap = t.snapshot()
+        self.assertFalse(snap["observed"])
+        self.assertFalse(snap["requested"])
+        self.assertFalse(snap["armed"])
+        self.assertFalse(snap["fired"])
+
+    def test_observe_transitions_to_not_requested(self) -> None:
+        t = EmergencyEjectTracker()
+        t.observe()
+        self.assertEqual(t.state, "not-requested")
+        snap = t.snapshot()
+        self.assertTrue(snap["observed"])
+        self.assertFalse(snap["requested"])
+        self.assertFalse(snap["armed"])
+        self.assertFalse(snap["fired"])
+
+    def test_full_eject_chain(self) -> None:
+        t = EmergencyEjectTracker()
+        t.observe()
+        t.on_request()
+        self.assertEqual(t.state, "requested")
+        t.on_arm(42)
+        self.assertEqual(t.state, "armed")
+        t.on_exit(42)
+        self.assertEqual(t.state, "fired")
+        snap = t.snapshot()
+        self.assertTrue(all(snap[k] for k in
+                           ("observed", "requested", "armed", "fired")))
+
+    def test_arm_records_tid(self) -> None:
+        t = EmergencyEjectTracker()
+        t.observe()
+        t.on_request()
+        t.on_arm(99)
+        self.assertEqual(t._eject_tid, 99)
+
+    def test_normal_thread_arch_exit_does_not_fire(self) -> None:
+        """arch_exit on a different thread must not set fired."""
+        t = EmergencyEjectTracker()
+        t.observe()
+        t.on_request()
+        t.on_arm(42)
+        t.on_exit(99)  # different TID
+        self.assertEqual(t.state, "armed")
+        snap = t.snapshot()
+        self.assertFalse(snap["fired"])
+
+    def test_out_of_order_transitions_are_ignored(self) -> None:
+        t = EmergencyEjectTracker()
+        t.on_request()  # skip observe
+        self.assertEqual(t.state, "unobserved")
+        t.observe()
+        t.on_arm(1)  # skip request
+        self.assertEqual(t.state, "not-requested")
+        t.on_exit(1)  # skip arm
+        self.assertEqual(t.state, "not-requested")
+
+    def test_unobserved_snapshot_booleans(self) -> None:
+        t = EmergencyEjectTracker()
+        snap = t.snapshot()
+        self.assertEqual(snap["state"], "unobserved")
+        self.assertFalse(snap["observed"])
+
+    def test_all_states_are_allowed(self) -> None:
+        for state in EMERGENCY_EJECT_STATES:
+            self.assertIn(state, ("unobserved", "not-requested",
+                                  "requested", "armed", "fired"))
+
+    def test_no_repeat_fires(self) -> None:
+        """Double on_exit on the same TID after fired must be a no-op."""
+        t = EmergencyEjectTracker()
+        t.observe()
+        t.on_request()
+        t.on_arm(42)
+        t.on_exit(42)
+        self.assertEqual(t.state, "fired")
+        t.on_exit(42)
+        self.assertEqual(t.state, "fired")
+
+    def test_request_without_observe_is_noop(self) -> None:
+        t = EmergencyEjectTracker()
+        t.on_request()
+        self.assertEqual(t.state, "unobserved")
+
+    def test_arm_without_request_is_noop(self) -> None:
+        t = EmergencyEjectTracker()
+        t.observe()
+        t.on_arm(1)
+        self.assertEqual(t.state, "not-requested")
+
+
+class EmergencyEjectSchemaValidationTest(unittest.TestCase):
+    """Schema validation for the new emergencyEject fields."""
+
+    def _event(self, **overrides) -> dict:
+        ev = success_event()
+        ev["emergencyEject"] = {
+            "state": "not-requested",
+            "observed": True,
+            "requested": False,
+            "armed": False,
+            "fired": False,
+        }
+        ev["emergencyEject"].update(overrides)
+        return ev
+
+    def test_valid_not_requested(self) -> None:
+        ev = self._event()
+        self.assertEqual(validate_wedge_event(ev), [])
+
+    def test_valid_fired(self) -> None:
+        ev = self._event(state="fired", observed=True,
+                         requested=True, armed=True, fired=True)
+        self.assertEqual(validate_wedge_event(ev), [])
+
+    def test_rejects_inconsistent_observed(self) -> None:
+        ev = self._event(state="unobserved", observed=True)
+        errs = validate_wedge_event(ev)
+        self.assertTrue(any("observed" in e and "inconsistent" in e
+                            for e in errs))
+
+    def test_rejects_inconsistent_armed(self) -> None:
+        ev = self._event(state="requested", armed=True)
+        errs = validate_wedge_event(ev)
+        self.assertTrue(any("armed" in e and "inconsistent" in e
+                            for e in errs))
+
+    def test_rejects_inconsistent_fired(self) -> None:
+        ev = self._event(state="armed", fired=True)
+        errs = validate_wedge_event(ev)
+        self.assertTrue(any("fired" in e and "inconsistent" in e
+                            for e in errs))
+
+    def test_rejects_unknown_state(self) -> None:
+        ev = self._event(state="bogus")
+        errs = validate_wedge_event(ev)
+        self.assertTrue(any("emergencyEject.state" in e for e in errs))
+
+    def test_rejects_missing_observed(self) -> None:
+        ev = self._event()
+        del ev["emergencyEject"]["observed"]
+        errs = validate_wedge_event(ev)
+        self.assertTrue(any("observed" in e for e in errs))
+
+    def test_rejects_missing_armed(self) -> None:
+        ev = self._event()
+        del ev["emergencyEject"]["armed"]
+        errs = validate_wedge_event(ev)
+        self.assertTrue(any("armed" in e for e in errs))
+
+
+class HostRequestNoEjectFieldTest(unittest.TestCase):
+    """The host wedge request must NOT include emergencyEject; the GDB
+    collector builds it from inferior probes."""
+
+    def test_smoke_request_has_no_eject_field(self) -> None:
+        """smoke._capture_from_attached_gdb must not put emergencyEject in
+        the host request dict."""
+        import inspect
+        src = inspect.getsource(smoke._capture_from_attached_gdb)
+        self.assertNotIn("emergencyEject", src)
+
+    def test_wedge_event_requires_eject_from_collector(self) -> None:
+        """A wedge event without emergencyEject must fail validation."""
+        ev = success_event()
+        del ev["emergencyEject"]
+        errs = validate_wedge_event(ev)
+        self.assertTrue(any("emergencyEject" in e for e in errs))
+
+
+class InventoryEntryTest(unittest.TestCase):
+    """inventory.json must contain shutdown_eject and arch_exit for the
+    emergency-eject tracker probes."""
+
+    def test_shutdown_eject_in_inventory(self) -> None:
+        inv_path = ROOT / "support" / "devtools" / "gdb" / "inventory.json"
+        inv = json.loads(inv_path.read_text(encoding="utf-8"))
+        ids = {e["id"] for e in inv["entries"]}
+        self.assertIn("shutdown_eject", ids)
+        self.assertIn("arch_exit", ids)
+        # Both must be core-init category for the observe() call
+        for entry in inv["entries"]:
+            if entry["id"] in ("shutdown_eject", "arch_exit"):
+                self.assertEqual(entry["category"], "core-init")
 
 if __name__ == "__main__":
     unittest.main()

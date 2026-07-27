@@ -102,11 +102,29 @@ def validate_wedge_event(event):
     if not isinstance(eject, dict):
         errors.append("emergencyEject must be an object")
     else:
-        if not isinstance(eject.get("state"), str) or not eject["state"]:
-            errors.append("emergencyEject.state must be a non-empty string")
-        for key in ("requested", "fired"):
+        eject_state = eject.get("state")
+        if not isinstance(eject_state, str) or \
+                eject_state not in EMERGENCY_EJECT_STATES:
+            errors.append("emergencyEject.state must be one of %s" %
+                          ", ".join(EMERGENCY_EJECT_STATES))
+        for key in ("observed", "requested", "armed", "fired"):
             if not isinstance(eject.get(key), bool):
                 errors.append("emergencyEject.%s must be boolean" % key)
+        if isinstance(eject_state, str) and \
+                eject_state in EMERGENCY_EJECT_STATES:
+            expected = {
+                "unobserved": (False, False, False, False),
+                "not-requested": (True, False, False, False),
+                "requested": (True, True, False, False),
+                "armed": (True, True, True, False),
+                "fired": (True, True, True, True),
+            }[eject_state]
+            for key, exp in zip(("observed", "requested", "armed", "fired"),
+                                expected):
+                if eject.get(key) != exp:
+                    errors.append(
+                        "emergencyEject.%s=%s inconsistent with state %s"
+                        % (key, eject.get(key), eject_state))
 
     session = event.get("session")
     if not isinstance(session, dict):
@@ -154,6 +172,77 @@ def validate_wedge_event(event):
                 capture["threadCount"] != len(threads):
             errors.append("capture.threadCount does not match remainingThreads")
     return errors
+EMERGENCY_EJECT_STATES = ("unobserved", "not-requested", "requested",
+                           "armed", "fired")
+_EMERGENCY_EJECT_TRANSITIONS = {
+    "unobserved": "not-requested",
+    "not-requested": "requested",
+    "requested": "armed",
+    "armed": "fired",
+}
+
+
+class EmergencyEjectTracker:
+    """Pure state machine for the emergency-eject lifecycle.
+
+    The collector observes this from the launch-attached inferior; the host
+    never supplies a constant.  Allowed transitions form a strict linear
+    chain: unobserved -> not-requested -> requested -> armed -> fired.
+    """
+
+    __slots__ = ("_state", "_requested", "_armed", "_fired",
+                 "_eject_tid")
+
+    def __init__(self):
+        self._state = "unobserved"
+        self._requested = False
+        self._armed = False
+        self._fired = False
+        self._eject_tid = None
+
+    @property
+    def state(self):
+        return self._state
+
+    def observe(self):
+        """Called when core-init probes are bound; marks as not-requested."""
+        self._advance("not-requested")
+
+    def on_request(self):
+        """app_shutdown entered."""
+        self._advance("requested")
+
+    def on_arm(self, tid):
+        """shutdown_eject entered; record the OS TID of the eject thread."""
+        self._advance("armed")
+        self._eject_tid = tid
+
+    def on_exit(self, tid):
+        """arch_exit entered; fires only if called from the eject thread."""
+        if self._state == "armed" and self._eject_tid is not None \
+                and tid == self._eject_tid:
+            self._advance("fired")
+
+    def _advance(self, target):
+        expected = _EMERGENCY_EJECT_TRANSITIONS.get(self._state)
+        if expected != target:
+            return
+        self._state = target
+        self._requested = self._state in ("requested", "armed", "fired")
+        self._armed = self._state in ("armed", "fired")
+        self._fired = self._state == "fired"
+
+    def snapshot(self):
+        """Return the public schema dict."""
+        observed = self._state != "unobserved"
+        return {
+            "state": self._state,
+            "observed": observed,
+            "requested": self._requested,
+            "armed": self._armed,
+            "fired": self._fired,
+        }
+
 
 _COLLECTOR = None  # type: ignore[assignment]
 
@@ -334,6 +423,7 @@ if _HAVE_GDB:
             self._closed = False
             self._exit_hook = None
             self._install_exit_hook()
+            self._eject_tracker = EmergencyEjectTracker()
 
         def _cap_for(self, cat):
             if cat in self._caps:
@@ -403,6 +493,26 @@ if _HAVE_GDB:
             objects = {k: v for k, v in arguments.items()
                        if isinstance(v, str) and v.startswith("0x")
                        and v != "0x0"}
+            # Update the emergency-eject tracker from the actual symbol and
+            # the selected thread's OS TID (observed from the inferior, not
+            # a host constant).
+            sym = bp.symbol
+            if sym == "app_shutdown":
+                self._eject_tracker.on_request()
+            elif sym == "shutdown_eject":
+                try:
+                    thr = gdb.selected_thread()
+                    tid = thr.ptid[1] if thr is not None else None
+                except Exception:
+                    tid = None
+                self._eject_tracker.on_arm(tid)
+            elif sym == "arch_exit":
+                try:
+                    thr = gdb.selected_thread()
+                    tid = thr.ptid[1] if thr is not None else None
+                except Exception:
+                    tid = None
+                self._eject_tracker.on_exit(tid)
             self.emit({
                 "category": cat,
                 "event": "enter",
@@ -467,6 +577,8 @@ if _HAVE_GDB:
                     bp = LifecycleBP(spec, cat, entry["symbol"], arg_exprs)
                     if bp.bound:
                         self._armed.append(bp)
+                        if cat == "core-init":
+                            self._eject_tracker.observe()
                     else:
                         self._unbound.append("%s (unresolved in loaded binary)" %
                                              spec)
@@ -602,9 +714,6 @@ if _HAVE_GDB:
                     "subsystem", "resource"):
             if not isinstance(request.get(key), str) or not request[key]:
                 errors.append("missing %s" % key)
-        eject = request.get("emergencyEject")
-        if not isinstance(eject, dict):
-            errors.append("missing emergencyEject")
         dump_path = request.get("dumpPath")
         state_dir = os.path.realpath(os.path.dirname(request_path))
         if not isinstance(dump_path, str) or not dump_path:
@@ -627,6 +736,13 @@ if _HAVE_GDB:
                 pass
             return response
 
+        # Snapshot the emergency-eject tracker once; used consistently in
+        # the dump and the JSONL event (built by the GDB collector, not
+        # copied from a host constant).
+        if _COLLECTOR is not None:
+            eject_snapshot = _COLLECTOR._eject_tracker.snapshot()
+        else:
+            eject_snapshot = EmergencyEjectTracker().snapshot()
         threads = _all_thread_info()
         output = ""
         detail = ""
@@ -671,9 +787,7 @@ if _HAVE_GDB:
             "trigger: %s" % request["trigger"],
             "classification: %s" % request["classification"],
             "subsystem: %s" % request["subsystem"],
-            "resource: %s" % request["resource"],
-            "emergency-eject-state: %s" %
-            request["emergencyEject"].get("state", "unknown"),
+            "emergency-eject-state: %s" % eject_snapshot["state"],
             "detail: %s" % detail,
         ]
         if output:
@@ -698,7 +812,7 @@ if _HAVE_GDB:
                 "subsystem": request["subsystem"],
                 "resource": request["resource"],
             },
-            "emergencyEject": request["emergencyEject"],
+            "emergencyEject": eject_snapshot,
             "session": {
                 "id": session_id,
                 "gdbPid": gdb_pid,

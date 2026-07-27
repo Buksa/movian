@@ -583,11 +583,6 @@ def _capture_from_attached_gdb(
         "classificationDetail": classification_detail,
         "subsystem": subsystem,
         "resource": resource,
-        "emergencyEject": {
-            "state": "not-requested-before-capture",
-            "requested": False,
-            "fired": False,
-        },
         "dumpPath": str(artifact.resolve()),
         "classifiedMonotonicNs": time.monotonic_ns(),
     }
