@@ -174,6 +174,29 @@ def validate_wedge_event(event):
     return errors
 EMERGENCY_EJECT_STATES = ("unobserved", "not-requested", "requested",
                            "armed", "fired")
+# Mandatory symbols whose presence in the armed set determines whether the
+# emergency-eject tracker observes the inferior lifecycle.  All three must
+# be selected and bound before observe() is called.
+EMERGENCY_EJECT_MANDATORY = frozenset((
+    "app_shutdown", "shutdown_eject", "arch_exit",
+))
+
+def is_eject_mandatory(symbol):
+    """True if *symbol* is one of the mandatory eject probes."""
+    return symbol in EMERGENCY_EJECT_MANDATORY
+
+
+def all_eject_mandatory_bound(armed_bps):
+    """True if every mandatory eject symbol is bound in *armed_bps*.
+
+    *armed_bps* is an iterable of objects with ``.symbol`` and ``.bound``
+    attributes (e.g. LifecycleBP instances).  Used to decide whether
+    observe() fires after the inventory loop -- state stays
+    ``"unobserved"`` otherwise.
+    """
+    armed_syms = {bp.symbol for bp in armed_bps if bp.bound}
+    return EMERGENCY_EJECT_MANDATORY <= armed_syms
+
 _EMERGENCY_EJECT_TRANSITIONS = {
     "unobserved": "not-requested",
     "not-requested": "requested",
@@ -432,6 +455,39 @@ if _HAVE_GDB:
                 return HIGH_VOLUME_CAPS[cat]
             return self._default_cap
 
+        def _all_eject_mandatory_bound(self):
+            """True only if every mandatory eject symbol is in the armed set
+            and bound.  Delegates to the module-level pure predicate."""
+            return all_eject_mandatory_bound(self._armed)
+
+        def _is_eject_mandatory(self, symbol):
+            """True if *symbol* is one of the mandatory eject probes."""
+            return is_eject_mandatory(symbol)
+
+        def _update_eject_tracker(self, bp):
+            """Advance the emergency-eject tracker for a mandatory symbol hit.
+
+            Called before the rate-limit cap check so mandatory transitions
+            are never suppressed by category-level disabling.
+            """
+            sym = bp.symbol
+            if sym == "app_shutdown":
+                self._eject_tracker.on_request()
+            elif sym == "shutdown_eject":
+                try:
+                    thr = gdb.selected_thread()
+                    tid = thr.ptid[1] if thr is not None else None
+                except Exception:
+                    tid = None
+                self._eject_tracker.on_arm(tid)
+            elif sym == "arch_exit":
+                try:
+                    thr = gdb.selected_thread()
+                    tid = thr.ptid[1] if thr is not None else None
+                except Exception:
+                    tid = None
+                self._eject_tracker.on_exit(tid)
+
         # -- event emission --------------------------------------------------
         def emit(self, event):
             if getattr(self, "_closed", False):
@@ -457,10 +513,18 @@ if _HAVE_GDB:
             cat = bp.category
             n = self._counts.get(cat, 0) + 1
             self._counts[cat] = n
+
+            # Update the emergency-eject tracker BEFORE the rate-limit cap
+            # check so mandatory eject transitions are never lost to
+            # category-level suppression.
+            self._update_eject_tracker(bp)
+
             cap = self._cap_for(cat)
             if cap and n > cap:
-                # Disable every probe in this category (zero further traps) and
-                # emit a single rate-limit summary, once.
+                # Disable non-mandatory probes in this category (zero
+                # further traps) and emit a single rate-limit summary,
+                # once.  Mandatory eject probes stay enabled so shutdown
+                # transitions are always observed.
                 self._disable_category(cat)
                 self._suppressed[cat] = self._suppressed.get(cat, 0) + 1
                 if cat not in self._summarized:
@@ -493,26 +557,6 @@ if _HAVE_GDB:
             objects = {k: v for k, v in arguments.items()
                        if isinstance(v, str) and v.startswith("0x")
                        and v != "0x0"}
-            # Update the emergency-eject tracker from the actual symbol and
-            # the selected thread's OS TID (observed from the inferior, not
-            # a host constant).
-            sym = bp.symbol
-            if sym == "app_shutdown":
-                self._eject_tracker.on_request()
-            elif sym == "shutdown_eject":
-                try:
-                    thr = gdb.selected_thread()
-                    tid = thr.ptid[1] if thr is not None else None
-                except Exception:
-                    tid = None
-                self._eject_tracker.on_arm(tid)
-            elif sym == "arch_exit":
-                try:
-                    thr = gdb.selected_thread()
-                    tid = thr.ptid[1] if thr is not None else None
-                except Exception:
-                    tid = None
-                self._eject_tracker.on_exit(tid)
             self.emit({
                 "category": cat,
                 "event": "enter",
@@ -526,6 +570,11 @@ if _HAVE_GDB:
         def _disable_category(self, cat):
             for bp in self._armed:
                 if bp.category == cat and bp.bound:
+                    # Mandatory eject probes must never be disabled by
+                    # ordinary rate-limiting so shutdown transitions are
+                    # always observed.
+                    if self._is_eject_mandatory(bp.symbol):
+                        continue
                     try:
                         bp.enabled = False
                     except Exception:
@@ -577,14 +626,17 @@ if _HAVE_GDB:
                     bp = LifecycleBP(spec, cat, entry["symbol"], arg_exprs)
                     if bp.bound:
                         self._armed.append(bp)
-                        if cat == "core-init":
-                            self._eject_tracker.observe()
                     else:
                         self._unbound.append("%s (unresolved in loaded binary)" %
                                              spec)
                         bp.delete()
                 except Exception as exc:
                     self._unbound.append("%s (%s)" % (spec, exc))
+            # Decide observation only after the full inventory loop: state
+            # remains unobserved unless ALL three mandatory eject symbols
+            # are selected and bound.
+            if self._all_eject_mandatory_bound():
+                self._eject_tracker.observe()
 
         def add_adhoc(self, sym, cat, exprs):
             try:

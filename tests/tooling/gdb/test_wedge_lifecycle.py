@@ -24,8 +24,10 @@ from movian_lifecycle import (  # noqa: E402
     EmergencyEjectTracker,
     WEDGE_PROTOCOL,
     _gdb_cmdfile,
+    all_eject_mandatory_bound,
     build_argparser,
     instance_state,
+    is_eject_mandatory,
     run_launch,
     validate_events,
     validate_wedge_event,
@@ -750,6 +752,52 @@ class InventoryEntryTest(unittest.TestCase):
         for entry in inv["entries"]:
             if entry["id"] in ("shutdown_eject", "arch_exit"):
                 self.assertEqual(entry["category"], "core-init")
+
+
+class MandatoryPredicateTest(unittest.TestCase):
+    """Pure module-level predicate tests for emergency-eject mandatory
+    symbols.  No GDB fake required -- these operate on plain data."""
+
+    def test_is_eject_mandatory_true_for_app_shutdown(self):
+        self.assertTrue(is_eject_mandatory("app_shutdown"))
+
+    def test_is_eject_mandatory_true_for_shutdown_eject(self):
+        self.assertTrue(is_eject_mandatory("shutdown_eject"))
+
+    def test_is_eject_mandatory_true_for_arch_exit(self):
+        self.assertTrue(is_eject_mandatory("arch_exit"))
+
+    def test_is_eject_mandatory_false_for_non_mandatory(self):
+        self.assertFalse(is_eject_mandatory("main_init"))
+
+    def test_all_eject_mandatory_bound_all_three(self):
+        class Bp:
+            def __init__(self, sym, bound=True):
+                self.symbol = sym
+                self.bound = bound
+        armed = [Bp("app_shutdown"), Bp("shutdown_eject"), Bp("arch_exit")]
+        self.assertTrue(all_eject_mandatory_bound(armed))
+
+    def test_all_eject_mandatory_bound_partial(self):
+        class Bp:
+            def __init__(self, sym, bound=True):
+                self.symbol = sym
+                self.bound = bound
+        armed = [Bp("app_shutdown"), Bp("shutdown_eject")]
+        self.assertFalse(all_eject_mandatory_bound(armed))
+
+    def test_all_eject_mandatory_bound_unbound_symbol(self):
+        class Bp:
+            def __init__(self, sym, bound=True):
+                self.symbol = sym
+                self.bound = bound
+        armed = [Bp("app_shutdown"), Bp("shutdown_eject"),
+                 Bp("arch_exit", bound=False)]
+        self.assertFalse(all_eject_mandatory_bound(armed))
+
+    def test_all_eject_mandatory_bound_empty(self):
+        self.assertFalse(all_eject_mandatory_bound([]))
+
 
 if __name__ == "__main__":
     unittest.main()
