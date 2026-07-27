@@ -666,6 +666,7 @@ def _capture_from_attached_gdb(
             "frameCount": response.get("frameCount", 0),
             "movianFramePresent": response.get(
                 "movianFramePresent", False),
+            "emergencyEject": response.get("emergencyEject"),
         }
         if not artifact.is_file() or artifact.stat().st_size == 0:
             return _write_capture_result(

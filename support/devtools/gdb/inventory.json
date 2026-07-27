@@ -173,7 +173,7 @@
     {
       "id": "arch_exit",
       "symbol": "arch_exit",
-      "file": "arch/linux/linux_main.c:70",
+      "file": "src/arch/linux/linux_main.c:70",
       "category": "core-init",
       "phase": "shutdown",
       "pairedWith": null,

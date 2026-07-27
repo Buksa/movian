@@ -172,6 +172,7 @@ def validate_wedge_event(event):
                 capture["threadCount"] != len(threads):
             errors.append("capture.threadCount does not match remainingThreads")
     return errors
+
 EMERGENCY_EJECT_STATES = ("unobserved", "not-requested", "requested",
                            "armed", "fired")
 # Mandatory symbols whose presence in the armed set determines whether the
@@ -237,8 +238,8 @@ class EmergencyEjectTracker:
 
     def on_arm(self, tid):
         """shutdown_eject entered; record the OS TID of the eject thread."""
-        self._advance("armed")
-        self._eject_tid = tid
+        if self._advance("armed"):
+            self._eject_tid = tid
 
     def on_exit(self, tid):
         """arch_exit entered; fires only if called from the eject thread."""
@@ -249,11 +250,12 @@ class EmergencyEjectTracker:
     def _advance(self, target):
         expected = _EMERGENCY_EJECT_TRANSITIONS.get(self._state)
         if expected != target:
-            return
+            return False
         self._state = target
         self._requested = self._state in ("requested", "armed", "fired")
         self._armed = self._state in ("armed", "fired")
         self._fired = self._state == "fired"
+        return True
 
     def snapshot(self):
         """Return the public schema dict."""
@@ -477,6 +479,9 @@ if _HAVE_GDB:
                 try:
                     thr = gdb.selected_thread()
                     tid = thr.ptid[1] if thr is not None else None
+                    # Zero is not a valid Linux TID; treat as unavailable.
+                    if tid == 0:
+                        tid = None
                 except Exception:
                     tid = None
                 self._eject_tracker.on_arm(tid)
@@ -484,6 +489,9 @@ if _HAVE_GDB:
                 try:
                     thr = gdb.selected_thread()
                     tid = thr.ptid[1] if thr is not None else None
+                    # Zero is not a valid Linux TID; treat as unavailable.
+                    if tid == 0:
+                        tid = None
                 except Exception:
                     tid = None
                 self._eject_tracker.on_exit(tid)
@@ -795,6 +803,7 @@ if _HAVE_GDB:
             eject_snapshot = _COLLECTOR._eject_tracker.snapshot()
         else:
             eject_snapshot = EmergencyEjectTracker().snapshot()
+        response["emergencyEject"] = eject_snapshot
         threads = _all_thread_info()
         output = ""
         detail = ""
@@ -839,6 +848,7 @@ if _HAVE_GDB:
             "trigger: %s" % request["trigger"],
             "classification: %s" % request["classification"],
             "subsystem: %s" % request["subsystem"],
+            "resource: %s" % request["resource"],
             "emergency-eject-state: %s" % eject_snapshot["state"],
             "detail: %s" % detail,
         ]

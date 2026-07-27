@@ -185,6 +185,13 @@ class AttachedCaptureTest(unittest.TestCase):
                 "\n".join("#%d frame" % n for n in range(20)) + "\n",
                 encoding="utf-8",
             )
+            eject_snapshot = {
+                "state": "not-requested",
+                "observed": True,
+                "requested": False,
+                "armed": False,
+                "fired": False,
+            }
             response = {
                 "protocol": WEDGE_PROTOCOL,
                 "sessionId": request["sessionId"],
@@ -196,6 +203,7 @@ class AttachedCaptureTest(unittest.TestCase):
                 "threadCount": 4,
                 "frameCount": 20,
                 "movianFramePresent": True,
+                "emergencyEject": eject_snapshot,
                 "detail": "captured 20 frames across 4 threads",
             }
             Path(self.control["responsePath"]).write_text(
@@ -222,6 +230,9 @@ class AttachedCaptureTest(unittest.TestCase):
         self.assertEqual(result["source"], "launch-attached-gdb")
         self.assertEqual(result["threadCount"], 4)
         self.assertEqual(result["frameCount"], 20)
+        self.assertEqual(result["emergencyEject"]["state"], "not-requested")
+        self.assertTrue(result["emergencyEject"]["observed"])
+        self.assertFalse(result["emergencyEject"]["armed"])
         # SIGSTOP traveled through the pidfd, never a numeric os.kill.
         self.assertEqual(sent, [(99, signal.SIGSTOP)])
         numeric_kill.assert_not_called()
@@ -658,6 +669,47 @@ class EmergencyEjectTrackerTest(unittest.TestCase):
         t.on_arm(1)
         self.assertEqual(t.state, "not-requested")
 
+    def test_zero_tid_normalized_to_none(self) -> None:
+        """on_arm(0) is allowed; caller normalizes zero to None before
+        invoking on_arm.  Verify that on_arm(None) does not set _eject_tid
+        to a matching value (None TID is guarded by is-not-None in on_exit)."""
+        t = EmergencyEjectTracker()
+        t.observe()
+        t.on_request()
+        t.on_arm(None)
+        self.assertIsNone(t._eject_tid)
+        t.on_exit(None)
+        self.assertNotEqual(t.state, "fired",
+                            "None TID must not bypass is-not-None guard")
+        t.on_exit(0)
+        self.assertNotEqual(t.state, "fired",
+                            "zero TID must not match None guard")
+
+    def test_arm_without_request_does_not_overwrite_eject_tid(self) -> None:
+        """Failed arm transition (after fired) must not overwrite _eject_tid."""
+        t = EmergencyEjectTracker()
+        t.observe()
+        t.on_request()
+        t.on_arm(42)
+        self.assertEqual(t._eject_tid, 42)
+        # Now arm again from a wrong state (after fired, advance is a no-op)
+        t.on_exit(42)  # -> fired
+        t.on_arm(99)  # no-op because state is fired, not "armed"
+        self.assertEqual(t._eject_tid, 42,
+                         "must not overwrite on failed transition")
+
+    def test_arm_before_request_does_not_set_eject_tid(self) -> None:
+        """on_arm without valid state transition must leave _eject_tid as None."""
+        t = EmergencyEjectTracker()
+        t.observe()
+        t.on_arm(42)  # no-op: need on_request first
+        self.assertEqual(t.state, "not-requested")
+        self.assertIsNone(t._eject_tid)
+        # Normal sequence still works after the failed arm
+        t.on_request()
+        t.on_arm(99)
+        self.assertEqual(t._eject_tid, 99)
+
 
 class EmergencyEjectSchemaValidationTest(unittest.TestCase):
     """Schema validation for the new emergencyEject fields."""
@@ -718,6 +770,84 @@ class EmergencyEjectSchemaValidationTest(unittest.TestCase):
         errs = validate_wedge_event(ev)
         self.assertTrue(any("armed" in e for e in errs))
 
+    def test_dump_includes_resource_line(self) -> None:
+        """_capture_wedge_request must emit resource: in the dump body."""
+        import inspect
+        # _capture_wedge_request is inside if _HAVE_GDB, not importable here.
+        # Read the source file and locate the function.
+        src_path = ROOT / "support" / "devtools" / "gdb" / "movian_lifecycle.py"
+        src = src_path.read_text(encoding="utf-8")
+        # Find _capture_wedge_request body
+        fn_start = src.find("def _capture_wedge_request(")
+        self.assertGreater(fn_start, 0, "_capture_wedge_request not found")
+        # Find the dump lines list construction within the function
+        lines_start = src.find('"capture-status:', fn_start)
+        self.assertGreater(lines_start, 0,
+                           "dump lines not found in function")
+        # The list should have a "resource: %s" entry
+        self.assertIn('"resource: %s"', src[lines_start:])
+        # resource should come before emergency-eject-state
+        resource_idx = src.find('"resource: %s"', lines_start)
+        eject_idx = src.find('"emergency-eject-state:', lines_start)
+        self.assertGreater(resource_idx, 0)
+        self.assertGreater(eject_idx, 0)
+        self.assertLess(resource_idx, eject_idx,
+                        "resource: must appear before emergency-eject-state: "
+                        "in the dump")
+
+
+class GdbResponseEjectFieldTest(unittest.TestCase):
+    """The GDB JSON response must include emergencyEject when status is
+    success, and the host capture result must forward it."""
+
+    def test_gdb_response_includes_emergency_eject(self) -> None:
+        """_capture_wedge_request must include emergencyEject in the
+        response dict sent back to the host."""
+        # _capture_wedge_request is inside if _HAVE_GDB, not importable here.
+        src_path = ROOT / "support" / "devtools" / "gdb" / "movian_lifecycle.py"
+        src = src_path.read_text(encoding="utf-8")
+        # The response dict must have emergencyEject set from the snapshot
+        self.assertIn('"emergencyEject"', src)
+        # It must come from the tracker snapshot, not from the request
+        self.assertIn("eject_snapshot", src)
+
+    def test_gdb_response_is_not_in_host_request(self) -> None:
+        """The host request dict must NOT contain emergencyEject; it comes
+        from the GDB collector's own tracker."""
+        import inspect
+        src = inspect.getsource(smoke._capture_from_attached_gdb)
+        # "emergencyEject" must not appear before the result dict building
+        result_marker = "result = {"
+        result_idx = src.find(result_marker)
+        self.assertGreater(result_idx, 0,
+                           "result dict not found in function")
+        request_part = src[:result_idx]
+        self.assertNotIn("emergencyEject", request_part)
+
+    def test_host_result_forwards_emergency_eject(self) -> None:
+        """The host capture result must include emergencyEject read from
+        the GDB response."""
+        import inspect
+        src = inspect.getsource(smoke._capture_from_attached_gdb)
+        # The result dict (after response is read) must reference emergencyEject
+        self.assertIn('"emergencyEject"', src,
+                      "host must read emergencyEject from GDB response")
+
+
+class InventoryFileTest(unittest.TestCase):
+    """inventory.json arch_exit entry must have the correct src/ path."""
+
+    def test_arch_exit_has_src_prefix(self) -> None:
+        inv_path = ROOT / "support" / "devtools" / "gdb" / "inventory.json"
+        inv = json.loads(inv_path.read_text(encoding="utf-8"))
+        for entry in inv["entries"]:
+            if entry["id"] == "arch_exit":
+                self.assertEqual(
+                    entry["file"], "src/arch/linux/linux_main.c:70"
+                )
+                return
+        self.fail("arch_exit not found in inventory")
+
 
 class HostRequestNoEjectFieldTest(unittest.TestCase):
     """The host wedge request must NOT include emergencyEject; the GDB
@@ -728,7 +858,13 @@ class HostRequestNoEjectFieldTest(unittest.TestCase):
         the host request dict."""
         import inspect
         src = inspect.getsource(smoke._capture_from_attached_gdb)
-        self.assertNotIn("emergencyEject", src)
+        # "emergencyEject" must not appear before the result dict building
+        result_marker = "result = {"
+        result_idx = src.find(result_marker)
+        self.assertGreater(result_idx, 0,
+                           "result dict not found in function")
+        request_part = src[:result_idx]
+        self.assertNotIn("emergencyEject", request_part)
 
     def test_wedge_event_requires_eject_from_collector(self) -> None:
         """A wedge event without emergencyEject must fail validation."""
