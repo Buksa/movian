@@ -173,14 +173,16 @@ def validate_wedge_event(event):
             errors.append("capture.threadCount does not match remainingThreads")
     return errors
 
+
 EMERGENCY_EJECT_STATES = ("unobserved", "not-requested", "requested",
-                           "armed", "fired")
+                          "armed", "fired")
 # Mandatory symbols whose presence in the armed set determines whether the
 # emergency-eject tracker observes the inferior lifecycle.  All three must
 # be selected and bound before observe() is called.
 EMERGENCY_EJECT_MANDATORY = frozenset((
     "app_shutdown", "shutdown_eject", "arch_exit",
 ))
+
 
 def is_eject_mandatory(symbol):
     """True if *symbol* is one of the mandatory eject probes."""
@@ -197,6 +199,7 @@ def all_eject_mandatory_bound(armed_bps):
     """
     armed_syms = {bp.symbol for bp in armed_bps if bp.bound}
     return EMERGENCY_EJECT_MANDATORY <= armed_syms
+
 
 _EMERGENCY_EJECT_TRANSITIONS = {
     "unobserved": "not-requested",

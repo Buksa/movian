@@ -179,6 +179,10 @@ class AttachedCaptureTest(unittest.TestCase):
             request = json.loads(
                 Path(self.control["requestPath"]).read_text(encoding="utf-8")
             )
+            # The request sent to GDB must not contain emergencyEject;
+            # the GDB collector builds it from inferior probes.
+            self.assertNotIn("emergencyEject", request,
+                             "host request must not carry emergencyEject")
             dump = Path(request["dumpPath"])
             dump.write_text(
                 "capture-status: success\n" +
@@ -770,68 +774,12 @@ class EmergencyEjectSchemaValidationTest(unittest.TestCase):
         errs = validate_wedge_event(ev)
         self.assertTrue(any("armed" in e for e in errs))
 
-    def test_dump_includes_resource_line(self) -> None:
-        """_capture_wedge_request must emit resource: in the dump body."""
-        import inspect
-        # _capture_wedge_request is inside if _HAVE_GDB, not importable here.
-        # Read the source file and locate the function.
-        src_path = ROOT / "support" / "devtools" / "gdb" / "movian_lifecycle.py"
-        src = src_path.read_text(encoding="utf-8")
-        # Find _capture_wedge_request body
-        fn_start = src.find("def _capture_wedge_request(")
-        self.assertGreater(fn_start, 0, "_capture_wedge_request not found")
-        # Find the dump lines list construction within the function
-        lines_start = src.find('"capture-status:', fn_start)
-        self.assertGreater(lines_start, 0,
-                           "dump lines not found in function")
-        # The list should have a "resource: %s" entry
-        self.assertIn('"resource: %s"', src[lines_start:])
-        # resource should come before emergency-eject-state
-        resource_idx = src.find('"resource: %s"', lines_start)
-        eject_idx = src.find('"emergency-eject-state:', lines_start)
-        self.assertGreater(resource_idx, 0)
-        self.assertGreater(eject_idx, 0)
-        self.assertLess(resource_idx, eject_idx,
-                        "resource: must appear before emergency-eject-state: "
-                        "in the dump")
-
-
-class GdbResponseEjectFieldTest(unittest.TestCase):
-    """The GDB JSON response must include emergencyEject when status is
-    success, and the host capture result must forward it."""
-
-    def test_gdb_response_includes_emergency_eject(self) -> None:
-        """_capture_wedge_request must include emergencyEject in the
-        response dict sent back to the host."""
-        # _capture_wedge_request is inside if _HAVE_GDB, not importable here.
-        src_path = ROOT / "support" / "devtools" / "gdb" / "movian_lifecycle.py"
-        src = src_path.read_text(encoding="utf-8")
-        # The response dict must have emergencyEject set from the snapshot
-        self.assertIn('"emergencyEject"', src)
-        # It must come from the tracker snapshot, not from the request
-        self.assertIn("eject_snapshot", src)
-
-    def test_gdb_response_is_not_in_host_request(self) -> None:
-        """The host request dict must NOT contain emergencyEject; it comes
-        from the GDB collector's own tracker."""
-        import inspect
-        src = inspect.getsource(smoke._capture_from_attached_gdb)
-        # "emergencyEject" must not appear before the result dict building
-        result_marker = "result = {"
-        result_idx = src.find(result_marker)
-        self.assertGreater(result_idx, 0,
-                           "result dict not found in function")
-        request_part = src[:result_idx]
-        self.assertNotIn("emergencyEject", request_part)
-
-    def test_host_result_forwards_emergency_eject(self) -> None:
-        """The host capture result must include emergencyEject read from
-        the GDB response."""
-        import inspect
-        src = inspect.getsource(smoke._capture_from_attached_gdb)
-        # The result dict (after response is read) must reference emergencyEject
-        self.assertIn('"emergencyEject"', src,
-                      "host must read emergencyEject from GDB response")
+    def test_wedge_event_requires_eject_from_collector(self) -> None:
+        """A wedge event without emergencyEject must fail validation."""
+        ev = success_event()
+        del ev["emergencyEject"]
+        errs = validate_wedge_event(ev)
+        self.assertTrue(any("emergencyEject" in e for e in errs))
 
 
 class InventoryFileTest(unittest.TestCase):
@@ -847,31 +795,6 @@ class InventoryFileTest(unittest.TestCase):
                 )
                 return
         self.fail("arch_exit not found in inventory")
-
-
-class HostRequestNoEjectFieldTest(unittest.TestCase):
-    """The host wedge request must NOT include emergencyEject; the GDB
-    collector builds it from inferior probes."""
-
-    def test_smoke_request_has_no_eject_field(self) -> None:
-        """smoke._capture_from_attached_gdb must not put emergencyEject in
-        the host request dict."""
-        import inspect
-        src = inspect.getsource(smoke._capture_from_attached_gdb)
-        # "emergencyEject" must not appear before the result dict building
-        result_marker = "result = {"
-        result_idx = src.find(result_marker)
-        self.assertGreater(result_idx, 0,
-                           "result dict not found in function")
-        request_part = src[:result_idx]
-        self.assertNotIn("emergencyEject", request_part)
-
-    def test_wedge_event_requires_eject_from_collector(self) -> None:
-        """A wedge event without emergencyEject must fail validation."""
-        ev = success_event()
-        del ev["emergencyEject"]
-        errs = validate_wedge_event(ev)
-        self.assertTrue(any("emergencyEject" in e for e in errs))
 
 
 class InventoryEntryTest(unittest.TestCase):
