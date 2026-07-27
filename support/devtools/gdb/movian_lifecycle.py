@@ -201,6 +201,22 @@ def all_eject_mandatory_bound(armed_bps):
     return EMERGENCY_EJECT_MANDATORY <= armed_syms
 
 
+def rate_limit_should_disable(bp, cat):
+    """Whether *bp* is disabled when category *cat* reaches its event cap.
+
+    Mandatory eject probes are immune: rate-limiting must never suppress a
+    shutdown transition, so the emergency-eject chain stays observable even
+    after an ordinary category is capped.  An unbound probe is never armed so
+    cannot fire, and only breakpoints in the rate-limited category qualify.
+
+    Pure (no GDB dependency) so the immunity contract is unit-testable from
+    CPython.  *bp* needs ``.category``, ``.bound`` and ``.symbol`` attributes.
+    """
+    if bp.category != cat or not bp.bound:
+        return False
+    return not is_eject_mandatory(bp.symbol)
+
+
 _EMERGENCY_EJECT_TRANSITIONS = {
     "unobserved": "not-requested",
     "not-requested": "requested",
@@ -580,16 +596,15 @@ if _HAVE_GDB:
 
         def _disable_category(self, cat):
             for bp in self._armed:
-                if bp.category == cat and bp.bound:
-                    # Mandatory eject probes must never be disabled by
-                    # ordinary rate-limiting so shutdown transitions are
-                    # always observed.
-                    if self._is_eject_mandatory(bp.symbol):
-                        continue
-                    try:
-                        bp.enabled = False
-                    except Exception:
-                        pass
+                # Mandatory eject probes are immune (see
+                # rate_limit_should_disable) so shutdown transitions stay
+                # observable after an ordinary category is capped.
+                if not rate_limit_should_disable(bp, cat):
+                    continue
+                try:
+                    bp.enabled = False
+                except Exception:
+                    pass
 
         def _write_pidfile_once(self):
             if self._pid_written or not self.pidfile:
