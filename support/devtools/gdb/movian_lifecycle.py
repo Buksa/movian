@@ -584,7 +584,7 @@ if _HAVE_GDB:
             objects = {k: v for k, v in arguments.items()
                        if isinstance(v, str) and v.startswith("0x")
                        and v != "0x0"}
-            self.emit({
+            event_data = {
                 "category": cat,
                 "event": "enter",
                 "symbol": bp.symbol,
@@ -592,7 +592,10 @@ if _HAVE_GDB:
                 "arguments": arguments,
                 "objects": objects,
                 "stack": _capture_stack(6),
-            })
+            }
+            if is_eject_mandatory(bp.symbol):
+                event_data["emergencyEject"] = self._eject_tracker.snapshot()
+            self.emit(event_data)
 
         def _disable_category(self, cat):
             for bp in self._armed:
@@ -686,6 +689,7 @@ if _HAVE_GDB:
                            "counts": self._counts,
                            "suppressed": self._suppressed,
                            "errors": self._errors,
+                           "emergencyEject": self._eject_tracker.snapshot(),
                            "thread": _thread_info(), "arguments": {},
                            "objects": {}, "stack": []})
             except Exception:
