@@ -489,7 +489,8 @@ def _gdb_process_matches(control: dict[str, Any]) -> bool:
             encoding="utf-8").strip()
     except OSError:
         return False
-    return comm == "gdb" and _proc_start_ticks(pid) == start_ticks
+    expected = control.get("gdbBasename") or "gdb"
+    return comm == expected[:15] and _proc_start_ticks(pid) == start_ticks
 
 
 def _attached_collector_control(
@@ -848,6 +849,9 @@ def _capture_and_stop_wedge(
     if inst.live_pid() is not None:
         stop_outcome = stop_wedged_instance(inst)
         transcript["ordering"].append("final-owned-cleanup:%s" % stop_outcome)
+    else:
+        stop_outcome = "stopped-clean"
+        transcript["ordering"].append("final-owned-cleanup:already-gone")
     _record_stop_outcome(bundle, transcript, stop_outcome)
     return stop_outcome, debugger_cleanup
 

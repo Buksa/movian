@@ -23,6 +23,7 @@ from movian_lifecycle import (  # noqa: E402
     EMERGENCY_EJECT_STATES,
     EmergencyEjectTracker,
     WEDGE_PROTOCOL,
+    _build_gdb_argv,
     _gdb_cmdfile,
     all_eject_mandatory_bound,
     build_argparser,
@@ -381,7 +382,6 @@ class OrderingAndCleanupTest(unittest.TestCase):
 
         self.assertEqual(calls, ["capture", "owned-cleanup", "gdb-cleanup"])
         self.assertEqual(stop_outcome, "stopped-clean")
-        self.assertEqual(gdb_outcome["status"], "exited")
         self.assertEqual(
             transcript["ordering"],
             [
@@ -389,6 +389,7 @@ class OrderingAndCleanupTest(unittest.TestCase):
                 "capture:timeout",
                 "owned-cleanup:stopped-clean",
                 "gdb-cleanup:exited",
+                "final-owned-cleanup:already-gone",
             ],
         )
 
@@ -857,6 +858,209 @@ class MandatoryPredicateTest(unittest.TestCase):
     def test_all_eject_mandatory_bound_empty(self):
         self.assertFalse(all_eject_mandatory_bound([]))
 
+class StaleStopOutcomeTest(unittest.TestCase):
+    """Fix 1: stop_outcome must not stay 'still-alive' when the inferior
+    dies during debugger cleanup."""
+
+    def setUp(self) -> None:
+        self.directory = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.directory, ignore_errors=True)
+
+    def test_stale_still_alive_corrected_when_inferior_dies_during_cleanup(self):
+        bundle = self.directory / "smoke-fail" / "health-001"
+        bundle.mkdir(parents=True)
+        transcript = {"ordering": ["classified"]}
+        inst = FakeInstance(self.directory, {}, live_pid=None)
+
+        with (
+            mock.patch.object(
+                smoke, "_capture_wedge_backtrace",
+                return_value={"status": "success"}),
+            mock.patch.object(
+                smoke, "stop_wedged_instance", return_value="still-alive"),
+            mock.patch.object(
+                smoke, "_cleanup_collector_debugger",
+                return_value={"status": "exited"}),
+        ):
+            stop_outcome, _ = smoke._capture_and_stop_wedge(
+                inst, bundle, transcript, "health-step", "screenshot 504")
+
+        # Before fix: stop_outcome would be the stale "still-alive".
+        self.assertEqual(stop_outcome, "stopped-clean")
+        self.assertIn("final-owned-cleanup:already-gone", transcript["ordering"])
+
+
+class GdbIdentityMatchTest(unittest.TestCase):
+    """Fix 3: _gdb_process_matches must accept gdb-multiarch and cross-build
+    names, not just bare 'gdb'."""
+
+    def _control(self, basename, pid=999, ticks=12345):
+        return {"gdbPid": pid, "gdbStartTicks": ticks,
+                "gdbBasename": basename}
+
+    def _mock_proc(self, comm, ticks=12345):
+        comm_data = comm
+        # /proc/PID/stat: after '(comm)', field[19] (0-indexed) is starttime
+        all_fields = ["S"] + ["0"] * 18 + [str(ticks)]
+        stat_data = "123 ({}) {}".format(comm, " ".join(all_fields))
+
+        def fake_read_text(self, **kwargs):
+            path = str(self)
+            if path.endswith("/comm"):
+                return comm_data + "\n"
+            if path.endswith("/stat"):
+                return stat_data + "\n"
+            raise OSError(path)
+
+        return mock.patch.object(Path, "read_text", fake_read_text)
+
+    def test_standard_gdb_still_matches(self):
+        with self._mock_proc("gdb"):
+            self.assertTrue(smoke._gdb_process_matches(self._control("gdb")))
+
+    def test_gdb_multiarch_matches(self):
+        with self._mock_proc("gdb-multiarch"):
+            self.assertTrue(smoke._gdb_process_matches(self._control("gdb-multiarch")))
+
+    def test_cross_build_gdb_truncated_comm_matches(self):
+        # /proc/PID/comm truncates to 15 chars: 'aarch64-linux-gnu-gdb' -> 'aarch64-linux-g'
+        with self._mock_proc("aarch64-linux-g"):
+            self.assertTrue(smoke._gdb_process_matches(
+                self._control("aarch64-linux-gnu-gdb")))
+
+    def test_old_state_without_gdbBasename_defaults_to_gdb(self):
+        control = {"gdbPid": 999, "gdbStartTicks": 12345}
+        with self._mock_proc("gdb"):
+            self.assertTrue(smoke._gdb_process_matches(control))
+
+    def test_wrong_binary_name_rejected(self):
+        with self._mock_proc("python3"):
+            self.assertFalse(smoke._gdb_process_matches(self._control("gdb")))
+
+
+class GdbArgvNxTest(unittest.TestCase):
+    """Fix 4: the launch GDB argv must include --nx to suppress init files."""
+
+    def test_nx_present(self):
+        argv = _build_gdb_argv("gdb", "/tmp/cmdfile")
+        self.assertIn("--nx", argv)
+
+    def test_nx_present_for_multiarch(self):
+        argv = _build_gdb_argv("gdb-multiarch", "/tmp/cmdfile")
+        self.assertIn("--nx", argv)
+
+
+class CaptureDetailPreservationTest(unittest.TestCase):
+    """Fix 2: when gdb.execute('thread apply all bt') fails, threadCount must
+    be set from _all_thread_info() and schema errors must append to (not
+    overwrite) the original detail."""
+
+    def test_backtrace_failure_sets_thread_count_from_all_thread_info(self):
+        """Before fix 2a: threadCount stayed 0 in the except block, causing a
+        spurious schema mismatch that overwrote the real GDB error message."""
+        import importlib.util
+        import types
+
+        lifecycle_path = ROOT / "support" / "devtools" / "gdb" / "movian_lifecycle.py"
+
+        # Build a minimal fake gdb module
+        fake_gdb = types.ModuleType("gdb")
+
+        class _FakeThread:
+            def __init__(self, num, tid):
+                self.global_num = num
+                self.name = "thread-%d" % num
+                self.ptid = (1, tid, 0)
+
+        class _FakeInferior:
+            pid = 1234
+            def threads(self):
+                return [_FakeThread(1, 1234), _FakeThread(2, 1235),
+                        _FakeThread(3, 1236)]
+
+        class _EventSlot:
+            def connect(self, fn): pass
+            def disconnect(self, fn): pass
+
+        class _FakeEvents:
+            exited = _EventSlot()
+            stop = _EventSlot()
+            gdb_exiting = _EventSlot()
+
+        fake_gdb.PARAM_BOOLEAN = 0
+        fake_gdb.PARAM_STRING = 0
+        fake_gdb.COMMAND_DATA = 1
+        fake_gdb.BREAK_STATE = True
+        fake_gdb.selected_inferior = lambda: _FakeInferior()
+        fake_gdb.selected_thread = lambda: _FakeThread(1, 1234)
+        fake_gdb.newest_frame = lambda: None
+        fake_gdb.parse_and_eval = lambda expr: ""
+        fake_gdb.thread_ptid = (1, 1234, 0)
+        fake_gdb.events = _FakeEvents()
+        fake_gdb.write = lambda *a, **kw: None
+        fake_gdb.flush = lambda: None
+
+        def _failing_execute(command, to_string=False):
+            if "thread apply all bt" in command:
+                raise RuntimeError("PC register is not available")
+            return ""
+        fake_gdb.execute = _failing_execute
+
+        class _FakeBP:
+            def __init__(self, *a, **kw):
+                self.enabled = True
+            def stop(self): return False
+            def delete(self): pass
+        fake_gdb.Breakpoint = _FakeBP
+        fake_gdb.Command = type("Cmd", (), {"__init__": lambda *a, **kw: None})
+
+        # Load movian_lifecycle with the fake gdb
+        orig = sys.modules.get("gdb")
+        sys.modules["gdb"] = fake_gdb
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "_lc_test_capture", lifecycle_path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+
+            # Prepare request/response files
+            with tempfile.TemporaryDirectory() as d:
+                req_path = os.path.join(d, "wedge-request.json")
+                resp_path = os.path.join(d, "wedge-response.json")
+                dump_path = os.path.join(d, "thread-backtrace.txt")
+                request = {
+                    "protocol": WEDGE_PROTOCOL,
+                    "sessionId": "test-session",
+                    "requestId": "req-1",
+                    "gdbPid": os.getpid(),
+                    "inferiorPid": 1234,
+                    "trigger": "health-step",
+                    "classification": "instance-health-wedge",
+                    "classificationDetail": "test detail",
+                    "subsystem": "screenshot-health",
+                    "resource": "/api/screenshot/raw",
+                    "dumpPath": dump_path,
+                }
+                with open(req_path, "w") as f:
+                    json.dump(request, f)
+
+                # _COLLECTOR must be None so we get a fresh tracker snapshot
+                mod._COLLECTOR = None
+                response = mod._capture_wedge_request(
+                    req_path, resp_path, "test-session", request)
+
+                # Fix 2a: threadCount must be set from _all_thread_info()
+                self.assertEqual(response["threadCount"], 3)
+                # The original GDB error must be preserved in detail
+                self.assertIn("PC register is not available", response["detail"])
+                self.assertIn("thread apply all bt failed", response["detail"])
+        finally:
+            if orig is not None:
+                sys.modules["gdb"] = orig
+            else:
+                sys.modules.pop("gdb", None)
 
 if __name__ == "__main__":
     unittest.main()

@@ -854,6 +854,11 @@ if _HAVE_GDB:
         except Exception as exc:
             detail = "thread apply all bt failed: %s: %s" % (
                 type(exc).__name__, exc)
+            response.update({
+                "threadCount": len(threads),
+                "frameCount": 0,
+                "movianFramePresent": False,
+            })
 
         response["detail"] = detail
         response["completedMonotonicNs"] = _monotonic_ns()
@@ -919,9 +924,14 @@ if _HAVE_GDB:
         }
         schema_errors = validate_wedge_event(event)
         if schema_errors:
-            response["status"] = "error"
-            response["detail"] = "wedge event schema: %s" % \
+            schema_note = "wedge event schema: %s" % \
                 "; ".join(schema_errors)
+            response["status"] = "error"
+            if response.get("detail"):
+                response["detail"] = "%s (%s)" % (
+                    response["detail"], schema_note)
+            else:
+                response["detail"] = schema_note
             event["capture"]["status"] = "error"
             event["capture"]["detail"] = response["detail"]
         if _COLLECTOR is not None:
@@ -1527,6 +1537,16 @@ def cleanup_owned(persistent, proc, pid, leave_running, gdb_timeout=10.0):
     return out
 
 
+def _build_gdb_argv(gdb_path, cmdfile):
+    """Build the GDB argument vector for the collector session.
+
+    ``--nx`` suppresses system (``/etc/gdb/gdbinit``) and user
+    (``~/.gdbinit``) init files so foreign Python hooks or redefined
+    commands cannot interfere with the collector's identity proof,
+    wedge-control, and ordering guarantees.
+    """
+    return [gdb_path, "--nx", "-q", "-batch", "-x", cmdfile]
+
 def run_launch(args):
     name = args.name
     persistent = args.persistent or os.path.join(instance_state(name),
@@ -1551,6 +1571,7 @@ def run_launch(args):
             "sessionId": uuid.uuid4().hex,
             "requestPath": os.path.join(state_dir, "wedge-request.json"),
             "responsePath": os.path.join(state_dir, "wedge-response.json"),
+            "gdbBasename": os.path.basename(args.gdb),
         }
         summary["collectorSessionId"] = control["sessionId"]
 
@@ -1655,8 +1676,7 @@ def run_launch(args):
                 cache, binary, start_url, args.categories, args.cap,
                 args.hv_cap, args.probe, args.mode, extra, control)
             log_fd = open(log_path, "wb", buffering=0)
-            log_fd.truncate(0)
-            gdb_argv = [args.gdb, "-q", "-batch", "-x", cmdfile]
+            gdb_argv = _build_gdb_argv(args.gdb, cmdfile)
             proc = subprocess.Popen(gdb_argv, cwd=os.getcwd(), env=env,
                                     stdout=log_fd, stderr=subprocess.STDOUT,
                                     stdin=subprocess.DEVNULL,
