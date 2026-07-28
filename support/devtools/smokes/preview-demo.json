@@ -21,8 +21,22 @@
       "equals": 12
     },
     {
+      "do": "http_get",
+      "path": "api/prop/global/navigators/current/currentpage/model/nodes/nonexistent",
+      "absent": true
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/nodes",
+      "equals": 12
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/nodes/*0/url",
+      "equals": "viewpreview:demo:1"
+    },
+    {
       "do": "shot",
       "tag": "demo"
     }
-  ]
 }

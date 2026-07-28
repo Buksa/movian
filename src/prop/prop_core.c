@@ -5046,7 +5046,7 @@ prop_suggest_focus(prop_t *p)
  *
  */
 prop_t *
-prop_findv(prop_t *p, char **names)
+prop_findv(prop_t *p, char **names, int allow_indexing)
 {
   hts_mutex_lock(&prop_mutex);
 
@@ -5063,11 +5063,24 @@ prop_findv(prop_t *p, char **names)
       break;
     }
 
-    TAILQ_FOREACH(c, &p->hp_childs, hp_parent_link)
-      if(c->hp_name != NULL && !strcmp(c->hp_name, n))
-	break;
-    if(c == NULL)
-      break;
+    if(allow_indexing && n[0] == '*') {
+      unsigned int idx = atoi(n + 1);
+      TAILQ_FOREACH(c, &p->hp_childs, hp_parent_link) {
+        if(idx == 0)
+          break;
+        idx--;
+      }
+      if(c == NULL) {
+        c = NULL;
+        break;
+      }
+    } else {
+      TAILQ_FOREACH(c, &p->hp_childs, hp_parent_link)
+        if(c->hp_name != NULL && !strcmp(c->hp_name, n))
+          break;
+      if(c == NULL)
+        break;
+    }
 
     while(c->hp_originator != NULL)
       c = c->hp_originator;
