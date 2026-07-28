@@ -28,7 +28,7 @@
     "glw",
     "service"
   ],
-  "count": 117,
+  "count": 119,
   "initmeUseCount": 45,
   "entries": [
     {
@@ -156,6 +156,24 @@
       "id": "app_shutdown",
       "symbol": "app_shutdown",
       "file": "src/main.c:868",
+      "category": "core-init",
+      "phase": "shutdown",
+      "pairedWith": null,
+      "confidence": "source-confirmed"
+    },
+    {
+      "id": "shutdown_eject",
+      "symbol": "shutdown_eject",
+      "file": "src/main.c:826",
+      "category": "core-init",
+      "phase": "shutdown",
+      "pairedWith": null,
+      "confidence": "source-confirmed"
+    },
+    {
+      "id": "arch_exit",
+      "symbol": "arch_exit",
+      "file": "src/arch/linux/linux_main.c:70",
       "category": "core-init",
       "phase": "shutdown",
       "pairedWith": null,
