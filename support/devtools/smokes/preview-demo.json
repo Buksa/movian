@@ -21,8 +21,8 @@
       "equals": 12
     },
     {
-      "do": "http_get",
-      "path": "api/prop/global/navigators/current/currentpage/model/nodes/nonexistent",
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/nodes/definitely-missing-issue152",
       "absent": true
     },
     {
@@ -39,4 +39,5 @@
       "do": "shot",
       "tag": "demo"
     }
+  ]
 }
