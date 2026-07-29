@@ -21,6 +21,31 @@ declare module 'movian/xml' {
      */
     interface XmlProxy {
         /**
+         * Source: explicit toString branch in htsmsgHandler.get.
+         */
+        toString(): string;
+
+        /**
+         * Source: explicit valueOf branch returns the proxied scalar value.
+         */
+        valueOf(): unknown;
+
+        /**
+         * Source: explicit dump branch calls native/htsmsg.print.
+         */
+        dump(): void;
+
+        /**
+         * Source: explicit filterNodes branch returns matching child values.
+         */
+        filterNodes(filter: string): unknown[];
+
+        /**
+         * Source: explicit length branch calls native/htsmsg.length.
+         */
+        readonly length: number;
+
+        /**
          * Source: dynamic property access via get handler.
          */
         [key: string]: unknown;
