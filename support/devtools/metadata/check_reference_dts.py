@@ -145,6 +145,7 @@ MODULES = (
         REFERENCE_DIR / "movian-html.d.ts",
         JS_MODULE_DIR / "html.js",
         (),
+        (),
     ),
     ModuleSpec(
         "movian/itemhook",
@@ -163,6 +164,7 @@ MODULES = (
         REFERENCE_DIR / "movian-sqlite.d.ts",
         JS_MODULE_DIR / "sqlite.js",
         (),
+        (),
     ),
     ModuleSpec(
         "movian/subtitles",
@@ -174,7 +176,7 @@ MODULES = (
         "movian/videoscrobbler",
         REFERENCE_DIR / "movian-videoscrobbler.d.ts",
         JS_MODULE_DIR / "videoscrobbler.js",
-        (),
+        ("VideoScrobbler",),
     ),
     ModuleSpec(
         "movian/xml",
@@ -186,6 +188,7 @@ MODULES = (
         "movian/xmlrpc",
         REFERENCE_DIR / "movian-xmlrpc.d.ts",
         JS_MODULE_DIR / "xmlrpc.js",
+        (),
         (),
     ),
     ModuleSpec(
@@ -222,7 +225,7 @@ MODULES = (
         "websocket",
         REFERENCE_DIR / "websocket.d.ts",
         TOPLEVEL_MODULE_DIR / "websocket.js",
-        (),
+        ("w3cwebsocket",),
     ),
 )
 
@@ -1181,8 +1184,10 @@ def _check_commonjs_coverage() -> list[str]:
     metadata = _load_metadata()
     all_modules = metadata.get("js", {}).get("modules", [])
 
-    # Filter for CommonJS modules
+    # Partition CommonJS and native modules
     commonjs_modules = {m["name"] for m in all_modules if m.get("kind") == "commonjs"}
+    native_modules = {m["name"] for m in all_modules if m.get("kind") == "native"}
+    deferred_count = len(native_modules)
 
     # Subtract the six previously accepted modules
     accepted = {
@@ -1196,9 +1201,8 @@ def _check_commonjs_coverage() -> list[str]:
 
     target_modules = commonjs_modules - accepted
 
-    # Partition native entries
-    native_modules = {m for m in commonjs_modules if m.startswith("native/")}
-    deferred_count = len(native_modules)
+    # Get registered module names from MODULES
+    registered_modules = {spec.name for spec in MODULES}
 
     # Check for missing fixtures
     missing = []
@@ -1233,13 +1237,28 @@ def _check_commonjs_coverage() -> list[str]:
         if module_name not in target_modules:
             phantom.append(module_name)
 
+    # Check for modules in fixtures but not in MODULES registry
+    fixture_modules = set()
+    for module_name in target_modules:
+        if module_name.startswith("movian/"):
+            basename = module_name[len("movian/"):].replace("/", "-")
+            decl_path = REFERENCE_DIR / ("movian-" + basename + ".d.ts")
+        else:
+            decl_path = REFERENCE_DIR / (module_name + ".d.ts")
+        if decl_path.is_file():
+            fixture_modules.add(module_name)
+
+    registry_missing = fixture_modules - registered_modules
+    if registry_missing:
+        errors.append("registry missing %d: %s" % (len(registry_missing), ", ".join(sorted(registry_missing))))
+
     if missing:
         errors.append("missing %d: %s" % (len(missing), ", ".join(sorted(missing))))
 
     if phantom:
         errors.append("phantom %d: %s" % (len(phantom), ", ".join(sorted(phantom))))
 
-    if not missing and not phantom:
+    if not missing and not phantom and not registry_missing:
         print("reference-dts: CommonJS coverage OK (missing 0, phantom 0, deferred-native %d)" % deferred_count)
 
     return errors

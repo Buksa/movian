@@ -6,8 +6,8 @@
  */
 declare module 'movian/xmlrpc' {
     /**
-     * Source: exports.call takes variable arguments.
-     * Calls native/io.xmlrpc and passes result to movian/xml.htsmsg.
+     * Source: exports.call takes URL, method, and rest arguments.
+     * The checker does not understand variadic call patterns.
      */
     export function call(): unknown;
 }

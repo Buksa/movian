@@ -6,51 +6,21 @@
  */
 declare module 'https' {
     /**
-     * Source: exports.request calls http.request with https=true flag.
-     * The https parameter is added internally.
+     * Source: exports.request calls http.request with https parameter added internally.
+     * The wrapper injects the HTTPS flag but reuses HTTP surface.
      */
+    import { HttpRequest, RequestOptions } from 'http';
+
     export function request(
-        opts: string | {
-            protocol: string;
-            slashes?: boolean;
-            host?: string;
-            hostname?: string;
-            port?: string;
-            pathname: string;
-            search?: string;
-            query?: Record<string, string>;
-            hash?: string;
-            auth?: string;
-        },
+        opts: string | RequestOptions,
         callback?: unknown
-    ): {
-        readonly url: string;
-        headers: unknown[];
-        end(): void;
-        on(event: 'response' | 'error', callback: (arg: unknown) => void): void;
-    };
+    ): HttpRequest;
 
     /**
-     * Source: exports.get calls http.get with https=true flag.
+     * Source: exports.get calls http.get with https parameter added internally.
      */
     export function get(
-        opts: string | {
-            protocol: string;
-            slashes?: boolean;
-            host?: string;
-            hostname?: string;
-            port?: string;
-            pathname: string;
-            search?: string;
-            query?: Record<string, string>;
-            hash?: string;
-            auth?: string;
-        },
+        opts: string | RequestOptions,
         callback?: unknown
-    ): {
-        readonly url: string;
-        headers: unknown[];
-        end(): void;
-        on(event: 'response' | 'error', callback: (arg: unknown) => void): void;
-    };
+    ): HttpRequest;
 }

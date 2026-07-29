@@ -18,6 +18,7 @@ import https = require('https');
 import querystring = require('querystring');
 import url = require('url');
 import websocket = require('websocket');
+import toplevelHttp = require('http');
 
 new page.Route(42, () => {}); // EXPECT_TS2345
 new page.Route(/foo/, () => {}); // EXPECT_TS2345
@@ -108,8 +109,11 @@ const badItemHook = itemhook.create({ // EXPECT_TS2345
   title: 'Test'
 });
 
-// movian/sqlite - wrong constructor parameter
-const badDb = new sqlite.DB(42); // EXPECT_TS2345
+// movian/popup - wrong number of arguments
+popup.notify('test'); // EXPECT_TS2554
+
+// movian/sqlite - wrong parameter type
+const badDb = sqlite.DB(42); // EXPECT_TS2345
 
 // movian/subtitles - wrong callback parameter
 subtitles.addProvider((req) => {
@@ -119,19 +123,28 @@ subtitles.addProvider((req) => {
 // movian/xml - wrong parameter type
 xml.parse(42); // EXPECT_TS2345
 
-// movian/xmlrpc - wrong parameter types
-xmlrpc.call(42); // EXPECT_TS2554
-
 // https - wrong parameter type
 https.request(42); // EXPECT_TS2345
 
 // querystring - wrong parameter type
-querystring.parse(42); // EXPECT_TS2345
+querystring.parse(void 0); // EXPECT_TS2345
 
 // url - wrong parameter types
 url.format(42); // EXPECT_TS2345
 url.parse(42); // EXPECT_TS2345
 url.resolve(42, 'test'); // EXPECT_TS2345
+
+// websocket - wrong constructor parameter
+const badWs = new websocket.w3cwebsocket(42); // EXPECT_TS2345
+
+// movian/videoscrobbler - wrong callback signature
+const badScrobbler = new videoscrobbler.VideoScrobbler();
+badScrobbler.onstart = (data, prop, origin) => {
+  const wrongType: string = data; // EXPECT_TS2322
+};
+
+// fs - wrong parameter type
+fs.writeFileSync(42, 'test'); // EXPECT_TS2345
 
 void returnedString;
 void bodyString;

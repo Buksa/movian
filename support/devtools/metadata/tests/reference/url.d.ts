@@ -7,7 +7,6 @@
 declare module 'url' {
     /**
      * Source: exports.format builds a URL string from a URL object.
-     * Follows Node.js URL.format semantics.
      */
     export function format(urlObj: UrlObject): string;
 
@@ -31,11 +30,12 @@ declare module 'url' {
         slashes?: boolean;
         host?: string;
         hostname?: string;
-        port?: string;
+        port?: number;
         pathname: string;
         search?: string;
         query?: Record<string, string>;
         hash?: string;
         auth?: string;
+        path?: string;
     }
 }

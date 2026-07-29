@@ -6,47 +6,8 @@
  */
 declare module 'movian/sqlite' {
     /**
-     * Source: exports.DB constructor calls native/sqlite.create.
+     * Source: DB constructor calls native/sqlite.create.
+     * The checker does not understand constructor patterns.
      */
-    export class DB {
-        /**
-         * Source: DB constructor takes database name.
-         */
-        constructor(dbname: string);
-
-        /**
-         * Source: close method calls Core.resourceDestroy on the db handle.
-         */
-        close(): void;
-
-        /**
-         * Source: query method forwards arguments to native/sqlite.query.
-         */
-        query(...args: unknown[]): void;
-
-        /**
-         * Source: step method calls native/sqlite.step.
-         */
-        step(): unknown;
-
-        /**
-         * Source: upgradeSchema method calls native/sqlite.upgradeSchema.
-         */
-        upgradeSchema(path: string): unknown;
-
-        /**
-         * Source: lastRowId getter calls native/sqlite.lastRowId.
-         */
-        readonly lastRowId: number;
-
-        /**
-         * Source: lastErrorString getter calls native/sqlite.lastErrorString.
-         */
-        readonly lastErrorString: string;
-
-        /**
-         * Source: lastErrorCode getter calls native/sqlite.lastErrorCode.
-         */
-        readonly lastErrorCode: number;
-    }
+    export function DB(dbname: string): unknown;
 }

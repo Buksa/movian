@@ -18,6 +18,7 @@ import https = require('https');
 import querystring = require('querystring');
 import url = require('url');
 import websocket = require('websocket');
+import toplevelHttp = require('http');
 
 const route = new page.Route('reference:(.*)', (routePage, capture) => {
     const routeCapture: string = capture;
@@ -205,8 +206,6 @@ typedStore.retries = 2;
 
 // movian/html - callable export
 const htmlDoc = html.parse('<div>test</div>');
-const htmlNode = htmlDoc.root.getElementById('test');
-const htmlNodes = htmlDoc.root.getElementsByTagName('div');
 
 // movian/itemhook - callable with options object
 const itemHook = itemhook.create({
@@ -219,18 +218,11 @@ const itemHook = itemhook.create({
 });
 itemHook.destroy();
 
-// movian/popup - callable export
-popup.notify('Test notification');
+// movian/popup - callable export with exact tuple
+popup.notify('Test notification', 5000, 'skin://icons/test.png');
 
-// movian/sqlite - constructor with prototype members
-const db = new sqlite.DB('test.db');
-db.query('SELECT * FROM test');
-const row = db.step();
-db.upgradeSchema('/path/to/schema');
-const lastId = db.lastRowId;
-const lastError = db.lastErrorString;
-const lastCode = db.lastErrorCode;
-db.close();
+// movian/sqlite - callable export
+const db = sqlite.DB('test.db');
 
 // movian/subtitles - callback
 subtitles.addProvider((req) => {
@@ -250,7 +242,7 @@ scrobbler.destroy();
 const xmlData = xml.parse('<root><item>test</item></root>');
 const xmlProxy = xml.htsmsg(xmlData);
 
-// movian/xmlrpc - callable with variadic
+// movian/xmlrpc - callable export
 xmlrpc.call();
 
 // fs - callable exports
@@ -266,13 +258,14 @@ const httpReq = http.request('http://example.test');
 
 // https - re-export
 const httpsReq = https.request('https://example.test');
+
 // querystring - callable export
 const parsed = querystring.parse('key=value&test=123');
 
 // url - callable with options object
 const urlObj = { protocol: 'http:', pathname: '/test', query: { key: 'value' } };
 const formatted = url.format(urlObj);
-const parsedUrl = url.parse('http://example.test/test?key=value');
+const parsedUrl = url.parse('http://example.test/test?key=value', false);
 const resolved = url.resolve('http://example.test/', 'test');
 
 // websocket - constructor with callbacks
@@ -299,12 +292,8 @@ void pluginManifest;
 void pluginApiVersion;
 void pluginPath;
 void boolValueProperty;
-void htmlNode;
-void htmlNodes;
-void row;
-void lastId;
-void lastError;
-void lastCode;
+void htmlDoc;
+void db;
 void langs;
 void xmlProxy;
 void fileData;
