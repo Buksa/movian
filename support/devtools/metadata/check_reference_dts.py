@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the accepted movian/page, movian/prop and movian/http .d.ts fixtures.
+"""Check the accepted reference .d.ts calibration fixtures.
 
 The parser is intentionally limited to the declaration/source forms used by
 these calibration fixtures. It is not a JavaScript, C, or TypeScript parser.
@@ -58,6 +58,17 @@ class ModuleSpec:
     native_table: str | None = None
     native_module: str | None = None
     native_kind: str = "wrapped-exports"
+    # A JS object used as the shared prototype rather than `Type.prototype`.
+    # Entries are (declaration interface name, JavaScript object name).
+    object_prototypes: tuple[tuple[str, str], ...] = ()
+    # Types whose constructor-created public fields are exact in both
+    # directions. The #135 types default to phantom-only because their
+    # constructors also carry intentionally private bookkeeping fields.
+    exact_member_types: tuple[str, ...] = ()
+    # Exported anonymous constructor functions whose public `this.*` fields
+    # are checked against their same-named declaration class. Each entry is
+    # (export name, internal field names to exclude).
+    export_instances: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 JS_MODULE_DIR = REPO_ROOT / "res" / "ecmascript" / "modules" / "movian"
@@ -93,10 +104,44 @@ MODULES = (
         native_module="io",
         native_kind="native-calls",
     ),
+    ModuleSpec(
+        "movian/settings",
+        REFERENCE_DIR / "movian-settings.d.ts",
+        JS_MODULE_DIR / "settings.js",
+        (),
+        native_c=ECMASCRIPT_C_DIR / "es_kvstore.c",
+        native_table="fnlist_kvstore",
+        native_module="kvstore",
+        native_kind="native-calls-exact",
+        object_prototypes=(("SettingsMethods", "sp"),),
+        export_instances=(
+            ("globalSettings", ("getvalue", "setvalue")),
+            ("kvstoreSettings", ("getvalue", "setvalue")),
+        ),
+    ),
+    ModuleSpec(
+        "movian/service",
+        REFERENCE_DIR / "movian-service.d.ts",
+        JS_MODULE_DIR / "service.js",
+        ("Service",),
+        native_c=ECMASCRIPT_C_DIR / "es_service.c",
+        native_table="fnlist_service",
+        native_module="service",
+        native_kind="native-calls-exact",
+        exact_member_types=("Service",),
+    ),
+    ModuleSpec(
+        "movian/store",
+        REFERENCE_DIR / "movian-store.d.ts",
+        JS_MODULE_DIR / "store.js",
+        (),
+    ),
 )
 
 POSITIVE_FIXTURE = FIXTURE_DIR / "reference-positive.ts"
 NEGATIVE_FIXTURE = FIXTURE_DIR / "reference-negative.ts"
+PLUGIN_DECLARATION = REFERENCE_DIR / "movian-plugin.d.ts"
+PLUGIN_SOURCE = ECMASCRIPT_C_DIR / "ecmascript.c"
 
 EXPORT_ASSIGN_RE = re.compile(
     r"^\s*exports\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=", re.MULTILINE)
@@ -112,6 +157,9 @@ PROTOTYPE_HEAD_RE = re.compile(
     r"^\s*(?:exports\.)?([A-Za-z_$][A-Za-z0-9_$]*)\.prototype\."
     r"([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*function\s*\(",
     re.MULTILINE)
+OBJECT_METHOD_HEAD_RE = re.compile(
+    r"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)"
+    r"\s*=\s*function\s*\(", re.MULTILINE)
 DECL_FUNCTION_RE = re.compile(
     r"^\s*export\s+function\s+([A-Za-z_$][A-Za-z0-9_$]*)"
     r"(?:\s*<[^;{]*?>)?\s*\(", re.MULTILINE)
@@ -144,6 +192,12 @@ THIS_FIELD_RE = re.compile(
 DIAGNOSTIC_RE = re.compile(
     r"^(.*?)\((\d+),(\d+)\): error TS(\d+):", re.MULTILINE)
 EXPECTED_DIAGNOSTIC_RE = re.compile(r"EXPECT_TS(\d+)")
+PLUGIN_ASSIGN_RE = re.compile(
+    r'duk_put_prop_string\(\s*ctx\s*,\s*plugin_obj_idx\s*,\s*"([^"]+)"'
+    r"\s*\)")
+PLUGIN_GLOBAL_DECL_RE = re.compile(
+    r"^\s*declare\s+var\s+Plugin\s*:\s*MovianPluginGlobal\s*;",
+    re.MULTILINE)
 
 
 def _read(path: Path) -> str:
@@ -468,6 +522,30 @@ def _javascript_methods(text: str, type_name: str) \
     }
 
 
+def _javascript_object_methods(text: str, object_name: str) \
+        -> dict[str, Signature]:
+    masked = _mask_js(text)
+    return {
+        match.group(2): _signature_at_paren(masked, match.end() - 1)
+        for match in OBJECT_METHOD_HEAD_RE.finditer(masked)
+        if match.group(1) == object_name
+    }
+
+
+def _exported_function_body(text: str, export_name: str) -> str:
+    match = next(
+        (candidate for candidate in EXPORT_FUNCTION_HEAD_RE.finditer(text)
+         if candidate.group(1) == export_name),
+        None,
+    )
+    if match is None:
+        raise ValueError("exported function %s not found" % export_name)
+    open_index = text.find("{", match.end() - 1)
+    if open_index == -1:
+        raise ValueError("exported function %s has no body" % export_name)
+    return _balanced_content(text, open_index, "{", "}")[0]
+
+
 def _constructor_body(text: str, type_name: str) -> str | None:
     match = None
     for candidate in JS_CONSTRUCTOR_HEAD_RE.finditer(text):
@@ -539,6 +617,12 @@ def _javascript_members(text: str, type_name: str) -> set[str]:
     return fields | _javascript_defined_properties(body)
 
 
+def _exported_function_members(text: str, export_name: str) -> set[str]:
+    body = _exported_function_body(text, export_name)
+    masked_body = _mask_nested_functions(_mask_js(body))
+    return set(THIS_FIELD_RE.findall(masked_body)) - {"__proto__"}
+
+
 def _native_functions(path: Path, table_name: str) -> dict[str, int]:
     text = _read(path)
     table_match = re.search(
@@ -558,13 +642,9 @@ def _native_functions(path: Path, table_name: str) -> dict[str, int]:
     return entries
 
 
-def _native_call_names(javascript: str, native_module: str) -> set[str]:
-    """Names called as `require('native/MODULE').NAME(...)` (directly, or
-    via a `var alias = require('native/MODULE')` alias), scoped to one
-    specific native/MODULE -- a JS file commonly requires several
-    different native/* modules (http.js also uses native/string, page.js
-    also uses native/metadata and native/hook), and a call through one of
-    those must never be attributed to a different module's table."""
+def _native_call_sites(javascript: str,
+                       native_module: str) -> tuple[str, list[tuple[str, int]]]:
+    """Masked source plus (native name, opening-paren index) call sites."""
     module = re.escape(native_module)
     alias_re = re.compile(
         r"(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
@@ -575,12 +655,29 @@ def _native_call_names(javascript: str, native_module: str) -> set[str]:
         r"\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(" % module)
     masked = _mask_js(javascript, mask_strings=False)
     aliases = {match.group(1) for match in alias_re.finditer(masked)}
-    names: set[str] = set()
+    sites: list[tuple[str, int]] = []
     for match in call_re.finditer(masked):
         receiver = match.group(1)
         if receiver is None or receiver in aliases:
-            names.add(match.group(2))
-    return names
+            sites.append((match.group(2), match.end() - 1))
+    return masked, sites
+
+
+def _native_call_names(javascript: str, native_module: str) -> set[str]:
+    """Names called through require('native/MODULE') or a direct alias."""
+    _, sites = _native_call_sites(javascript, native_module)
+    return {name for name, _ in sites}
+
+
+def _native_call_arities(javascript: str,
+                         native_module: str) -> dict[str, list[int]]:
+    """Call argument counts for one native module, including alias calls."""
+    masked, sites = _native_call_sites(javascript, native_module)
+    calls: dict[str, list[int]] = {}
+    for name, open_index in sites:
+        arguments, _ = _balanced_content(masked, open_index, "(", ")")
+        calls.setdefault(name, []).append(len(_split_parameters(arguments)))
+    return calls
 
 
 def _compare_name_sets(errors: list[str], module: str, label: str,
@@ -617,6 +714,33 @@ def _check_native_table(errors: list[str], spec: ModuleSpec,
                 "%s: calls native %s.%s, which does not exist in %s" %
                 (spec.name, spec.native_table, name,
                  spec.native_c.relative_to(REPO_ROOT)))
+        return
+
+    if spec.native_kind == "native-calls-exact":
+        # Exact mode is only for tables wholly consumed by this one wrapper;
+        # shared native tables must use the one-direction "native-calls" mode.
+        calls = _native_call_arities(javascript, spec.native_module)
+        for name in sorted(set(native) - set(calls)):
+            errors.append(
+                "%s: native %s member %s not exercised by source" %
+                (spec.name, spec.native_table, name))
+        for name in sorted(set(calls) - set(native)):
+            errors.append(
+                "%s: source calls missing native %s.%s" %
+                (spec.name, spec.native_table, name))
+        for name, nargs in sorted(native.items()):
+            arities = calls.get(name)
+            if not arities or nargs == VARARGS_NARGS:
+                continue
+            # duk_function_list_entry.nargs is the registered maximum; wrapper
+            # calls may omit trailing optional arguments, so compare the
+            # maximum source call arity.
+            source_nargs = max(arities)
+            if source_nargs != nargs:
+                errors.append(
+                    "%s: native %s.%s nargs=%d vs %d source call args" %
+                    (spec.name, spec.native_table, name, nargs,
+                     source_nargs))
         return
 
     # wrapped-exports: exports.NAME is expected to be a thin wrapper
@@ -715,15 +839,155 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
         # function masking in _javascript_members.
         source_members = _javascript_members(javascript, type_name)
         declared_members = _declared_members(declaration, type_name)
-        for member in sorted(declared_members - source_members):
-            errors.append("%s: phantom declaration %s.%s" %
-                          (spec.name, type_name, member))
+        if type_name in spec.exact_member_types:
+            _compare_name_sets(
+                errors, spec.name, type_name + ".",
+                source_members, declared_members)
+        else:
+            for member in sorted(declared_members - source_members):
+                errors.append("%s: phantom declaration %s.%s" %
+                              (spec.name, type_name, member))
+
+    for type_name, object_name in spec.object_prototypes:
+        source_methods = _javascript_object_methods(javascript, object_name)
+        try:
+            declared_methods = _declared_methods(declaration, type_name)
+        except ValueError as error:
+            errors.append("%s: %s" % (spec.name, error))
+            continue
+        _compare_name_sets(errors, spec.name, type_name + ".",
+                           set(source_methods), set(declared_methods))
+        for method, source_signature in sorted(source_methods.items()):
+            signatures = declared_methods.get(method)
+            if signatures is None:
+                continue
+            if _max_arity(signatures) != source_signature.total:
+                errors.append(
+                    "%s: %s.%s call shape is %d source args vs %d "
+                    "declared" %
+                    (spec.name, type_name, method,
+                     source_signature.total, _max_arity(signatures)))
+
+    for export_name, excluded in spec.export_instances:
+        source_members = _exported_function_members(
+            javascript, export_name) - set(excluded)
+        declared_members = _declared_members(declaration, export_name)
+        _compare_name_sets(
+            errors, spec.name, export_name + ".",
+            source_members, declared_members)
 
     _check_native_table(errors, spec, declared_signatures, declared_kinds,
                         javascript)
 
 
-def check_source_shapes() -> list[str]:
+def _receiver_call_names(text: str, receiver: str) -> set[str]:
+    masked = _mask_js(text)
+    pattern = re.compile(
+        r"\b%s\.([A-Za-z_$][A-Za-z0-9_$]*)\s*\(" %
+        re.escape(receiver))
+    return {match.group(1) for match in pattern.finditer(masked)}
+
+
+def _store_native_resolution(errors: list[str]) -> dict[str, set[str]]:
+    """Resolve movian/store exports through the top-level fs.js wrapper.
+
+    `createFromPath` calls the CommonJS `fs` wrapper, while `create` shadows
+    that alias with native/fs and then calls createFromPath. The resolution is
+    intentionally scope-aware so the shadowed `fs` identifier cannot make
+    writeFileSync/readFileSync look like phantom native names.
+    """
+    store_text = _read(JS_MODULE_DIR / "store.js")
+    fs_wrapper_path = REPO_ROOT / "res" / "ecmascript" / "modules" / "fs.js"
+    fs_wrapper_text = _read(fs_wrapper_path)
+    native_fs_path = ECMASCRIPT_C_DIR / "es_fs.c"
+    native_fs = _native_functions(native_fs_path, "fnlist_fs")
+
+    if not re.search(
+            r"(?:var|let|const)\s+fs\s*=\s*require\(\s*['\"]fs['\"]\s*\)",
+            _mask_js(store_text, mask_strings=False)):
+        errors.append(
+            "movian/store: top-level fs wrapper alias is missing")
+
+    fs_exports, _ = _javascript_exports(fs_wrapper_text)
+    fs_native_by_export: dict[str, set[str]] = {}
+    for export_name in fs_exports:
+        body = _exported_function_body(fs_wrapper_text, export_name)
+        fs_native_by_export[export_name] = _native_call_names(body, "fs")
+
+    store_exports, _ = _javascript_exports(store_text)
+    direct_by_export: dict[str, set[str]] = {}
+    nested_by_export: dict[str, set[str]] = {}
+    for export_name in store_exports:
+        body = _exported_function_body(store_text, export_name)
+        direct = _native_call_names(body, "fs")
+        local_native_fs = re.search(
+            r"(?:var|let|const)\s+fs\s*=\s*"
+            r"require\(\s*['\"]native/fs['\"]\s*\)",
+            _mask_js(body, mask_strings=False),
+        )
+        wrapper_calls = set() if local_native_fs else \
+            _receiver_call_names(body, "fs")
+        for wrapper_call in sorted(wrapper_calls):
+            if wrapper_call not in fs_native_by_export:
+                errors.append(
+                    "movian/store: %s calls phantom fs wrapper member %s" %
+                    (export_name, wrapper_call))
+                continue
+            direct.update(fs_native_by_export[wrapper_call])
+        direct_by_export[export_name] = direct
+        nested_by_export[export_name] = _receiver_call_names(body, "exports")
+
+    resolved: dict[str, set[str]] = {}
+
+    def resolve(export_name: str, visiting: set[str]) -> set[str]:
+        if export_name in resolved:
+            return resolved[export_name]
+        if export_name in visiting:
+            raise ValueError(
+                "movian/store export recursion at %s" % export_name)
+        visiting.add(export_name)
+        names = set(direct_by_export[export_name])
+        for nested in nested_by_export[export_name]:
+            if nested not in direct_by_export:
+                errors.append(
+                    "movian/store: %s calls phantom store export %s" %
+                    (export_name, nested))
+                continue
+            names.update(resolve(nested, visiting))
+        visiting.remove(export_name)
+        resolved[export_name] = names
+        return names
+
+    for export_name in store_exports:
+        resolve(export_name, set())
+
+    for export_name, names in sorted(resolved.items()):
+        if not names:
+            errors.append(
+                "movian/store: export %s has no resolved native/fs calls" %
+                export_name)
+        for name in sorted(names - set(native_fs)):
+            errors.append(
+                "movian/store: %s resolves phantom native fnlist_fs.%s" %
+                (export_name, name))
+    return resolved
+
+
+def _check_plugin_global(errors: list[str]) -> None:
+    declaration = _read(PLUGIN_DECLARATION)
+    source = _read(PLUGIN_SOURCE)
+    if PLUGIN_GLOBAL_DECL_RE.search(declaration) is None:
+        errors.append(
+            "Plugin: global declaration must be `declare var Plugin: "
+            "MovianPluginGlobal`")
+    source_fields = set(PLUGIN_ASSIGN_RE.findall(_mask_js(
+        source, mask_strings=False)))
+    declared_fields = _declared_members(declaration, "MovianPluginGlobal")
+    _compare_name_sets(
+        errors, "Plugin", "field", source_fields, declared_fields)
+
+
+def check_source_shapes() -> tuple[list[str], dict[str, set[str]]]:
     errors: list[str] = []
     for spec in MODULES:
         try:
@@ -732,16 +996,29 @@ def check_source_shapes() -> list[str]:
             # A parse failure in one module's source/declaration must not
             # silently abort verification of the other modules.
             errors.append("%s: %s" % (spec.name, error))
-    return errors
+    resolution: dict[str, set[str]] = {}
+    try:
+        resolution = _store_native_resolution(errors)
+    except ValueError as error:
+        errors.append("movian/store: %s" % error)
+    try:
+        _check_plugin_global(errors)
+    except ValueError as error:
+        errors.append("Plugin: %s" % error)
+    return errors, resolution
 
 
 def _tsc_command(tsc: str, fixture: Path) -> list[str]:
-    inputs = [spec.declaration for spec in MODULES] + [fixture]
+    inputs = [spec.declaration for spec in MODULES] + [
+        PLUGIN_DECLARATION,
+        fixture,
+    ]
     return [
         tsc,
         "--noEmit",
         "--strict",
         "--target", "ES2015",
+        "--lib", "ES2015",
         "--module", "commonjs",
         "--pretty", "false",
         "--noErrorTruncation",
@@ -802,7 +1079,7 @@ def check_typescript(tsc: str) -> list[str]:
 
 def main() -> int:
     try:
-        errors = check_source_shapes()
+        errors, resolution = check_source_shapes()
     except (OSError, ValueError) as error:
         print("reference-dts: %s: %s" % (type(error).__name__, error),
               file=sys.stderr)
@@ -811,8 +1088,14 @@ def main() -> int:
         for error in errors:
             print("reference-dts: %s" % error, file=sys.stderr)
         return 1
-    print("reference-dts: source shapes OK (%d modules; native names+nargs)"
-          % len(MODULES))
+    rendered_resolution = "; ".join(
+        "%s -> native/fs[%s]" % (name, ",".join(sorted(native_names)))
+        for name, native_names in sorted(resolution.items())
+    )
+    print("reference-dts: source shapes OK "
+          "(%d modules + Plugin; native names+nargs)" % len(MODULES))
+    print("reference-dts: movian/store resolution: %s" %
+          rendered_resolution)
 
     tsc = shutil.which("tsc")
     if tsc is None:
