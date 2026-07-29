@@ -178,10 +178,14 @@ const dynamicStore: store.Store = store.create('reference');
 const dynamicStoreValue: unknown = dynamicStore.runtimeKey;
 dynamicStore.runtimeKey = { nested: true };
 
-const typedStore = store.createFromPath<{
+interface ReferenceStoreState {
     token: string;
     retries: number;
-}>('/tmp/reference-store');
+}
+
+const typedStore = store.createFromPath<ReferenceStoreState>(
+    '/tmp/reference-store'
+);
 typedStore.token = 'fixture';
 typedStore.retries = 2;
 

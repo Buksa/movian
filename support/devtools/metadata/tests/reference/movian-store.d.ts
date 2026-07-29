@@ -13,16 +13,16 @@ declare module 'movian/store' {
      * value type from a single consumer.
      */
     export type Store<
-        T extends Record<string, unknown> = Record<string, unknown>
+        T extends object = Record<string, unknown>
     > = T;
 
     /** Source: exports.create builds Core.storagePath/store/<name>. */
     export function create<
-        T extends Record<string, unknown> = Record<string, unknown>
+        T extends object = Record<string, unknown>
     >(name: string): Store<T>;
 
     /** Source: exports.createFromPath reads and writes the supplied filename. */
     export function createFromPath<
-        T extends Record<string, unknown> = Record<string, unknown>
+        T extends object = Record<string, unknown>
     >(path: string): Store<T>;
 }
