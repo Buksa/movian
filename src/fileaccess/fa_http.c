@@ -1500,8 +1500,15 @@ authenticate(http_file_t *hf, char *errbuf, size_t errlen, int *non_interactive,
   }
 
   if(hf->hf_ext_auth) {
-    /* This request is handled by an external inspector, so
-       don't popup any requests or anything, just retry */
+    /* Inspector-claimed request: the inspector already got one retry on which
+       hri_auth_has_failed (= hf_auth_failed) was exposed, giving it a chance to
+       req.fail(). If we are still here the inspector did not break the loop, so
+       fail bounded instead of retrying forever (#149). */
+    if(hf->hf_auth_failed > 0) {
+      snprintf(errbuf, errlen, "HTTP 401: authentication failed for %s",
+               hf->hf_url);
+      return -1;
+    }
     hf->hf_auth_failed++;
     return 0;
   }
@@ -3191,6 +3198,11 @@ http_req_do(http_req_aux_t *hra)
     goto retry;
 
   case 401:
+    if(hra->flags & FA_CONTENT_ON_ERROR && hf->hf_rsize && code > 0) {
+      HF_TRACE(hf, "%s returned 401 with noFail set; returning content",
+               hf->hf_url);
+      break;
+    }
     {
       int statcode;
       if(authenticate(hf, hra->errbuf, hra->errlen,

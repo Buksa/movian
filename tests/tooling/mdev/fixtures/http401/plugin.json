@@ -1,0 +1,10 @@
+{
+  "type": "ecmascript",
+  "id": "test_http401_inspector",
+  "title": "HTTP 401 inspector test fixture",
+  "version": "1.0.0",
+  "category": "other",
+  "synopsis": "End-to-end fixture for HTTP 401 inspector behavior.",
+  "file": "http401.js",
+  "apiversion": 2
+}
