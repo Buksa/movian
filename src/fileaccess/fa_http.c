@@ -1509,6 +1509,12 @@ authenticate(http_file_t *hf, char *errbuf, size_t errlen, int *non_interactive,
                hf->hf_url);
       return -1;
     }
+    /* Drain the rejected 401 body so the retry sees a clean status line on a
+       reusable connection — the realm path below does the same. Without this
+       we only avoid a stale-body misread because http_connect() happens to
+       reconnect, which is implicit and wastes a TCP round-trip (#149). */
+    if(expect_content && http_drain_content(hf))
+      hf->hf_connection_mode = CONNECTION_MODE_CLOSE;
     hf->hf_auth_failed++;
     return 0;
   }
@@ -3198,7 +3204,7 @@ http_req_do(http_req_aux_t *hra)
     goto retry;
 
   case 401:
-    if(hra->flags & FA_CONTENT_ON_ERROR && hf->hf_rsize && code > 0) {
+    if(hra->flags & FA_CONTENT_ON_ERROR && hf->hf_rsize >= 0 && code > 0) {
       HF_TRACE(hf, "%s returned 401 with noFail set; returning content",
                hf->hf_url);
       break;
