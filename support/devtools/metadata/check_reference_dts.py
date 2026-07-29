@@ -7,7 +7,9 @@ Python standard library only.
 """
 
 from __future__ import annotations
+import argparse
 
+import argparse
 import re
 import shutil
 import subprocess
@@ -18,6 +20,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 METADATA_DIR = Path(__file__).resolve().parent
+TOPLEVEL_MODULE_DIR = REPO_ROOT / "res" / "ecmascript" / "modules"
 REFERENCE_DIR = METADATA_DIR / "tests" / "reference"
 FIXTURE_DIR = METADATA_DIR / "tests" / "fixtures"
 
@@ -134,6 +137,90 @@ MODULES = (
         "movian/store",
         REFERENCE_DIR / "movian-store.d.ts",
         JS_MODULE_DIR / "store.js",
+        (),
+    ),
+    ModuleSpec(
+        "movian/html",
+        REFERENCE_DIR / "movian-html.d.ts",
+        JS_MODULE_DIR / "html.js",
+        (),
+    ),
+    ModuleSpec(
+        "movian/itemhook",
+        REFERENCE_DIR / "movian-itemhook.d.ts",
+        JS_MODULE_DIR / "itemhook.js",
+        (),
+    ),
+    ModuleSpec(
+        "movian/popup",
+        REFERENCE_DIR / "movian-popup.d.ts",
+        JS_MODULE_DIR / "popup.js",
+        (),
+    ),
+    ModuleSpec(
+        "movian/sqlite",
+        REFERENCE_DIR / "movian-sqlite.d.ts",
+        JS_MODULE_DIR / "sqlite.js",
+        (),
+    ),
+    ModuleSpec(
+        "movian/subtitles",
+        REFERENCE_DIR / "movian-subtitles.d.ts",
+        JS_MODULE_DIR / "subtitles.js",
+        (),
+    ),
+    ModuleSpec(
+        "movian/videoscrobbler",
+        REFERENCE_DIR / "movian-videoscrobbler.d.ts",
+        JS_MODULE_DIR / "videoscrobbler.js",
+        (),
+    ),
+    ModuleSpec(
+        "movian/xml",
+        REFERENCE_DIR / "movian-xml.d.ts",
+        JS_MODULE_DIR / "xml.js",
+        (),
+    ),
+    ModuleSpec(
+        "movian/xmlrpc",
+        REFERENCE_DIR / "movian-xmlrpc.d.ts",
+        JS_MODULE_DIR / "xmlrpc.js",
+        (),
+    ),
+    ModuleSpec(
+        "fs",
+        REFERENCE_DIR / "fs.d.ts",
+        TOPLEVEL_MODULE_DIR / "fs.js",
+        (),
+    ),
+    ModuleSpec(
+        "http",
+        REFERENCE_DIR / "http.d.ts",
+        TOPLEVEL_MODULE_DIR / "http.js",
+        (),
+    ),
+    ModuleSpec(
+        "https",
+        REFERENCE_DIR / "https.d.ts",
+        TOPLEVEL_MODULE_DIR / "https.js",
+        (),
+    ),
+    ModuleSpec(
+        "querystring",
+        REFERENCE_DIR / "querystring.d.ts",
+        TOPLEVEL_MODULE_DIR / "querystring.js",
+        (),
+    ),
+    ModuleSpec(
+        "url",
+        REFERENCE_DIR / "url.d.ts",
+        TOPLEVEL_MODULE_DIR / "url.js",
+        (),
+    ),
+    ModuleSpec(
+        "websocket",
+        REFERENCE_DIR / "websocket.d.ts",
+        TOPLEVEL_MODULE_DIR / "websocket.js",
         (),
     ),
 )
@@ -1077,7 +1164,26 @@ def check_typescript(tsc: str) -> list[str]:
     return errors
 
 
+
+def _run_commonjs_checker() -> int:
+    """Run the separate CommonJS coverage checker."""
+    import subprocess
+    checker_path = Path(__file__).parent / "check_commonjs_coverage.py"
+    result = subprocess.run([sys.executable, str(checker_path)], capture_output=True)
+    if result.stdout:
+        print(result.stdout.decode(), end="")
+    if result.stderr:
+        print(result.stderr.decode(), end="", file=sys.stderr)
+    return result.returncode
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Check reference .d.ts calibration fixtures")
+    parser.add_argument("--commonjs", action="store_true", help="Check CommonJS module coverage")
+    args = parser.parse_args()
+
+    if args.commonjs:
+        return _run_commonjs_checker()
+
     try:
         errors, resolution = check_source_shapes()
     except (OSError, ValueError) as error:
