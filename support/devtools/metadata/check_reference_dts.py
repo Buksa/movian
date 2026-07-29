@@ -160,9 +160,6 @@ PROTOTYPE_HEAD_RE = re.compile(
 OBJECT_METHOD_HEAD_RE = re.compile(
     r"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)"
     r"\s*=\s*function\s*\(", re.MULTILINE)
-EXPORT_FUNCTION_RE = re.compile(
-    r"^\s*exports\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*function\s*\(",
-    re.MULTILINE)
 DECL_FUNCTION_RE = re.compile(
     r"^\s*export\s+function\s+([A-Za-z_$][A-Za-z0-9_$]*)"
     r"(?:\s*<[^;{]*?>)?\s*\(", re.MULTILINE)
@@ -537,7 +534,7 @@ def _javascript_object_methods(text: str, object_name: str) \
 
 def _exported_function_body(text: str, export_name: str) -> str:
     match = next(
-        (candidate for candidate in EXPORT_FUNCTION_RE.finditer(text)
+        (candidate for candidate in EXPORT_FUNCTION_HEAD_RE.finditer(text)
          if candidate.group(1) == export_name),
         None,
     )
@@ -645,13 +642,9 @@ def _native_functions(path: Path, table_name: str) -> dict[str, int]:
     return entries
 
 
-def _native_call_names(javascript: str, native_module: str) -> set[str]:
-    """Names called as `require('native/MODULE').NAME(...)` (directly, or
-    via a `var alias = require('native/MODULE')` alias), scoped to one
-    specific native/MODULE -- a JS file commonly requires several
-    different native/* modules (http.js also uses native/string, page.js
-    also uses native/metadata and native/hook), and a call through one of
-    those must never be attributed to a different module's table."""
+def _native_call_sites(javascript: str,
+                       native_module: str) -> tuple[str, list[tuple[str, int]]]:
+    """Masked source plus (native name, opening-paren index) call sites."""
     module = re.escape(native_module)
     alias_re = re.compile(
         r"(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
@@ -662,36 +655,28 @@ def _native_call_names(javascript: str, native_module: str) -> set[str]:
         r"\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(" % module)
     masked = _mask_js(javascript, mask_strings=False)
     aliases = {match.group(1) for match in alias_re.finditer(masked)}
-    names: set[str] = set()
+    sites: list[tuple[str, int]] = []
     for match in call_re.finditer(masked):
         receiver = match.group(1)
         if receiver is None or receiver in aliases:
-            names.add(match.group(2))
-    return names
+            sites.append((match.group(2), match.end() - 1))
+    return masked, sites
+
+
+def _native_call_names(javascript: str, native_module: str) -> set[str]:
+    """Names called through require('native/MODULE') or a direct alias."""
+    _, sites = _native_call_sites(javascript, native_module)
+    return {name for name, _ in sites}
 
 
 def _native_call_arities(javascript: str,
                          native_module: str) -> dict[str, list[int]]:
     """Call argument counts for one native module, including alias calls."""
-    module = re.escape(native_module)
-    alias_re = re.compile(
-        r"(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
-        r"require\(\s*['\"]native/%s['\"]\s*\)" % module)
-    call_re = re.compile(
-        r"(?:require\(\s*['\"]native/%s['\"]\s*\)|"
-        r"\b([A-Za-z_$][A-Za-z0-9_$]*)\b)"
-        r"\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(" % module)
-    masked = _mask_js(javascript, mask_strings=False)
-    aliases = {match.group(1) for match in alias_re.finditer(masked)}
+    masked, sites = _native_call_sites(javascript, native_module)
     calls: dict[str, list[int]] = {}
-    for match in call_re.finditer(masked):
-        receiver = match.group(1)
-        if receiver is not None and receiver not in aliases:
-            continue
-        arguments, _ = _balanced_content(
-            masked, match.end() - 1, "(", ")")
-        calls.setdefault(match.group(2), []).append(
-            len(_split_parameters(arguments)))
+    for name, open_index in sites:
+        arguments, _ = _balanced_content(masked, open_index, "(", ")")
+        calls.setdefault(name, []).append(len(_split_parameters(arguments)))
     return calls
 
 
@@ -732,18 +717,24 @@ def _check_native_table(errors: list[str], spec: ModuleSpec,
         return
 
     if spec.native_kind == "native-calls-exact":
+        # Exact mode is only for tables wholly consumed by this one wrapper;
+        # shared native tables must use the one-direction "native-calls" mode.
         calls = _native_call_arities(javascript, spec.native_module)
-        _compare_name_sets(
-            errors,
-            spec.name,
-            "native %s member" % spec.native_table,
-            set(native),
-            set(calls),
-        )
+        for name in sorted(set(native) - set(calls)):
+            errors.append(
+                "%s: native %s member %s not exercised by source" %
+                (spec.name, spec.native_table, name))
+        for name in sorted(set(calls) - set(native)):
+            errors.append(
+                "%s: source calls missing native %s.%s" %
+                (spec.name, spec.native_table, name))
         for name, nargs in sorted(native.items()):
             arities = calls.get(name)
             if not arities or nargs == VARARGS_NARGS:
                 continue
+            # duk_function_list_entry.nargs is the registered maximum; wrapper
+            # calls may omit trailing optional arguments, so compare the
+            # maximum source call arity.
             source_nargs = max(arities)
             if source_nargs != nargs:
                 errors.append(
@@ -996,7 +987,7 @@ def _check_plugin_global(errors: list[str]) -> None:
         errors, "Plugin", "field", source_fields, declared_fields)
 
 
-def check_source_shapes() -> list[str]:
+def check_source_shapes() -> tuple[list[str], dict[str, set[str]]]:
     errors: list[str] = []
     for spec in MODULES:
         try:
@@ -1005,15 +996,16 @@ def check_source_shapes() -> list[str]:
             # A parse failure in one module's source/declaration must not
             # silently abort verification of the other modules.
             errors.append("%s: %s" % (spec.name, error))
+    resolution: dict[str, set[str]] = {}
     try:
-        _store_native_resolution(errors)
+        resolution = _store_native_resolution(errors)
     except ValueError as error:
         errors.append("movian/store: %s" % error)
     try:
         _check_plugin_global(errors)
     except ValueError as error:
         errors.append("Plugin: %s" % error)
-    return errors
+    return errors, resolution
 
 
 def _tsc_command(tsc: str, fixture: Path) -> list[str]:
@@ -1087,7 +1079,7 @@ def check_typescript(tsc: str) -> list[str]:
 
 def main() -> int:
     try:
-        errors = check_source_shapes()
+        errors, resolution = check_source_shapes()
     except (OSError, ValueError) as error:
         print("reference-dts: %s: %s" % (type(error).__name__, error),
               file=sys.stderr)
@@ -1096,7 +1088,6 @@ def main() -> int:
         for error in errors:
             print("reference-dts: %s" % error, file=sys.stderr)
         return 1
-    resolution = _store_native_resolution([])
     rendered_resolution = "; ".join(
         "%s -> native/fs[%s]" % (name, ",".join(sorted(native_names)))
         for name, native_names in sorted(resolution.items())
