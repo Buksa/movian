@@ -1500,8 +1500,21 @@ authenticate(http_file_t *hf, char *errbuf, size_t errlen, int *non_interactive,
   }
 
   if(hf->hf_ext_auth) {
-    /* This request is handled by an external inspector, so
-       don't popup any requests or anything, just retry */
+    /* Inspector-claimed request: the inspector already got one retry on which
+       hri_auth_has_failed (= hf_auth_failed) was exposed, giving it a chance to
+       req.fail(). If we are still here the inspector did not break the loop, so
+       fail bounded instead of retrying forever (#149). */
+    if(hf->hf_auth_failed > 0) {
+      snprintf(errbuf, errlen, "HTTP 401: authentication failed for %s",
+               hf->hf_url);
+      return -1;
+    }
+    /* Drain the rejected 401 body so the retry sees a clean status line on a
+       reusable connection — the realm path below does the same. Without this
+       we only avoid a stale-body misread because http_connect() happens to
+       reconnect, which is implicit and wastes a TCP round-trip (#149). */
+    if(expect_content && http_drain_content(hf))
+      hf->hf_connection_mode = CONNECTION_MODE_CLOSE;
     hf->hf_auth_failed++;
     return 0;
   }
@@ -3191,6 +3204,11 @@ http_req_do(http_req_aux_t *hra)
     goto retry;
 
   case 401:
+    if(hra->flags & FA_CONTENT_ON_ERROR && hf->hf_rsize >= 0 && code > 0) {
+      HF_TRACE(hf, "%s returned 401 with noFail set; returning content",
+               hf->hf_url);
+      break;
+    }
     {
       int statcode;
       if(authenticate(hf, hra->errbuf, hra->errlen,
