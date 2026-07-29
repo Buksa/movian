@@ -5,6 +5,20 @@ import settings = require('movian/settings');
 import service = require('movian/service');
 import store = require('movian/store');
 
+import html = require('movian/html');
+import itemhook = require('movian/itemhook');
+import popup = require('movian/popup');
+import sqlite = require('movian/sqlite');
+import subtitles = require('movian/subtitles');
+import videoscrobbler = require('movian/videoscrobbler');
+import xml = require('movian/xml');
+import xmlrpc = require('movian/xmlrpc');
+import fs = require('fs');
+import https = require('https');
+import querystring = require('querystring');
+import url = require('url');
+import websocket = require('websocket');
+
 const route = new page.Route('reference:(.*)', (routePage, capture) => {
     const routeCapture: string = capture;
     const appended: page.Item = routePage.appendItem(
@@ -189,6 +203,86 @@ const typedStore = store.createFromPath<ReferenceStoreState>(
 typedStore.token = 'fixture';
 typedStore.retries = 2;
 
+// movian/html - callable export
+const htmlDoc = html.parse('<div>test</div>');
+const htmlNode = htmlDoc.root.getElementById('test');
+const htmlNodes = htmlDoc.root.getElementsByTagName('div');
+
+// movian/itemhook - callable with options object
+const itemHook = itemhook.create({
+  itemtype: 'video',
+  title: 'Test',
+  icon: 'skin://icons/test.png',
+  handler: (item, nav) => {
+    nav.openURL('page:home');
+  }
+});
+itemHook.destroy();
+
+// movian/popup - callable export
+popup.notify('Test notification');
+
+// movian/sqlite - constructor with prototype members
+const db = new sqlite.DB('test.db');
+db.query('SELECT * FROM test');
+const row = db.step();
+db.upgradeSchema('/path/to/schema');
+const lastId = db.lastRowId;
+const lastError = db.lastErrorString;
+const lastCode = db.lastErrorCode;
+db.close();
+
+// movian/subtitles - callback
+subtitles.addProvider((req) => {
+  req.addSubtitle('http://example.test/sub.vtt', 'Test', 'en', 'vtt', 'test', 100);
+});
+const langs = subtitles.getLanguages();
+
+// movian/videoscrobbler - constructor with callbacks
+const scrobbler = new videoscrobbler.VideoScrobbler();
+scrobbler.onstart = (data, prop, origin) => {};
+scrobbler.onpause = (data, prop, origin) => {};
+scrobbler.onresume = (data, prop, origin) => {};
+scrobbler.onstop = (data, prop, origin) => {};
+scrobbler.destroy();
+
+// movian/xml - callable export
+const xmlData = xml.parse('<root><item>test</item></root>');
+const xmlProxy = xml.htsmsg(xmlData);
+
+// movian/xmlrpc - callable with variadic
+xmlrpc.call();
+
+// fs - callable exports
+fs.writeFileSync('/tmp/test.txt', 'test content');
+const fileData = fs.readFileSync('/tmp/test.txt');
+const dirEntries = fs.readdirSync('/tmp');
+fs.unlinkSync('/tmp/test.txt');
+fs.mkdirSync('/tmp/testdir');
+fs.rmdirSync('/tmp/testdir');
+
+// http - callable with options object
+const httpReq = http.request('http://example.test');
+
+// https - re-export
+const httpsReq = https.request('https://example.test');
+// querystring - callable export
+const parsed = querystring.parse('key=value&test=123');
+
+// url - callable with options object
+const urlObj = { protocol: 'http:', pathname: '/test', query: { key: 'value' } };
+const formatted = url.format(urlObj);
+const parsedUrl = url.parse('http://example.test/test?key=value');
+const resolved = url.resolve('http://example.test/', 'test');
+
+// websocket - constructor with callbacks
+const ws = new websocket.w3cwebsocket('ws://example.test');
+ws.onopen = () => {};
+ws.oninput = (data) => {};
+ws.onclose = () => {};
+ws.send('test message');
+ws.close();
+
 const pluginId: string = Plugin.id;
 const pluginUrl: string = Plugin.url;
 const pluginManifest: string = Plugin.manifest;
@@ -205,3 +299,17 @@ void pluginManifest;
 void pluginApiVersion;
 void pluginPath;
 void boolValueProperty;
+void htmlNode;
+void htmlNodes;
+void row;
+void lastId;
+void lastError;
+void lastCode;
+void langs;
+void xmlProxy;
+void fileData;
+void dirEntries;
+void formatted;
+void parsedUrl;
+void resolved;
+void parsed;

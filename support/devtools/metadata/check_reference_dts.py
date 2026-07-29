@@ -7,9 +7,9 @@ Python standard library only.
 """
 
 from __future__ import annotations
-import argparse
 
 import argparse
+import json
 import re
 import shutil
 import subprocess
@@ -21,6 +21,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 METADATA_DIR = Path(__file__).resolve().parent
 TOPLEVEL_MODULE_DIR = REPO_ROOT / "res" / "ecmascript" / "modules"
+METADATA_FILE = REPO_ROOT / "generated" / "movian-metadata.json"
 REFERENCE_DIR = METADATA_DIR / "tests" / "reference"
 FIXTURE_DIR = METADATA_DIR / "tests" / "fixtures"
 
@@ -1165,16 +1166,83 @@ def check_typescript(tsc: str) -> list[str]:
 
 
 
-def _run_commonjs_checker() -> int:
-    """Run the separate CommonJS coverage checker."""
-    import subprocess
-    checker_path = Path(__file__).parent / "check_commonjs_coverage.py"
-    result = subprocess.run([sys.executable, str(checker_path)], capture_output=True)
-    if result.stdout:
-        print(result.stdout.decode(), end="")
-    if result.stderr:
-        print(result.stderr.decode(), end="", file=sys.stderr)
-    return result.returncode
+def _load_metadata() -> dict:
+    """Load the generated movian-metadata.json."""
+    text = _read(METADATA_FILE)
+    return json.loads(text)
+
+
+
+
+def _check_commonjs_coverage() -> list[str]:
+    """Check CommonJS module coverage using live metadata."""
+    errors: list[str] = []
+
+    metadata = _load_metadata()
+    all_modules = metadata.get("js", {}).get("modules", [])
+
+    # Filter for CommonJS modules
+    commonjs_modules = {m["name"] for m in all_modules if m.get("kind") == "commonjs"}
+
+    # Subtract the six previously accepted modules
+    accepted = {
+        "movian/page",
+        "movian/prop",
+        "movian/http",
+        "movian/settings",
+        "movian/service",
+        "movian/store",
+    }
+
+    target_modules = commonjs_modules - accepted
+
+    # Partition native entries
+    native_modules = {m for m in commonjs_modules if m.startswith("native/")}
+    deferred_count = len(native_modules)
+
+    # Check for missing fixtures
+    missing = []
+    phantom = []
+
+    for module_name in target_modules:
+        if module_name.startswith("movian/"):
+            basename = module_name[len("movian/"):].replace("/", "-")
+            decl_path = REFERENCE_DIR / ("movian-" + basename + ".d.ts")
+        else:
+            decl_path = REFERENCE_DIR / (module_name + ".d.ts")
+
+        if not decl_path.is_file():
+            missing.append(module_name)
+
+    # Check for phantom fixtures
+    existing_decls = list(REFERENCE_DIR.glob("*.d.ts"))
+    for decl_path in existing_decls:
+        if decl_path.name == "movian-plugin.d.ts":
+            continue
+
+        # Convert filename back to module name
+        if decl_path.name.startswith("movian-"):
+            module_name = "movian/" + decl_path.name[len("movian-"):len(decl_path.name)-5].replace("-", "/")
+        else:
+            module_name = decl_path.name[:-5]  # Remove .d.ts
+
+        # Skip accepted modules
+        if module_name in accepted:
+            continue
+
+        if module_name not in target_modules:
+            phantom.append(module_name)
+
+    if missing:
+        errors.append("missing %d: %s" % (len(missing), ", ".join(sorted(missing))))
+
+    if phantom:
+        errors.append("phantom %d: %s" % (len(phantom), ", ".join(sorted(phantom))))
+
+    if not missing and not phantom:
+        print("reference-dts: CommonJS coverage OK (missing 0, phantom 0, deferred-native %d)" % deferred_count)
+
+    return errors
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check reference .d.ts calibration fixtures")
@@ -1182,7 +1250,10 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.commonjs:
-        return _run_commonjs_checker()
+        errors = _check_commonjs_coverage()
+        for error in errors:
+            print("reference-dts: %s" % error, file=sys.stderr)
+        return 1 if errors else 0
 
     try:
         errors, resolution = check_source_shapes()

@@ -9,5 +9,5 @@ declare module 'movian/popup' {
      * Source: exports.notify is an alias to native/popup.notify.
      * The native contract is outside this fixture.
      */
-    export function notify(message: string): void;
+    export function notify(...args: unknown[]): void;
 }

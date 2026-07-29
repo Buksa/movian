@@ -15,7 +15,7 @@ declare module 'url' {
      * Source: exports.parse is an alias to native/string.parseURL.
      * The native contract is outside this fixture.
      */
-    export function parse(urlString: string): UrlObject;
+    export function parse(urlString: string, parseQueryString?: boolean): UrlObject;
 
     /**
      * Source: exports.resolve is an alias to native/string.resolveURL.

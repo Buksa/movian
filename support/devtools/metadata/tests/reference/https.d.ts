@@ -7,18 +7,50 @@
 declare module 'https' {
     /**
      * Source: exports.request calls http.request with https=true flag.
-     * This is a re-export of the http module with HTTPS semantics.
+     * The https parameter is added internally.
      */
     export function request(
-        opts: string | Record<string, unknown>,
-        callback?: (res: Record<string, unknown>) => void
-    ): Record<string, unknown>;
+        opts: string | {
+            protocol: string;
+            slashes?: boolean;
+            host?: string;
+            hostname?: string;
+            port?: string;
+            pathname: string;
+            search?: string;
+            query?: Record<string, string>;
+            hash?: string;
+            auth?: string;
+        },
+        callback?: unknown
+    ): {
+        readonly url: string;
+        headers: unknown[];
+        end(): void;
+        on(event: 'response' | 'error', callback: (arg: unknown) => void): void;
+    };
 
     /**
      * Source: exports.get calls http.get with https=true flag.
      */
     export function get(
-        opts: string | Record<string, unknown>,
-        callback?: (res: Record<string, unknown>) => void
-    ): Record<string, unknown>;
+        opts: string | {
+            protocol: string;
+            slashes?: boolean;
+            host?: string;
+            hostname?: string;
+            port?: string;
+            pathname: string;
+            search?: string;
+            query?: Record<string, string>;
+            hash?: string;
+            auth?: string;
+        },
+        callback?: unknown
+    ): {
+        readonly url: string;
+        headers: unknown[];
+        end(): void;
+        on(event: 'response' | 'error', callback: (arg: unknown) => void): void;
+    };
 }

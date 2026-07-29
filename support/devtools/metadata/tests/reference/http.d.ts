@@ -8,11 +8,12 @@ declare module 'http' {
     /**
      * Source: exports.request creates a Request instance.
      * Accepts either a URL string or an options object.
+     * The callback and https parameters are accepted but not used.
      */
     export function request(
         opts: string | RequestOptions,
-        callback?: (res: HttpResponse) => void,
-        https?: boolean
+        callback?: unknown,
+        https?: unknown
     ): HttpRequest;
 
     /**
@@ -20,8 +21,8 @@ declare module 'http' {
      */
     export function get(
         opts: string | RequestOptions,
-        callback?: (res: HttpResponse) => void,
-        https?: boolean
+        callback?: unknown,
+        https?: unknown
     ): HttpRequest;
 
     /**
@@ -29,9 +30,24 @@ declare module 'http' {
      */
     interface HttpRequest {
         /**
+         * Source: url property stores the request URL.
+         */
+        readonly url: string;
+
+        /**
+         * Source: headers array for request headers.
+         */
+        headers: unknown[];
+
+        /**
          * Source: end method triggers the native HTTP request.
          */
         end(): void;
+
+        /**
+         * Source: on method registers event handlers.
+         */
+        on(event: 'response' | 'error', callback: (arg: unknown) => void): void;
     }
 
     /**
@@ -39,9 +55,29 @@ declare module 'http' {
      */
     interface HttpResponse {
         /**
+         * Source: statusCode from native response.
+         */
+        readonly statusCode: number;
+
+        /**
+         * Source: encoding property (default 'utf8').
+         */
+        encoding: string;
+
+        /**
+         * Source: bytes buffer from native response.
+         */
+        readonly bytes: unknown;
+
+        /**
          * Source: setEncoding method.
          */
         setEncoding(enc: string): void;
+
+        /**
+         * Source: on method registers data/end handlers.
+         */
+        on(event: 'data' | 'end', callback: (arg: unknown) => void): void;
     }
 
     /**

@@ -5,6 +5,20 @@ import settings = require('movian/settings');
 import service = require('movian/service');
 import store = require('movian/store');
 
+import html = require('movian/html');
+import itemhook = require('movian/itemhook');
+import popup = require('movian/popup');
+import sqlite = require('movian/sqlite');
+import subtitles = require('movian/subtitles');
+import videoscrobbler = require('movian/videoscrobbler');
+import xml = require('movian/xml');
+import xmlrpc = require('movian/xmlrpc');
+import fs = require('fs');
+import https = require('https');
+import querystring = require('querystring');
+import url = require('url');
+import websocket = require('websocket');
+
 new page.Route(42, () => {}); // EXPECT_TS2345
 new page.Route(/foo/, () => {}); // EXPECT_TS2345
 new page.Searcher('Search', 'icon', (_page, query) => {
@@ -84,6 +98,40 @@ typedStore.count = 'one'; // EXPECT_TS2322
 
 const missingPluginField = Plugin.missing; // EXPECT_TS2339
 const pluginVersionText: string = Plugin.apiversion; // EXPECT_TS2322
+
+// movian/html - wrong parameter type
+const htmlNumber = html.parse(42); // EXPECT_TS2345
+
+// movian/itemhook - missing required field
+const badItemHook = itemhook.create({ // EXPECT_TS2345
+  itemtype: 'video',
+  title: 'Test'
+});
+
+// movian/sqlite - wrong constructor parameter
+const badDb = new sqlite.DB(42); // EXPECT_TS2345
+
+// movian/subtitles - wrong callback parameter
+subtitles.addProvider((req) => {
+  req.addSubtitle(42, 'Test', 'en', 'vtt', 'test', 100); // EXPECT_TS2345
+});
+
+// movian/xml - wrong parameter type
+xml.parse(42); // EXPECT_TS2345
+
+// movian/xmlrpc - wrong parameter types
+xmlrpc.call(42); // EXPECT_TS2554
+
+// https - wrong parameter type
+https.request(42); // EXPECT_TS2345
+
+// querystring - wrong parameter type
+querystring.parse(42); // EXPECT_TS2345
+
+// url - wrong parameter types
+url.format(42); // EXPECT_TS2345
+url.parse(42); // EXPECT_TS2345
+url.resolve(42, 'test'); // EXPECT_TS2345
 
 void returnedString;
 void bodyString;

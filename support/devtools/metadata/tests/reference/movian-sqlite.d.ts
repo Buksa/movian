@@ -33,5 +33,20 @@ declare module 'movian/sqlite' {
          * Source: upgradeSchema method calls native/sqlite.upgradeSchema.
          */
         upgradeSchema(path: string): unknown;
+
+        /**
+         * Source: lastRowId getter calls native/sqlite.lastRowId.
+         */
+        readonly lastRowId: number;
+
+        /**
+         * Source: lastErrorString getter calls native/sqlite.lastErrorString.
+         */
+        readonly lastErrorString: string;
+
+        /**
+         * Source: lastErrorCode getter calls native/sqlite.lastErrorCode.
+         */
+        readonly lastErrorCode: number;
     }
 }
