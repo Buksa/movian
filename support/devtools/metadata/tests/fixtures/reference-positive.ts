@@ -206,6 +206,16 @@ typedStore.retries = 2;
 
 // movian/html - callable export
 const htmlDoc = html.parse('<div>test</div>');
+const htmlRootName: string = htmlDoc.root.nodeName;
+const htmlRootType: number = htmlDoc.root.nodeType;
+const htmlChildren: html.Node[] = htmlDoc.root.children;
+const htmlText: string = htmlDoc.root.textContent;
+const htmlAttribute = htmlDoc.root.attributes.getNamedItem('class');
+const htmlById = htmlDoc.root.getElementById('test');
+const htmlByClass = htmlDoc.root.getElementByClassName('reference');
+const htmlByClasses = htmlDoc.root.getElementsByClassName('reference');
+const htmlByTag = htmlDoc.root.getElementByTagName('div');
+const htmlByTags = htmlDoc.root.getElementsByTagName('div');
 
 // movian/itemhook - callable with options object
 const itemHook = itemhook.create({
@@ -221,8 +231,15 @@ itemHook.destroy();
 // movian/popup - callable export with exact tuple
 popup.notify('Test notification', 5000, 'skin://icons/test.png');
 
-// movian/sqlite - callable export
-const db = sqlite.DB('test.db');
+// movian/sqlite - constructor, variadic method, methods, and accessors
+const db = new sqlite.DB('test.db');
+db.query('SELECT * FROM test WHERE id = ?', 1);
+const dbRow: unknown = db.step();
+const upgraded: unknown = db.upgradeSchema('/tmp/reference-schema');
+const lastRowId: number = db.lastRowId;
+const lastErrorString: string = db.lastErrorString;
+const lastErrorCode: number = db.lastErrorCode;
+db.close();
 
 // movian/subtitles - callback
 subtitles.addProvider((req) => {
@@ -242,8 +259,13 @@ scrobbler.destroy();
 const xmlData = xml.parse('<root><item>test</item></root>');
 const xmlProxy = xml.htsmsg(xmlData);
 
-// movian/xmlrpc - callable export
-xmlrpc.call();
+// movian/xmlrpc - two required arguments plus a variadic tail
+xmlrpc.call(
+  'https://example.test/xmlrpc',
+  'reference.method',
+  'argument',
+  42
+);
 
 // fs - callable exports
 fs.writeFileSync('/tmp/test.txt', 'test content');
@@ -253,11 +275,18 @@ fs.unlinkSync('/tmp/test.txt');
 fs.mkdirSync('/tmp/testdir');
 fs.rmdirSync('/tmp/testdir');
 
-// http - callable with options object
-const httpReq = http.request('http://example.test');
+// top-level http - callable with string and options-object signatures
+const httpReq = toplevelHttp.request('http://example.test');
+const httpGet = toplevelHttp.get({
+  protocol: 'http:',
+  hostname: 'example.test',
+  port: '80',
+  pathname: '/reference'
+});
 
-// https - re-export
+// https - two-argument wrappers reusing HTTP types
 const httpsReq = https.request('https://example.test');
+const httpsGet = https.get('https://example.test/reference');
 
 // querystring - callable export
 const parsed = querystring.parse('key=value&test=123');

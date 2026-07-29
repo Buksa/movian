@@ -2,7 +2,7 @@
  * Accepted calibration fixture for https.
  *
  * This is a generator test oracle, not a shipped declaration package.
- * Source: res/ecmascript/modules/https.js, which re-exports from ./http.
+ * Source: res/ecmascript/modules/https.js, which wraps ./http.
  */
 declare module 'https' {
     /**

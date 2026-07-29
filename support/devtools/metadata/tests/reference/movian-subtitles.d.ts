@@ -15,7 +15,7 @@ declare module 'movian/subtitles' {
 
     /**
      * Source: exports.getLanguages is an alias to native/subtitle.getLanguages.
-     * The native contract is outside this fixture.
+     * Native metadata provides the exact zero-argument call shape.
      */
     export function getLanguages(): string[];
 

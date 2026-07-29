@@ -7,7 +7,7 @@
 declare module 'querystring' {
     /**
      * Source: exports.parse is an alias to native/string.queryStringSplit.
-     * The native contract is outside this fixture.
+     * Native metadata provides the exact one-argument call shape.
      */
     export function parse(query: string): Record<string, string>;
 }

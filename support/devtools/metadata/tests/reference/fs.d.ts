@@ -6,7 +6,8 @@
  */
 declare module 'fs' {
     /**
-     * Source: exports.writeFileSync calls native/fs.open/write/close.
+     * Source: exports.writeFileSync calls native/fs.open/write and destroys
+     * the resource through Core.resourceDestroy.
      */
     export function writeFileSync(
         filename: string,
@@ -15,7 +16,8 @@ declare module 'fs' {
     ): void;
 
     /**
-     * Source: exports.readFileSync calls native/fs.open/read/close.
+     * Source: exports.readFileSync calls native/fs.open/read and destroys
+     * the resource through Core.resourceDestroy.
      * Returns a Duktape.Buffer.
      */
     export function readFileSync(

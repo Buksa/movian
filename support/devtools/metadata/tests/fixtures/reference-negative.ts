@@ -112,8 +112,8 @@ const badItemHook = itemhook.create({ // EXPECT_TS2345
 // movian/popup - wrong number of arguments
 popup.notify('test'); // EXPECT_TS2554
 
-// movian/sqlite - wrong parameter type
-const badDb = sqlite.DB(42); // EXPECT_TS2345
+// movian/sqlite - wrong constructor parameter type
+const badDb = new sqlite.DB(42); // EXPECT_TS2345
 
 // movian/subtitles - wrong callback parameter
 subtitles.addProvider((req) => {
@@ -122,6 +122,12 @@ subtitles.addProvider((req) => {
 
 // movian/xml - wrong parameter type
 xml.parse(42); // EXPECT_TS2345
+
+// movian/xmlrpc - wrong required URL and missing method
+xmlrpc.call(42); // EXPECT_TS2555
+
+// top-level http - wrong options type
+toplevelHttp.request(42); // EXPECT_TS2345
 
 // https - wrong parameter type
 https.request(42); // EXPECT_TS2345

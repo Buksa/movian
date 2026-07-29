@@ -38,6 +38,7 @@ VARARGS_NARGS = -1
 class Signature:
     required: int
     total: int
+    variadic: bool = False
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,20 @@ class ModuleSpec:
     # are checked against their same-named declaration class. Each entry is
     # (export name, internal field names to exclude).
     export_instances: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    # A local constructor whose Object.defineProperties(this, {...}) entries
+    # are public members of a differently named declaration interface.
+    object_constructor_members: tuple[tuple[str, str], ...] = ()
+    # Constructor-created fields that are intentionally private when a type's
+    # non-method members are otherwise checked in both directions.
+    private_members: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    # Exported constructors whose public fields are discovered from all
+    # `this` references (and aliases such as `var self = this`), including
+    # references inside nested callbacks.
+    instance_references: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    # Exact exported aliases: (export, required module, required member).
+    exact_aliases: tuple[tuple[str, str, str], ...] = ()
+    # Exact thin wrappers: (export, required module, required member).
+    wrapper_exports: tuple[tuple[str, str, str], ...] = ()
 
 
 JS_MODULE_DIR = REPO_ROOT / "res" / "ecmascript" / "modules" / "movian"
@@ -145,7 +160,8 @@ MODULES = (
         REFERENCE_DIR / "movian-html.d.ts",
         JS_MODULE_DIR / "html.js",
         (),
-        (),
+        object_prototypes=(("Node", "NodeProto"),),
+        object_constructor_members=(("Node", "NodeProto"),),
     ),
     ModuleSpec(
         "movian/itemhook",
@@ -158,25 +174,33 @@ MODULES = (
         REFERENCE_DIR / "movian-popup.d.ts",
         JS_MODULE_DIR / "popup.js",
         (),
+        exact_aliases=(("notify", "native/popup", "notify"),),
     ),
     ModuleSpec(
         "movian/sqlite",
         REFERENCE_DIR / "movian-sqlite.d.ts",
         JS_MODULE_DIR / "sqlite.js",
-        (),
-        (),
+        ("DB",),
+        exact_member_types=("DB",),
+        private_members=(("DB", ("db",)),),
     ),
     ModuleSpec(
         "movian/subtitles",
         REFERENCE_DIR / "movian-subtitles.d.ts",
         JS_MODULE_DIR / "subtitles.js",
         (),
+        exact_aliases=(
+            ("getLanguages", "native/subtitle", "getLanguages"),
+        ),
     ),
     ModuleSpec(
         "movian/videoscrobbler",
         REFERENCE_DIR / "movian-videoscrobbler.d.ts",
         JS_MODULE_DIR / "videoscrobbler.js",
         ("VideoScrobbler",),
+        instance_references=(
+            ("VideoScrobbler", ("paused", "hook")),
+        ),
     ),
     ModuleSpec(
         "movian/xml",
@@ -208,24 +232,36 @@ MODULES = (
         REFERENCE_DIR / "https.d.ts",
         TOPLEVEL_MODULE_DIR / "https.js",
         (),
+        wrapper_exports=(
+            ("request", "./http", "request"),
+            ("get", "./http", "get"),
+        ),
     ),
     ModuleSpec(
         "querystring",
         REFERENCE_DIR / "querystring.d.ts",
         TOPLEVEL_MODULE_DIR / "querystring.js",
         (),
+        exact_aliases=(
+            ("parse", "native/string", "queryStringSplit"),
+        ),
     ),
     ModuleSpec(
         "url",
         REFERENCE_DIR / "url.d.ts",
         TOPLEVEL_MODULE_DIR / "url.js",
         (),
+        exact_aliases=(
+            ("parse", "native/string", "parseURL"),
+            ("resolve", "native/string", "resolveURL"),
+        ),
     ),
     ModuleSpec(
         "websocket",
         REFERENCE_DIR / "websocket.d.ts",
         TOPLEVEL_MODULE_DIR / "websocket.js",
         ("w3cwebsocket",),
+        instance_references=(("w3cwebsocket", ("_sock",)),),
     ),
 )
 
@@ -248,6 +284,11 @@ PROTOTYPE_HEAD_RE = re.compile(
     r"^\s*(?:exports\.)?([A-Za-z_$][A-Za-z0-9_$]*)\.prototype\."
     r"([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*function\s*\(",
     re.MULTILINE)
+PROTOTYPE_ALIAS_RE = re.compile(
+    r"^\s*(?:exports\.)?([A-Za-z_$][A-Za-z0-9_$]*)\.prototype\."
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
+    r"(?:exports\.)?([A-Za-z_$][A-Za-z0-9_$]*)\.prototype\."
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*;", re.MULTILINE)
 OBJECT_METHOD_HEAD_RE = re.compile(
     r"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)"
     r"\s*=\s*function\s*\(", re.MULTILINE)
@@ -267,6 +308,9 @@ ACCESSOR_RE = re.compile(
 FIELD_RE = re.compile(
     r"^\s*(?:readonly\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\??\s*:(?!\s*\()",
     re.MULTILINE)
+CALLBACK_FIELD_RE = re.compile(
+    r"^\s*(?:readonly\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\??\s*:\s*\(",
+    re.MULTILINE)
 NATIVE_ENTRY_RE = re.compile(
     r'\{\s*"([^"]+)"\s*,\s*[A-Za-z_]\w*\s*,\s*'
     r'(-?\d+|DUK_VARARGS)\s*\}')
@@ -274,7 +318,6 @@ DEFINE_PROPERTIES_HEAD_RE = re.compile(
     r"Object\.defineProperties\(\s*this\s*,\s*\{")
 DEFINE_PROPERTY_ENTRY_RE = re.compile(
     r"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*\{", re.MULTILINE)
-DEFINE_PROPERTY_GET_RE = re.compile(r"\bget\s*:\s*function\b")
 JS_CONSTRUCTOR_HEAD_RE = re.compile(
     r"^\s*function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", re.MULTILINE)
 NESTED_FUNCTION_HEAD_RE = re.compile(r"\bfunction\b[^{]*\{")
@@ -289,6 +332,26 @@ PLUGIN_ASSIGN_RE = re.compile(
 PLUGIN_GLOBAL_DECL_RE = re.compile(
     r"^\s*declare\s+var\s+Plugin\s*:\s*MovianPluginGlobal\s*;",
     re.MULTILINE)
+DEFINE_PROPERTIES_PROTOTYPE_HEAD_RE = re.compile(
+    r"Object\.defineProperties\(\s*(?:exports\.)?"
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\.prototype\s*,\s*\{")
+REEXPORT_PROTO_RE = re.compile(
+    r"^\s*exports\.__proto__\s*=\s*require\(['\"]([^'\"]+)['\"]\)", re.MULTILINE)
+ALIAS_RE = re.compile(
+    r"^\s*(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*="
+    r"\s*require\(\s*['\"]([^'\"]+)['\"]\s*\)", re.MULTILINE)
+ALIAS_EXPORT_RE = re.compile(
+    r"^\s*exports\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\."
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*;", re.MULTILINE)
+THIS_ALIAS_RE = re.compile(
+    r"\b(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*this\b")
+ARGUMENT_INDEX_RE = re.compile(r"\barguments\s*\[\s*(\d+)\s*\]")
+ARGUMENT_REST_LOOP_RE = re.compile(
+    r"\bfor\s*\(\s*var\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=\s*(\d+)\s*;"
+    r"\s*[A-Za-z_$][A-Za-z0-9_$]*\s*<\s*arguments\.length\b")
+
+EXPECTED_DEFERRED_NATIVE_COUNT = 18
 
 
 def _read(path: Path) -> str:
@@ -431,12 +494,33 @@ def _is_required(part: str) -> bool:
 
 def _signature(parameters: str) -> Signature:
     parts = _split_parameters(parameters)
-    required = sum(1 for part in parts if _is_required(part))
-    return Signature(required, len(parts))
+    rest = [part for part in parts if part.lstrip().startswith("...")]
+    if len(rest) > 1 or (rest and parts[-1] != rest[0]):
+        raise ValueError("rest parameter must be the final parameter")
+    fixed = parts[:-1] if rest else parts
+    required = sum(1 for part in fixed if _is_required(part))
+    return Signature(required, len(fixed), bool(rest))
 
 
 def _max_arity(signatures: list[Signature]) -> int:
     return max(signature.total for signature in signatures)
+
+
+def _same_call_shape(source: Signature, declared: Signature) -> bool:
+    return source.total == declared.total and \
+        source.variadic == declared.variadic and \
+        (not source.variadic or source.required == declared.required)
+
+
+def _has_call_shape(source: Signature,
+                    declared: list[Signature]) -> bool:
+    return any(_same_call_shape(source, candidate)
+               for candidate in declared)
+
+
+def _render_signature_shape(signature: Signature) -> str:
+    suffix = "+rest" if signature.variadic else ""
+    return "%d%s" % (signature.total, suffix)
 
 
 def _balanced_content(text: str, open_index: int,
@@ -484,6 +568,36 @@ def _signature_at_paren(text: str, search_start: int) -> Signature:
     open_index = text.find("(", search_start)
     parameters, _ = _balanced_content(text, open_index, "(", ")")
     return _signature(parameters)
+
+
+def _javascript_signature_at_paren(text: str, open_index: int) -> Signature:
+    """Read a JS function signature, including `arguments`-driven rest.
+
+    Some legacy CommonJS functions intentionally have no formal parameters
+    but consume a fixed prefix plus a rest tail through `arguments`. The loop
+    start is the fixed prefix length: sqlite query starts at zero, while
+    xmlrpc starts at two and also references arguments[0] and arguments[1].
+    """
+    parameters, close_index = _balanced_content(
+        text, open_index, "(", ")")
+    signature = _signature(parameters)
+    body_open = text.find("{", close_index + 1)
+    if body_open == -1:
+        return signature
+    body, _ = _balanced_content(text, body_open, "{", "}")
+    rest_starts = [
+        int(match.group(1))
+        for match in ARGUMENT_REST_LOOP_RE.finditer(body)
+    ]
+    if not rest_starts:
+        return signature
+    fixed = min(rest_starts)
+    indexed = [
+        int(match.group(1))
+        for match in ARGUMENT_INDEX_RE.finditer(body)
+    ]
+    fixed = max(fixed, max(indexed, default=-1) + 1)
+    return Signature(fixed, fixed, True)
 
 
 def _signatures_after_head_matches(text: str,
@@ -564,7 +678,8 @@ def _mask_method_parameter_lists(block: str) -> str:
     return "".join(chars)
 
 
-def _declared_members(text: str, type_name: str) -> set[str]:
+def _declared_members(text: str, type_name: str,
+                      include_callbacks: bool = False) -> set[str]:
     """Every non-method member name declared on an interface/class:
     accessor pairs (`get X()`/`set X()`) and plain `readonly X: T;` / `X?:
     T;` fields, unified into one set -- the JS side may realize either as
@@ -582,6 +697,12 @@ def _declared_members(text: str, type_name: str) -> set[str]:
         match.group(1) for match in FIELD_RE.finditer(field_block)
         if match.group(1) not in method_names
     }
+    if include_callbacks:
+        fields.update(
+            match.group(1)
+            for match in CALLBACK_FIELD_RE.finditer(field_block)
+            if match.group(1) not in method_names
+        )
     return accessor_names | fields
 
 
@@ -590,11 +711,13 @@ def _javascript_exports(text: str) \
     masked = _mask_js(text)
     names = set(EXPORT_ASSIGN_RE.findall(masked)) - {"__proto__"}
     callables = {
-        match.group(1): _signature_at_paren(masked, match.end() - 1)
+        match.group(1): _javascript_signature_at_paren(
+            masked, match.end() - 1)
         for match in EXPORT_FUNCTION_HEAD_RE.finditer(masked)
     }
     local_functions = {
-        match.group(1): _signature_at_paren(masked, match.end() - 1)
+        match.group(1): _javascript_signature_at_paren(
+            masked, match.end() - 1)
         for match in LOCAL_FUNCTION_HEAD_RE.finditer(masked)
     }
     for exported, local in EXPORT_ALIAS_RE.findall(masked):
@@ -606,21 +729,49 @@ def _javascript_exports(text: str) \
 def _javascript_methods(text: str, type_name: str) \
         -> dict[str, Signature]:
     masked = _mask_js(text)
-    return {
-        match.group(2): _signature_at_paren(masked, match.end() - 1)
+    methods = {
+        match.group(2): _javascript_signature_at_paren(
+            masked, match.end() - 1)
         for match in PROTOTYPE_HEAD_RE.finditer(masked)
         if match.group(1) == type_name
     }
+    unresolved = [
+        (match.group(2), match.group(4))
+        for match in PROTOTYPE_ALIAS_RE.finditer(masked)
+        if match.group(1) == type_name and match.group(3) == type_name
+    ]
+    while unresolved:
+        remaining = []
+        progress = False
+        for alias, target in unresolved:
+            if target in methods:
+                methods[alias] = methods[target]
+                progress = True
+            else:
+                remaining.append((alias, target))
+        if not progress:
+            break
+        unresolved = remaining
+    return methods
 
 
 def _javascript_object_methods(text: str, object_name: str) \
         -> dict[str, Signature]:
     masked = _mask_js(text)
     return {
-        match.group(2): _signature_at_paren(masked, match.end() - 1)
+        match.group(2): _javascript_signature_at_paren(
+            masked, match.end() - 1)
         for match in OBJECT_METHOD_HEAD_RE.finditer(masked)
         if match.group(1) == object_name
     }
+
+
+def _javascript_shared_object_methods(
+        text: str, object_name: str) -> dict[str, Signature]:
+    """Methods on either `object.method` or `Constructor.prototype.method`."""
+    methods = _javascript_object_methods(text, object_name)
+    methods.update(_javascript_methods(text, object_name))
+    return methods
 
 
 def _exported_function_body(text: str, export_name: str) -> str:
@@ -643,6 +794,11 @@ def _constructor_body(text: str, type_name: str) -> str | None:
         if candidate.group(1) == type_name:
             match = candidate
             break
+    if match is None:
+        for candidate in EXPORT_FUNCTION_HEAD_RE.finditer(text):
+            if candidate.group(1) == type_name:
+                match = candidate
+                break
     if match is None:
         return None
     open_index = text.find("{", match.end() - 1)
@@ -694,6 +850,23 @@ def _javascript_defined_properties(body: str) -> set[str]:
     return names
 
 
+def _javascript_prototype_defined_properties(
+        text: str, type_name: str) -> set[str]:
+    """Top-level keys from balanced defineProperties(Type.prototype, {...})."""
+    names: set[str] = set()
+    masked = _mask_js(text)
+    for header in DEFINE_PROPERTIES_PROTOTYPE_HEAD_RE.finditer(masked):
+        if header.group(1) != type_name:
+            continue
+        open_index = header.end() - 1
+        block, _ = _balanced_content(masked, open_index, "{", "}")
+        names.update(
+            entry.group(1)
+            for entry in DEFINE_PROPERTY_ENTRY_RE.finditer(block)
+        )
+    return names
+
+
 def _javascript_members(text: str, type_name: str) -> set[str]:
     """Every non-method member the constructor gives an instance: plain
     top-level `this.x = ...` assignments (excluding anything inside a
@@ -701,17 +874,91 @@ def _javascript_members(text: str, type_name: str) -> set[str]:
     is not an instance field of the type whose constructor hosts it) plus
     every Object.defineProperties() entry, regardless of its shape."""
     body = _constructor_body(text, type_name)
-    if body is None:
-        return set()
-    masked_body = _mask_nested_functions(_mask_js(body))
-    fields = set(THIS_FIELD_RE.findall(masked_body)) - {"__proto__"}
-    return fields | _javascript_defined_properties(body)
+    fields: set[str] = set()
+    if body is not None:
+        masked_body = _mask_nested_functions(_mask_js(body))
+        fields.update(THIS_FIELD_RE.findall(masked_body))
+        fields.update(_javascript_defined_properties(body))
+    fields.update(_javascript_prototype_defined_properties(text, type_name))
+    return fields - {"__proto__"}
 
 
 def _exported_function_members(text: str, export_name: str) -> set[str]:
     body = _exported_function_body(text, export_name)
     masked_body = _mask_nested_functions(_mask_js(body))
     return set(THIS_FIELD_RE.findall(masked_body)) - {"__proto__"}
+
+
+def _exported_instance_references(text: str, export_name: str) -> set[str]:
+    """All members referenced through `this` and direct aliases to `this`.
+
+    Unlike constructor-field extraction, this intentionally retains nested
+    callbacks: public callback slots are often only read there.
+    """
+    body = _exported_function_body(text, export_name)
+    masked = _mask_js(body)
+    receivers = {"this"} | set(THIS_ALIAS_RE.findall(masked))
+    members: set[str] = set()
+    for receiver in receivers:
+        pattern = re.compile(
+            r"(?<![.\w])%s\.([A-Za-z_$][A-Za-z0-9_$]*)\b" %
+            re.escape(receiver))
+        members.update(pattern.findall(masked))
+    return members - {"__proto__"}
+
+
+def _javascript_exact_aliases(
+        text: str) -> dict[str, tuple[str, str]]:
+    masked = _mask_js(text, mask_strings=False)
+    requires = {
+        match.group(1): match.group(2)
+        for match in ALIAS_RE.finditer(masked)
+    }
+    aliases: dict[str, tuple[str, str]] = {}
+    for match in ALIAS_EXPORT_RE.finditer(masked):
+        module = requires.get(match.group(2))
+        if module is not None:
+            aliases[match.group(1)] = (module, match.group(3))
+    return aliases
+
+
+def _native_metadata_functions(module_name: str) -> dict[str, Signature]:
+    metadata = _load_metadata()
+    for module in metadata.get("js", {}).get("modules", []):
+        if module.get("name") != module_name:
+            continue
+        if module.get("kind") != "native":
+            raise ValueError("%s is not native metadata" % module_name)
+        return {
+            function["name"]: Signature(
+                function["nargs"],
+                function["nargs"],
+                bool(function.get("variadic")),
+            )
+            for function in module.get("functions", [])
+        }
+    raise ValueError("native metadata module %s not found" % module_name)
+
+
+def _javascript_wrapper_target(
+        text: str, export_name: str) -> tuple[str, str] | None:
+    try:
+        body = _exported_function_body(text, export_name)
+    except ValueError:
+        inherited = REEXPORT_PROTO_RE.search(
+            _mask_js(text, mask_strings=False))
+        if inherited is None:
+            return None
+        return inherited.group(1), export_name
+    masked = _mask_js(body, mask_strings=False)
+    match = re.search(
+        r"\brequire\(\s*['\"]([^'\"]+)['\"]\s*\)\s*\."
+        r"([A-Za-z_$][A-Za-z0-9_$]*)\s*\(",
+        masked,
+    )
+    if match is None:
+        return None
+    return match.group(1), match.group(2)
 
 
 def _native_functions(path: Path, table_name: str) -> dict[str, int]:
@@ -886,16 +1133,26 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
     # and several accepted fixtures already rely on that looser contract.
     # A strict required-vs-required check was tried while fixing this
     # file and produced false positives against those already-accepted
-    # signatures, so only .total (the argument COUNT) is enforced.
+    # signatures, so fixed .total (the argument COUNT) is enforced. For
+    # source-inferred `arguments` rest signatures, variadic shape and the
+    # required fixed prefix are also exact.
     for name, source_signature in sorted(js_callables.items()):
         signatures = declared_signatures.get(name)
         if signatures is None:
             continue
-        if _max_arity(signatures) != source_signature.total:
+        if not _has_call_shape(source_signature, signatures):
             errors.append(
-                "%s: %s call shape is %d source args vs %d declared" %
-                (spec.name, name, source_signature.total,
-                 _max_arity(signatures)))
+                "%s: %s call shape is %s source args vs %s declared" %
+                (spec.name, name, _render_signature_shape(source_signature),
+                 ", ".join(_render_signature_shape(item)
+                           for item in signatures)))
+
+    for type_name in spec.prototypes:
+        if type_name in js_callables and \
+                declared_kinds.get(type_name) != "class":
+            errors.append(
+                "%s: %s source constructor must declare an exported class" %
+                (spec.name, type_name))
 
     for type_name in spec.prototypes:
         source_methods = _javascript_methods(javascript, type_name)
@@ -910,12 +1167,14 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
             signatures = declared_methods.get(method)
             if signatures is None:
                 continue
-            if _max_arity(signatures) != source_signature.total:
+            if not _has_call_shape(source_signature, signatures):
                 errors.append(
-                    "%s: %s.%s call shape is %d source args vs %d "
+                    "%s: %s.%s call shape is %s source args vs %s "
                     "declared" %
                     (spec.name, type_name, method,
-                     source_signature.total, _max_arity(signatures)))
+                     _render_signature_shape(source_signature),
+                     ", ".join(_render_signature_shape(item)
+                               for item in signatures)))
 
         # Non-method members (accessors and plain fields) are checked in
         # the PHANTOM direction only: every declared member must actually
@@ -929,6 +1188,8 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
         # `paginator_`) that this file already excludes via the nested-
         # function masking in _javascript_members.
         source_members = _javascript_members(javascript, type_name)
+        private_members = dict(spec.private_members).get(type_name, ())
+        source_members -= set(private_members)
         declared_members = _declared_members(declaration, type_name)
         if type_name in spec.exact_member_types:
             _compare_name_sets(
@@ -940,7 +1201,8 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
                               (spec.name, type_name, member))
 
     for type_name, object_name in spec.object_prototypes:
-        source_methods = _javascript_object_methods(javascript, object_name)
+        source_methods = _javascript_shared_object_methods(
+            javascript, object_name)
         try:
             declared_methods = _declared_methods(declaration, type_name)
         except ValueError as error:
@@ -952,12 +1214,27 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
             signatures = declared_methods.get(method)
             if signatures is None:
                 continue
-            if _max_arity(signatures) != source_signature.total:
+            if not _has_call_shape(source_signature, signatures):
                 errors.append(
-                    "%s: %s.%s call shape is %d source args vs %d "
+                    "%s: %s.%s call shape is %s source args vs %s "
                     "declared" %
                     (spec.name, type_name, method,
-                     source_signature.total, _max_arity(signatures)))
+                     _render_signature_shape(source_signature),
+                     ", ".join(_render_signature_shape(item)
+                               for item in signatures)))
+
+    for type_name, constructor_name in spec.object_constructor_members:
+        body = _constructor_body(javascript, constructor_name)
+        if body is None:
+            errors.append(
+                "%s: object constructor %s not found for %s" %
+                (spec.name, constructor_name, type_name))
+            continue
+        source_members = _javascript_defined_properties(body)
+        declared_members = _declared_members(declaration, type_name)
+        _compare_name_sets(
+            errors, spec.name, type_name + ".",
+            source_members, declared_members)
 
     for export_name, excluded in spec.export_instances:
         source_members = _exported_function_members(
@@ -966,6 +1243,62 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
         _compare_name_sets(
             errors, spec.name, export_name + ".",
             source_members, declared_members)
+
+    for export_name, excluded in spec.instance_references:
+        source_members = _exported_instance_references(
+            javascript, export_name) - set(excluded)
+        declared_members = _declared_members(
+            declaration, export_name, include_callbacks=True)
+        _compare_name_sets(
+            errors, spec.name, export_name + ".",
+            source_members, declared_members)
+
+    actual_aliases = _javascript_exact_aliases(javascript)
+    for export_name, required_module, required_member in spec.exact_aliases:
+        expected = (required_module, required_member)
+        actual = actual_aliases.get(export_name)
+        if actual != expected:
+            errors.append(
+                "%s: %s alias target is %s vs required %s.%s" %
+                (spec.name, export_name,
+                 "<missing>" if actual is None else "%s.%s" % actual,
+                 required_module, required_member))
+            continue
+        native_functions = _native_metadata_functions(required_module)
+        native_signature = native_functions.get(required_member)
+        if native_signature is None:
+            errors.append(
+                "%s: %s alias target %s.%s is absent from native metadata" %
+                (spec.name, export_name, required_module, required_member))
+            continue
+        if declared_kinds.get(export_name) != "function":
+            errors.append(
+                "%s: %s native alias must declare a function" %
+                (spec.name, export_name))
+            continue
+        signatures = declared_signatures.get(export_name, [])
+        if not _has_call_shape(native_signature, signatures):
+            errors.append(
+                "%s: %s native alias shape is %s args vs %s declared" %
+                (spec.name, export_name,
+                 _render_signature_shape(native_signature),
+                 ", ".join(_render_signature_shape(item)
+                           for item in signatures) or "<missing>"))
+
+    for export_name, required_module, required_member in \
+            spec.wrapper_exports:
+        actual = _javascript_wrapper_target(javascript, export_name)
+        expected = (required_module, required_member)
+        if actual != expected:
+            errors.append(
+                "%s: %s wrapper target is %s vs required %s.%s" %
+                (spec.name, export_name,
+                 "<missing>" if actual is None else "%s.%s" % actual,
+                 required_module, required_member))
+        if declared_kinds.get(export_name) != "function":
+            errors.append(
+                "%s: %s wrapper must declare a function" %
+                (spec.name, export_name))
 
     _check_native_table(errors, spec, declared_signatures, declared_kinds,
                         javascript)
@@ -1168,28 +1501,24 @@ def check_typescript(tsc: str) -> list[str]:
     return errors
 
 
-
 def _load_metadata() -> dict:
     """Load the generated movian-metadata.json."""
     text = _read(METADATA_FILE)
     return json.loads(text)
 
 
-
-
 def _check_commonjs_coverage() -> list[str]:
     """Check CommonJS module coverage using live metadata."""
     errors: list[str] = []
-
-    metadata = _load_metadata()
-    all_modules = metadata.get("js", {}).get("modules", [])
-
-    # Partition CommonJS and native modules
-    commonjs_modules = {m["name"] for m in all_modules if m.get("kind") == "commonjs"}
-    native_modules = {m["name"] for m in all_modules if m.get("kind") == "native"}
-    deferred_count = len(native_modules)
-
-    # Subtract the six previously accepted modules
+    all_modules = _load_metadata().get("js", {}).get("modules", [])
+    commonjs_modules = {
+        module["name"] for module in all_modules
+        if module.get("kind") == "commonjs"
+    }
+    native_modules = {
+        module["name"] for module in all_modules
+        if module.get("kind") == "native"
+    }
     accepted = {
         "movian/page",
         "movian/prop",
@@ -1198,70 +1527,50 @@ def _check_commonjs_coverage() -> list[str]:
         "movian/service",
         "movian/store",
     }
-
     target_modules = commonjs_modules - accepted
-
-    # Get registered module names from MODULES
-    registered_modules = {spec.name for spec in MODULES}
-
-    # Check for missing fixtures
-    missing = []
-    phantom = []
-
-    for module_name in target_modules:
-        if module_name.startswith("movian/"):
-            basename = module_name[len("movian/"):].replace("/", "-")
-            decl_path = REFERENCE_DIR / ("movian-" + basename + ".d.ts")
-        else:
-            decl_path = REFERENCE_DIR / (module_name + ".d.ts")
-
-        if not decl_path.is_file():
-            missing.append(module_name)
-
-    # Check for phantom fixtures
-    existing_decls = list(REFERENCE_DIR.glob("*.d.ts"))
-    for decl_path in existing_decls:
-        if decl_path.name == "movian-plugin.d.ts":
+    registered_modules = {spec.name for spec in MODULES} - accepted
+    fixture_modules: set[str] = set()
+    for declaration in REFERENCE_DIR.glob("*.d.ts"):
+        if declaration == PLUGIN_DECLARATION:
             continue
+        stem = declaration.name[:-5]
+        name = "movian/" + stem[len("movian-"):].replace("-", "/") \
+            if stem.startswith("movian-") else stem
+        if name not in accepted:
+            fixture_modules.add(name)
 
-        # Convert filename back to module name
-        if decl_path.name.startswith("movian-"):
-            module_name = "movian/" + decl_path.name[len("movian-"):len(decl_path.name)-5].replace("-", "/")
-        else:
-            module_name = decl_path.name[:-5]  # Remove .d.ts
-
-        # Skip accepted modules
-        if module_name in accepted:
-            continue
-
-        if module_name not in target_modules:
-            phantom.append(module_name)
-
-    # Check for modules in fixtures but not in MODULES registry
-    fixture_modules = set()
-    for module_name in target_modules:
-        if module_name.startswith("movian/"):
-            basename = module_name[len("movian/"):].replace("/", "-")
-            decl_path = REFERENCE_DIR / ("movian-" + basename + ".d.ts")
-        else:
-            decl_path = REFERENCE_DIR / (module_name + ".d.ts")
-        if decl_path.is_file():
-            fixture_modules.add(module_name)
-
-    registry_missing = fixture_modules - registered_modules
-    if registry_missing:
-        errors.append("registry missing %d: %s" % (len(registry_missing), ", ".join(sorted(registry_missing))))
+    missing = target_modules - fixture_modules
+    phantom = fixture_modules - target_modules
+    registry_missing = target_modules - registered_modules
+    registry_phantom = registered_modules - target_modules
 
     if missing:
-        errors.append("missing %d: %s" % (len(missing), ", ".join(sorted(missing))))
-
+        errors.append("missing %d: %s" %
+                      (len(missing), ", ".join(sorted(missing))))
     if phantom:
-        errors.append("phantom %d: %s" % (len(phantom), ", ".join(sorted(phantom))))
+        errors.append("phantom %d: %s" %
+                      (len(phantom), ", ".join(sorted(phantom))))
+    if registry_missing:
+        errors.append("registry missing %d: %s" %
+                      (len(registry_missing),
+                       ", ".join(sorted(registry_missing))))
+    if registry_phantom:
+        errors.append("registry phantom %d: %s" %
+                      (len(registry_phantom),
+                       ", ".join(sorted(registry_phantom))))
+    if len(native_modules) != EXPECTED_DEFERRED_NATIVE_COUNT:
+        errors.append(
+            "deferred-native count %d vs required %d" %
+            (len(native_modules), EXPECTED_DEFERRED_NATIVE_COUNT))
 
-    if not missing and not phantom and not registry_missing:
-        print("reference-dts: CommonJS coverage OK (missing 0, phantom 0, deferred-native %d)" % deferred_count)
+    if not errors:
+        print(
+            "reference-dts: CommonJS coverage OK "
+            "(missing 0, phantom 0, deferred-native %d)" %
+            len(native_modules))
 
     return errors
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check reference .d.ts calibration fixtures")

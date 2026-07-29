@@ -12,13 +12,13 @@ declare module 'url' {
 
     /**
      * Source: exports.parse is an alias to native/string.parseURL.
-     * The native contract is outside this fixture.
+     * Native metadata provides the exact two-argument call shape.
      */
     export function parse(urlString: string, parseQueryString?: boolean): UrlObject;
 
     /**
      * Source: exports.resolve is an alias to native/string.resolveURL.
-     * The native contract is outside this fixture.
+     * Native metadata provides the exact two-argument call shape.
      */
     export function resolve(from: string, to: string): string;
 

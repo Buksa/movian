@@ -7,7 +7,7 @@
 declare module 'movian/xmlrpc' {
     /**
      * Source: exports.call takes URL, method, and rest arguments.
-     * The checker does not understand variadic call patterns.
+     * Body uses arguments[0], arguments[1], and rest from arguments[2].
      */
-    export function call(): unknown;
+    export function call(url: string, method: string, ...args: unknown[]): unknown;
 }
