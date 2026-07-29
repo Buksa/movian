@@ -52,6 +52,9 @@ class HTTP401Handler(BaseHTTPRequestHandler):
         server: CountingHTTPServer = self.server  # type: ignore[assignment]
         authorization = self.headers.get("Authorization")
         mode = server.record_request(authorization)
+        if mode == "plain_empty":
+            self._respond(401, b"")
+            return
 
         if mode == "realm" and authorization == EXPECTED_AUTHORIZATION:
             self._respond(200, b"authenticated")
@@ -192,6 +195,18 @@ class HTTP401InspectorTest(unittest.TestCase):
             "ok": True,
             "status": 401,
             "body": "token expired",
+        })
+        self._assert_debug_count(url, request_count)
+
+    def test_inspector_401_nofail_empty_body(self) -> None:
+        url, outcome = self._launch("plain_empty", inspector=True, no_fail=True)
+        request_count, _ = self.server.snapshot()
+
+        self.assertEqual(request_count, 1)
+        self.assertEqual(outcome, {
+            "ok": True,
+            "status": 401,
+            "body": "",
         })
         self._assert_debug_count(url, request_count)
 
