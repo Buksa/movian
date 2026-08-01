@@ -219,12 +219,12 @@ const htmlByTags = htmlDoc.root.getElementsByTagName('div');
 
 // movian/itemhook - callable with options object
 const itemHook = itemhook.create({
-  itemtype: 'video',
-  title: 'Test',
-  icon: 'skin://icons/test.png',
-  handler: (item, nav) => {
+    itemtype: 'video',
+    title: 'Test',
+    icon: 'skin://icons/test.png',
+    handler: (item, nav) => {
     nav.openURL('page:home');
-  }
+    }
 });
 itemHook.destroy();
 
@@ -243,7 +243,7 @@ db.close();
 
 // movian/subtitles - callback
 subtitles.addProvider((req) => {
-  req.addSubtitle('http://example.test/sub.vtt', 'Test', 'en', 'vtt', 'test', 100);
+    req.addSubtitle('http://example.test/sub.vtt', 'Test', 'en', 'vtt', 'test', 100);
 });
 const langs = subtitles.getLanguages();
 
@@ -261,10 +261,10 @@ const xmlProxy = xml.htsmsg(xmlData);
 
 // movian/xmlrpc - two required arguments plus a variadic tail
 xmlrpc.call(
-  'https://example.test/xmlrpc',
-  'reference.method',
-  'argument',
-  42
+    'https://example.test/xmlrpc',
+    'reference.method',
+    'argument',
+    42
 );
 
 // fs - callable exports
@@ -275,18 +275,44 @@ fs.unlinkSync('/tmp/test.txt');
 fs.mkdirSync('/tmp/testdir');
 fs.rmdirSync('/tmp/testdir');
 
-// top-level http - callable with string and options-object signatures
+// top-level http - callable with string and options-object signatures.
+// `port` is a number: native/string.parseURL pushes it with duk_push_int
+// (es_string.c:319) and RequestOptions extends url's UrlObject.
 const httpReq = toplevelHttp.request('http://example.test');
 const httpGet = toplevelHttp.get({
-  protocol: 'http:',
-  hostname: 'example.test',
-  port: '80',
-  pathname: '/reference'
+    protocol: 'http:',
+    hostname: 'example.test',
+    port: 80,
+    pathname: '/reference'
 });
+
+// http - the request/response callback families. Request.on('response')
+// yields a Response; Response.on('data') yields a decoded string and
+// on('end') takes no argument.
+httpReq.on('response', (response) => {
+    const status: number = response.statusCode;
+    response.setEncoding('utf8');
+    response.on('data', (chunk) => {
+        const text: string = chunk;
+        void text;
+    });
+    response.on('end', () => {
+        void status;
+    });
+});
+httpReq.on('error', (error) => {
+    void error;
+});
+httpReq.end();
+const requestHeaders: unknown[] = httpReq.headers;
+void requestHeaders;
 
 // https - two-argument wrappers reusing HTTP types
 const httpsReq = https.request('https://example.test');
 const httpsGet = https.get('https://example.test/reference');
+httpsReq.on('response', (response) => {
+    void response.statusCode;
+});
 
 // querystring - callable export
 const parsed = querystring.parse('key=value&test=123');

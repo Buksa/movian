@@ -2,18 +2,28 @@
  * Accepted calibration fixture for http.
  *
  * This is a generator test oracle, not a shipped declaration package.
- * Source: res/ecmascript/modules/http.js, with native/io and native/string calls.
+ * Source: res/ecmascript/modules/http.js, with native/io and native/string
+ * calls.
  */
 declare module 'http' {
+    import { UrlObject } from 'url';
+
     /**
      * Source: exports.request creates a Request instance.
      * Accepts either a URL string or an options object.
-     * The callback and https parameters are accepted but not used.
+     *
+     * `callback` is accepted and never invoked anywhere in http.js, so no
+     * signature is source-defensible and it stays `unknown` on purpose --
+     * do not "fix" it into a function type the runtime never calls. The
+     * falsifiable callback surface of this module is HttpRequest.on and
+     * HttpResponse.on below, which source does invoke with known arguments.
+     *
+     * `https` is boolean: https.js calls http.request(opts, cb, true).
      */
     export function request(
         opts: string | RequestOptions,
         callback?: unknown,
-        https?: unknown
+        https?: boolean
     ): HttpRequest;
 
     /**
@@ -22,7 +32,7 @@ declare module 'http' {
     export function get(
         opts: string | RequestOptions,
         callback?: unknown,
-        https?: unknown
+        https?: boolean
     ): HttpRequest;
 
     /**
@@ -45,17 +55,24 @@ declare module 'http' {
         end(): void;
 
         /**
-         * Source: on method registers event handlers.
+         * Source: Request.prototype.on stores the handler, and end()'s
+         * io.httpReq callback invokes onResponse(new Response(res)) on
+         * success and onError(err) on failure.
          */
-        on(event: 'response' | 'error', callback: (arg: unknown) => void): void;
+        on(
+            event: 'response',
+            callback: (response: HttpResponse) => void
+        ): void;
+        on(event: 'error', callback: (error: unknown) => void): void;
     }
 
     /**
-     * Source: Response constructor wraps native response.
+     * Source: Response constructor wraps native response. Reachable through
+     * HttpRequest.on('response', ...) above.
      */
     interface HttpResponse {
         /**
-         * Source: statusCode from native response.
+         * Source: statusCode from native response (res.statuscode).
          */
         readonly statusCode: number;
 
@@ -65,7 +82,7 @@ declare module 'http' {
         encoding: string;
 
         /**
-         * Source: bytes buffer from native response.
+         * Source: bytes buffer from native response (res.buffer).
          */
         readonly bytes: unknown;
 
@@ -75,24 +92,22 @@ declare module 'http' {
         setEncoding(enc: string): void;
 
         /**
-         * Source: on method registers data/end handlers.
+         * Source: the Response constructor's deferred callback invokes
+         * onData(string.utf8FromBytes(bytes, encoding)) -- a string -- and
+         * then onEnd() with no arguments.
          */
-        on(event: 'data' | 'end', callback: (arg: unknown) => void): void;
+        on(event: 'data', callback: (chunk: string) => void): void;
+        on(event: 'end', callback: () => void): void;
     }
 
     /**
-     * Source: options object format (subset of Node.js URL format).
+     * Source: a non-string `opts` is passed straight into
+     * require('url').format(opts), so this options object IS the url
+     * module's UrlObject. Declared by extension rather than copied so the
+     * two fixtures cannot drift -- notably `port`, which
+     * native/string.parseURL pushes with duk_push_int
+     * (src/ecmascript/es_string.c:319) and is therefore a number.
      */
-    interface RequestOptions {
-        protocol: string;
-        slashes?: boolean;
-        host?: string;
-        hostname?: string;
-        port?: string;
-        pathname: string;
-        search?: string;
-        query?: Record<string, string>;
-        hash?: string;
-        auth?: string;
+    interface RequestOptions extends UrlObject {
     }
 }

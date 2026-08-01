@@ -8,10 +8,18 @@ declare module 'fs' {
     /**
      * Source: exports.writeFileSync calls native/fs.open/write and destroys
      * the resource through Core.resourceDestroy.
+     *
+     * `data` is the payload native/fs.write coerces with duk_to_buffer
+     * (src/ecmascript/es_fs.c, es_file_write), so it is declared as a string
+     * rather than `unknown` -- the union `string | unknown` collapses to
+     * `unknown` and accepts every argument, which leaves nothing to falsify.
+     *
+     * `opts` is accepted by the wrapper and never read, so no shape is
+     * source-defensible for it.
      */
     export function writeFileSync(
         filename: string,
-        data: string | unknown,
+        data: string,
         opts?: unknown
     ): void;
 

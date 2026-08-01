@@ -105,8 +105,8 @@ const htmlNumber = html.parse(42); // EXPECT_TS2345
 
 // movian/itemhook - missing required field
 const badItemHook = itemhook.create({ // EXPECT_TS2345
-  itemtype: 'video',
-  title: 'Test'
+    itemtype: 'video',
+    title: 'Test'
 });
 
 // movian/popup - wrong number of arguments
@@ -117,7 +117,7 @@ const badDb = new sqlite.DB(42); // EXPECT_TS2345
 
 // movian/subtitles - wrong callback parameter
 subtitles.addProvider((req) => {
-  req.addSubtitle(42, 'Test', 'en', 'vtt', 'test', 100); // EXPECT_TS2345
+    req.addSubtitle(42, 'Test', 'en', 'vtt', 'test', 100); // EXPECT_TS2345
 });
 
 // movian/xml - wrong parameter type
@@ -146,11 +146,46 @@ const badWs = new websocket.w3cwebsocket(42); // EXPECT_TS2345
 // movian/videoscrobbler - wrong callback signature
 const badScrobbler = new videoscrobbler.VideoScrobbler();
 badScrobbler.onstart = (data, prop, origin) => {
-  const wrongType: string = data; // EXPECT_TS2322
+    const wrongType: string = data; // EXPECT_TS2322
 };
 
 // fs - wrong parameter type
 fs.writeFileSync(42, 'test'); // EXPECT_TS2345
+
+// fs - wrong data type: native/fs.write coerces with duk_to_buffer, so the
+// declared payload is a string, not an arbitrary value
+fs.writeFileSync('/tmp/reference', 42); // EXPECT_TS2345
+
+// http - options-object member of the wrong type. RequestOptions extends
+// url's UrlObject, whose `port` native/string.parseURL pushes as an int.
+toplevelHttp.request({
+    protocol: 'http:',
+    hostname: 'example.test',
+    port: '80', // EXPECT_TS2322
+    pathname: '/reference'
+});
+
+const badHttpRequest = toplevelHttp.request('http://example.test');
+
+// http - unknown event name on the response-callback family
+badHttpRequest.on('finished', () => undefined); // EXPECT_TS2769
+
+// http - response and data callback parameters used at the wrong types
+badHttpRequest.on('response', (response) => {
+    const wrongStatus: string = response.statusCode; // EXPECT_TS2322
+    void wrongStatus;
+    response.on('data', (chunk) => {
+        const wrongChunk: number = chunk; // EXPECT_TS2322
+        void wrongChunk;
+    });
+});
+
+// https - the callback family is inherited from http, so it falsifies alike
+const badHttpsRequest = https.request('https://example.test');
+badHttpsRequest.on('response', (response) => {
+    const wrongStatus: boolean = response.statusCode; // EXPECT_TS2322
+    void wrongStatus;
+});
 
 void returnedString;
 void bodyString;

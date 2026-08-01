@@ -5,19 +5,21 @@
  * Source: res/ecmascript/modules/https.js, which wraps ./http.
  */
 declare module 'https' {
-    /**
-     * Source: exports.request calls http.request with https parameter added internally.
-     * The wrapper injects the HTTPS flag but reuses HTTP surface.
-     */
     import { HttpRequest, RequestOptions } from 'http';
 
+    /**
+     * Source: exports.request calls http.request(opts, cb, true) -- the
+     * wrapper injects the HTTPS flag and reuses the HTTP surface, so the
+     * returned object is an http HttpRequest and its callback families
+     * ('response' / 'error') are the http ones.
+     */
     export function request(
         opts: string | RequestOptions,
         callback?: unknown
     ): HttpRequest;
 
     /**
-     * Source: exports.get calls http.get with https parameter added internally.
+     * Source: exports.get calls http.get(opts, cb, true).
      */
     export function get(
         opts: string | RequestOptions,
