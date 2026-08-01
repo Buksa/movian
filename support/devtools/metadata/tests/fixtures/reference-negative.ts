@@ -168,12 +168,14 @@ fs.writeFileSync(42, 'test'); // EXPECT_TS2345
 // declared payload is a string, not an arbitrary value
 fs.writeFileSync('/tmp/reference', 42); // EXPECT_TS2345
 
-// http - options-object member of the wrong type. RequestOptions extends
-// url's UrlObject, whose `port` native/string.parseURL pushes as an int.
+// http - `port` is not offered on the format-input shape at all: url.js reads
+// it through the broken `':' + port` branch, so a port-bearing options object
+// either crashes or is ignored. Supplying one must not type-check, whatever
+// its type.
 toplevelHttp.request({
     protocol: 'http:',
     hostname: 'example.test',
-    port: '80', // EXPECT_TS2322
+    port: 80, // EXPECT_TS2353
     pathname: '/reference'
 });
 

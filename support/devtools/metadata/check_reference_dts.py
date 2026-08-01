@@ -121,7 +121,8 @@ class ModuleSpec:
     # "exact both directions" check certified a false exactness. The inherited
     # names are read out of the C source (`es_set_*(ctx, -1, "name", ...)`),
     # never hand-listed: (type, native_c).
-    inherited_native_members: tuple[tuple[str, Path], ...] = ()
+    inherited_native_members: tuple[
+        tuple[str, str, Path], ...] = ()
     # An interface describing the object a NATIVE function builds and returns.
     # (type, native table name, C file): the members are read out of that
     # function's own body (`duk_put_prop_string(ctx, -2, "name")`), so a
@@ -246,7 +247,8 @@ MODULES = (
         ),
         local_objects=(("req", "SubtitleRequest"),),
         inherited_native_members=(
-            ("SubtitleRequest", ECMASCRIPT_C_DIR / "es_subtitles.c"),),
+            ("SubtitleRequest", "esp_query",
+             ECMASCRIPT_C_DIR / "es_subtitles.c"),),
         audit_runtime_aliases=True,
     ),
     ModuleSpec(
@@ -1370,9 +1372,33 @@ ES_SET_MEMBER_RE = re.compile(
     r'\bes_set_[a-z]+\s*\(\s*ctx\s*,\s*-1\s*,\s*"([A-Za-z_][A-Za-z0-9_]*)"')
 
 
-def _native_object_members(native_c: Path) -> set[str]:
-    """Member names a C source attaches to the object at stack index -1."""
-    return set(ES_SET_MEMBER_RE.findall(_read(native_c)))
+def _plain_c_function_body(text: str, symbol: str) -> str | None:
+    """Body of a C function defined as `symbol(...)` at column zero."""
+    definition = re.search(r"^%s\s*\(" % re.escape(symbol), text, re.MULTILINE)
+    if definition is None:
+        return None
+    open_index = text.find("{", definition.end())
+    if open_index < 0:
+        return None
+    try:
+        body, _ = _balanced_content(text, open_index, "{", "}")
+    except ValueError:
+        return None
+    return body
+
+
+def _native_object_members(native_c: Path, builder: str) -> set[str] | None:
+    """Member names `builder` attaches to the object at stack index -1.
+
+    Scoped to that one function on purpose: a file-wide scan would attribute
+    an unrelated object's properties to this type, and would keep a removed
+    property green as long as some other function in the same file still set a
+    property of that name. Same failure the arity-floor check had.
+    """
+    body = _plain_c_function_body(_read(native_c), builder)
+    if body is None:
+        return None
+    return set(ES_SET_MEMBER_RE.findall(body))
 
 
 def _native_c_function_body(text: str, native_name: str) -> str | None:
@@ -1699,8 +1725,15 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
 
     _check_native_returned_objects(errors, spec, declaration)
 
-    inherited = {name: _native_object_members(path)
-                 for name, path in spec.inherited_native_members}
+    inherited: dict[str, set[str]] = {}
+    for type_name, builder, path in spec.inherited_native_members:
+        members = _native_object_members(path, builder)
+        if members is None:
+            errors.append(
+                "%s: %s claims to inherit from %s, but %s defines no such "
+                "function" % (spec.name, type_name, builder, path.name))
+            continue
+        inherited[type_name] = members
     for object_name, type_name in spec.local_objects:
         _check_declared_object_shape(
             errors, spec.name, declaration, type_name,

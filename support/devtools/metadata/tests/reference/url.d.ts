@@ -32,13 +32,21 @@ declare module 'url' {
      * + ...)`), so everything except the two it dereferences unguarded is
      * optional here. This is the input shape, and it is NOT the same set that
      * `parse` produces -- see ParsedUrl.
+     *
+     * `port` is deliberately absent. The only branch that reads it is
+     *     var host = d.host || (d.hostname + (d.port ? (':' + port) : ''));
+     * which tests `d.port` and then concatenates the undeclared identifier
+     * `port`, so supplying a port without a host raises ReferenceError, and
+     * supplying one WITH a host is silently ignored. There is no input for
+     * which this option does anything useful, so the calibration type must
+     * not offer it. `ParsedUrl` still carries `port`, which parseURL really
+     * does produce.
      */
     interface UrlObject {
         protocol: string;
         slashes?: boolean;
         host?: string;
         hostname?: string;
-        port?: number;
         pathname: string;
         search?: string;
         query?: Record<string, string>;
