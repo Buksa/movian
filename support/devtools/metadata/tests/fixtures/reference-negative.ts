@@ -109,8 +109,10 @@ const badItemHook = itemhook.create({ // EXPECT_TS2345
     title: 'Test'
 });
 
-// movian/popup - wrong number of arguments
-popup.notify('test'); // EXPECT_TS2554
+// movian/popup - text is the one mandatory argument and it must be a string;
+// omitting delay/icon is valid (es_notify tolerates 0 / NULL), so the invalid
+// call is a wrong-typed text, not a short one.
+popup.notify(42); // EXPECT_TS2345
 
 // movian/sqlite - wrong constructor parameter type
 const badDb = new sqlite.DB(42); // EXPECT_TS2345
@@ -138,6 +140,12 @@ https.request(42); // EXPECT_TS2345
 
 // querystring - wrong parameter type
 querystring.parse(void 0); // EXPECT_TS2345
+
+// url - `host` and `slashes` are format inputs; es_parseURL never emits them,
+// so reading them off a parse result must not type-check
+const parsedNoHost = url.parse('http://example.test/');
+void parsedNoHost.host; // EXPECT_TS2339
+void parsedNoHost.slashes; // EXPECT_TS2339
 
 // url - wrong parameter types
 url.format(42); // EXPECT_TS2345

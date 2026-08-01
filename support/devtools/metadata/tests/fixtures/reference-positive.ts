@@ -237,6 +237,9 @@ itemHook.destroy();
 
 // movian/popup - callable export with exact tuple
 popup.notify('Test notification', 5000, 'skin://icons/test.png');
+// delay 0 (omitted) means "stay until dismissed"; icon is optional too
+popup.notify('Persistent notification');
+popup.notify('Timed notification', 3000);
 
 // movian/sqlite - constructor, variadic method, methods, and accessors
 const db = new sqlite.DB('test.db');
@@ -347,6 +350,12 @@ const parsed = querystring.parse('key=value&test=123');
 const urlObj = { protocol: 'http:', pathname: '/test', query: { key: 'value' } };
 const formatted = url.format(urlObj);
 const parsedUrl = url.parse('http://example.test/test?key=value', false);
+// es_parseURL puts protocol/hostname/path/pathname unconditionally, so these
+// need no guard, while port/hash/search are conditional.
+const parsedHost: string = parsedUrl.hostname;
+const parsedPath: string = parsedUrl.path;
+void parsedHost;
+void parsedPath;
 const resolved = url.resolve('http://example.test/', 'test');
 
 // websocket - constructor with callbacks
