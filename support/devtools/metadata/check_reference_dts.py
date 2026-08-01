@@ -106,7 +106,6 @@ class ModuleSpec:
     # Opt-in inventory audit for issue #137 modules. Every native property
     # alias and exports.__proto__ re-export must be registered exactly.
     audit_runtime_aliases: bool = False
-    reexport_target: str | None = None
 
 
 JS_MODULE_DIR = REPO_ROOT / "res" / "ecmascript" / "modules" / "movian"
@@ -241,7 +240,6 @@ MODULES = (
         "movian/xmlrpc",
         REFERENCE_DIR / "movian-xmlrpc.d.ts",
         JS_MODULE_DIR / "xmlrpc.js",
-        (),
         (),
         forbid_nested_types=True,
         audit_runtime_aliases=True,
@@ -381,7 +379,8 @@ DEFINE_PROPERTIES_PROTOTYPE_HEAD_RE = re.compile(
     r"Object\.defineProperties\(\s*(?:exports\.)?"
     r"([A-Za-z_$][A-Za-z0-9_$]*)\.prototype\s*,\s*\{")
 REEXPORT_PROTO_RE = re.compile(
-    r"^\s*exports\.__proto__\s*=\s*require\(['\"]([^'\"]+)['\"]\)", re.MULTILINE)
+    r"^\s*exports\.__proto__\s*=\s*require\(['\"]([^'\"]+)['\"]\)",
+    re.MULTILINE)
 ALIAS_RE = re.compile(
     r"^\s*(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*="
     r"\s*require\(\s*['\"]([^'\"]+)['\"]\s*\)", re.MULTILINE)
@@ -414,8 +413,6 @@ ARGUMENT_INDEX_RE = re.compile(r"\barguments\s*\[\s*(\d+)\s*\]")
 ARGUMENT_REST_LOOP_RE = re.compile(
     r"\bfor\s*\(\s*var\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=\s*(\d+)\s*;"
     r"\s*[A-Za-z_$][A-Za-z0-9_$]*\s*<\s*arguments\.length\b")
-
-EXPECTED_DEFERRED_NATIVE_COUNT = 18
 
 
 def _read(path: Path) -> str:
@@ -596,17 +593,33 @@ def _balanced_content(text: str, open_index: int,
     depth = 0
     quote: str | None = None
     escaped = False
-    for index in range(open_index, len(text)):
+    # Comments must be skipped, not just quotes: an ordinary apostrophe in a
+    # doc comment ("end()'s callback") would otherwise open a string state
+    # that never closes, so the scan runs past the real closing brace and
+    # silently returns a block spanning the *following* declaration too.
+    comment: str | None = None
+    index = open_index
+    while index < len(text):
         char = text[index]
-        if quote is not None:
+        following = text[index + 1:index + 2]
+        if comment == "line":
+            if char == "\n":
+                comment = None
+        elif comment == "block":
+            if char == "*" and following == "/":
+                comment = None
+                index += 1
+        elif quote is not None:
             if escaped:
                 escaped = False
             elif char == "\\":
                 escaped = True
             elif char == quote:
                 quote = None
-            continue
-        if char in "'\"`":
+        elif char == "/" and following in ("/", "*"):
+            comment = "line" if following == "/" else "block"
+            index += 1
+        elif char in "'\"`":
             quote = char
         elif char == opener:
             depth += 1
@@ -614,6 +627,7 @@ def _balanced_content(text: str, open_index: int,
             depth -= 1
             if depth == 0:
                 return text[open_index + 1:index], index
+        index += 1
     raise ValueError("narrow parser found unterminated %s" % opener)
 
 
@@ -1115,11 +1129,14 @@ def _javascript_exact_aliases(
 
 
 def _declared_type_kind(text: str, name: str) -> str | None:
-    if any(match.group(1) == name for match in DECL_INTERFACE_RE.finditer(text)):
+    def declares(pattern: re.Pattern[str]) -> bool:
+        return any(match.group(1) == name for match in pattern.finditer(text))
+
+    if declares(DECL_INTERFACE_RE):
         return "interface"
-    if any(match.group(1) == name for match in DECL_CLASS_RE.finditer(text)):
+    if declares(DECL_CLASS_RE):
         return "class"
-    if any(match.group(1) == name for match in DECL_FUNCTION_RE.finditer(text)):
+    if declares(DECL_FUNCTION_RE):
         return "function"
     if name in DECL_VALUE_RE.findall(text):
         return "value"
@@ -1561,18 +1578,15 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
                 "%s: registered native alias %s is missing from source" %
                 (spec.name, name))
 
+        # No module in this set re-exports through `exports.__proto__`
+        # (movian/prop does, but it is a #135 module and does not opt into
+        # this audit). Any target found here is therefore unregistered: fail
+        # loudly rather than carry a declaration hook no spec uses.
         reexport_targets = set(REEXPORT_PROTO_RE.findall(
             _mask_js(javascript, mask_strings=False)))
-        if spec.reexport_target is None:
-            for target in sorted(reexport_targets):
-                errors.append(
-                    "%s: unexpected re-export target %s" %
-                    (spec.name, target))
-        elif reexport_targets != {spec.reexport_target}:
-            actual = ", ".join(sorted(reexport_targets)) or "<missing>"
+        for target in sorted(reexport_targets):
             errors.append(
-                "%s: re-export target is %s vs required %s" %
-                (spec.name, actual, spec.reexport_target))
+                "%s: unexpected re-export target %s" % (spec.name, target))
 
     for export_name, required_module, required_member in spec.exact_aliases:
         expected = (required_module, required_member)
@@ -1878,11 +1892,9 @@ def _check_commonjs_coverage() -> list[str]:
         errors.append("registry phantom %d: %s" %
                       (len(registry_phantom),
                        ", ".join(sorted(registry_phantom))))
-    if len(native_modules) != EXPECTED_DEFERRED_NATIVE_COUNT:
-        errors.append(
-            "deferred-native count %d vs required %d" %
-            (len(native_modules), EXPECTED_DEFERRED_NATIVE_COUNT))
-
+    # The deferred-native count is reported, never asserted against a literal:
+    # `generated/movian-metadata.json` is the binding inventory, and child C2
+    # adding a native module must not redden this CommonJS coverage check.
     if not errors:
         print(
             "reference-dts: CommonJS coverage OK "
@@ -1893,12 +1905,20 @@ def _check_commonjs_coverage() -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check reference .d.ts calibration fixtures")
-    parser.add_argument("--commonjs", action="store_true", help="Check CommonJS module coverage")
+    parser = argparse.ArgumentParser(
+        description="Check reference .d.ts calibration fixtures")
+    parser.add_argument(
+        "--commonjs", action="store_true",
+        help="Check CommonJS module coverage")
     args = parser.parse_args()
 
     if args.commonjs:
-        errors = _check_commonjs_coverage()
+        try:
+            errors = _check_commonjs_coverage()
+        except (OSError, ValueError) as error:
+            print("reference-dts: %s: %s" % (type(error).__name__, error),
+                  file=sys.stderr)
+            return 1
         for error in errors:
             print("reference-dts: %s" % error, file=sys.stderr)
         return 1 if errors else 0
