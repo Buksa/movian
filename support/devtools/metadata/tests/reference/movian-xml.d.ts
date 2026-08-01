@@ -26,9 +26,13 @@ declare module 'movian/xml' {
         toString(): string;
 
         /**
-         * Source: explicit valueOf branch returns the proxied scalar value.
+         * Source: the valueOf branch returns `obj.value`, and a proxy is only
+         * ever built around `{msg: x}` or an htsmsg.get child carrying `msg` --
+         * message and list fields push undefined into that `value`, while
+         * scalar fields are returned directly and never wrapped in a proxy.
+         * So the proxied value is source-definitely undefined.
          */
-        valueOf(): unknown;
+        valueOf(): undefined;
 
         /**
          * Source: explicit dump branch calls native/htsmsg.print.
@@ -36,9 +40,13 @@ declare module 'movian/xml' {
         dump(): void;
 
         /**
-         * Source: explicit filterNodes branch returns matching child values.
+         * Source: filterNodes pushes getfield(...) results, which are either
+         * another XmlProxy for a child message or the native field value.
+         * es_push_htsmsg_field emits duk_push_string, duk_push_number, or
+         * duk_push_undefined in its default branch -- a finite set.
          */
-        filterNodes(filter: string): unknown[];
+        filterNodes(filter: string): (XmlProxy | string | number |
+            undefined)[];
 
         /**
          * Source: explicit length branch calls native/htsmsg.length.

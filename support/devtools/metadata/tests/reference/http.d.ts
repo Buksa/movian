@@ -64,7 +64,12 @@ declare module 'http' {
             event: 'response',
             callback: (response: HttpResponse) => void
         ): void;
-        on(event: 'error', callback: (error: unknown) => void): void;
+        /**
+         * Source: the io.httpReq error path pushes `ehr->ehr_errbuf` with
+         * duk_push_string (src/ecmascript/es_io.c), so the handler receives a
+         * message, not an opaque value.
+         */
+        on(event: 'error', callback: (error: string) => void): void;
     }
 
     /**

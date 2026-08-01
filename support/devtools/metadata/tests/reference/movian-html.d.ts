@@ -83,9 +83,13 @@ declare module 'movian/html' {
     /**
      * Source: attributes getter return type.
      */
-    interface NamedNodeMap {
-        readonly length: number;
-        [index: number]: Attr;
+    /**
+     * Source: es_gumbo_node_attributes creates the value with duk_push_array
+     * and html.js only attaches getNamedItem to that array, so the array
+     * surface (map, forEach, ...) is genuinely available and a standalone
+     * interface would reject supported calls.
+     */
+    interface NamedNodeMap extends Array<Attr> {
         getNamedItem(name: string): Attr | null;
     }
 

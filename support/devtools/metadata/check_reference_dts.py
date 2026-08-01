@@ -337,6 +337,13 @@ MODULES = (
         TOPLEVEL_MODULE_DIR / "websocket.js",
         ("w3cwebsocket",),
         instance_references=(("w3cwebsocket", ("_sock",)),),
+        # Without this the wrapper's native calls were checked against nothing:
+        # renaming ws.clientSend to a function that does not exist left the
+        # whole gate green.
+        native_c=ECMASCRIPT_C_DIR / "es_websocket.c",
+        native_table="fnlist_websocket",
+        native_module="websocket",
+        native_kind="native-calls",
         audit_runtime_aliases=True,
     ),
 )
@@ -1450,6 +1457,29 @@ def _check_native_returned_objects(
                            source, declared)
 
 
+WRAPPER_NATIVE_CALL_RE = re.compile(
+    r"\b[A-Za-z_$][A-Za-z0-9_$]*\.([A-Za-z_$][A-Za-z0-9_$]*)"
+    r"\s*(?:\.\s*(?:apply|call)\s*)?\(")
+
+
+def _wrapper_native_calls(javascript: str, type_name: str,
+                          method: str) -> set[str] | None:
+    """Native member names the JS body of `type.method` invokes."""
+    head = re.search(
+        r"\b%s\.prototype\.%s\s*=\s*function" %
+        (re.escape(type_name), re.escape(method)), javascript)
+    if head is None:
+        return None
+    open_index = javascript.find("{", head.end())
+    if open_index < 0:
+        return None
+    try:
+        body, _ = _balanced_content(javascript, open_index, "{", "}")
+    except ValueError:
+        return None
+    return set(WRAPPER_NATIVE_CALL_RE.findall(body))
+
+
 def _check_native_arity_floor(
         errors: list[str], spec: "ModuleSpec") -> dict[tuple[str, str], int]:
     """Validate each declared native arity floor against the C source.
@@ -1461,8 +1491,26 @@ def _check_native_arity_floor(
     pointed at the wrong file until this was tightened).
     """
     floors: dict[tuple[str, str], int] = {}
+    javascript = _read(spec.javascript)
     for type_name, method, native_name, floor, native_c in \
             spec.native_arity_floors:
+        # The configured name is a claim about the wrapper, so check it: find
+        # the method body and require it to actually call that native function.
+        # Otherwise retargeting `sqlite.query.apply(...)` to another native
+        # would leave the floor certified against the old callee.
+        called = _wrapper_native_calls(javascript, type_name, method)
+        if called is None:
+            errors.append(
+                "%s: %s.%s claims a native arity floor, but no wrapper body "
+                "for it was found in %s" %
+                (spec.name, type_name, method, spec.javascript.name))
+            continue
+        if native_name not in called:
+            errors.append(
+                "%s: %s.%s claims native callee %s, but its wrapper calls %s" %
+                (spec.name, type_name, method, native_name,
+                 ", ".join(sorted(called)) or "nothing native"))
+            continue
         body = _native_c_function_body(_read(native_c), native_name)
         if body is None:
             errors.append(
@@ -2044,8 +2092,14 @@ def _check_commonjs_coverage() -> list[str]:
         "movian/service",
         "movian/store",
     }
-    target_modules = commonjs_modules - accepted
-    registered_modules = {spec.name for spec in MODULES} - accepted
+    # `accepted` records which modules landed in the earlier issues; it must
+    # NOT narrow the audit. Subtracting it from both sides meant a module
+    # accepted by (#135)/(#136) could vanish from the live metadata, or be
+    # reclassified, and coverage still reported complete -- the audit only ever
+    # policed the modules this issue added. Every CommonJS module in the
+    # artifact is now required to have a fixture and a registration.
+    target_modules = commonjs_modules
+    registered_modules = {spec.name for spec in MODULES}
     fixture_modules: set[str] = set()
     for declaration in REFERENCE_DIR.glob("*.d.ts"):
         if declaration == PLUGIN_DECLARATION:
@@ -2053,8 +2107,7 @@ def _check_commonjs_coverage() -> list[str]:
         stem = declaration.name[:-5]
         name = "movian/" + stem[len("movian-"):].replace("-", "/") \
             if stem.startswith("movian-") else stem
-        if name not in accepted:
-            fixture_modules.add(name)
+        fixture_modules.add(name)
 
     missing = target_modules - fixture_modules
     phantom = fixture_modules - target_modules

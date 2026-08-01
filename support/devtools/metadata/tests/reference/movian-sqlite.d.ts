@@ -6,6 +6,16 @@
  */
 declare module 'movian/sqlite' {
     /**
+     * Source: es_sqlite_step pushes null when no statement remains, otherwise
+     * an object whose column values are pushed with duk_push_string or
+     * duk_push_number; NULL and unsupported column types are omitted entirely
+     * rather than emitted as another kind.
+     */
+    interface SqliteRow {
+        [column: string]: string | number;
+    }
+
+    /**
      * Source: exports.DB constructor calls native/sqlite.create.
      */
     export class DB {
@@ -34,7 +44,7 @@ declare module 'movian/sqlite' {
         /**
          * Source: step method calls native/sqlite.step.
          */
-        step(): unknown;
+        step(): SqliteRow | null;
 
         /**
          * Source: es_db_upgrade_schema pushes nothing and ends

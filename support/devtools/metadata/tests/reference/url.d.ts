@@ -41,6 +41,16 @@ declare module 'url' {
      * which this option does anything useful, so the calibration type must
      * not offer it. `ParsedUrl` still carries `port`, which parseURL really
      * does produce.
+     *
+     * `path` is absent for the same reason: url.js never reads `d.path` -- it
+     * always builds the result from the required `pathname` -- so offering it
+     * as a format input would certify another option that cannot affect the
+     * output. It survives on `ParsedUrl`, which is where parseURL emits it.
+     *
+     * `query` values are deliberately `unknown`: url.js hands each one to
+     * native/string.paramEscape, whose es_escape reads it with
+     * duk_safe_to_string, so `{query: {page: 2}}` really does produce
+     * `page=2`. Restricting them to string would reject a supported path.
      */
     interface UrlObject {
         protocol: string;
@@ -49,10 +59,9 @@ declare module 'url' {
         hostname?: string;
         pathname: string;
         search?: string;
-        query?: Record<string, string>;
+        query?: Record<string, unknown>;
         hash?: string;
         auth?: string;
-        path?: string;
     }
 
     /**
