@@ -209,7 +209,14 @@ const htmlDoc = html.parse('<div>test</div>');
 const htmlRootName: string = htmlDoc.root.nodeName;
 const htmlRootType: number = htmlDoc.root.nodeType;
 const htmlChildren: html.Node[] = htmlDoc.root.children;
-const htmlText: string = htmlDoc.root.textContent;
+// textContent is undefined for a node with no text fragments (es_gumbo.c
+// returns zero values), so the guard is the calibrated shape, not a cast.
+const htmlText: string | undefined = htmlDoc.root.textContent;
+const htmlEmpty = html.parse('<div></div>');
+if (htmlEmpty.root.textContent !== undefined) {
+    const htmlNarrowed: string = htmlEmpty.root.textContent;
+    void htmlNarrowed;
+}
 const htmlAttribute = htmlDoc.root.attributes.getNamedItem('class');
 const htmlById = htmlDoc.root.getElementById('test');
 const htmlByClass = htmlDoc.root.getElementByClassName('reference');
@@ -223,7 +230,7 @@ const itemHook = itemhook.create({
     title: 'Test',
     icon: 'skin://icons/test.png',
     handler: (item, nav) => {
-    nav.openURL('page:home');
+        nav.openURL('page:home');
     }
 });
 itemHook.destroy();
@@ -276,13 +283,20 @@ fs.mkdirSync('/tmp/testdir');
 fs.rmdirSync('/tmp/testdir');
 
 // top-level http - callable with string and options-object signatures.
-// `port` is a number: native/string.parseURL pushes it with duk_push_int
-// (es_string.c:319) and RequestOptions extends url's UrlObject.
+//
+// `port` is deliberately absent from this positive case. It is typed as a
+// number (native/string.parseURL pushes it with duk_push_int,
+// src/ecmascript/es_string.c:319), but a port-bearing options object cannot
+// actually run: url.js:14 tests `d.port` and then concatenates the bare
+// identifier `port`, which is not defined —
+//     var host = d.host || (d.hostname + (d.port ? (':' + port) : ''));
+// so `get({hostname, port, ...})` raises ReferenceError before reaching the
+// request. A compile-only fixture must not bless a shape the runtime cannot
+// execute; the `d.port`/`port` typo is a separate runtime defect.
 const httpReq = toplevelHttp.request('http://example.test');
 const httpGet = toplevelHttp.get({
     protocol: 'http:',
     hostname: 'example.test',
-    port: 80,
     pathname: '/reference'
 });
 

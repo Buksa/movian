@@ -20,9 +20,16 @@ declare module 'websocket' {
         onopen: () => void;
 
         /**
-         * Source: oninput callback for data received.
+         * Source: the native onInput handler pushes an ArrayBuffer for
+         * opcode-2 (binary) frames --
+         *   duk_push_buffer_object(ctx, -1, 0, t->bufsize,
+         *                          DUK_BUFOBJ_ARRAYBUFFER)
+         * (src/ecmascript/es_websocket.c) -- and duk_push_lstring for text.
+         * websocket.js passes it straight through as `{ data: d }`, so the
+         * payload is a union: typing it `string` alone both rejects binary
+         * frames the runtime delivers and licenses `.toUpperCase()` on them.
          */
-        oninput: (data: { data: string }) => void;
+        oninput: (data: { data: string | ArrayBuffer }) => void;
 
         /**
          * Source: onclose callback for connection close.
@@ -30,9 +37,13 @@ declare module 'websocket' {
         onclose: () => void;
 
         /**
-         * Source: send method calls native/websocket.clientSend.
+         * Source: send calls native/websocket.clientSend, whose first act is
+         *   buf = duk_get_buffer_data(ctx, 1, &bufsize);
+         *   if(buf != NULL) opcode = 2;   // binary
+         *   else { buf = duk_to_string(ctx, 1); opcode = 1; }
+         * so a buffer argument is a first-class binary send, not an error.
          */
-        send(d: string): void;
+        send(d: string | ArrayBuffer): void;
 
         /**
          * Source: close method calls Core.resourceDestroy on the socket.

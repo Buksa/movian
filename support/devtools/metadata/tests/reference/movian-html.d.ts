@@ -30,9 +30,16 @@ declare module 'movian/html' {
         readonly children: Node[];
 
         /**
-         * Source: textContent getter calls gumbo.nodeTextContent.
+         * Source: textContent getter calls gumbo.nodeTextContent, whose C
+         * implementation returns *zero* Duktape values for a node with no
+         * text fragments --
+         *     int num = es_gumbo_node_textContent_r(ctx, node);
+         *     if(num == 0) return 0;
+         * (src/ecmascript/es_gumbo.c) -- so the getter evaluates to
+         * undefined for an empty element such as `<div></div>`. Declaring a
+         * bare string lets callers run string operations that throw there.
          */
-        readonly textContent: string;
+        readonly textContent: string | undefined;
 
         /**
          * Source: attributes getter calls gumbo.nodeAttributes.
