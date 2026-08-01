@@ -7,6 +7,7 @@
  */
 declare module 'http' {
     import { UrlObject } from 'url';
+    import { DuktapeBuffer } from 'movian/http';
 
     /**
      * Source: exports.request creates a Request instance.
@@ -82,9 +83,12 @@ declare module 'http' {
         encoding: string;
 
         /**
-         * Source: bytes buffer from native response (res.buffer).
+         * Source: `this.bytes = res.buffer` (http.js), and es_io.c fills that
+         * property with `duk_push_fixed_buffer` only `if(ehr->ehr_result !=
+         * NULL)`, so it is the same indexed-byte buffer movian/http already
+         * declares, and it is absent when the response carried no body.
          */
-        readonly bytes: unknown;
+        readonly bytes: DuktapeBuffer | undefined;
 
         /**
          * Source: setEncoding method.

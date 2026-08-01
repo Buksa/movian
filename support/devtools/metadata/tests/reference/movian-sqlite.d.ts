@@ -37,9 +37,12 @@ declare module 'movian/sqlite' {
         step(): unknown;
 
         /**
-         * Source: upgradeSchema method calls native/sqlite.upgradeSchema.
+         * Source: es_db_upgrade_schema pushes nothing and ends
+         * `return 0;` -- it either succeeds with no result or raises
+         * through duk_error, so the wrapper's value is always
+         * undefined. upgradeSchema method calls native/sqlite.upgradeSchema.
          */
-        upgradeSchema(path: string): unknown;
+        upgradeSchema(path: string): void;
 
         /**
          * Source: lastRowId getter calls native/sqlite.lastRowId.

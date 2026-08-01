@@ -245,7 +245,6 @@ popup.notify('Timed notification', 3000);
 const db = new sqlite.DB('test.db');
 db.query('SELECT * FROM test WHERE id = ?', 1);
 const dbRow: unknown = db.step();
-const upgraded: unknown = db.upgradeSchema('/tmp/reference-schema');
 const lastRowId: number = db.lastRowId;
 const lastErrorString: string = db.lastErrorString;
 const lastErrorCode: number = db.lastErrorCode;
@@ -357,6 +356,20 @@ const parsedPath: string = parsedUrl.path;
 void parsedHost;
 void parsedPath;
 const resolved = url.resolve('http://example.test/', 'test');
+
+// websocket - a Duktape buffer from fs or http is a valid binary send
+const wsBinary = new websocket.w3cwebsocket('wss://example.test');
+wsBinary.send(fs.readFileSync('/tmp/reference'));
+wsBinary.oninput = (data) => {
+    if (typeof data.data === 'string') {
+        const text: string = data.data;
+        void text;
+    }
+};
+
+// movian/sqlite - upgradeSchema resolves to nothing
+const upgradeResult: void = db.upgradeSchema('/tmp/reference-schema');
+void upgradeResult;
 
 // websocket - constructor with callbacks
 const ws = new websocket.w3cwebsocket('ws://example.test');

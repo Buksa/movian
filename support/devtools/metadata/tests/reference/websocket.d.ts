@@ -5,6 +5,8 @@
  * Source: res/ecmascript/modules/websocket.js, with native/websocket calls.
  */
 declare module 'websocket' {
+    import { DuktapeBuffer } from 'movian/http';
+
     /**
      * Source: exports.w3cwebsocket constructor creates a WebSocket client.
      */
@@ -42,8 +44,11 @@ declare module 'websocket' {
          *   if(buf != NULL) opcode = 2;   // binary
          *   else { buf = duk_to_string(ctx, 1); opcode = 1; }
          * so a buffer argument is a first-class binary send, not an error.
+         * That includes a plain Duktape buffer, which is what
+         * fs.readFileSync and movian/http response bodies hand back --
+         * duk_get_buffer_data accepts both it and an ArrayBuffer view.
          */
-        send(d: string | ArrayBuffer): void;
+        send(d: string | ArrayBuffer | DuktapeBuffer): void;
 
         /**
          * Source: close method calls Core.resourceDestroy on the socket.

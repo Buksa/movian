@@ -113,7 +113,8 @@ class ModuleSpec:
     # `function()`. The floor is not taken on trust -- _check_native_arity_floor
     # requires a matching `argc < N` guard in the module's native_c file, so
     # claiming the wrong number fails.
-    native_arity_floors: tuple[tuple[str, str, int, Path], ...] = ()
+    native_arity_floors: tuple[
+        tuple[str, str, str, int, Path], ...] = ()
     # A callback argument built in C and then extended in JS through
     # `Object.create(...)`. The narrow parser only sees the JS-side `x.y = ...`
     # assignments, so the inherited half of the surface was invisible and the
@@ -121,6 +122,12 @@ class ModuleSpec:
     # names are read out of the C source (`es_set_*(ctx, -1, "name", ...)`),
     # never hand-listed: (type, native_c).
     inherited_native_members: tuple[tuple[str, Path], ...] = ()
+    # An interface describing the object a NATIVE function builds and returns.
+    # (type, native table name, C file): the members are read out of that
+    # function's own body (`duk_put_prop_string(ctx, -2, "name")`), so a
+    # phantom on the declaration fails and a new native property that nobody
+    # declared fails too.
+    native_returned_objects: tuple[tuple[str, str, Path], ...] = ()
 
 
 JS_MODULE_DIR = REPO_ROOT / "res" / "ecmascript" / "modules" / "movian"
@@ -226,7 +233,8 @@ MODULES = (
         private_members=(("DB", ("db",)),),
         audit_runtime_aliases=True,
         native_arity_floors=(
-            ("DB", "query", 2, ECMASCRIPT_C_DIR / "es_sqlite.c"),),
+            ("DB", "query", "query", 2,
+             ECMASCRIPT_C_DIR / "es_sqlite.c"),),
     ),
     ModuleSpec(
         "movian/subtitles",
@@ -316,6 +324,9 @@ MODULES = (
             ("parse", "native/string", "parseURL"),
             ("resolve", "native/string", "resolveURL"),
         ),
+        native_returned_objects=(
+            ("ParsedUrl", "parseURL",
+             ECMASCRIPT_C_DIR / "es_string.c"),),
         audit_runtime_aliases=True,
     ),
     ModuleSpec(
@@ -1364,25 +1375,81 @@ def _native_object_members(native_c: Path) -> set[str]:
     return set(ES_SET_MEMBER_RE.findall(_read(native_c)))
 
 
+def _native_c_function_body(text: str, native_name: str) -> str | None:
+    """The C body registered for `native_name` in a duk function table."""
+    entry = re.search(
+        r'\{\s*"%s"\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,' %
+        re.escape(native_name), text)
+    if entry is None:
+        return None
+    symbol = entry.group(1)
+    definition = re.search(
+        r"^%s\s*\(duk_context\s*\*\s*ctx\s*\)" % re.escape(symbol),
+        text, re.MULTILINE)
+    if definition is None:
+        return None
+    open_index = text.find("{", definition.end())
+    if open_index < 0:
+        return None
+    try:
+        body, _ = _balanced_content(text, open_index, "{", "}")
+    except ValueError:
+        return None
+    return body
+
+
+NATIVE_PUT_PROP_RE = re.compile(
+    r'\bduk_put_prop_string\s*\(\s*ctx\s*,\s*-?\w+\s*,\s*"([A-Za-z_]'
+    r'[A-Za-z0-9_]*)"')
+
+
+def _check_native_returned_objects(
+        errors: list[str], spec: "ModuleSpec", declaration: str) -> None:
+    """Compare an interface against the object its native builder creates."""
+    for type_name, native_name, native_c in spec.native_returned_objects:
+        body = _native_c_function_body(_read(native_c), native_name)
+        if body is None:
+            errors.append(
+                "%s: %s claims to mirror %s, but %s registers no table entry "
+                "of that name" %
+                (spec.name, type_name, native_name, native_c.name))
+            continue
+        source = set(NATIVE_PUT_PROP_RE.findall(body))
+        try:
+            declared = _declared_members(declaration, type_name)
+        except ValueError as error:
+            errors.append("%s: %s" % (spec.name, error))
+            continue
+        _compare_name_sets(errors, spec.name, type_name + ".",
+                           source, declared)
+
+
 def _check_native_arity_floor(
         errors: list[str], spec: "ModuleSpec") -> dict[tuple[str, str], int]:
     """Validate each declared native arity floor against the C source.
 
-    A floor is only usable as evidence if the native callee really rejects
-    shorter calls, so the guard must be visible as `argc < N` in the module's
-    native table file. Without this the field would let any spec assert an
-    arbitrary required prefix.
+    The guard must live in the body of the function the native table actually
+    registers for that name -- a file-wide search is not enough, because an
+    unrelated `argc < N` elsewhere in the same file would rubber-stamp any
+    claim (es_io.c carries one, which silently validated a DB.query entry
+    pointed at the wrong file until this was tightened).
     """
     floors: dict[tuple[str, str], int] = {}
-    if not spec.native_arity_floors:
-        return floors
-    for type_name, method, floor, native_c in spec.native_arity_floors:
-        text = _read(native_c)
-        if not re.search(r"\bargc\s*<\s*%d\b" % floor, text):
+    for type_name, method, native_name, floor, native_c in \
+            spec.native_arity_floors:
+        body = _native_c_function_body(_read(native_c), native_name)
+        if body is None:
             errors.append(
-                "%s: %s.%s claims a native arity floor of %d, but no "
-                "`argc < %d` guard exists in %s" %
-                (spec.name, type_name, method, floor, floor, native_c.name))
+                "%s: %s.%s claims a native arity floor, but %s registers no "
+                "table entry named %s" %
+                (spec.name, type_name, method, native_c.name, native_name))
+            continue
+        if not re.search(r"\bargc\s*<\s*%d\b" % floor, body):
+            errors.append(
+                "%s: %s.%s claims a native arity floor of %d, but the body "
+                "registered for %s in %s has no `argc < %d` guard" %
+                (spec.name, type_name, method, floor, native_name,
+                 native_c.name, floor))
             continue
         floors[(type_name, method)] = floor
     return floors
@@ -1629,6 +1696,8 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
         _check_declared_object_shape(
             errors, spec.name, declaration, type_name,
             source_methods, source_members)
+
+    _check_native_returned_objects(errors, spec, declaration)
 
     inherited = {name: _native_object_members(path)
                  for name, path in spec.inherited_native_members}
