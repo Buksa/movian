@@ -14,7 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 
@@ -106,6 +106,14 @@ class ModuleSpec:
     # Opt-in inventory audit for issue #137 modules. Every native property
     # alias and exports.__proto__ re-export must be registered exactly.
     audit_runtime_aliases: bool = False
+    # A fully-variadic JS wrapper whose native callee refuses short calls.
+    # (type, method, native argc floor): the wrapper unshifts its handle, so a
+    # native floor of N makes N-1 JS arguments mandatory, and the declaration
+    # may state that required prefix even though the JS signature alone is
+    # `function()`. The floor is not taken on trust -- _check_native_arity_floor
+    # requires a matching `argc < N` guard in the module's native_c file, so
+    # claiming the wrong number fails.
+    native_arity_floors: tuple[tuple[str, str, int, Path], ...] = ()
 
 
 JS_MODULE_DIR = REPO_ROOT / "res" / "ecmascript" / "modules" / "movian"
@@ -206,6 +214,8 @@ MODULES = (
         exact_member_types=("DB",),
         private_members=(("DB", ("db",)),),
         audit_runtime_aliases=True,
+        native_arity_floors=(
+            ("DB", "query", 2, ECMASCRIPT_C_DIR / "es_sqlite.c"),),
     ),
     ModuleSpec(
         "movian/subtitles",
@@ -1332,10 +1342,35 @@ def _check_native_table(errors: list[str], spec: ModuleSpec,
                 (spec.name, name, nargs, declared_nargs))
 
 
+def _check_native_arity_floor(
+        errors: list[str], spec: "ModuleSpec") -> dict[tuple[str, str], int]:
+    """Validate each declared native arity floor against the C source.
+
+    A floor is only usable as evidence if the native callee really rejects
+    shorter calls, so the guard must be visible as `argc < N` in the module's
+    native table file. Without this the field would let any spec assert an
+    arbitrary required prefix.
+    """
+    floors: dict[tuple[str, str], int] = {}
+    if not spec.native_arity_floors:
+        return floors
+    for type_name, method, floor, native_c in spec.native_arity_floors:
+        text = _read(native_c)
+        if not re.search(r"\bargc\s*<\s*%d\b" % floor, text):
+            errors.append(
+                "%s: %s.%s claims a native arity floor of %d, but no "
+                "`argc < %d` guard exists in %s" %
+                (spec.name, type_name, method, floor, floor, native_c.name))
+            continue
+        floors[(type_name, method)] = floor
+    return floors
+
+
 def _check_declared_object_shape(
         errors: list[str], module_name: str, declaration: str,
         type_name: str, source_methods: dict[str, Signature],
-        source_members: set[str]) -> None:
+        source_members: set[str],
+        arity_floors: dict[str, int] | None = None) -> None:
     try:
         declared_methods = _declared_methods(declaration, type_name)
         declared_members = _declared_members(declaration, type_name)
@@ -1352,6 +1387,14 @@ def _check_declared_object_shape(
         signatures = declared_methods.get(method)
         if signatures is None:
             continue
+        floor = (arity_floors or {}).get(method)
+        if floor is not None and source_signature.variadic:
+            # The wrapper unshifts its own handle before calling native, so a
+            # native floor of N leaves N-1 arguments required on the JS side.
+            source_signature = replace(
+                source_signature,
+                required=max(source_signature.required, floor - 1),
+                total=max(source_signature.total, floor - 1))
         if not _has_call_shape(source_signature, signatures):
             errors.append(
                 "%s: %s.%s call shape is %s source args vs %s declared" %
@@ -1405,6 +1448,8 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
                  ", ".join(_render_signature_shape(item)
                            for item in signatures)))
 
+    arity_floors = _check_native_arity_floor(errors, spec)
+
     for type_name in spec.prototypes:
         if type_name in js_callables and \
                 declared_kinds.get(type_name) != "class":
@@ -1425,6 +1470,14 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
             signatures = declared_methods.get(method)
             if signatures is None:
                 continue
+            floor = arity_floors.get((type_name, method))
+            if floor is not None and source_signature.variadic:
+                # The wrapper unshifts its own handle before calling native,
+                # so a native floor of N leaves N-1 required on the JS side.
+                source_signature = replace(
+                    source_signature,
+                    required=max(source_signature.required, floor - 1),
+                    total=max(source_signature.total, floor - 1))
             if not _has_call_shape(source_signature, signatures):
                 errors.append(
                     "%s: %s.%s call shape is %s source args vs %s "
@@ -1539,7 +1592,10 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
                 (spec.name, constructor_name, member))
         _check_declared_object_shape(
             errors, spec.name, declaration, type_name,
-            source_methods, all_source_members - set(excluded))
+            source_methods, all_source_members - set(excluded),
+            {method: floor
+             for (owner, method), floor in arity_floors.items()
+             if owner == type_name})
 
     for handler_name, type_name in spec.proxy_handlers:
         try:

@@ -20,9 +20,16 @@ declare module 'movian/sqlite' {
         close(): void;
 
         /**
-         * Source: query method forwards arguments to native/sqlite.query.
+         * Source: query forwards its arguments to native/sqlite.query after
+         * `args.unshift(this.db)`, and the native side requires the handle
+         * PLUS a query string --
+         *     int argc = duk_get_top(ctx);
+         *     if(argc < 2) return DUK_RET_TYPE_ERROR;
+         * (src/ecmascript/es_sqlite.c) -- so `db.query()` with no argument is
+         * a guaranteed runtime TypeError, not a permitted variadic call. The
+         * SQL text is therefore a required prefix, not part of the rest.
          */
-        query(...args: unknown[]): void;
+        query(sql: string, ...args: unknown[]): void;
 
         /**
          * Source: step method calls native/sqlite.step.

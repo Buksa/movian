@@ -115,6 +115,10 @@ popup.notify('test'); // EXPECT_TS2554
 // movian/sqlite - wrong constructor parameter type
 const badDb = new sqlite.DB(42); // EXPECT_TS2345
 
+// movian/sqlite - query without SQL: native es_sqlite_query rejects argc < 2
+const emptyDb = new sqlite.DB('test.db');
+emptyDb.query(); // EXPECT_TS2555
+
 // movian/subtitles - wrong callback parameter
 subtitles.addProvider((req) => {
     req.addSubtitle(42, 'Test', 'en', 'vtt', 'test', 100); // EXPECT_TS2345
