@@ -114,6 +114,13 @@ class ModuleSpec:
     # requires a matching `argc < N` guard in the module's native_c file, so
     # claiming the wrong number fails.
     native_arity_floors: tuple[tuple[str, str, int, Path], ...] = ()
+    # A callback argument built in C and then extended in JS through
+    # `Object.create(...)`. The narrow parser only sees the JS-side `x.y = ...`
+    # assignments, so the inherited half of the surface was invisible and the
+    # "exact both directions" check certified a false exactness. The inherited
+    # names are read out of the C source (`es_set_*(ctx, -1, "name", ...)`),
+    # never hand-listed: (type, native_c).
+    inherited_native_members: tuple[tuple[str, Path], ...] = ()
 
 
 JS_MODULE_DIR = REPO_ROOT / "res" / "ecmascript" / "modules" / "movian"
@@ -188,6 +195,10 @@ MODULES = (
         (),
         object_prototypes=(("Node", "NodeProto"),),
         object_constructor_members=(("Node", "NodeProto"),),
+        # exports.parse returns an object literal; without this the declared
+        # ParsedDocument was connected to nothing and a phantom member on it
+        # stayed green in both the source-shape check and both fixtures.
+        returned_objects=(("parse", "ParsedDocument"),),
         audit_runtime_aliases=True,
     ),
     ModuleSpec(
@@ -226,6 +237,8 @@ MODULES = (
             ("getLanguages", "native/subtitle", "getLanguages"),
         ),
         local_objects=(("req", "SubtitleRequest"),),
+        inherited_native_members=(
+            ("SubtitleRequest", ECMASCRIPT_C_DIR / "es_subtitles.c"),),
         audit_runtime_aliases=True,
     ),
     ModuleSpec(
@@ -1342,6 +1355,15 @@ def _check_native_table(errors: list[str], spec: ModuleSpec,
                 (spec.name, name, nargs, declared_nargs))
 
 
+ES_SET_MEMBER_RE = re.compile(
+    r'\bes_set_[a-z]+\s*\(\s*ctx\s*,\s*-1\s*,\s*"([A-Za-z_][A-Za-z0-9_]*)"')
+
+
+def _native_object_members(native_c: Path) -> set[str]:
+    """Member names a C source attaches to the object at stack index -1."""
+    return set(ES_SET_MEMBER_RE.findall(_read(native_c)))
+
+
 def _check_native_arity_floor(
         errors: list[str], spec: "ModuleSpec") -> dict[tuple[str, str], int]:
     """Validate each declared native arity floor against the C source.
@@ -1608,11 +1630,14 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
             errors, spec.name, declaration, type_name,
             source_methods, source_members)
 
+    inherited = {name: _native_object_members(path)
+                 for name, path in spec.inherited_native_members}
     for object_name, type_name in spec.local_objects:
         _check_declared_object_shape(
             errors, spec.name, declaration, type_name,
             _javascript_object_methods(javascript, object_name),
-            _javascript_object_members(javascript, object_name))
+            _javascript_object_members(javascript, object_name)
+            | inherited.get(type_name, set()))
 
     actual_aliases = _javascript_exact_aliases(javascript)
     if spec.audit_runtime_aliases:

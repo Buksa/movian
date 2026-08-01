@@ -250,6 +250,18 @@ db.close();
 
 // movian/subtitles - callback
 subtitles.addProvider((req) => {
+    // the request inherits the native query object, so a provider can read
+    // the search metadata it was called with
+    if (req.title !== undefined) {
+        const searchTitle: string = req.title;
+        void searchTitle;
+    }
+    if (req.season !== undefined && req.episode !== undefined) {
+        const ep: number = req.season * 100 + req.episode;
+        void ep;
+    }
+    void req.imdb;
+    void req.opensubhash;
     req.addSubtitle('http://example.test/sub.vtt', 'Test', 'en', 'vtt', 'test', 100);
 });
 const langs = subtitles.getLanguages();

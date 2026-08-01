@@ -896,11 +896,12 @@ def cmd_generate(_args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_reference_dts_check() -> tuple[bool, str]:
+def _run_reference_dts_check(
+        extra_args: tuple[str, ...] = ()) -> tuple[bool, str]:
     """Run the source/fixture oracle without adding TypeScript as a build dep."""
     try:
         result = subprocess.run(
-            [sys.executable, str(REFERENCE_DTS_CHECKER)],
+            [sys.executable, str(REFERENCE_DTS_CHECKER), *extra_args],
             cwd=REPO_ROOT,
             text=True,
             stdout=subprocess.PIPE,
@@ -939,6 +940,16 @@ def cmd_check(args: argparse.Namespace) -> int:
         dts_ok = (_strip_dts_revision(fresh_dts)
                   == _strip_dts_revision(committed_dts))
     reference_dts_ok, reference_dts_output = _run_reference_dts_check()
+    # The default invocation carries the source-shape, member and alias
+    # enforcement; `--commonjs` is the separate inventory audit. Running only
+    # the first left the completeness guarantee outside every automated gate,
+    # so a CommonJS module added to the metadata artifact without a fixture, or
+    # a fixture deleted, failed nothing until somebody typed the flag by hand.
+    coverage_ok, coverage_output = _run_reference_dts_check(("--commonjs",))
+    reference_dts_ok = reference_dts_ok and coverage_ok
+    if coverage_output:
+        reference_dts_output = "\n".join(
+            part for part in (reference_dts_output, coverage_output) if part)
 
     if metadata_ok and dts_ok and reference_dts_ok:
         if args.json:
