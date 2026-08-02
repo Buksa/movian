@@ -283,9 +283,13 @@ scrobbler.onresume = (data, prop, origin) => {};
 scrobbler.onstop = (data, prop, origin) => {};
 scrobbler.destroy();
 
-// movian/xml - callable export
-const xmlData = xml.parse('<root><item>test</item></root>');
-const xmlProxy = xml.htsmsg(xmlData);
+// movian/xml - callable export. `htsmsg()` is NOT called on the result of
+// `parse()`: it expects the native htsmsg handle that APIs such as
+// native/io.xmlrpc return, and feeding it a proxy makes the first property
+// read hand that proxy to native/htsmsg.get, where es_get_native_obj rejects
+// it for having no htsmsg finalizer. The proxy surface is exercised through
+// parse's own result instead.
+const xmlProxy = xml.parse('<root><item>test</item></root>');
 
 // movian/xmlrpc - two required arguments plus a variadic tail
 xmlrpc.call(

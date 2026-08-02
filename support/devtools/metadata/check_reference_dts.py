@@ -101,6 +101,10 @@ class ModuleSpec:
     # Local objects whose assigned methods and fields form an exact interface:
     # (object, interface).
     local_objects: tuple[tuple[str, str], ...] = ()
+    # `var NAME = { ... }` object literals handed to a callback. Distinct from
+    # local_objects, which reads `NAME.x = ...` assignments: a literal's
+    # members never appear that way, so such a type had nothing comparing it.
+    local_object_literals: tuple[tuple[str, str], ...] = ()
     # Modules with no source-backed nested class/interface surface.
     forbid_nested_types: bool = False
     # Opt-in inventory audit for issue #137 modules. Every native property
@@ -208,6 +212,12 @@ MODULES = (
         # stayed green in both the source-shape check and both fixtures.
         returned_objects=(("parse", "ParsedDocument"),),
         audit_runtime_aliases=True,
+        # Without the table none of the native/gumbo calls behind these
+        # shapes were checked at all.
+        native_c=ECMASCRIPT_C_DIR / "es_gumbo.c",
+        native_table="fnlist_gumbo",
+        native_module="gumbo",
+        native_kind="native-calls",
     ),
     ModuleSpec(
         "movian/itemhook",
@@ -216,6 +226,10 @@ MODULES = (
         (),
         returned_objects=(("create", "ItemHookHandle"),),
         audit_runtime_aliases=True,
+        # The callback argument was disconnected: a phantom method on
+        # NavigationObject stayed green because only the create handle
+        # was compared.
+        local_object_literals=(("navobj", "NavigationObject"),),
     ),
     ModuleSpec(
         "movian/popup",
@@ -1816,6 +1830,16 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
                 "function" % (spec.name, type_name, builder, path.name))
             continue
         inherited[type_name] = members
+    for object_name, type_name in spec.local_object_literals:
+        try:
+            methods, members = _object_literal_shape(
+                _assigned_object_literal(javascript, object_name))
+        except ValueError as error:
+            errors.append("%s: %s" % (spec.name, error))
+            continue
+        _check_declared_object_shape(
+            errors, spec.name, declaration, type_name, methods, members)
+
     for object_name, type_name in spec.local_objects:
         _check_declared_object_shape(
             errors, spec.name, declaration, type_name,

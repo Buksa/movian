@@ -152,6 +152,12 @@ url.format(42); // EXPECT_TS2345
 url.parse(42); // EXPECT_TS2345
 url.resolve(42, 'test'); // EXPECT_TS2345
 
+// websocket - a plain array structurally resembles a buffer but is not one:
+// duk_get_buffer_data does not recognise it, so the value would go out
+// stringified as a text frame. The brand must keep it out of the binary branch.
+const brandWs = new websocket.w3cwebsocket('wss://example.test');
+brandWs.send([1, 2, 3]); // EXPECT_TS2345
+
 // websocket - wrong constructor parameter
 const badWs = new websocket.w3cwebsocket(42); // EXPECT_TS2345
 

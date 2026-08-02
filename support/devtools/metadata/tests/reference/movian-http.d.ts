@@ -5,12 +5,23 @@
  * Sources: res/ecmascript/modules/movian/http.js and
  * src/ecmascript/es_io.c (es_http_req/httpReq).
  */
+declare const duktapeBufferBrand: unique symbol;
+
 declare module 'movian/http' {
     /**
      * Source: es_http_push_result() uses duk_push_fixed_buffer; the documented
      * Duktape 1.8 runtime contract exposes indexed bytes, length and toString.
      */
     interface DuktapeBuffer {
+        /**
+         * Nominal brand. Without it the interface is purely structural, so an
+         * ordinary `number[]` satisfies it and type-checks anywhere a native
+         * buffer is expected -- including websocket.send's binary branch,
+         * where duk_get_buffer_data does not recognise an array and the value
+         * silently goes out as a stringified text frame. Only values that
+         * really come from the buffer-returning natives should match.
+         */
+        readonly [duktapeBufferBrand]: true;
         readonly length: number;
         [index: number]: number;
         toString(): string;
