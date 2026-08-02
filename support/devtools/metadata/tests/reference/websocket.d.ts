@@ -46,9 +46,13 @@ declare module 'websocket' {
          * so a buffer argument is a first-class binary send, not an error.
          * That includes a plain Duktape buffer, which is what
          * fs.readFileSync and movian/http response bodies hand back --
-         * duk_get_buffer_data accepts both it and an ArrayBuffer view.
+         * duk_get_buffer_data accepts a plain buffer, an ArrayBuffer, and any
+         * ArrayBuffer *view* -- Uint8Array, DataView and friends -- returning
+         * the validated backing slice, so all of them travel as opcode-2.
          */
-        send(d: string | ArrayBuffer | DuktapeBuffer): void;
+        send(
+            d: string | ArrayBuffer | ArrayBufferView | DuktapeBuffer
+        ): void;
 
         /**
          * Source: close method calls Core.resourceDestroy on the socket.

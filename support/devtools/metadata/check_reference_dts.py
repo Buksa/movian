@@ -1273,6 +1273,11 @@ def _native_functions(path: Path, table_name: str) -> dict[str, int]:
     return entries
 
 
+ANY_NATIVE_ALIAS_RE = re.compile(
+    r"(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
+    r"require\(\s*['\"]native/[^'\"]+['\"]\s*\)")
+
+
 def _native_call_sites(javascript: str,
                        native_module: str) -> tuple[str, list[tuple[str, int]]]:
     """Masked source plus (native name, opening-paren index) call sites."""
@@ -1285,12 +1290,29 @@ def _native_call_sites(javascript: str,
         r"\b([A-Za-z_$][A-Za-z0-9_$]*)\b)"
         r"\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(" % module)
     masked = _mask_js(javascript, mask_strings=False)
-    aliases = {match.group(1) for match in alias_re.finditer(masked)}
+    # An alias binds only from its own declaration onward. Collecting them
+    # file-wide let one wrapper's `var fs = require('native/fs')` vouch for a
+    # sibling wrapper that had been retargeted to a different module, so the
+    # registration protected nothing for independently scoped functions.
+    binds = [(match.start(), match.group(1))
+             for match in alias_re.finditer(masked)]
+    rebinds = [(match.start(), match.group(1))
+               for match in ANY_NATIVE_ALIAS_RE.finditer(masked)]
     sites: list[tuple[str, int]] = []
     for match in call_re.finditer(masked):
         receiver = match.group(1)
-        if receiver is None or receiver in aliases:
+        if receiver is None:
             sites.append((match.group(2), match.end() - 1))
+            continue
+        prior = [pos for pos, name in binds
+                 if name == receiver and pos < match.start()]
+        if not prior:
+            continue
+        shadow = [pos for pos, name in rebinds
+                  if name == receiver and prior[-1] < pos < match.start()]
+        if shadow:
+            continue
+        sites.append((match.group(2), match.end() - 1))
     return masked, sites
 
 
@@ -1514,6 +1536,9 @@ def _wrapper_native_calls(javascript: str, type_name: str, method: str,
         body, _ = _balanced_content(javascript, open_index, "{", "}")
     except ValueError:
         return None
+    # Mask first: a commented-out copy of the old call would otherwise count
+    # as arity evidence while the wrapper really invokes something else.
+    body = _mask_js(body, mask_strings=False)
     calls = WRAPPER_NATIVE_CALL_RE.findall(body)
     if native_module is None:
         return {member for _receiver, member in calls}
@@ -1525,6 +1550,29 @@ def _wrapper_native_calls(javascript: str, type_name: str, method: str,
             re.escape(native_module), javascript)
     }
     return {member for receiver, member in calls if receiver in aliases}
+
+
+NATIVE_REQUIRE_RE = re.compile(
+    r"require\(\s*['\"]native/([A-Za-z_][A-Za-z0-9_]*)['\"]\s*\)")
+
+
+def _check_native_dependencies(
+        errors: list[str], spec: "ModuleSpec", native_modules: set[str]
+) -> None:
+    """Every `require("native/X")` in a module must name a real native module.
+
+    Registering one native table per spec is not enough on its own: a wrapper
+    can be retargeted to a module that does not exist and the table check then
+    simply sees fewer calls for the module it was configured with, which is
+    silently green. Checking the dependency names catches that directly, and
+    covers the modules whose native calls no spec had registered at all.
+    """
+    for module in sorted(set(NATIVE_REQUIRE_RE.findall(
+            _mask_js(_read(spec.javascript), mask_strings=False)))):
+        if module not in native_modules:
+            errors.append(
+                "%s: requires native/%s, which is not a native module in "
+                "generated/movian-metadata.json" % (spec.name, module))
 
 
 def _check_native_arity_floor(
@@ -2036,7 +2084,17 @@ def _check_plugin_global(errors: list[str]) -> None:
 
 def check_source_shapes() -> tuple[list[str], dict[str, set[str]]]:
     errors: list[str] = []
+    try:
+        native_modules = {
+            module["name"][len("native/"):]
+            for module in _load_metadata()["js"]["modules"]
+            if module.get("kind") == "native"
+        }
+    except (OSError, ValueError, KeyError):
+        native_modules = set()
     for spec in MODULES:
+        if native_modules:
+            _check_native_dependencies(errors, spec, native_modules)
         try:
             _check_module(errors, spec)
         except ValueError as error:

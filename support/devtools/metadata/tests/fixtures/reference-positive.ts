@@ -251,7 +251,15 @@ popup.notify('Timed notification', 3000);
 // movian/sqlite - constructor, variadic method, methods, and accessors
 const db = new sqlite.DB('test.db');
 db.query('SELECT * FROM test WHERE id = ?', 1);
-const dbRow: unknown = db.step();
+const dbRow = db.step();
+if (dbRow !== null) {
+    // columns holding SQL NULL are omitted, so a read is guarded
+    const dbCell: string | number | undefined = dbRow.id;
+    void dbCell;
+}
+const wsTyped = new websocket.w3cwebsocket('wss://example.test');
+wsTyped.send(new Uint8Array([1, 2, 3]));
+wsTyped.send(new DataView(new ArrayBuffer(4)));
 const lastRowId: number = db.lastRowId;
 const lastErrorString: string = db.lastErrorString;
 const lastErrorCode: number = db.lastErrorCode;

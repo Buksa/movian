@@ -5,8 +5,6 @@
  * Sources: res/ecmascript/modules/movian/http.js and
  * src/ecmascript/es_io.c (es_http_req/httpReq).
  */
-declare const duktapeBufferBrand: unique symbol;
-
 declare module 'movian/http' {
     /**
      * Source: es_http_push_result() uses duk_push_fixed_buffer; the documented
@@ -14,17 +12,31 @@ declare module 'movian/http' {
      */
     interface DuktapeBuffer {
         /**
-         * Nominal brand. Without it the interface is purely structural, so an
+         * Nominal brand, uninhabitable on purpose. `never` cannot be supplied
+         * by any expression, so no object literal can forge one, and the
+         * marker lives inside the ambient module rather than declaring a
+         * global the runtime does not have. Only the natives whose declared
+         * return type is DuktapeBuffer produce values that satisfy it.
+         *
+         * Without it the interface is purely structural, so an
          * ordinary `number[]` satisfies it and type-checks anywhere a native
          * buffer is expected -- including websocket.send's binary branch,
          * where duk_get_buffer_data does not recognise an array and the value
          * silently goes out as a stringified text frame. Only values that
          * really come from the buffer-returning natives should match.
          */
-        readonly [duktapeBufferBrand]: true;
+        readonly __duktapeBuffer__: never;
         readonly length: number;
         [index: number]: number;
         toString(): string;
+
+        /**
+         * Source: fs.js calls `buf.valueOf()` before passing the value to
+         * native/fs.read, so the raw view is part of the supported surface;
+         * without it TypeScript falls back to Object.valueOf(): Object and
+         * the result cannot be handed back to a buffer-taking API.
+         */
+        valueOf(): DuktapeBuffer;
     }
 
     /** Source: es_http_req() reads precisely these control-object fields. */
