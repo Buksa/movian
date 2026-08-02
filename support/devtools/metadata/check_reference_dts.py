@@ -232,6 +232,10 @@ MODULES = (
         ("DB",),
         exact_member_types=("DB",),
         private_members=(("DB", ("db",)),),
+        native_c=ECMASCRIPT_C_DIR / "es_sqlite.c",
+        native_table="fnlist_sqlite",
+        native_module="sqlite",
+        native_kind="native-calls",
         audit_runtime_aliases=True,
         native_arity_floors=(
             ("DB", "query", "query", 2,
@@ -284,6 +288,13 @@ MODULES = (
         (),
         forbid_nested_types=True,
         audit_runtime_aliases=True,
+        # The movian/store resolver only happens to cover open, read,
+        # write and fsize; readdir/unlink/mkdirs/rmdir had nothing
+        # validating them.
+        native_c=ECMASCRIPT_C_DIR / "es_fs.c",
+        native_table="fnlist_fs",
+        native_module="fs",
+        native_kind="native-calls",
     ),
     ModuleSpec(
         "http",
@@ -1016,7 +1027,11 @@ def _proxy_handler_shape(
         if function_return is not None:
             methods[branch.group(2)] = _javascript_signature_at_paren(
                 segment, function_return.end() - 1)
-        elif not re.search(r"\breturn\s+undefined\b", segment):
+        else:
+            # An explicit `return undefined` branch is still a named member of
+            # the proxy surface, and a source-definite one: dropping it meant
+            # the accurate declaration was rejected as a phantom while leaving
+            # the property typed only through the index signature.
             members.add(branch.group(2))
     return methods, members
 
@@ -1458,13 +1473,21 @@ def _check_native_returned_objects(
 
 
 WRAPPER_NATIVE_CALL_RE = re.compile(
-    r"\b[A-Za-z_$][A-Za-z0-9_$]*\.([A-Za-z_$][A-Za-z0-9_$]*)"
+    r"\b([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)"
     r"\s*(?:\.\s*(?:apply|call)\s*)?\(")
 
 
-def _wrapper_native_calls(javascript: str, type_name: str,
-                          method: str) -> set[str] | None:
-    """Native member names the JS body of `type.method` invokes."""
+def _wrapper_native_calls(javascript: str, type_name: str, method: str,
+                          native_module: str | None = None
+                          ) -> set[str] | None:
+    """Native member names the JS body of `type.method` invokes.
+
+    When `native_module` is given, only calls whose receiver is an alias bound
+    to `require("native/<module>")` count. Without that the member name alone
+    would satisfy the check, so re-pointing the module behind the alias --
+    native/sqlite to native/nope -- would keep a floor certified against the
+    old C function.
+    """
     head = re.search(
         r"\b%s\.prototype\.%s\s*=\s*function" %
         (re.escape(type_name), re.escape(method)), javascript)
@@ -1477,7 +1500,17 @@ def _wrapper_native_calls(javascript: str, type_name: str,
         body, _ = _balanced_content(javascript, open_index, "{", "}")
     except ValueError:
         return None
-    return set(WRAPPER_NATIVE_CALL_RE.findall(body))
+    calls = WRAPPER_NATIVE_CALL_RE.findall(body)
+    if native_module is None:
+        return {member for _receiver, member in calls}
+    aliases = {
+        match.group(1)
+        for match in re.finditer(
+            r"\b(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
+            r"require\(\s*['\"]native/%s['\"]\s*\)" %
+            re.escape(native_module), javascript)
+    }
+    return {member for receiver, member in calls if receiver in aliases}
 
 
 def _check_native_arity_floor(
@@ -1498,7 +1531,8 @@ def _check_native_arity_floor(
         # the method body and require it to actually call that native function.
         # Otherwise retargeting `sqlite.query.apply(...)` to another native
         # would leave the floor certified against the old callee.
-        called = _wrapper_native_calls(javascript, type_name, method)
+        called = _wrapper_native_calls(
+            javascript, type_name, method, spec.native_module)
         if called is None:
             errors.append(
                 "%s: %s.%s claims a native arity floor, but no wrapper body "

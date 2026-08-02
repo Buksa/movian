@@ -218,6 +218,13 @@ if (htmlEmpty.root.textContent !== undefined) {
     void htmlNarrowed;
 }
 const htmlAttribute = htmlDoc.root.attributes.getNamedItem('class');
+// nodeAttributes really returns an array, so the inherited surface must stay
+// usable — this is what protects `extends Array<Attr>` from silently going away
+const htmlAttrNames: string[] = htmlDoc.root.attributes.map(a => a.name);
+htmlDoc.root.attributes.forEach(a => { void a.value; });
+const htmlAttrCount: number = htmlDoc.root.attributes.length;
+void htmlAttrNames;
+void htmlAttrCount;
 const htmlById = htmlDoc.root.getElementById('test');
 const htmlByClass = htmlDoc.root.getElementByClassName('reference');
 const htmlByClasses = htmlDoc.root.getElementsByClassName('reference');

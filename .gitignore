@@ -24,3 +24,6 @@ xcuserdata/
 InfoPlist.h
 __pycache__/
 *.pyc
+
+# Transient LSP buffer snapshots (Server._write_buffer_snapshot)
+.movian-lsp-*

@@ -3,6 +3,25 @@
  *
  * This is a generator test oracle, not a shipped declaration package.
  * Source: res/ecmascript/modules/fs.js, with native/fs calls.
+ *
+ * CORPUS CONVENTION — coercion is not contract.
+ *
+ * Almost every native entry point reads its arguments with duk_to_string,
+ * duk_safe_to_string or duk_to_buffer, all of which coerce anything. Taken
+ * literally that would make every string parameter in this corpus `unknown`,
+ * and an oracle that accepts everything calibrates nothing. So a declaration
+ * states the type a caller is meant to pass, not the full set Duktape will
+ * silently convert.
+ *
+ * The line is drawn at whether the coercion serves a distinct use case:
+ *
+ *   declared   a Duktape buffer for writeFileSync/readFileSync (file copy)
+ *              and for websocket send (a real binary frame, opcode 2)
+ *   not        number/boolean/null reaching a string parameter, where the
+ *              runtime merely stringifies and no caller wants that typed
+ *
+ * A negative fixture case for such a parameter asserts what TypeScript does
+ * with the declared type. It is not a claim that the runtime throws.
  */
 declare module 'fs' {
     import { DuktapeBuffer } from 'movian/http';

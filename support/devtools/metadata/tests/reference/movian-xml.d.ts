@@ -35,6 +35,13 @@ declare module 'movian/xml' {
         valueOf(): undefined;
 
         /**
+         * Source: the handler has an explicit `if(name == 'toJSON') return
+         * undefined;` branch, so the property is source-definitely undefined
+         * rather than whatever the index signature would otherwise imply.
+         */
+        readonly toJSON: undefined;
+
+        /**
          * Source: explicit dump branch calls native/htsmsg.print.
          */
         dump(): void;

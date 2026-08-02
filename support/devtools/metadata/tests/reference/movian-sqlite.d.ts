@@ -9,10 +9,12 @@ declare module 'movian/sqlite' {
      * Source: es_sqlite_step pushes null when no statement remains, otherwise
      * an object whose column values are pushed with duk_push_string or
      * duk_push_number; NULL and unsupported column types are omitted entirely
-     * rather than emitted as another kind.
+     * rather than emitted as another kind -- which is exactly why the indexed
+     * value includes undefined: reading such a column, or any absent name,
+     * yields undefined and must be guarded before use.
      */
     interface SqliteRow {
-        [column: string]: string | number;
+        [column: string]: string | number | undefined;
     }
 
     /**
