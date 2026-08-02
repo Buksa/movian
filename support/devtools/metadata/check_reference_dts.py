@@ -115,6 +115,12 @@ class ModuleSpec:
     forbid_nested_types: bool = False
     # Opt-in inventory audit for issue #137 modules. Every native property
     # alias and exports.__proto__ re-export must be registered exactly.
+    # Modules this one is expected to require. Membership in the artifact is
+    # not enough by itself: retargeting a wrapper to another EXISTING module
+    # passed, because the one-directional table check simply saw no calls for
+    # the configured table. Declaring the expected set makes such a swap an
+    # error rather than a silence.
+    requires: tuple[str, ...] = ()
     audit_runtime_aliases: bool = False
     # A fully-variadic JS wrapper whose native callee refuses short calls.
     # (type, method, native argc floor): the wrapper unshifts its handle, so a
@@ -154,6 +160,7 @@ MODULES = (
         native_table="fnlist_route",
         native_module="route",
         native_kind="native-calls",
+        requires=("movian/prop", "movian/settings", "native/hook", "native/metadata", "native/route"),
     ),
     ModuleSpec(
         "movian/prop",
@@ -163,6 +170,7 @@ MODULES = (
         native_c=ECMASCRIPT_C_DIR / "es_prop.c",
         native_table="fnlist_prop",
         native_kind="wrapped-exports",
+        requires=("native/prop",),
     ),
     ModuleSpec(
         "movian/http",
@@ -173,6 +181,7 @@ MODULES = (
         native_table="fnlist_io",
         native_module="io",
         native_kind="native-calls",
+        requires=("native/io", "native/string"),
     ),
     ModuleSpec(
         "movian/settings",
@@ -188,6 +197,7 @@ MODULES = (
             ("globalSettings", ("getvalue", "setvalue")),
             ("kvstoreSettings", ("getvalue", "setvalue")),
         ),
+        requires=("movian/prop", "movian/store", "native/fs", "native/kvstore"),
     ),
     ModuleSpec(
         "movian/service",
@@ -199,12 +209,14 @@ MODULES = (
         native_module="service",
         native_kind="native-calls-exact",
         exact_member_types=("Service",),
+        requires=("native/service",),
     ),
     ModuleSpec(
         "movian/store",
         REFERENCE_DIR / "movian-store.d.ts",
         JS_MODULE_DIR / "store.js",
         (),
+        requires=("fs", "native/fs"),
     ),
     ModuleSpec(
         "movian/html",
@@ -217,6 +229,7 @@ MODULES = (
         # ParsedDocument was connected to nothing and a phantom member on it
         # stayed green in both the source-shape check and both fixtures.
         returned_objects=(("parse", "ParsedDocument"),),
+        requires=("native/gumbo",),
         audit_runtime_aliases=True,
         # Without the table none of the native/gumbo calls behind these
         # shapes were checked at all.
@@ -231,6 +244,7 @@ MODULES = (
         JS_MODULE_DIR / "itemhook.js",
         (),
         returned_objects=(("create", "ItemHookHandle"),),
+        requires=("movian/prop",),
         audit_runtime_aliases=True,
         # The callback argument was disconnected: a phantom method on
         # NavigationObject stayed green because only the create handle
@@ -244,6 +258,7 @@ MODULES = (
         JS_MODULE_DIR / "popup.js",
         (),
         exact_aliases=(("notify", "native/popup", "notify"),),
+        requires=("native/popup",),
         audit_runtime_aliases=True,
     ),
     ModuleSpec(
@@ -257,6 +272,7 @@ MODULES = (
         native_table="fnlist_sqlite",
         native_module="sqlite",
         native_kind="native-calls",
+        requires=("native/sqlite",),
         audit_runtime_aliases=True,
         native_arity_floors=(
             ("DB", "query", "query", 2,
@@ -274,6 +290,7 @@ MODULES = (
         inherited_native_members=(
             ("SubtitleRequest", "esp_query",
              ECMASCRIPT_C_DIR / "es_subtitles.c"),),
+        requires=("native/subtitle",),
         audit_runtime_aliases=True,
     ),
     ModuleSpec(
@@ -284,6 +301,7 @@ MODULES = (
         instance_references=(
             ("VideoScrobbler", ("paused", "hook")),
         ),
+        requires=("movian/prop", "native/hook"),
         audit_runtime_aliases=True,
     ),
     ModuleSpec(
@@ -292,6 +310,7 @@ MODULES = (
         JS_MODULE_DIR / "xml.js",
         (),
         proxy_handlers=(("htsmsgHandler", "XmlProxy"),),
+        requires=("native/htsmsg",),
         audit_runtime_aliases=True,
     ),
     ModuleSpec(
@@ -300,6 +319,7 @@ MODULES = (
         JS_MODULE_DIR / "xmlrpc.js",
         (),
         forbid_nested_types=True,
+        requires=("movian/xml", "native/io"),
         audit_runtime_aliases=True,
     ),
     ModuleSpec(
@@ -308,6 +328,7 @@ MODULES = (
         TOPLEVEL_MODULE_DIR / "fs.js",
         (),
         forbid_nested_types=True,
+        requires=("native/fs",),
         audit_runtime_aliases=True,
         # The movian/store resolver only happens to cover open, read,
         # write and fsize; readdir/unlink/mkdirs/rmdir had nothing
@@ -326,6 +347,7 @@ MODULES = (
             ("Request", "HttpRequest", ("onResponse", "onError")),
             ("Response", "HttpResponse", ("onData", "onEnd")),
         ),
+        requires=("native/io", "native/string", "url"),
         audit_runtime_aliases=True,
     ),
     ModuleSpec(
@@ -347,6 +369,7 @@ MODULES = (
         exact_aliases=(
             ("parse", "native/string", "queryStringSplit"),
         ),
+        requires=("native/string",),
         audit_runtime_aliases=True,
     ),
     ModuleSpec(
@@ -366,6 +389,7 @@ MODULES = (
         native_returned_objects=(
             ("ParsedUrl", "parseURL",
              ECMASCRIPT_C_DIR / "es_string.c"),),
+        requires=("native/string",),
         audit_runtime_aliases=True,
     ),
     ModuleSpec(
@@ -381,6 +405,7 @@ MODULES = (
         native_table="fnlist_websocket",
         native_module="websocket",
         native_kind="native-calls",
+        requires=("native/websocket",),
         audit_runtime_aliases=True,
     ),
 )
@@ -1575,11 +1600,24 @@ def _wrapper_native_calls(javascript: str, type_name: str, method: str,
     # wrapper body: a local `var sqlite = require('native/fs')` inside the
     # method shadows the file's top-level alias, and accepting any matching
     # alias anywhere in the file certified the floor against the wrong module.
+    # A formal parameter shadows an outer alias exactly as a local declaration
+    # does, so `function(sqlite)` must not inherit the file's `native/sqlite`
+    # binding. Any lexical declaration of the name counts, whether or not it
+    # binds a require.
+    try:
+        parameters = {
+            name.strip()
+            for name in _split_parameters(_balanced_content(
+                javascript, javascript.find("(", head.end()), "(", ")")[0])
+            if name.strip()
+        }
+    except ValueError:
+        parameters = set()
     scopes = body + "\n" + javascript[:open_index]
-    bound: dict[str, str] = {}
+    bound: dict[str, str | None] = {name: None for name in parameters}
     for match in re.finditer(
-            r"\b(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
-            r"require\(\s*['\"]([^'\"]+)['\"]\s*\)", scopes):
+            r"\b(?:var|let|const|function)\s+([A-Za-z_$][A-Za-z0-9_$]*)"
+            r"\s*(?:=\s*require\(\s*['\"]([^'\"]+)['\"]\s*\))?", scopes):
         bound.setdefault(match.group(1), match.group(2))
     wanted = "native/%s" % native_module
     return {member for receiver, member in calls
@@ -1650,11 +1688,17 @@ def _check_native_dependencies(
                 errors.append(
                     "%s: requires %s, which is not a native module in "
                     "generated/movian-metadata.json" % (spec.name, target))
-            continue
-        if target not in known_modules:
+                continue
+        elif target not in known_modules:
             errors.append(
                 "%s: requires %s, which is not a module in "
                 "generated/movian-metadata.json" % (spec.name, target))
+            continue
+        if spec.requires and target not in spec.requires:
+            errors.append(
+                "%s: requires %s, which is not among its declared "
+                "dependencies (%s)" %
+                (spec.name, target, ", ".join(sorted(spec.requires))))
 
 
 def _check_native_arity_floor(
