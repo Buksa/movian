@@ -282,13 +282,21 @@ subtitles.addProvider((req) => {
     req.addSubtitle('http://example.test/sub.vtt', 'Test', 'en', 'vtt', 'test', 100);
 });
 const langs = subtitles.getLanguages();
+const firstLang: string = langs[0];
+void firstLang;
 
 // movian/videoscrobbler - constructor with callbacks
 const scrobbler = new videoscrobbler.VideoScrobbler();
-scrobbler.onstart = (data, prop, origin) => {};
-scrobbler.onpause = (data, prop, origin) => {};
-scrobbler.onresume = (data, prop, origin) => {};
-scrobbler.onstop = (data, prop, origin) => {};
+scrobbler.onstart = (data, prop, origin) => {
+    // es_push_htsmsg_field emits string, number, or undefined per field
+    const scrobbleTitle: string | number | undefined = data.title;
+    void scrobbleTitle;
+    void prop;
+    void origin;
+};
+scrobbler.onpause = (data, prop, origin) => { void data.season; };
+scrobbler.onresume = (data, prop, origin) => { void data.episode; };
+scrobbler.onstop = (data, prop, origin) => { void data.duration; };
 scrobbler.destroy();
 
 // movian/xml - callable export. `htsmsg()` is NOT called on the result of
@@ -298,6 +306,13 @@ scrobbler.destroy();
 // it for having no htsmsg finalizer. The proxy surface is exercised through
 // parse's own result instead.
 const xmlProxy = xml.parse('<root><item>test</item></root>');
+const xmlNodes: (xml.XmlProxy | string | number | undefined)[] =
+    xmlProxy.filterNodes('item');
+const xmlValue: undefined = xmlProxy.valueOf();
+const xmlJson: undefined = xmlProxy.toJSON;
+void xmlNodes;
+void xmlValue;
+void xmlJson;
 
 // movian/xmlrpc - two required arguments plus a variadic tail
 xmlrpc.call(
@@ -348,7 +363,9 @@ httpReq.on('response', (response) => {
     });
 });
 httpReq.on('error', (error) => {
-    void error;
+    // es_io.c pushes ehr_errbuf with duk_push_string
+    const errorText: string = error.toUpperCase();
+    void errorText;
 });
 httpReq.end();
 const requestHeaders: unknown[] = httpReq.headers;
@@ -363,6 +380,8 @@ httpsReq.on('response', (response) => {
 
 // querystring - callable export
 const parsed = querystring.parse('key=value&test=123');
+const parsedValue: string = parsed.key;
+void parsedValue;
 
 // url - callable with options object
 const urlObj = { protocol: 'http:', pathname: '/test', query: { key: 'value' } };
@@ -375,10 +394,19 @@ const parsedPath: string = parsedUrl.path;
 void parsedHost;
 void parsedPath;
 const resolved = url.resolve('http://example.test/', 'test');
+// parseURL emits port with duk_push_int, and only when it is present
+if (parsedUrl.port !== undefined) {
+    const parsedPort: number = parsedUrl.port;
+    void parsedPort;
+}
 
 // websocket - a Duktape buffer from fs or http is a valid binary send
 const wsBinary = new websocket.w3cwebsocket('wss://example.test');
-wsBinary.send(fs.readFileSync('/tmp/reference'));
+const referenceBuffer = fs.readFileSync('/tmp/reference');
+wsBinary.send(referenceBuffer);
+// fs.js calls buf.valueOf() before native/fs.read, so the raw view round-trips
+const rawView: http.DuktapeBuffer = referenceBuffer.valueOf();
+wsBinary.send(rawView);
 wsBinary.oninput = (data) => {
     if (typeof data.data === 'string') {
         const text: string = data.data;

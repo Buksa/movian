@@ -105,6 +105,12 @@ class ModuleSpec:
     # local_objects, which reads `NAME.x = ...` assignments: a literal's
     # members never appear that way, so such a type had nothing comparing it.
     local_object_literals: tuple[tuple[str, str], ...] = ()
+    # Interfaces describing an object the module CONSUMES rather than builds:
+    # (type, exported function, parameter). The members are the `param.x`
+    # reads inside that function, so a declared option the code never looks at
+    # is a phantom -- which is how `path` survived on the url format input.
+    consumed_objects: tuple[
+        tuple[str, str, str, tuple[str, ...]], ...] = ()
     # Modules with no source-backed nested class/interface surface.
     forbid_nested_types: bool = False
     # Opt-in inventory audit for issue #137 modules. Every native property
@@ -230,6 +236,7 @@ MODULES = (
         # NavigationObject stayed green because only the create handle
         # was compared.
         local_object_literals=(("navobj", "NavigationObject"),),
+        consumed_objects=(("ItemHookConfig", "create", "conf", ()),),
     ),
     ModuleSpec(
         "movian/popup",
@@ -351,6 +358,11 @@ MODULES = (
             ("parse", "native/string", "parseURL"),
             ("resolve", "native/string", "resolveURL"),
         ),
+        # `port` is read by format -- and only through the broken
+        # `':' + port` branch -- so it is deliberately NOT offered on the
+        # input type. Excluded here rather than silently tolerated, so the
+        # exception is visible instead of looking like an oversight.
+        consumed_objects=(("UrlObject", "format", "d", ("port",)),),
         native_returned_objects=(
             ("ParsedUrl", "parseURL",
              ECMASCRIPT_C_DIR / "es_string.c"),),
@@ -1273,9 +1285,12 @@ def _native_functions(path: Path, table_name: str) -> dict[str, int]:
     return entries
 
 
-ANY_NATIVE_ALIAS_RE = re.compile(
-    r"(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
-    r"require\(\s*['\"]native/[^'\"]+['\"]\s*\)")
+# Any redeclaration of the identifier shadows an earlier native alias, not
+# only another `require("native/...")`. Tracking only native rebindings let a
+# later `require("fs")` -- or any other assignment -- leave the earlier native
+# binding effective, so a retargeted wrapper kept borrowing its sibling's.
+ANY_ALIAS_REBIND_RE = re.compile(
+    r"(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=")
 
 
 def _native_call_sites(javascript: str,
@@ -1297,7 +1312,7 @@ def _native_call_sites(javascript: str,
     binds = [(match.start(), match.group(1))
              for match in alias_re.finditer(masked)]
     rebinds = [(match.start(), match.group(1))
-               for match in ANY_NATIVE_ALIAS_RE.finditer(masked)]
+               for match in ANY_ALIAS_REBIND_RE.finditer(masked)]
     sites: list[tuple[str, int]] = []
     for match in call_re.finditer(masked):
         receiver = match.group(1)
@@ -1456,7 +1471,21 @@ def _native_object_members(native_c: Path, builder: str) -> set[str] | None:
     body = _plain_c_function_body(_read(native_c), builder)
     if body is None:
         return None
-    return set(ES_SET_MEMBER_RE.findall(body))
+    return set(ES_SET_MEMBER_RE.findall(_mask_c(body)))
+
+
+C_COMMENT_RE = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
+
+
+def _mask_c(text: str) -> str:
+    """Blank out C comments, preserving offsets and line structure.
+
+    The member scans below take a commented-out statement as runtime evidence
+    otherwise: deleting a real `duk_put_prop_string(...)` while leaving its
+    text in a comment kept the property certified.
+    """
+    return C_COMMENT_RE.sub(
+        lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
 
 
 def _native_c_function_body(text: str, native_name: str) -> str | None:
@@ -1498,7 +1527,7 @@ def _check_native_returned_objects(
                 "of that name" %
                 (spec.name, type_name, native_name, native_c.name))
             continue
-        source = set(NATIVE_PUT_PROP_RE.findall(body))
+        source = set(NATIVE_PUT_PROP_RE.findall(_mask_c(body)))
         try:
             declared = _declared_members(declaration, type_name)
         except ValueError as error:
@@ -1542,23 +1571,63 @@ def _wrapper_native_calls(javascript: str, type_name: str, method: str,
     calls = WRAPPER_NATIVE_CALL_RE.findall(body)
     if native_module is None:
         return {member for _receiver, member in calls}
-    aliases = {
-        match.group(1)
-        for match in re.finditer(
+    # Resolve the receiver against the nearest binding visible from the
+    # wrapper body: a local `var sqlite = require('native/fs')` inside the
+    # method shadows the file's top-level alias, and accepting any matching
+    # alias anywhere in the file certified the floor against the wrong module.
+    scopes = body + "\n" + javascript[:open_index]
+    bound: dict[str, str] = {}
+    for match in re.finditer(
             r"\b(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
-            r"require\(\s*['\"]native/%s['\"]\s*\)" %
-            re.escape(native_module), javascript)
-    }
-    return {member for receiver, member in calls if receiver in aliases}
+            r"require\(\s*['\"]([^'\"]+)['\"]\s*\)", scopes):
+        bound.setdefault(match.group(1), match.group(2))
+    wanted = "native/%s" % native_module
+    return {member for receiver, member in calls
+            if bound.get(receiver) == wanted}
 
 
-NATIVE_REQUIRE_RE = re.compile(
-    r"require\(\s*['\"]native/([A-Za-z_][A-Za-z0-9_]*)['\"]\s*\)")
+ANY_REQUIRE_RE = re.compile(
+    r"require\(\s*['\"]([^'\"]+)['\"]\s*\)")
+
+
+def _consumed_object_members(javascript: str, export_name: str,
+                             parameter: str) -> set[str] | None:
+    """Property names an exported function reads off one of its parameters."""
+    try:
+        body = _exported_function_body(javascript, export_name)
+    except ValueError:
+        return None
+    masked = _mask_js(body, mask_strings=False)
+    return set(re.findall(
+        r"\b%s\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)" % re.escape(parameter),
+        masked))
+
+
+def _check_consumed_objects(
+        errors: list[str], spec: "ModuleSpec", declaration: str,
+        javascript: str) -> None:
+    for type_name, export_name, parameter, excluded in \
+            spec.consumed_objects:
+        source = _consumed_object_members(javascript, export_name, parameter)
+        if source is None:
+            errors.append(
+                "%s: %s claims to describe %s's %s parameter, but no such "
+                "exported function was found" %
+                (spec.name, type_name, export_name, parameter))
+            continue
+        try:
+            declared = _declared_members(
+                declaration, type_name, include_callbacks=True)
+        except ValueError as error:
+            errors.append("%s: %s" % (spec.name, error))
+            continue
+        _compare_name_sets(errors, spec.name, type_name + ".",
+                           source - set(excluded), declared)
 
 
 def _check_native_dependencies(
-        errors: list[str], spec: "ModuleSpec", native_modules: set[str]
-) -> None:
+        errors: list[str], spec: "ModuleSpec", native_modules: set[str],
+        known_modules: set[str]) -> None:
     """Every `require("native/X")` in a module must name a real native module.
 
     Registering one native table per spec is not enough on its own: a wrapper
@@ -1567,12 +1636,25 @@ def _check_native_dependencies(
     silently green. Checking the dependency names catches that directly, and
     covers the modules whose native calls no spec had registered at all.
     """
-    for module in sorted(set(NATIVE_REQUIRE_RE.findall(
+    for target in sorted(set(ANY_REQUIRE_RE.findall(
             _mask_js(_read(spec.javascript), mask_strings=False)))):
-        if module not in native_modules:
+        if target.startswith("."):
+            continue                      # relative sibling, e.g. https -> ./http
+        if target == spec.name:
             errors.append(
-                "%s: requires native/%s, which is not a native module in "
-                "generated/movian-metadata.json" % (spec.name, module))
+                "%s: requires itself; a wrapper retargeted this way keeps "
+                "type-checking while recursing at runtime" % spec.name)
+            continue
+        if target.startswith("native/"):
+            if target[len("native/"):] not in native_modules:
+                errors.append(
+                    "%s: requires %s, which is not a native module in "
+                    "generated/movian-metadata.json" % (spec.name, target))
+            continue
+        if target not in known_modules:
+            errors.append(
+                "%s: requires %s, which is not a module in "
+                "generated/movian-metadata.json" % (spec.name, target))
 
 
 def _check_native_arity_floor(
@@ -1868,6 +1950,7 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
             source_methods, source_members)
 
     _check_native_returned_objects(errors, spec, declaration)
+    _check_consumed_objects(errors, spec, declaration, javascript)
 
     inherited: dict[str, set[str]] = {}
     for type_name, builder, path in spec.inherited_native_members:
@@ -2085,16 +2168,19 @@ def _check_plugin_global(errors: list[str]) -> None:
 def check_source_shapes() -> tuple[list[str], dict[str, set[str]]]:
     errors: list[str] = []
     try:
+        all_modules = _load_metadata()["js"]["modules"]
         native_modules = {
             module["name"][len("native/"):]
-            for module in _load_metadata()["js"]["modules"]
-            if module.get("kind") == "native"
+            for module in all_modules if module.get("kind") == "native"
         }
+        known_modules = {module["name"] for module in all_modules}
     except (OSError, ValueError, KeyError):
         native_modules = set()
+        known_modules = set()
     for spec in MODULES:
         if native_modules:
-            _check_native_dependencies(errors, spec, native_modules)
+            _check_native_dependencies(
+                errors, spec, native_modules, known_modules)
         try:
             _check_module(errors, spec)
         except ValueError as error:
