@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, replace
+from enum import Enum, auto
 from pathlib import Path
 
 
@@ -41,12 +42,73 @@ class Signature:
     variadic: bool = False
 
 
+class MemberSource(Enum):
+    PROTOTYPE = auto()
+    SHARED_OBJECT = auto()
+    EXPORTED_INSTANCE = auto()
+    OBJECT_CONSTRUCTOR = auto()
+    INSTANCE_REFERENCES = auto()
+    RETURNED_OBJECT = auto()
+    LOCAL_CONSTRUCTOR = auto()
+    PROXY_HANDLER = auto()
+    LOCAL_OBJECT = auto()
+    LOCAL_OBJECT_LITERAL = auto()
+    CONSUMED_OBJECT = auto()
+    NATIVE_RETURNED_OBJECT = auto()
+
+
+@dataclass(frozen=True)
+class NativeMemberSource:
+    function: str
+    path: Path
+
+
+@dataclass(frozen=True)
+class NativeArityFloor:
+    method: str
+    function: str
+    minimum: int
+    path: Path
+
+
+@dataclass(frozen=True)
+class MemberShape:
+    """One source-backed member check for a declared type.
+
+    A type may have multiple descriptors when independent runtime surfaces,
+    such as its prototype and constructor-created fields, both need checking.
+    """
+
+    type_name: str
+    source: MemberSource
+    source_name: str
+    excluded: tuple[str, ...] = ()
+    exact_members: bool = False
+    parameter: str | None = None
+    inherited: NativeMemberSource | None = None
+    native: NativeMemberSource | None = None
+    arity_floors: tuple[NativeArityFloor, ...] = ()
+
+
+class ExportLinkKind(Enum):
+    ALIAS = auto()
+    WRAPPER = auto()
+
+
+@dataclass(frozen=True)
+class ExportLink:
+    export_name: str
+    required_module: str
+    required_member: str
+    kind: ExportLinkKind = ExportLinkKind.ALIAS
+
+
 @dataclass(frozen=True)
 class ModuleSpec:
     name: str
     declaration: Path
     javascript: Path
-    prototypes: tuple[str, ...]
+    member_shapes: tuple[MemberShape, ...]
     # Native C function table this module's JS wraps, if any. Two shapes:
     # - "wrapped-exports": `exports.NAME` in the JS is expected to be a
     #   thin wrapper around a same-named native function (movian/prop's
@@ -63,54 +125,6 @@ class ModuleSpec:
     native_table: str | None = None
     native_module: str | None = None
     native_kind: str = "wrapped-exports"
-    # A JS object used as the shared prototype rather than `Type.prototype`.
-    # Entries are (declaration interface name, JavaScript object name).
-    object_prototypes: tuple[tuple[str, str], ...] = ()
-    # Types whose constructor-created public fields are exact in both
-    # directions. The #135 types default to phantom-only because their
-    # constructors also carry intentionally private bookkeeping fields.
-    exact_member_types: tuple[str, ...] = ()
-    # Exported anonymous constructor functions whose public `this.*` fields
-    # are checked against their same-named declaration class. Each entry is
-    # (export name, internal field names to exclude).
-    export_instances: tuple[tuple[str, tuple[str, ...]], ...] = ()
-    # A local constructor whose Object.defineProperties(this, {...}) entries
-    # are public members of a differently named declaration interface.
-    object_constructor_members: tuple[tuple[str, str], ...] = ()
-    # Constructor-created fields that are intentionally private when a type's
-    # non-method members are otherwise checked in both directions.
-    private_members: tuple[tuple[str, tuple[str, ...]], ...] = ()
-    # Exported constructors whose public fields are discovered from all
-    # `this` references (and aliases such as `var self = this`), including
-    # references inside nested callbacks.
-    instance_references: tuple[tuple[str, tuple[str, ...]], ...] = ()
-    # Exact exported aliases: (export, required module, required member).
-    exact_aliases: tuple[tuple[str, str, str], ...] = ()
-    # Exact thin wrappers: (export, required module, required member).
-    wrapper_exports: tuple[tuple[str, str, str], ...] = ()
-    # Exported functions whose returned object literal is the complete public
-    # surface of a declaration interface: (export, interface).
-    returned_objects: tuple[tuple[str, str], ...] = ()
-    # Local constructors exposed through a differently named declaration
-    # interface: (constructor, interface, explicitly private fields).
-    local_constructors: tuple[
-        tuple[str, str, tuple[str, ...]], ...] = ()
-    # Proxy handler objects whose explicit string-name branches form the
-    # named part of a declaration interface. Dynamic index access is ignored.
-    proxy_handlers: tuple[tuple[str, str], ...] = ()
-    # Local objects whose assigned methods and fields form an exact interface:
-    # (object, interface).
-    local_objects: tuple[tuple[str, str], ...] = ()
-    # `var NAME = { ... }` object literals handed to a callback. Distinct from
-    # local_objects, which reads `NAME.x = ...` assignments: a literal's
-    # members never appear that way, so such a type had nothing comparing it.
-    local_object_literals: tuple[tuple[str, str], ...] = ()
-    # Interfaces describing an object the module CONSUMES rather than builds:
-    # (type, exported function, parameter). The members are the `param.x`
-    # reads inside that function, so a declared option the code never looks at
-    # is a phantom -- which is how `path` survived on the url format input.
-    consumed_objects: tuple[
-        tuple[str, str, str, tuple[str, ...]], ...] = ()
     # Modules with no source-backed nested class/interface surface.
     forbid_nested_types: bool = False
     # Opt-in inventory audit for issue #137 modules. Every native property
@@ -122,29 +136,7 @@ class ModuleSpec:
     # error rather than a silence.
     requires: tuple[str, ...] = ()
     audit_runtime_aliases: bool = False
-    # A fully-variadic JS wrapper whose native callee refuses short calls.
-    # (type, method, native argc floor): the wrapper unshifts its handle, so a
-    # native floor of N makes N-1 JS arguments mandatory, and the declaration
-    # may state that required prefix even though the JS signature alone is
-    # `function()`. The floor is not taken on trust -- _check_native_arity_floor
-    # requires a matching `argc < N` guard in the module's native_c file, so
-    # claiming the wrong number fails.
-    native_arity_floors: tuple[
-        tuple[str, str, str, int, Path], ...] = ()
-    # A callback argument built in C and then extended in JS through
-    # `Object.create(...)`. The narrow parser only sees the JS-side `x.y = ...`
-    # assignments, so the inherited half of the surface was invisible and the
-    # "exact both directions" check certified a false exactness. The inherited
-    # names are read out of the C source (`es_set_*(ctx, -1, "name", ...)`),
-    # never hand-listed: (type, native_c).
-    inherited_native_members: tuple[
-        tuple[str, str, Path], ...] = ()
-    # An interface describing the object a NATIVE function builds and returns.
-    # (type, native table name, C file): the members are read out of that
-    # function's own body (`duk_put_prop_string(ctx, -2, "name")`), so a
-    # phantom on the declaration fails and a new native property that nobody
-    # declared fails too.
-    native_returned_objects: tuple[tuple[str, str, Path], ...] = ()
+    export_links: tuple[ExportLink, ...] = ()
 
 
 JS_MODULE_DIR = REPO_ROOT / "res" / "ecmascript" / "modules" / "movian"
@@ -155,7 +147,8 @@ MODULES = (
         "movian/page",
         REFERENCE_DIR / "movian-page.d.ts",
         JS_MODULE_DIR / "page.js",
-        ("Item", "Page", "Route", "Searcher"),
+        tuple(MemberShape(name, MemberSource.PROTOTYPE, name)
+              for name in ("Item", "Page", "Route", "Searcher")),
         native_c=ECMASCRIPT_C_DIR / "es_route.c",
         native_table="fnlist_route",
         native_module="route",
@@ -176,7 +169,7 @@ MODULES = (
         "movian/http",
         REFERENCE_DIR / "movian-http.d.ts",
         JS_MODULE_DIR / "http.js",
-        ("HttpResponse",),
+        (MemberShape("HttpResponse", MemberSource.PROTOTYPE, "HttpResponse"),),
         native_c=ECMASCRIPT_C_DIR / "es_io.c",
         native_table="fnlist_io",
         native_module="io",
@@ -187,28 +180,33 @@ MODULES = (
         "movian/settings",
         REFERENCE_DIR / "movian-settings.d.ts",
         JS_MODULE_DIR / "settings.js",
-        (),
+        (
+            MemberShape(
+                "SettingsMethods", MemberSource.SHARED_OBJECT, "sp"),
+            MemberShape(
+                "globalSettings", MemberSource.EXPORTED_INSTANCE,
+                "globalSettings", ("getvalue", "setvalue")),
+            MemberShape(
+                "kvstoreSettings", MemberSource.EXPORTED_INSTANCE,
+                "kvstoreSettings", ("getvalue", "setvalue")),
+        ),
         native_c=ECMASCRIPT_C_DIR / "es_kvstore.c",
         native_table="fnlist_kvstore",
         native_module="kvstore",
         native_kind="native-calls-exact",
-        object_prototypes=(("SettingsMethods", "sp"),),
-        export_instances=(
-            ("globalSettings", ("getvalue", "setvalue")),
-            ("kvstoreSettings", ("getvalue", "setvalue")),
-        ),
         requires=("movian/prop", "movian/store", "native/fs", "native/kvstore"),
     ),
     ModuleSpec(
         "movian/service",
         REFERENCE_DIR / "movian-service.d.ts",
         JS_MODULE_DIR / "service.js",
-        ("Service",),
+        (MemberShape(
+            "Service", MemberSource.PROTOTYPE, "Service",
+            exact_members=True),),
         native_c=ECMASCRIPT_C_DIR / "es_service.c",
         native_table="fnlist_service",
         native_module="service",
         native_kind="native-calls-exact",
-        exact_member_types=("Service",),
         requires=("native/service",),
     ),
     ModuleSpec(
@@ -222,13 +220,16 @@ MODULES = (
         "movian/html",
         REFERENCE_DIR / "movian-html.d.ts",
         JS_MODULE_DIR / "html.js",
-        (),
-        object_prototypes=(("Node", "NodeProto"),),
-        object_constructor_members=(("Node", "NodeProto"),),
-        # exports.parse returns an object literal; without this the declared
-        # ParsedDocument was connected to nothing and a phantom member on it
-        # stayed green in both the source-shape check and both fixtures.
-        returned_objects=(("parse", "ParsedDocument"),),
+        (
+            MemberShape("Node", MemberSource.SHARED_OBJECT, "NodeProto"),
+            MemberShape(
+                "Node", MemberSource.OBJECT_CONSTRUCTOR, "NodeProto"),
+            # exports.parse returns an object literal; without this the
+            # declared ParsedDocument was connected to nothing and a phantom
+            # member on it stayed green in both source-shape checks.
+            MemberShape(
+                "ParsedDocument", MemberSource.RETURNED_OBJECT, "parse"),
+        ),
         requires=("native/gumbo",),
         audit_runtime_aliases=True,
         # Without the table none of the native/gumbo calls behind these
@@ -242,22 +243,28 @@ MODULES = (
         "movian/itemhook",
         REFERENCE_DIR / "movian-itemhook.d.ts",
         JS_MODULE_DIR / "itemhook.js",
-        (),
-        returned_objects=(("create", "ItemHookHandle"),),
+        (
+            MemberShape(
+                "ItemHookHandle", MemberSource.RETURNED_OBJECT, "create"),
+            # The callback argument was disconnected: a phantom method on
+            # NavigationObject stayed green because only the create handle
+            # was compared.
+            MemberShape(
+                "NavigationObject", MemberSource.LOCAL_OBJECT_LITERAL,
+                "navobj"),
+            MemberShape(
+                "ItemHookConfig", MemberSource.CONSUMED_OBJECT, "create",
+                parameter="conf"),
+        ),
         requires=("movian/prop",),
         audit_runtime_aliases=True,
-        # The callback argument was disconnected: a phantom method on
-        # NavigationObject stayed green because only the create handle
-        # was compared.
-        local_object_literals=(("navobj", "NavigationObject"),),
-        consumed_objects=(("ItemHookConfig", "create", "conf", ()),),
     ),
     ModuleSpec(
         "movian/popup",
         REFERENCE_DIR / "movian-popup.d.ts",
         JS_MODULE_DIR / "popup.js",
         (),
-        exact_aliases=(("notify", "native/popup", "notify"),),
+        export_links=(ExportLink("notify", "native/popup", "notify"),),
         requires=("native/popup",),
         audit_runtime_aliases=True,
     ),
@@ -265,31 +272,30 @@ MODULES = (
         "movian/sqlite",
         REFERENCE_DIR / "movian-sqlite.d.ts",
         JS_MODULE_DIR / "sqlite.js",
-        ("DB",),
-        exact_member_types=("DB",),
-        private_members=(("DB", ("db",)),),
+        (MemberShape(
+            "DB", MemberSource.PROTOTYPE, "DB", ("db",),
+            exact_members=True,
+            arity_floors=(NativeArityFloor(
+                "query", "query", 2,
+                ECMASCRIPT_C_DIR / "es_sqlite.c"),)),),
         native_c=ECMASCRIPT_C_DIR / "es_sqlite.c",
         native_table="fnlist_sqlite",
         native_module="sqlite",
         native_kind="native-calls",
         requires=("native/sqlite",),
         audit_runtime_aliases=True,
-        native_arity_floors=(
-            ("DB", "query", "query", 2,
-             ECMASCRIPT_C_DIR / "es_sqlite.c"),),
     ),
     ModuleSpec(
         "movian/subtitles",
         REFERENCE_DIR / "movian-subtitles.d.ts",
         JS_MODULE_DIR / "subtitles.js",
-        (),
-        exact_aliases=(
-            ("getLanguages", "native/subtitle", "getLanguages"),
+        (MemberShape(
+            "SubtitleRequest", MemberSource.LOCAL_OBJECT, "req",
+            inherited=NativeMemberSource(
+                "esp_query", ECMASCRIPT_C_DIR / "es_subtitles.c")),),
+        export_links=(
+            ExportLink("getLanguages", "native/subtitle", "getLanguages"),
         ),
-        local_objects=(("req", "SubtitleRequest"),),
-        inherited_native_members=(
-            ("SubtitleRequest", "esp_query",
-             ECMASCRIPT_C_DIR / "es_subtitles.c"),),
         requires=("native/subtitle",),
         audit_runtime_aliases=True,
     ),
@@ -297,9 +303,13 @@ MODULES = (
         "movian/videoscrobbler",
         REFERENCE_DIR / "movian-videoscrobbler.d.ts",
         JS_MODULE_DIR / "videoscrobbler.js",
-        ("VideoScrobbler",),
-        instance_references=(
-            ("VideoScrobbler", ("paused", "hook")),
+        (
+            MemberShape(
+                "VideoScrobbler", MemberSource.PROTOTYPE,
+                "VideoScrobbler"),
+            MemberShape(
+                "VideoScrobbler", MemberSource.INSTANCE_REFERENCES,
+                "VideoScrobbler", ("paused", "hook")),
         ),
         requires=("movian/prop", "native/hook"),
         audit_runtime_aliases=True,
@@ -308,8 +318,8 @@ MODULES = (
         "movian/xml",
         REFERENCE_DIR / "movian-xml.d.ts",
         JS_MODULE_DIR / "xml.js",
-        (),
-        proxy_handlers=(("htsmsgHandler", "XmlProxy"),),
+        (MemberShape(
+            "XmlProxy", MemberSource.PROXY_HANDLER, "htsmsgHandler"),),
         requires=("native/htsmsg",),
         audit_runtime_aliases=True,
     ),
@@ -342,10 +352,13 @@ MODULES = (
         "http",
         REFERENCE_DIR / "http.d.ts",
         TOPLEVEL_MODULE_DIR / "http.js",
-        (),
-        local_constructors=(
-            ("Request", "HttpRequest", ("onResponse", "onError")),
-            ("Response", "HttpResponse", ("onData", "onEnd")),
+        (
+            MemberShape(
+                "HttpRequest", MemberSource.LOCAL_CONSTRUCTOR, "Request",
+                ("onResponse", "onError")),
+            MemberShape(
+                "HttpResponse", MemberSource.LOCAL_CONSTRUCTOR, "Response",
+                ("onData", "onEnd")),
         ),
         requires=("native/io", "native/string", "url"),
         audit_runtime_aliases=True,
@@ -355,9 +368,10 @@ MODULES = (
         REFERENCE_DIR / "https.d.ts",
         TOPLEVEL_MODULE_DIR / "https.js",
         (),
-        wrapper_exports=(
-            ("request", "./http", "request"),
-            ("get", "./http", "get"),
+        export_links=(
+            ExportLink(
+                "request", "./http", "request", ExportLinkKind.WRAPPER),
+            ExportLink("get", "./http", "get", ExportLinkKind.WRAPPER),
         ),
         audit_runtime_aliases=True,
     ),
@@ -366,8 +380,8 @@ MODULES = (
         REFERENCE_DIR / "querystring.d.ts",
         TOPLEVEL_MODULE_DIR / "querystring.js",
         (),
-        exact_aliases=(
-            ("parse", "native/string", "queryStringSplit"),
+        export_links=(
+            ExportLink("parse", "native/string", "queryStringSplit"),
         ),
         requires=("native/string",),
         audit_runtime_aliases=True,
@@ -376,19 +390,23 @@ MODULES = (
         "url",
         REFERENCE_DIR / "url.d.ts",
         TOPLEVEL_MODULE_DIR / "url.js",
-        (),
-        exact_aliases=(
-            ("parse", "native/string", "parseURL"),
-            ("resolve", "native/string", "resolveURL"),
+        (
+            MemberShape(
+                "UrlObject", MemberSource.CONSUMED_OBJECT, "format",
+                ("port",), parameter="d"),
+            MemberShape(
+                "ParsedUrl", MemberSource.NATIVE_RETURNED_OBJECT,
+                "parseURL", native=NativeMemberSource(
+                    "parseURL", ECMASCRIPT_C_DIR / "es_string.c")),
+        ),
+        export_links=(
+            ExportLink("parse", "native/string", "parseURL"),
+            ExportLink("resolve", "native/string", "resolveURL"),
         ),
         # `port` is read by format -- and only through the broken
         # `':' + port` branch -- so it is deliberately NOT offered on the
         # input type. Excluded here rather than silently tolerated, so the
         # exception is visible instead of looking like an oversight.
-        consumed_objects=(("UrlObject", "format", "d", ("port",)),),
-        native_returned_objects=(
-            ("ParsedUrl", "parseURL",
-             ECMASCRIPT_C_DIR / "es_string.c"),),
         requires=("native/string",),
         audit_runtime_aliases=True,
     ),
@@ -396,8 +414,13 @@ MODULES = (
         "websocket",
         REFERENCE_DIR / "websocket.d.ts",
         TOPLEVEL_MODULE_DIR / "websocket.js",
-        ("w3cwebsocket",),
-        instance_references=(("w3cwebsocket", ("_sock",)),),
+        (
+            MemberShape(
+                "w3cwebsocket", MemberSource.PROTOTYPE, "w3cwebsocket"),
+            MemberShape(
+                "w3cwebsocket", MemberSource.INSTANCE_REFERENCES,
+                "w3cwebsocket", ("_sock",)),
+        ),
         # Without this the wrapper's native calls were checked against nothing:
         # renaming ws.clientSend to a function that does not exist left the
         # whole gate green.
@@ -1541,25 +1564,29 @@ NATIVE_PUT_PROP_RE = re.compile(
     r'[A-Za-z0-9_]*)"')
 
 
-def _check_native_returned_objects(
-        errors: list[str], spec: "ModuleSpec", declaration: str) -> None:
+def _check_native_returned_object(
+        errors: list[str], spec: "ModuleSpec", declaration: str,
+        shape: MemberShape) -> None:
     """Compare an interface against the object its native builder creates."""
-    for type_name, native_name, native_c in spec.native_returned_objects:
-        body = _native_c_function_body(_read(native_c), native_name)
-        if body is None:
-            errors.append(
-                "%s: %s claims to mirror %s, but %s registers no table entry "
-                "of that name" %
-                (spec.name, type_name, native_name, native_c.name))
-            continue
-        source = set(NATIVE_PUT_PROP_RE.findall(_mask_c(body)))
-        try:
-            declared = _declared_members(declaration, type_name)
-        except ValueError as error:
-            errors.append("%s: %s" % (spec.name, error))
-            continue
-        _compare_name_sets(errors, spec.name, type_name + ".",
-                           source, declared)
+    if shape.native is None:
+        raise ValueError("native returned object requires a native source")
+    native_name = shape.native.function
+    native_c = shape.native.path
+    body = _native_c_function_body(_read(native_c), native_name)
+    if body is None:
+        errors.append(
+            "%s: %s claims to mirror %s, but %s registers no table entry "
+            "of that name" %
+            (spec.name, shape.type_name, native_name, native_c.name))
+        return
+    source = set(NATIVE_PUT_PROP_RE.findall(_mask_c(body)))
+    try:
+        declared = _declared_members(declaration, shape.type_name)
+    except ValueError as error:
+        errors.append("%s: %s" % (spec.name, error))
+        return
+    _compare_name_sets(errors, spec.name, shape.type_name + ".",
+                       source, declared)
 
 
 WRAPPER_NATIVE_CALL_RE = re.compile(
@@ -1641,26 +1668,27 @@ def _consumed_object_members(javascript: str, export_name: str,
         masked))
 
 
-def _check_consumed_objects(
+def _check_consumed_object(
         errors: list[str], spec: "ModuleSpec", declaration: str,
-        javascript: str) -> None:
-    for type_name, export_name, parameter, excluded in \
-            spec.consumed_objects:
-        source = _consumed_object_members(javascript, export_name, parameter)
-        if source is None:
-            errors.append(
-                "%s: %s claims to describe %s's %s parameter, but no such "
-                "exported function was found" %
-                (spec.name, type_name, export_name, parameter))
-            continue
-        try:
-            declared = _declared_members(
-                declaration, type_name, include_callbacks=True)
-        except ValueError as error:
-            errors.append("%s: %s" % (spec.name, error))
-            continue
-        _compare_name_sets(errors, spec.name, type_name + ".",
-                           source - set(excluded), declared)
+        javascript: str, shape: MemberShape) -> None:
+    if shape.parameter is None:
+        raise ValueError("consumed object requires a parameter name")
+    source = _consumed_object_members(
+        javascript, shape.source_name, shape.parameter)
+    if source is None:
+        errors.append(
+            "%s: %s claims to describe %s's %s parameter, but no such "
+            "exported function was found" %
+            (spec.name, shape.type_name, shape.source_name, shape.parameter))
+        return
+    try:
+        declared = _declared_members(
+            declaration, shape.type_name, include_callbacks=True)
+    except ValueError as error:
+        errors.append("%s: %s" % (spec.name, error))
+        return
+    _compare_name_sets(errors, spec.name, shape.type_name + ".",
+                       source - set(shape.excluded), declared)
 
 
 def _check_native_dependencies(
@@ -1713,8 +1741,16 @@ def _check_native_arity_floor(
     """
     floors: dict[tuple[str, str], int] = {}
     javascript = _read(spec.javascript)
-    for type_name, method, native_name, floor, native_c in \
-            spec.native_arity_floors:
+    configured_floors = (
+        (shape.type_name, floor)
+        for shape in spec.member_shapes
+        for floor in shape.arity_floors
+    )
+    for type_name, configured in configured_floors:
+        method = configured.method
+        native_name = configured.function
+        floor = configured.minimum
+        native_c = configured.path
         # The configured name is a claim about the wrapper, so check it: find
         # the method body and require it to actually call that native function.
         # Otherwise retargeting `sqlite.query.apply(...)` to another native
@@ -1751,6 +1787,33 @@ def _check_native_arity_floor(
     return floors
 
 
+def _check_call_shapes(
+        errors: list[str], module_name: str, owner: str | None,
+        source_methods: dict[str, Signature],
+        declared_methods: dict[str, list[Signature]],
+        arity_floors: dict[str, int] | None = None) -> None:
+    prefix = "" if owner is None else owner + "."
+    for method, source_signature in sorted(source_methods.items()):
+        signatures = declared_methods.get(method)
+        if signatures is None:
+            continue
+        floor = (arity_floors or {}).get(method)
+        if floor is not None and source_signature.variadic:
+            # The wrapper unshifts its own handle before calling native, so a
+            # native floor of N leaves N-1 arguments required on the JS side.
+            source_signature = replace(
+                source_signature,
+                required=max(source_signature.required, floor - 1),
+                total=max(source_signature.total, floor - 1))
+        if not _has_call_shape(source_signature, signatures):
+            errors.append(
+                "%s: %s%s call shape is %s source args vs %s declared" %
+                (module_name, prefix, method,
+                 _render_signature_shape(source_signature),
+                 ", ".join(_render_signature_shape(item)
+                           for item in signatures)))
+
+
 def _check_declared_object_shape(
         errors: list[str], module_name: str, declaration: str,
         type_name: str, source_methods: dict[str, Signature],
@@ -1768,25 +1831,188 @@ def _check_declared_object_shape(
     _compare_name_sets(
         errors, module_name, type_name + ".",
         source_members, declared_members)
-    for method, source_signature in sorted(source_methods.items()):
-        signatures = declared_methods.get(method)
-        if signatures is None:
-            continue
-        floor = (arity_floors or {}).get(method)
-        if floor is not None and source_signature.variadic:
-            # The wrapper unshifts its own handle before calling native, so a
-            # native floor of N leaves N-1 arguments required on the JS side.
-            source_signature = replace(
-                source_signature,
-                required=max(source_signature.required, floor - 1),
-                total=max(source_signature.total, floor - 1))
-        if not _has_call_shape(source_signature, signatures):
+    _check_call_shapes(
+        errors, module_name, type_name, source_methods, declared_methods,
+        arity_floors)
+
+
+def _check_member_shape(
+        errors: list[str], spec: ModuleSpec, shape: MemberShape,
+        declaration: str, javascript: str,
+        declared_kinds: dict[str, str],
+        js_callables: dict[str, Signature],
+        arity_floors: dict[tuple[str, str], int]) -> None:
+    type_name = shape.type_name
+    source_name = shape.source_name
+
+    if shape.source is MemberSource.PROTOTYPE:
+        if source_name in js_callables and \
+                declared_kinds.get(type_name) != "class":
             errors.append(
-                "%s: %s.%s call shape is %s source args vs %s declared" %
-                (module_name, type_name, method,
-                 _render_signature_shape(source_signature),
-                 ", ".join(_render_signature_shape(item)
-                           for item in signatures)))
+                "%s: %s source constructor must declare an exported class" %
+                (spec.name, type_name))
+        source_methods = _javascript_methods(javascript, source_name)
+        try:
+            declared_methods = _declared_methods(declaration, type_name)
+        except ValueError as error:
+            errors.append("%s: %s" % (spec.name, error))
+            return
+        _compare_name_sets(errors, spec.name, type_name + ".",
+                           set(source_methods), set(declared_methods))
+        _check_call_shapes(
+            errors, spec.name, type_name, source_methods, declared_methods,
+            {method: floor
+             for (owner, method), floor in arity_floors.items()
+             if owner == type_name})
+
+        # Most constructor-backed types are phantom-only because their
+        # instances also carry private bookkeeping fields. Exact shapes opt in
+        # and name any intentional exclusions on their descriptor.
+        source_members = _javascript_members(javascript, source_name)
+        source_members -= set(shape.excluded)
+        declared_members = _declared_members(declaration, type_name)
+        if shape.exact_members:
+            _compare_name_sets(
+                errors, spec.name, type_name + ".",
+                source_members, declared_members)
+        else:
+            for member in sorted(declared_members - source_members):
+                errors.append("%s: phantom declaration %s.%s" %
+                              (spec.name, type_name, member))
+        return
+
+    if shape.source is MemberSource.SHARED_OBJECT:
+        source_methods = _javascript_shared_object_methods(
+            javascript, source_name)
+        try:
+            declared_methods = _declared_methods(declaration, type_name)
+        except ValueError as error:
+            errors.append("%s: %s" % (spec.name, error))
+            return
+        _compare_name_sets(errors, spec.name, type_name + ".",
+                           set(source_methods), set(declared_methods))
+        _check_call_shapes(
+            errors, spec.name, type_name, source_methods, declared_methods)
+        return
+
+    if shape.source is MemberSource.OBJECT_CONSTRUCTOR:
+        body = _constructor_body(javascript, source_name)
+        if body is None:
+            errors.append(
+                "%s: object constructor %s not found for %s" %
+                (spec.name, source_name, type_name))
+            return
+        source_members = _javascript_defined_properties(body)
+        declared_members = _declared_members(declaration, type_name)
+        _compare_name_sets(
+            errors, spec.name, type_name + ".",
+            source_members, declared_members)
+        return
+
+    if shape.source is MemberSource.EXPORTED_INSTANCE:
+        source_members = _exported_function_members(
+            javascript, source_name) - set(shape.excluded)
+        declared_members = _declared_members(declaration, type_name)
+        _compare_name_sets(
+            errors, spec.name, type_name + ".",
+            source_members, declared_members)
+        return
+
+    if shape.source is MemberSource.INSTANCE_REFERENCES:
+        source_members = _exported_instance_references(
+            javascript, source_name) - set(shape.excluded)
+        declared_members = _declared_members(
+            declaration, type_name, include_callbacks=True)
+        _compare_name_sets(
+            errors, spec.name, type_name + ".",
+            source_members, declared_members)
+        return
+
+    if shape.source is MemberSource.RETURNED_OBJECT:
+        try:
+            source_methods, source_members = _returned_object_shape(
+                javascript, source_name)
+        except ValueError as error:
+            errors.append("%s: %s" % (spec.name, error))
+            return
+        _check_declared_object_shape(
+            errors, spec.name, declaration, type_name,
+            source_methods, source_members)
+        return
+
+    if shape.source is MemberSource.LOCAL_CONSTRUCTOR:
+        kind = _declared_type_kind(declaration, type_name)
+        if kind != "interface":
+            errors.append(
+                "%s: local constructor %s must map to interface %s, not %s" %
+                (spec.name, source_name, type_name, kind or "missing"))
+        source_methods = _javascript_methods(javascript, source_name)
+        all_source_members = _javascript_members(javascript, source_name)
+        stale_exclusions = set(shape.excluded) - all_source_members
+        for member in sorted(stale_exclusions):
+            errors.append(
+                "%s: private exclusion %s.%s is absent from source" %
+                (spec.name, source_name, member))
+        _check_declared_object_shape(
+            errors, spec.name, declaration, type_name,
+            source_methods, all_source_members - set(shape.excluded),
+            {method: floor
+             for (owner, method), floor in arity_floors.items()
+             if owner == type_name})
+        return
+
+    if shape.source is MemberSource.PROXY_HANDLER:
+        try:
+            source_methods, source_members = _proxy_handler_shape(
+                javascript, source_name)
+        except ValueError as error:
+            errors.append("%s: %s" % (spec.name, error))
+            return
+        _check_declared_object_shape(
+            errors, spec.name, declaration, type_name,
+            source_methods, source_members)
+        return
+
+    if shape.source is MemberSource.LOCAL_OBJECT_LITERAL:
+        try:
+            methods, members = _object_literal_shape(
+                _assigned_object_literal(javascript, source_name))
+        except ValueError as error:
+            errors.append("%s: %s" % (spec.name, error))
+            return
+        _check_declared_object_shape(
+            errors, spec.name, declaration, type_name, methods, members)
+        return
+
+    if shape.source is MemberSource.LOCAL_OBJECT:
+        inherited: set[str] = set()
+        if shape.inherited is not None:
+            inherited_members = _native_object_members(
+                shape.inherited.path, shape.inherited.function)
+            if inherited_members is None:
+                errors.append(
+                    "%s: %s claims to inherit from %s, but %s defines no "
+                    "such function" %
+                    (spec.name, type_name, shape.inherited.function,
+                     shape.inherited.path.name))
+            else:
+                inherited = inherited_members
+        _check_declared_object_shape(
+            errors, spec.name, declaration, type_name,
+            _javascript_object_methods(javascript, source_name),
+            _javascript_object_members(javascript, source_name) | inherited)
+        return
+
+    if shape.source is MemberSource.CONSUMED_OBJECT:
+        _check_consumed_object(
+            errors, spec, declaration, javascript, shape)
+        return
+
+    if shape.source is MemberSource.NATIVE_RETURNED_OBJECT:
+        _check_native_returned_object(errors, spec, declaration, shape)
+        return
+
+    raise ValueError("unsupported member source: %s" % shape.source)
 
 
 def _check_module(errors: list[str], spec: ModuleSpec) -> None:
@@ -1822,215 +2048,28 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
     # signatures, so fixed .total (the argument COUNT) is enforced. For
     # source-inferred `arguments` rest signatures, variadic shape and the
     # required fixed prefix are also exact.
-    for name, source_signature in sorted(js_callables.items()):
-        signatures = declared_signatures.get(name)
-        if signatures is None:
-            continue
-        if not _has_call_shape(source_signature, signatures):
-            errors.append(
-                "%s: %s call shape is %s source args vs %s declared" %
-                (spec.name, name, _render_signature_shape(source_signature),
-                 ", ".join(_render_signature_shape(item)
-                           for item in signatures)))
+    _check_call_shapes(
+        errors, spec.name, None, js_callables, declared_signatures)
 
     arity_floors = _check_native_arity_floor(errors, spec)
 
-    for type_name in spec.prototypes:
-        if type_name in js_callables and \
-                declared_kinds.get(type_name) != "class":
-            errors.append(
-                "%s: %s source constructor must declare an exported class" %
-                (spec.name, type_name))
-
-    for type_name in spec.prototypes:
-        source_methods = _javascript_methods(javascript, type_name)
-        try:
-            declared_methods = _declared_methods(declaration, type_name)
-        except ValueError as error:
-            errors.append("%s: %s" % (spec.name, error))
-            continue
-        _compare_name_sets(errors, spec.name, type_name + ".",
-                           set(source_methods), set(declared_methods))
-        for method, source_signature in sorted(source_methods.items()):
-            signatures = declared_methods.get(method)
-            if signatures is None:
-                continue
-            floor = arity_floors.get((type_name, method))
-            if floor is not None and source_signature.variadic:
-                # The wrapper unshifts its own handle before calling native,
-                # so a native floor of N leaves N-1 required on the JS side.
-                source_signature = replace(
-                    source_signature,
-                    required=max(source_signature.required, floor - 1),
-                    total=max(source_signature.total, floor - 1))
-            if not _has_call_shape(source_signature, signatures):
-                errors.append(
-                    "%s: %s.%s call shape is %s source args vs %s "
-                    "declared" %
-                    (spec.name, type_name, method,
-                     _render_signature_shape(source_signature),
-                     ", ".join(_render_signature_shape(item)
-                               for item in signatures)))
-
-        # Non-method members (accessors and plain fields) are checked in
-        # the PHANTOM direction only: every declared member must actually
-        # exist on the real instance. The reverse (every instance
-        # property must be declared) is deliberately not enforced --
-        # constructors legitimately carry private bookkeeping state
-        # (e.g. Item/Page's internal `eventhandlers`) that was never
-        # meant to be part of the public .d.ts surface, and this narrow
-        # parser cannot reliably distinguish "public" from "private" JS
-        # convention beyond the underscore-suffix idiom (Page's own
-        # `paginator_`) that this file already excludes via the nested-
-        # function masking in _javascript_members.
-        source_members = _javascript_members(javascript, type_name)
-        private_members = dict(spec.private_members).get(type_name, ())
-        source_members -= set(private_members)
-        declared_members = _declared_members(declaration, type_name)
-        if type_name in spec.exact_member_types:
-            _compare_name_sets(
-                errors, spec.name, type_name + ".",
-                source_members, declared_members)
-        else:
-            for member in sorted(declared_members - source_members):
-                errors.append("%s: phantom declaration %s.%s" %
-                              (spec.name, type_name, member))
-
-    for type_name, object_name in spec.object_prototypes:
-        source_methods = _javascript_shared_object_methods(
-            javascript, object_name)
-        try:
-            declared_methods = _declared_methods(declaration, type_name)
-        except ValueError as error:
-            errors.append("%s: %s" % (spec.name, error))
-            continue
-        _compare_name_sets(errors, spec.name, type_name + ".",
-                           set(source_methods), set(declared_methods))
-        for method, source_signature in sorted(source_methods.items()):
-            signatures = declared_methods.get(method)
-            if signatures is None:
-                continue
-            if not _has_call_shape(source_signature, signatures):
-                errors.append(
-                    "%s: %s.%s call shape is %s source args vs %s "
-                    "declared" %
-                    (spec.name, type_name, method,
-                     _render_signature_shape(source_signature),
-                     ", ".join(_render_signature_shape(item)
-                               for item in signatures)))
-
-    for type_name, constructor_name in spec.object_constructor_members:
-        body = _constructor_body(javascript, constructor_name)
-        if body is None:
-            errors.append(
-                "%s: object constructor %s not found for %s" %
-                (spec.name, constructor_name, type_name))
-            continue
-        source_members = _javascript_defined_properties(body)
-        declared_members = _declared_members(declaration, type_name)
-        _compare_name_sets(
-            errors, spec.name, type_name + ".",
-            source_members, declared_members)
-
-    for export_name, excluded in spec.export_instances:
-        source_members = _exported_function_members(
-            javascript, export_name) - set(excluded)
-        declared_members = _declared_members(declaration, export_name)
-        _compare_name_sets(
-            errors, spec.name, export_name + ".",
-            source_members, declared_members)
-
-    for export_name, excluded in spec.instance_references:
-        source_members = _exported_instance_references(
-            javascript, export_name) - set(excluded)
-        declared_members = _declared_members(
-            declaration, export_name, include_callbacks=True)
-        _compare_name_sets(
-            errors, spec.name, export_name + ".",
-            source_members, declared_members)
-
-    for export_name, type_name in spec.returned_objects:
-        try:
-            source_methods, source_members = _returned_object_shape(
-                javascript, export_name)
-        except ValueError as error:
-            errors.append("%s: %s" % (spec.name, error))
-            continue
-        _check_declared_object_shape(
-            errors, spec.name, declaration, type_name,
-            source_methods, source_members)
-
-    for constructor_name, type_name, excluded in spec.local_constructors:
-        kind = _declared_type_kind(declaration, type_name)
-        if kind != "interface":
-            errors.append(
-                "%s: local constructor %s must map to interface %s, not %s" %
-                (spec.name, constructor_name, type_name,
-                 kind or "missing"))
-        source_methods = _javascript_methods(javascript, constructor_name)
-        all_source_members = _javascript_members(
-            javascript, constructor_name)
-        stale_exclusions = set(excluded) - all_source_members
-        for member in sorted(stale_exclusions):
-            errors.append(
-                "%s: private exclusion %s.%s is absent from source" %
-                (spec.name, constructor_name, member))
-        _check_declared_object_shape(
-            errors, spec.name, declaration, type_name,
-            source_methods, all_source_members - set(excluded),
-            {method: floor
-             for (owner, method), floor in arity_floors.items()
-             if owner == type_name})
-
-    for handler_name, type_name in spec.proxy_handlers:
-        try:
-            source_methods, source_members = _proxy_handler_shape(
-                javascript, handler_name)
-        except ValueError as error:
-            errors.append("%s: %s" % (spec.name, error))
-            continue
-        _check_declared_object_shape(
-            errors, spec.name, declaration, type_name,
-            source_methods, source_members)
-
-    _check_native_returned_objects(errors, spec, declaration)
-    _check_consumed_objects(errors, spec, declaration, javascript)
-
-    inherited: dict[str, set[str]] = {}
-    for type_name, builder, path in spec.inherited_native_members:
-        members = _native_object_members(path, builder)
-        if members is None:
-            errors.append(
-                "%s: %s claims to inherit from %s, but %s defines no such "
-                "function" % (spec.name, type_name, builder, path.name))
-            continue
-        inherited[type_name] = members
-    for object_name, type_name in spec.local_object_literals:
-        try:
-            methods, members = _object_literal_shape(
-                _assigned_object_literal(javascript, object_name))
-        except ValueError as error:
-            errors.append("%s: %s" % (spec.name, error))
-            continue
-        _check_declared_object_shape(
-            errors, spec.name, declaration, type_name, methods, members)
-
-    for object_name, type_name in spec.local_objects:
-        _check_declared_object_shape(
-            errors, spec.name, declaration, type_name,
-            _javascript_object_methods(javascript, object_name),
-            _javascript_object_members(javascript, object_name)
-            | inherited.get(type_name, set()))
+    for shape in spec.member_shapes:
+        _check_member_shape(
+            errors, spec, shape, declaration, javascript,
+            declared_kinds, js_callables, arity_floors)
 
     actual_aliases = _javascript_exact_aliases(javascript)
+    alias_links = tuple(
+        link for link in spec.export_links
+        if link.kind is ExportLinkKind.ALIAS)
     if spec.audit_runtime_aliases:
         native_aliases = {
             name: target for name, target in actual_aliases.items()
             if target[0].startswith("native/")
         }
         registered_aliases = {
-            name: (module, member)
-            for name, module, member in spec.exact_aliases
+            link.export_name: (link.required_module, link.required_member)
+            for link in alias_links
         }
         for name in sorted(set(native_aliases) - set(registered_aliases)):
             module, member = native_aliases[name]
@@ -2052,7 +2091,10 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
             errors.append(
                 "%s: unexpected re-export target %s" % (spec.name, target))
 
-    for export_name, required_module, required_member in spec.exact_aliases:
+    for link in alias_links:
+        export_name = link.export_name
+        required_module = link.required_module
+        required_member = link.required_member
         expected = (required_module, required_member)
         actual = actual_aliases.get(export_name)
         if actual != expected:
@@ -2083,8 +2125,12 @@ def _check_module(errors: list[str], spec: ModuleSpec) -> None:
                  ", ".join(_render_signature_shape(item)
                            for item in signatures) or "<missing>"))
 
-    for export_name, required_module, required_member in \
-            spec.wrapper_exports:
+    for link in spec.export_links:
+        if link.kind is not ExportLinkKind.WRAPPER:
+            continue
+        export_name = link.export_name
+        required_module = link.required_module
+        required_member = link.required_member
         actual = _javascript_wrapper_target(javascript, export_name)
         expected = (required_module, required_member)
         if actual != expected:
