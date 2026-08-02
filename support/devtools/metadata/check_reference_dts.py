@@ -73,7 +73,11 @@ class NativeArityFloor:
 
 @dataclass(frozen=True)
 class MemberShape:
-    """How one declared type's members are realised by the runtime source."""
+    """One source-backed member check for a declared type.
+
+    A type may have multiple descriptors when independent runtime surfaces,
+    such as its prototype and constructor-created fields, both need checking.
+    """
 
     type_name: str
     source: MemberSource
@@ -299,9 +303,14 @@ MODULES = (
         "movian/videoscrobbler",
         REFERENCE_DIR / "movian-videoscrobbler.d.ts",
         JS_MODULE_DIR / "videoscrobbler.js",
-        (MemberShape(
-            "VideoScrobbler", MemberSource.INSTANCE_REFERENCES,
-            "VideoScrobbler", ("paused", "hook")),),
+        (
+            MemberShape(
+                "VideoScrobbler", MemberSource.PROTOTYPE,
+                "VideoScrobbler"),
+            MemberShape(
+                "VideoScrobbler", MemberSource.INSTANCE_REFERENCES,
+                "VideoScrobbler", ("paused", "hook")),
+        ),
         requires=("movian/prop", "native/hook"),
         audit_runtime_aliases=True,
     ),
@@ -405,9 +414,13 @@ MODULES = (
         "websocket",
         REFERENCE_DIR / "websocket.d.ts",
         TOPLEVEL_MODULE_DIR / "websocket.js",
-        (MemberShape(
-            "w3cwebsocket", MemberSource.INSTANCE_REFERENCES,
-            "w3cwebsocket", ("_sock",)),),
+        (
+            MemberShape(
+                "w3cwebsocket", MemberSource.PROTOTYPE, "w3cwebsocket"),
+            MemberShape(
+                "w3cwebsocket", MemberSource.INSTANCE_REFERENCES,
+                "w3cwebsocket", ("_sock",)),
+        ),
         # Without this the wrapper's native calls were checked against nothing:
         # renaming ws.clientSend to a function that does not exist left the
         # whole gate green.

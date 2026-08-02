@@ -67,6 +67,14 @@ CASES = (
             "        readonly title?: string;",
             "        readonly titleRenamed?: string;"),
     )),
+    Case("videoscrobbler prototype phantom", (
+        mutation(
+            "support/devtools/metadata/tests/reference/"
+            "movian-videoscrobbler.d.ts",
+            "        destroy(): void;",
+            "        destroy(): void;\n\n"
+            "        zzPhantomMethod(): void;"),
+    )),
     Case("http request constructor missing+phantom", (
         mutation(
             "support/devtools/metadata/tests/reference/http.d.ts",
@@ -139,6 +147,13 @@ CASES = (
             "support/devtools/metadata/tests/reference/http.d.ts",
             "        on(event: 'data', callback: (chunk: string) => void): void;",
             "        on(event: 'data', callback: (chunk: unknown) => void): void;"),
+    )),
+    Case("websocket prototype phantom", (
+        mutation(
+            "support/devtools/metadata/tests/reference/websocket.d.ts",
+            "        close(d?: unknown): void;",
+            "        close(d?: unknown): void;\n\n"
+            "        zzPhantomMethod(): void;"),
     )),
 )
 
