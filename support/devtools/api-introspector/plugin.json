@@ -1,0 +1,6 @@
+{
+  "type": "ecmascript",
+  "id": "movian_api_introspector",
+  "file": "introspector.js",
+  "apiversion": 1
+}
