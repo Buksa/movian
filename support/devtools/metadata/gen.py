@@ -684,6 +684,12 @@ PROTOTYPE_ALIAS_RE = re.compile(
 SHARED_OBJECT_FUNCTION_RE = re.compile(
     r"^\s*(sp)\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*function\s*"
     r"(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\(([^)]*)\)", re.M)
+RECEIVER_FUNCTION_RE = re.compile(
+    r"^\s*this\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*function\s*"
+    r"(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\(([^)]*)\)", re.M)
+RECEIVER_ASSIGN_RE = re.compile(
+    r"^\s*this\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)", re.M)
+RETURN_OBJECT_RE = re.compile(r"\breturn\s*\{")
 
 
 def _masked_js_text(path: Path) -> str:
@@ -786,6 +792,97 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
     return shapes
 
 
+def _anonymous_return_shape(region: str) -> dict[str, Any] | None:
+    match = RETURN_OBJECT_RE.search(region)
+    if match is None:
+        return None
+    open_index = match.end() - 1
+    depth = 0
+    close_index = None
+    for index in range(open_index, len(region)):
+        if region[index] == "{":
+            depth += 1
+        elif region[index] == "}":
+            depth -= 1
+            if depth == 0:
+                close_index = index
+                break
+    if close_index is None:
+        return None
+
+    fields: list[dict[str, str]] = []
+    for field in split_fields(region[open_index + 1:close_index]):
+        entry = re.fullmatch(
+            r"\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*(.*?)\s*",
+            field, re.S)
+        if entry is None:
+            return None
+        constructor = re.fullmatch(
+            r"new\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(.*\)",
+            entry.group(2), re.S)
+        fields.append({
+            "name": entry.group(1),
+            "type": constructor.group(1) if constructor else "any",
+        })
+    return {"kind": "object", "fields": fields} if fields else None
+
+
+def _receiver_members(
+        region: str, path: Path, line_index: int
+) -> list[dict[str, Any]]:
+    functions: dict[str, dict[str, Any]] = {}
+    for match in RECEIVER_FUNCTION_RE.finditer(region):
+        record: dict[str, Any] = {
+            "kind": "function",
+            "name": match.group(1),
+            "source": {
+                "file": rel(path),
+                "line": line_index + 1 + region.count(
+                    "\n", 0, match.end()),
+            },
+        }
+        params = _parse_params(match.group(2))
+        if params is not None:
+            record["params"] = params
+            record["nargs"] = len(params)
+        functions[match.group(1)] = record
+
+    members: dict[str, dict[str, Any]] = dict(functions)
+    for match in RECEIVER_ASSIGN_RE.finditer(region):
+        name = match.group(1)
+        if name == "__proto__" or name in functions:
+            continue
+        members[name] = {
+            "kind": "value",
+            "name": name,
+            "source": {
+                "file": rel(path),
+                "line": line_index + 1 + region.count(
+                    "\n", 0, match.end()),
+            },
+        }
+    return [members[name] for name in sorted(members)]
+
+
+def _merge_receiver_members(
+        members: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for member in members:
+        name = member["name"]
+        previous = merged.get(name)
+        if previous is None:
+            merged[name] = member
+            continue
+        if previous["kind"] != member["kind"]:
+            continue
+        if member["kind"] == "function":
+            old_params = previous.get("params") or []
+            new_params = member.get("params") or []
+            if len(new_params) > len(old_params):
+                merged[name] = member
+    return [merged[name] for name in sorted(merged)]
+
+
 def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
     raw_lines = path.read_text(encoding="utf-8").splitlines()
     masked_lines: list[str] = []
@@ -832,10 +929,12 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
             r"\breturn\s+new\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", region))
         if len(returned) == 1:
             record["returns"] = next(iter(returned))
-        if re.search(
-                r"\breturn\s*\{\s*document\s*:\s*new\s+Node\b"
-                r".*\broot\s*:\s*new\s+Node\b", region, re.S):
-            record["returns"] = "ParsedHTML"
+        anonymous = _anonymous_return_shape(region)
+        if anonymous is not None:
+            record["returns"] = anonymous
+        if record.get("receiverMutation"):
+            record["receiverMembers"] = _receiver_members(
+                region, path, line_index)
         if re.search(r"\bnew\s+Page\s*\(", region) and \
                 re.search(r"\bcallback\b", region):
             record["callbackPage"] = True
@@ -881,23 +980,26 @@ def build_commonjs_modules() -> list[dict[str, Any]]:
         shapes = (scan_commonjs_shapes(path)
                   if module_name.startswith("movian/") else [])
         shape_names = {shape["name"] for shape in shapes}
+        receiver_members: list[dict[str, Any]] = []
         for export in exports:
+            receiver_members.extend(export.pop("receiverMembers", []))
             returned = export.get("returns")
-            if returned not in shape_names and not (
-                    module_name == "movian/html" and
-                    returned == "ParsedHTML"):
+            if isinstance(returned, str) and returned not in shape_names:
                 export.pop("returns", None)
             if export.get("callbackPage") and "Page" not in shape_names:
                 export.pop("callbackPage", None)
             if export.get("callbackResponse") and \
                     "HttpResponse" not in shape_names:
                 export.pop("callbackResponse", None)
+        receiver_members = _merge_receiver_members(receiver_members)
         record = {
             "name": module_name,
             "kind": "commonjs",
             "exports": exports,
             "source": {"file": rel(path), "line": 1},
         }
+        if receiver_members:
+            record["receiverMembers"] = receiver_members
         if shapes:
             record["shapes"] = shapes
         parent = _proto_parent(path)
@@ -1064,6 +1166,31 @@ def render_dts(artifact: dict[str, Any]) -> str:
         }
         return returns.get((shape["name"], method), "any")
 
+
+    def render_return_type(
+            returned: Any, shape_names: set[str]) -> str:
+        if isinstance(returned, str):
+            return returned if returned in shape_names else "any"
+        if not isinstance(returned, dict) or \
+                returned.get("kind") != "object":
+            return "any"
+        fields = returned.get("fields")
+        if not isinstance(fields, list) or not fields:
+            return "any"
+        rendered: list[str] = []
+        for field in fields:
+            if not isinstance(field, dict):
+                return "any"
+            field_name = field.get("name")
+            field_type = field.get("type")
+            if not isinstance(field_name, str):
+                return "any"
+            if not isinstance(field_type, str) or field_type not in shape_names:
+                field_type = "any"
+            rendered.append("%s: %s;" % (field_name, field_type))
+        return "{ %s }" % " ".join(rendered)
+
+
     for mod in modules:
         name = mod["name"]
         kind = mod.get("kind", "unknown")
@@ -1090,7 +1217,9 @@ def render_dts(artifact: dict[str, Any]) -> str:
         elif kind == "commonjs":
             exports = mod.get("exports", [])
             shapes = mod.get("shapes", [])
-            if not exports and not mod.get("inherits") and not shapes:
+            receiver_members = mod.get("receiverMembers", [])
+            if (not exports and not mod.get("inherits") and not shapes
+                    and not receiver_members):
                 lines.append("}")
                 lines.append("")
                 continue
@@ -1124,14 +1253,6 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     lines.append("  }")
                 lines.append("")
 
-            if name == "movian/html" and any(
-                    shape["name"] == "Node" for shape in prototype_shapes):
-                lines.append("  interface ParsedHTML {")
-                lines.append("    document: Node;")
-                lines.append("    root: Node;")
-                lines.append("  }")
-                lines.append("")
-
             if shared_shapes:
                 lines.append(
                     "  // CommonJS receiver-mutated shared object shapes")
@@ -1144,6 +1265,21 @@ def render_dts(artifact: dict[str, Any]) -> str:
                         lines.append(
                             "  function %s(%s): any;" %
                             (method["name"], params_signature(params)))
+                lines.append("")
+            if receiver_members:
+                lines.append(
+                    "  // CommonJS receiver-mutated module exports")
+                for member in receiver_members:
+                    if member["kind"] == "function":
+                        params = member.get("params")
+                        if params is not None:
+                            lines.append("  /** @arity %d */"
+                                         % len(params))
+                        lines.append(
+                            "  function %s(%s): any;" %
+                            (member["name"], params_signature(params)))
+                    else:
+                        lines.append("  var %s: any;" % member["name"])
                 lines.append("")
 
             if exports:
@@ -1172,11 +1308,8 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     lines.append("  };")
                 elif params is not None:
                     lines.append("  /** @arity %d */" % len(params))
-                    return_type = exp.get("returns", "any")
-                    if return_type not in shape_names and not (
-                            name == "movian/html" and
-                            return_type == "ParsedHTML"):
-                        return_type = "any"
+                    return_type = render_return_type(
+                        exp.get("returns", "any"), shape_names)
                     lines.append("  function %s(%s): %s;" %
                                  (ename, sig, return_type))
                 else:

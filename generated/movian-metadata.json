@@ -3636,7 +3636,19 @@
             "params": [
               "html"
             ],
-            "returns": "ParsedHTML",
+            "returns": {
+              "fields": [
+                {
+                  "name": "document",
+                  "type": "Node"
+                },
+                {
+                  "name": "root",
+                  "type": "Node"
+                }
+              ],
+              "kind": "object"
+            },
             "source": {
               "file": "res/ecmascript/modules/movian/html.js",
               "line": 88
@@ -3786,6 +3798,15 @@
             "params": [
               "conf"
             ],
+            "returns": {
+              "fields": [
+                {
+                  "name": "destroy",
+                  "type": "any"
+                }
+              ],
+              "kind": "object"
+            },
             "source": {
               "file": "res/ecmascript/modules/movian/itemhook.js",
               "line": 3
@@ -4310,6 +4331,61 @@
         ],
         "kind": "commonjs",
         "name": "movian/settings",
+        "receiverMembers": [
+          {
+            "kind": "function",
+            "name": "getvalue",
+            "nargs": 4,
+            "params": [
+              "id",
+              "def",
+              "type",
+              "persistent"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/settings.js",
+              "line": 317
+            }
+          },
+          {
+            "kind": "value",
+            "name": "id",
+            "source": {
+              "file": "res/ecmascript/modules/movian/settings.js",
+              "line": 274
+            }
+          },
+          {
+            "kind": "value",
+            "name": "nodes",
+            "source": {
+              "file": "res/ecmascript/modules/movian/settings.js",
+              "line": 284
+            }
+          },
+          {
+            "kind": "value",
+            "name": "properties",
+            "source": {
+              "file": "res/ecmascript/modules/movian/settings.js",
+              "line": 300
+            }
+          },
+          {
+            "kind": "function",
+            "name": "setvalue",
+            "nargs": 3,
+            "params": [
+              "id",
+              "value",
+              "persistent"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/settings.js",
+              "line": 329
+            }
+          }
+        ],
         "shapes": [
           {
             "kind": "shared",
@@ -6170,6 +6246,6 @@
       }
     ]
   },
-  "movianRevision": "e9b9ad01b9cd0a08b82a98034c06c2dbad5e4b39",
+  "movianRevision": "67bd804c0464ada86c70f4ea60c54272812e1c19",
   "schemaVersion": 1
 }
