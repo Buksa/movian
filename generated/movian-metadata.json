@@ -3636,6 +3636,7 @@
             "params": [
               "html"
             ],
+            "returns": "ParsedHTML",
             "source": {
               "file": "res/ecmascript/modules/movian/html.js",
               "line": 88
@@ -3644,6 +3645,76 @@
         ],
         "kind": "commonjs",
         "name": "movian/html",
+        "shapes": [
+          {
+            "kind": "prototype",
+            "methods": [
+              {
+                "name": "getElementByClassName",
+                "nargs": 1,
+                "params": [
+                  "cls"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/html.js",
+                  "line": 58
+                }
+              },
+              {
+                "name": "getElementById",
+                "nargs": 1,
+                "params": [
+                  "id"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/html.js",
+                  "line": 52
+                }
+              },
+              {
+                "name": "getElementByTagName",
+                "nargs": 1,
+                "params": [
+                  "tag"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/html.js",
+                  "line": 67
+                }
+              },
+              {
+                "aliasOf": "getElementByClassName",
+                "name": "getElementsByClassName",
+                "nargs": 1,
+                "params": [
+                  "cls"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/html.js",
+                  "line": 64
+                }
+              },
+              {
+                "aliasOf": "getElementByTagName",
+                "name": "getElementsByTagName",
+                "nargs": 1,
+                "params": [
+                  "tag"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/html.js",
+                  "line": 73
+                }
+              }
+            ],
+            "name": "Node",
+            "receiver": "NodeProto",
+            "source": {
+              "file": "res/ecmascript/modules/movian/html.js",
+              "line": 52
+            }
+          }
+        ],
         "source": {
           "file": "res/ecmascript/modules/movian/html.js",
           "line": 1
@@ -3652,6 +3723,7 @@
       {
         "exports": [
           {
+            "callbackResponse": true,
             "name": "request",
             "nargs": 3,
             "params": [
@@ -3659,6 +3731,7 @@
               "ctrl",
               "callback"
             ],
+            "returns": "HttpResponse",
             "source": {
               "file": "res/ecmascript/modules/movian/http.js",
               "line": 75
@@ -3667,6 +3740,39 @@
         ],
         "kind": "commonjs",
         "name": "movian/http",
+        "shapes": [
+          {
+            "kind": "prototype",
+            "methods": [
+              {
+                "name": "convertFromEncoding",
+                "nargs": 1,
+                "params": [
+                  "encoding"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/http.js",
+                  "line": 66
+                }
+              },
+              {
+                "name": "toString",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/http.js",
+                  "line": 46
+                }
+              }
+            ],
+            "name": "HttpResponse",
+            "receiver": "HttpResponse",
+            "source": {
+              "file": "res/ecmascript/modules/movian/http.js",
+              "line": 46
+            }
+          }
+        ],
         "source": {
           "file": "res/ecmascript/modules/movian/http.js",
           "line": 1
@@ -3696,6 +3802,7 @@
       {
         "exports": [
           {
+            "callbackPage": true,
             "constructor": true,
             "name": "Route",
             "nargs": 2,
@@ -3709,6 +3816,7 @@
             }
           },
           {
+            "callbackPage": true,
             "constructor": true,
             "name": "Searcher",
             "nargs": 3,
@@ -3725,6 +3833,330 @@
         ],
         "kind": "commonjs",
         "name": "movian/page",
+        "shapes": [
+          {
+            "kind": "prototype",
+            "methods": [
+              {
+                "name": "addOptAction",
+                "nargs": 3,
+                "params": [
+                  "title",
+                  "func",
+                  "subtype"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 54
+                }
+              },
+              {
+                "name": "addOptSeparator",
+                "nargs": 1,
+                "params": [
+                  "title"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 84
+                }
+              },
+              {
+                "name": "addOptURL",
+                "nargs": 3,
+                "params": [
+                  "title",
+                  "url",
+                  "subtype"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 72
+                }
+              },
+              {
+                "name": "bindVideoMetadata",
+                "nargs": 1,
+                "params": [
+                  "obj"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 20
+                }
+              },
+              {
+                "name": "destroy",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 94
+                }
+              },
+              {
+                "name": "destroyOption",
+                "nargs": 1,
+                "params": [
+                  "item"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 50
+                }
+              },
+              {
+                "name": "disable",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 46
+                }
+              },
+              {
+                "name": "dump",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 38
+                }
+              },
+              {
+                "name": "enable",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 42
+                }
+              },
+              {
+                "name": "moveBefore",
+                "nargs": 1,
+                "params": [
+                  "before"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 102
+                }
+              },
+              {
+                "name": "onEvent",
+                "nargs": 2,
+                "params": [
+                  "type",
+                  "callback"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 118
+                }
+              },
+              {
+                "name": "toString",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 34
+                }
+              },
+              {
+                "name": "unbindVideoMetadata",
+                "nargs": 1,
+                "params": [
+                  "obj"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 27
+                }
+              }
+            ],
+            "name": "Item",
+            "receiver": "Item",
+            "source": {
+              "file": "res/ecmascript/modules/movian/page.js",
+              "line": 20
+            }
+          },
+          {
+            "kind": "prototype",
+            "methods": [
+              {
+                "name": "appendAction",
+                "nargs": 3,
+                "params": [
+                  "title",
+                  "func",
+                  "subtype"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 298
+                }
+              },
+              {
+                "name": "appendItem",
+                "nargs": 3,
+                "params": [
+                  "url",
+                  "type",
+                  "metadata"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 261
+                }
+              },
+              {
+                "name": "appendPassiveItem",
+                "nargs": 3,
+                "params": [
+                  "type",
+                  "data",
+                  "metadata"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 319
+                }
+              },
+              {
+                "name": "dump",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 332
+                }
+              },
+              {
+                "name": "error",
+                "nargs": 1,
+                "params": [
+                  "msg"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 251
+                }
+              },
+              {
+                "name": "findItemByProp",
+                "nargs": 1,
+                "params": [
+                  "v"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 242
+                }
+              },
+              {
+                "name": "flush",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 336
+                }
+              },
+              {
+                "name": "getItems",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 257
+                }
+              },
+              {
+                "name": "haveMore",
+                "nargs": 1,
+                "params": [
+                  "v"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 237
+                }
+              },
+              {
+                "name": "onEvent",
+                "nargs": 2,
+                "params": [
+                  "type",
+                  "callback"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 351
+                }
+              },
+              {
+                "name": "redirect",
+                "nargs": 1,
+                "params": [
+                  "url"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 340
+                }
+              }
+            ],
+            "name": "Page",
+            "receiver": "Page",
+            "source": {
+              "file": "res/ecmascript/modules/movian/page.js",
+              "line": 237
+            }
+          },
+          {
+            "kind": "prototype",
+            "methods": [
+              {
+                "name": "destroy",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 407
+                }
+              }
+            ],
+            "name": "Route",
+            "receiver": "exports.Route",
+            "source": {
+              "file": "res/ecmascript/modules/movian/page.js",
+              "line": 407
+            }
+          },
+          {
+            "kind": "prototype",
+            "methods": [
+              {
+                "name": "destroy",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 448
+                }
+              }
+            ],
+            "name": "Searcher",
+            "receiver": "exports.Searcher",
+            "source": {
+              "file": "res/ecmascript/modules/movian/page.js",
+              "line": 448
+            }
+          }
+        ],
         "source": {
           "file": "res/ecmascript/modules/movian/page.js",
           "line": 1
@@ -3808,6 +4240,7 @@
               "enabled",
               "icon"
             ],
+            "returns": "Service",
             "source": {
               "file": "res/ecmascript/modules/movian/service.js",
               "line": 27
@@ -3816,6 +4249,28 @@
         ],
         "kind": "commonjs",
         "name": "movian/service",
+        "shapes": [
+          {
+            "kind": "prototype",
+            "methods": [
+              {
+                "name": "destroy",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/service.js",
+                  "line": 21
+                }
+              }
+            ],
+            "name": "Service",
+            "receiver": "Service",
+            "source": {
+              "file": "res/ecmascript/modules/movian/service.js",
+              "line": 21
+            }
+          }
+        ],
         "source": {
           "file": "res/ecmascript/modules/movian/service.js",
           "line": 1
@@ -3824,7 +4279,6 @@
       {
         "exports": [
           {
-            "constructor": true,
             "name": "globalSettings",
             "nargs": 4,
             "params": [
@@ -3833,13 +4287,13 @@
               "icon",
               "desc"
             ],
+            "receiverMutation": true,
             "source": {
               "file": "res/ecmascript/modules/movian/settings.js",
               "line": 266
             }
           },
           {
-            "constructor": true,
             "name": "kvstoreSettings",
             "nargs": 3,
             "params": [
@@ -3847,6 +4301,7 @@
               "url",
               "domain"
             ],
+            "receiverMutation": true,
             "source": {
               "file": "res/ecmascript/modules/movian/settings.js",
               "line": 309
@@ -3855,6 +4310,138 @@
         ],
         "kind": "commonjs",
         "name": "movian/settings",
+        "shapes": [
+          {
+            "kind": "shared",
+            "methods": [
+              {
+                "name": "createAction",
+                "nargs": 3,
+                "params": [
+                  "id",
+                  "title",
+                  "callback"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 184
+                }
+              },
+              {
+                "name": "createBool",
+                "nargs": 5,
+                "params": [
+                  "id",
+                  "title",
+                  "def",
+                  "callback",
+                  "persistent"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 65
+                }
+              },
+              {
+                "name": "createDivider",
+                "nargs": 1,
+                "params": [
+                  "title"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 157
+                }
+              },
+              {
+                "name": "createInfo",
+                "nargs": 3,
+                "params": [
+                  "id",
+                  "icon",
+                  "description"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 170
+                }
+              },
+              {
+                "name": "createInt",
+                "nargs": 9,
+                "params": [
+                  "id",
+                  "title",
+                  "def",
+                  "min",
+                  "max",
+                  "step",
+                  "unit",
+                  "callback",
+                  "persistent"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 120
+                }
+              },
+              {
+                "name": "createMultiOpt",
+                "nargs": 5,
+                "params": [
+                  "id",
+                  "title",
+                  "options",
+                  "callback",
+                  "persistent"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 204
+                }
+              },
+              {
+                "name": "createString",
+                "nargs": 5,
+                "params": [
+                  "id",
+                  "title",
+                  "def",
+                  "callback",
+                  "persistent"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 92
+                }
+              },
+              {
+                "name": "destroy",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 47
+                }
+              },
+              {
+                "name": "dump",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 57
+                }
+              }
+            ],
+            "name": "sp",
+            "receiver": "sp",
+            "source": {
+              "file": "res/ecmascript/modules/movian/settings.js",
+              "line": 47
+            }
+          }
+        ],
         "source": {
           "file": "res/ecmascript/modules/movian/settings.js",
           "line": 1
@@ -3877,6 +4464,57 @@
         ],
         "kind": "commonjs",
         "name": "movian/sqlite",
+        "shapes": [
+          {
+            "kind": "prototype",
+            "methods": [
+              {
+                "name": "close",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/sqlite.js",
+                  "line": 7
+                }
+              },
+              {
+                "name": "query",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/sqlite.js",
+                  "line": 11
+                }
+              },
+              {
+                "name": "step",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/sqlite.js",
+                  "line": 21
+                }
+              },
+              {
+                "name": "upgradeSchema",
+                "nargs": 1,
+                "params": [
+                  "path"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/sqlite.js",
+                  "line": 25
+                }
+              }
+            ],
+            "name": "DB",
+            "receiver": "exports.DB",
+            "source": {
+              "file": "res/ecmascript/modules/movian/sqlite.js",
+              "line": 7
+            }
+          }
+        ],
         "source": {
           "file": "res/ecmascript/modules/movian/sqlite.js",
           "line": 1
@@ -3957,6 +4595,28 @@
         ],
         "kind": "commonjs",
         "name": "movian/videoscrobbler",
+        "shapes": [
+          {
+            "kind": "prototype",
+            "methods": [
+              {
+                "name": "destroy",
+                "nargs": 0,
+                "params": [],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/videoscrobbler.js",
+                  "line": 44
+                }
+              }
+            ],
+            "name": "VideoScrobbler",
+            "receiver": "exports.VideoScrobbler",
+            "source": {
+              "file": "res/ecmascript/modules/movian/videoscrobbler.js",
+              "line": 44
+            }
+          }
+        ],
         "source": {
           "file": "res/ecmascript/modules/movian/videoscrobbler.js",
           "line": 1
@@ -5510,6 +6170,6 @@
       }
     ]
   },
-  "movianRevision": "b2c8bb8530dc877e7eb6881a9486fc4f7a311034",
+  "movianRevision": "e9b9ad01b9cd0a08b82a98034c06c2dbad5e4b39",
   "schemaVersion": 1
 }

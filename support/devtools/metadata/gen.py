@@ -23,9 +23,9 @@ committed metadata artifact for the GLW view language, grown from
 - glw.scopes      -- curated, `curated_scopes.json` next to this file.
 - js.modules      -- native `ES_MODULE` registrations from
                      src/ecmascript/es_*.c (function names and arities), plus
-                     statically scanned CommonJS exports from
-                     res/ecmascript/modules/**/*.js.
-- js.pluginManifest -- curated plugin.json keys and mandatory status,
+                     statically scanned CommonJS exports and prototype/shared
+                     object shapes from res/ecmascript/modules/**/*.js.
+- js.pluginManifest -- curated `plugin.json` keys and mandatory status,
                        anchored to the loader in src/plugins.c.
 
 Every record carries `source: {file, line}` pointing at the defining line
@@ -644,13 +644,8 @@ COMMONJS_FUNCTION_RE = re.compile(
     r"=\s*function\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\(([^)]*)\)", re.S)
 
 
-def _function_params(region: str) -> list[str] | None:
-    """Parameter names of the function assigned at the head of `region`,
-    or None when the export is not assigned a function literal."""
-    match = COMMONJS_FUNCTION_RE.search(region)
-    if match is None:
-        return None
-    raw = match.group(1).strip()
+def _parse_params(raw: str) -> list[str] | None:
+    raw = raw.strip()
     if not raw:
         return []
     params = []
@@ -665,7 +660,130 @@ def _function_params(region: str) -> list[str] | None:
     return params
 
 
+def _function_params(region: str) -> list[str] | None:
+    """Parameter names of the function assigned at the head of `region`,
+    or None when the export is not assigned a function literal."""
+    match = COMMONJS_FUNCTION_RE.search(region)
+    if match is None:
+        return None
+    return _parse_params(match.group(1))
+
+
 IDENT_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
+
+
+PROTOTYPE_FUNCTION_RE = re.compile(
+    r"^\s*((?:exports\.)?[A-Za-z_$][A-Za-z0-9_$]*)\.prototype\."
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*function\s*"
+    r"(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\(([^)]*)\)", re.M)
+PROTOTYPE_ALIAS_RE = re.compile(
+    r"^\s*((?:exports\.)?[A-Za-z_$][A-Za-z0-9_$]*)\.prototype\."
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
+    r"((?:exports\.)?[A-Za-z_$][A-Za-z0-9_$]*)\.prototype\."
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*;", re.M)
+SHARED_OBJECT_FUNCTION_RE = re.compile(
+    r"^\s*(sp)\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*function\s*"
+    r"(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\(([^)]*)\)", re.M)
+
+
+def _masked_js_text(path: Path) -> str:
+    raw_lines = path.read_text(encoding="utf-8").splitlines()
+    masked_lines: list[str] = []
+    in_block_comment = False
+    for raw_line in raw_lines:
+        line, in_block_comment = _mask_js_comments(
+            raw_line, in_block_comment)
+        masked_lines.append(line)
+    return "\n".join(masked_lines)
+
+
+def _source_line(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+def _shape_owner(receiver: str) -> str:
+    owner = receiver.rsplit(".", 1)[-1]
+    return owner[:-5] if owner.endswith("Proto") else owner
+
+
+def _shape_method(
+        name: str, raw_params: str, path: Path, line: int,
+        alias_of: str | None = None) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "name": name,
+        "source": {"file": rel(path), "line": line},
+    }
+    params = _parse_params(raw_params)
+    if params is not None:
+        record["params"] = params
+        record["nargs"] = len(params)
+    if alias_of is not None:
+        record["aliasOf"] = alias_of
+    return record
+
+
+def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
+    """Scan prototype and settings shared-object method assignments."""
+    text = _masked_js_text(path)
+    by_receiver: dict[str, dict[str, dict[str, Any]]] = {}
+
+    for match in PROTOTYPE_FUNCTION_RE.finditer(text):
+        receiver = match.group(1)
+        methods = by_receiver.setdefault(receiver, {})
+        methods[match.group(2)] = _shape_method(
+            match.group(2), match.group(3), path,
+            _source_line(text, match.start()))
+
+    unresolved_aliases: list[tuple[str, str, str, int]] = []
+    for match in PROTOTYPE_ALIAS_RE.finditer(text):
+        receiver, name, target_receiver, target = match.groups()
+        if receiver == target_receiver:
+            unresolved_aliases.append((
+                receiver, name, target, _source_line(text, match.start())))
+
+    while unresolved_aliases:
+        remaining: list[tuple[str, str, str, int]] = []
+        progress = False
+        for receiver, name, target, line in unresolved_aliases:
+            methods = by_receiver.setdefault(receiver, {})
+            if target in methods:
+                method = dict(methods[target])
+                method["name"] = name
+                method["source"] = {"file": rel(path), "line": line}
+                method["aliasOf"] = target
+                methods[name] = method
+                progress = True
+            else:
+                remaining.append((receiver, name, target, line))
+        if not progress:
+            break
+        unresolved_aliases = remaining
+
+    if SHARED_OBJECT_FUNCTION_RE.search(text):
+        methods = by_receiver.setdefault("sp", {})
+        for match in SHARED_OBJECT_FUNCTION_RE.finditer(text):
+            methods[match.group(2)] = _shape_method(
+                match.group(2), match.group(3), path,
+                _source_line(text, match.start()))
+
+    shapes: list[dict[str, Any]] = []
+    for receiver in sorted(by_receiver):
+        methods = by_receiver[receiver]
+        if not methods:
+            continue
+        shape = {
+            "kind": "shared" if receiver == "sp" else "prototype",
+            "methods": [methods[name] for name in sorted(methods)],
+            "name": "sp" if receiver == "sp" else _shape_owner(receiver),
+            "receiver": receiver,
+            "source": {
+                "file": rel(path),
+                "line": min(
+                    method["source"]["line"] for method in methods.values()),
+            },
+        }
+        shapes.append(shape)
+    return shapes
 
 
 def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
@@ -703,8 +821,27 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
         if params is not None:
             record["params"] = params
             record["nargs"] = len(params)
-        if re.search(r"\bthis\b", region):
+        if re.search(r"this\.__proto__\s*=", region):
+            # These functions mutate the receiver's prototype when called as
+            # `settings.globalSettings(...)`; they are not constructors in
+            # the public module surface.
+            record["receiverMutation"] = True
+        elif re.search(r"\bthis\b", region):
             record["constructor"] = True
+        returned = set(re.findall(
+            r"\breturn\s+new\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", region))
+        if len(returned) == 1:
+            record["returns"] = next(iter(returned))
+        if re.search(
+                r"\breturn\s*\{\s*document\s*:\s*new\s+Node\b"
+                r".*\broot\s*:\s*new\s+Node\b", region, re.S):
+            record["returns"] = "ParsedHTML"
+        if re.search(r"\bnew\s+Page\s*\(", region) and \
+                re.search(r"\bcallback\b", region):
+            record["callbackPage"] = True
+        if re.search(r"\bnew\s+HttpResponse\s*\(", region) and \
+                re.search(r"\bcallback\s*\(", region):
+            record["callbackResponse"] = True
         exports.append(record)
     exports.sort(key=lambda r: r["name"])
     return exports
@@ -741,12 +878,28 @@ def build_commonjs_modules() -> list[dict[str, Any]]:
         seen.add(module_name)
         exports = [e for e in scan_commonjs_exports(path)
                    if e["name"] != "__proto__"]
+        shapes = (scan_commonjs_shapes(path)
+                  if module_name.startswith("movian/") else [])
+        shape_names = {shape["name"] for shape in shapes}
+        for export in exports:
+            returned = export.get("returns")
+            if returned not in shape_names and not (
+                    module_name == "movian/html" and
+                    returned == "ParsedHTML"):
+                export.pop("returns", None)
+            if export.get("callbackPage") and "Page" not in shape_names:
+                export.pop("callbackPage", None)
+            if export.get("callbackResponse") and \
+                    "HttpResponse" not in shape_names:
+                export.pop("callbackResponse", None)
         record = {
             "name": module_name,
             "kind": "commonjs",
             "exports": exports,
             "source": {"file": rel(path), "line": 1},
         }
+        if shapes:
+            record["shapes"] = shapes
         parent = _proto_parent(path)
         if parent is not None:
             record["inherits"] = parent
@@ -874,8 +1027,7 @@ def dumps(artifact: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def render_dts(artifact: dict[str, Any]) -> str:
-    """Render a .d.ts file from js.modules data.  All types are ``any`` in
-    v1; the honest signal is exact arity encoded via ``@arity`` JSDoc."""
+    """Render a .d.ts file from js.modules data."""
     modules = artifact.get("js", {}).get("modules", [])
     rev = artifact.get("movianRevision", "unknown")
     lines: list[str] = []
@@ -883,6 +1035,34 @@ def render_dts(artifact: dict[str, Any]) -> str:
     lines.append("// movianRevision: %s" % rev)
     lines.append("// Duktape ES5.1 -- no ES6+ in plugin code.")
     lines.append("")
+
+    def params_signature(
+            params: list[str] | None, export: dict[str, Any] | None = None,
+            shape_names: set[str] | None = None
+    ) -> str:
+        if params is None:
+            return "...args: any[]"
+        parts = []
+        for name in params:
+            annotation = "any"
+            if export is not None and name == "callback":
+                if export.get("callbackPage") and \
+                        shape_names and "Page" in shape_names:
+                    annotation = "(page: Page, ...args: any[]) => any"
+                elif export.get("callbackResponse") and \
+                        shape_names and "HttpResponse" in shape_names:
+                    annotation = "(err: any, response: HttpResponse) => any"
+            parts.append("%s?: %s" % (name, annotation))
+        return ", ".join(parts)
+
+    def shape_return(shape: dict[str, Any], method: str) -> str:
+        returns = {
+            ("Page", "appendAction"): "Item",
+            ("Page", "appendItem"): "Item",
+            ("Page", "appendPassiveItem"): "Item",
+            ("Page", "getItems"): "Item[]",
+        }
+        return returns.get((shape["name"], method), "any")
 
     for mod in modules:
         name = mod["name"]
@@ -909,7 +1089,8 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     "  function %s(...args: any[]): any;" % fname)
         elif kind == "commonjs":
             exports = mod.get("exports", [])
-            if not exports and not mod.get("inherits"):
+            shapes = mod.get("shapes", [])
+            if not exports and not mod.get("inherits") and not shapes:
                 lines.append("}")
                 lines.append("")
                 continue
@@ -918,7 +1099,58 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 lines.append("  // exports.__proto__ = require('%s') --"
                              " inherits its whole surface" % inherits)
                 lines.append("  export * from '%s';" % inherits)
-            lines.append("  // CommonJS exports")
+
+            prototype_shapes = [
+                shape for shape in shapes
+                if shape.get("kind") == "prototype"
+            ]
+            shared_shapes = [
+                shape for shape in shapes
+                if shape.get("kind") == "shared"
+            ]
+            if prototype_shapes:
+                lines.append("  // CommonJS prototype shapes")
+                for shape in prototype_shapes:
+                    lines.append("  interface %s {" % shape["name"])
+                    for method in shape["methods"]:
+                        params = method.get("params")
+                        if params is not None:
+                            lines.append("    /** @arity %d */"
+                                         % len(params))
+                        lines.append(
+                            "    %s(%s): %s;" %
+                            (method["name"], params_signature(params),
+                             shape_return(shape, method["name"])))
+                    lines.append("  }")
+                lines.append("")
+
+            if name == "movian/html" and any(
+                    shape["name"] == "Node" for shape in prototype_shapes):
+                lines.append("  interface ParsedHTML {")
+                lines.append("    document: Node;")
+                lines.append("    root: Node;")
+                lines.append("  }")
+                lines.append("")
+
+            if shared_shapes:
+                lines.append(
+                    "  // CommonJS receiver-mutated shared object shapes")
+                for shape in shared_shapes:
+                    for method in shape["methods"]:
+                        params = method.get("params")
+                        if params is not None:
+                            lines.append("  /** @arity %d */"
+                                         % len(params))
+                        lines.append(
+                            "  function %s(%s): any;" %
+                            (method["name"], params_signature(params)))
+                lines.append("")
+
+            if exports:
+                lines.append("  // CommonJS exports")
+            shape_names = {
+                shape["name"] for shape in prototype_shapes
+            }
             for exp in exports:
                 ename = exp["name"]
                 params = exp.get("params")
@@ -929,18 +1161,24 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 # arguments than they declare. Requiring them would generate
                 # errors the runtime does not have. The honest count stays in
                 # @arity.
-                sig = ", ".join("%s?: any" % name for name in (params or []))
+                sig = params_signature(params, exp, shape_names)
                 if exp.get("constructor"):
                     if params is not None:
                         lines.append("  /** @arity %d */" % len(params))
+                    result_type = ename if ename in shape_names else "any"
                     lines.append("  const %s: {" % ename)
-                    lines.append("    new (%s): any;"
-                                 % (sig if params is not None
-                                    else "...args: any[]"))
+                    lines.append("    new (%s): %s;" %
+                                 (sig, result_type))
                     lines.append("  };")
                 elif params is not None:
                     lines.append("  /** @arity %d */" % len(params))
-                    lines.append("  function %s(%s): any;" % (ename, sig))
+                    return_type = exp.get("returns", "any")
+                    if return_type not in shape_names and not (
+                            name == "movian/html" and
+                            return_type == "ParsedHTML"):
+                        return_type = "any"
+                    lines.append("  function %s(%s): %s;" %
+                                 (ename, sig, return_type))
                 else:
                     lines.append("  const %s: any;" % ename)
 
