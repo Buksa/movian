@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "movian-plugin-sdk": {
+      "source": {
+        "source": "github",
+        "repo": "Buksa/movian-plugin-sdk"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "movian@movian-plugin-sdk": true
+  }
+}

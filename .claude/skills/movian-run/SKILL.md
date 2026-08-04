@@ -42,16 +42,36 @@ make BUILD=debug -j$(nproc) movian-analyze
 
 ## A build directory belongs to exactly one checkout
 
-Run `configure-linux-debug.sh` **only from the checkout that owns its real
-`build.debug`**. From a worktree it rewrites the shared `config.mak` with that
-worktree's `TOPDIR` and breaks every checkout sharing it — and the breakage
-surfaces in a *different* tree, long after the command that caused it.
+Every checkout — worktrees included — configures and owns its own
+`build.debug`. `configure-linux-debug.sh` resolves `TOPDIR` from its own
+location and builds there, so running it inside a worktree is correct and
+touches no other tree. The external-dependency cache under `~/.cache/movian-ext`
+is what keeps a private build cheap (`docs/Guides/LINUX_FLATPAK_SMOKE_CHECKLIST.md`).
 
-The same applies to read-only-looking probes. `make -q` builds nothing, but GNU
-make still remakes the included dependency files, which live in the shared build
-directory — so a freshness query from a second checkout leaves the owner
-permanently "stale". Verification worktrees get no `build.debug` at all: not a
-copy, not a symlink. Build-dependent gates run only in the owning checkout.
+```
+./support/configure-linux-debug.sh
+make BUILD=debug -j$(nproc)
+```
+
+**The restriction applies to a shared `build.debug` symlink, which is legacy.**
+Where one still exists, running configure through it rewrites the owner's
+`config.mak` with this worktree's `TOPDIR` and breaks every checkout sharing it,
+and the breakage surfaces in a *different* tree long after the command that
+caused it. Read-only-looking probes are no safer: `make -q` builds nothing, but
+GNU make still remakes the included dependency files inside that shared
+directory, so a freshness query from a second checkout leaves the owner
+permanently "stale".
+
+So: check first, then act.
+
+```
+[ -L build.debug ] && echo "shared symlink — do not configure here"
+```
+
+If it is a symlink, remove it and configure a private build before running any
+build-dependent gate in this worktree. If it is absent or a real directory, the
+gate belongs here and skipping it means the change went unverified — or worse,
+was verified against another checkout's binary.
 
 ## Repo-root requirement
 
