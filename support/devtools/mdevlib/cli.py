@@ -18,7 +18,6 @@ from typing import Any
 from . import harness
 from . import lspdoctor
 from . import smoke
-from . import viewdoc
 from .harness import Instance, MdevError
 
 
@@ -556,51 +555,6 @@ def cmd_preview(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
-# viewdoc (issue #88 -- GLW reference-doc drift detector)
-# ---------------------------------------------------------------------------
-
-def cmd_viewdoc(args: argparse.Namespace) -> int:
-    if not args.check:
-        # No --check: dump the source-side inventories (handy for doc work).
-        inv = viewdoc.inventory()
-        enum_values = viewdoc.attribute_enum_values()
-        if args.json:
-            print(json.dumps({**inv, "attributeEnumValues": enum_values},
-                             ensure_ascii=False, indent=2))
-        else:
-            for kind, names in inv.items():
-                print("%s (%d): %s" % (kind, len(names), " ".join(names)))
-            for name, values in enum_values.items():
-                print("attribute %s values: %s"
-                      % (name, " | ".join(values)))
-        return 0
-
-    result = viewdoc.run_check()
-    drift_lines: list[str] = []
-    for kind, diff in result.items():
-        for name in diff["missing_from_doc"]:
-            drift_lines.append("missing-from-doc (%s): %s"
-                               % (kind.rstrip("s"), name))
-        for name in diff["gone_from_source"]:
-            drift_lines.append("gone-from-source (%s): %s"
-                               % (kind.rstrip("s"), name))
-
-    if args.json:
-        print(json.dumps({"viewdoc": "error" if drift_lines else "ok",
-                          "result": result},
-                         ensure_ascii=False, indent=2))
-    else:
-        for kind, diff in result.items():
-            print("%s: source=%d documented=%d"
-                  % (kind, diff["source_count"], diff["documented_count"]))
-        for line in drift_lines:
-            print(line)
-        if not drift_lines:
-            print("VIEWDOC OK")
-    return 1 if drift_lines else 0
-
-
-# ---------------------------------------------------------------------------
 # lsp (issue #100 -- editor integration preflight)
 # ---------------------------------------------------------------------------
 
@@ -818,31 +772,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="machine-readable JSON output"
     )
     smoke_run.set_defaults(func=cmd_smoke_run)
-
-    # No instance/--name: viewdoc reads files only, never talks to a
-    # running Movian.
-    viewdoc_ = sub.add_parser(
-        "viewdoc",
-        help="diff the GLW attribute/function tables against the "
-             "movian-view-design reference docs (issue #88)",
-        description="Reads attribute and expression-function names from "
-                    "generated/movian-metadata.json's glw.attributes / "
-                    "glw.functions (issue #98's generated artifact -- run "
-                    "support/devtools/metadata/gen.py to (re)build it from "
-                    "glw_view_attrib.c's attribtab[] / glw_view_eval.c's "
-                    "funcvec[]), and (with --check) diffs them against the "
-                    "names documented in the movian-view-design skill's "
-                    "glw-widget-catalog.md / glw-view-language.md. Reports "
-                    "missing-from-doc (in the artifact, undocumented) and "
-                    "gone-from-source (documented, not in the artifact); "
-                    "exit 1 on any drift. Without --check, dumps the "
-                    "artifact-side inventories.")
-    viewdoc_.add_argument("--check", action="store_true",
-                          help="diff artifact tables against the docs; "
-                               "exit 1 on any drift")
-    viewdoc_.add_argument("--json", action="store_true",
-                          help="machine-readable JSON output")
-    viewdoc_.set_defaults(func=cmd_viewdoc)
 
     lsp = sub.add_parser(
         "lsp",
