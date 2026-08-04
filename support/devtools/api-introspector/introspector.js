@@ -196,6 +196,97 @@ function describeOwnProperties(value) {
   return result;
 }
 
+function getAllPropertyKeys(value) {
+  var result = [];
+  var keys;
+  var i;
+  var key;
+
+  try {
+    keys = Object.getOwnPropertyNames(value);
+  } catch(e) {
+    return getShapeKeys(value);
+  }
+
+  for(i = 0; i < keys.length; i++) {
+    key = keys[i];
+    if(key != 'constructor')
+      result.push(key);
+  }
+
+  return result;
+}
+
+function describeAllOwnProperties(value) {
+  var result = {};
+  var keys = getAllPropertyKeys(value);
+  var i;
+  var key;
+  var descriptor;
+
+  for(i = 0; i < keys.length; i++) {
+    key = keys[i];
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if(descriptor &&
+         (typeof descriptor.get == 'function' ||
+          typeof descriptor.set == 'function')) {
+        result[key] = describeAccessor(descriptor);
+      } else if(descriptor && 'value' in descriptor) {
+        result[key] = describeMember(descriptor.value);
+      } else {
+        result[key] = describeMember(value[key]);
+      }
+    } catch(e2) {
+      result[key] = {
+        type: '<error>',
+        error: String(e2)
+      };
+    }
+  }
+
+  return result;
+}
+
+function describeEnumerableProperties(value) {
+  var result = {};
+  var keys;
+  var i;
+  var key;
+  var descriptor;
+
+  try {
+    keys = Object.keys(value);
+  } catch(e) {
+    return {
+      error: String(e)
+    };
+  }
+
+  for(i = 0; i < keys.length; i++) {
+    key = keys[i];
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if(descriptor &&
+         (typeof descriptor.get == 'function' ||
+          typeof descriptor.set == 'function')) {
+        result[key] = describeAccessor(descriptor);
+      } else if(descriptor && 'value' in descriptor) {
+        result[key] = describeMember(descriptor.value);
+      } else {
+        result[key] = describeMember(value[key]);
+      }
+    } catch(e2) {
+      result[key] = {
+        type: '<error>',
+        error: String(e2)
+      };
+    }
+  }
+
+  return result;
+}
+
 function describePrototypeLevel(value) {
   var result = {
     type: typeof value,
@@ -357,6 +448,70 @@ function describeConstructed(value, depth) {
   return result;
 }
 
+function describeLiveObject(value, depth) {
+  var childType = typeof value;
+  var result = {
+    type: childType,
+    keys: {},
+    properties: {},
+    prototype: null
+  };
+  var proto;
+  var keys;
+  var i;
+  var key;
+  var descriptor;
+  var nested = {};
+
+  if(value === null) {
+    result.type = 'null';
+    return result;
+  }
+
+  if(childType != 'object' && childType != 'function')
+    return result;
+
+  result.keys = describeEnumerableProperties(value);
+  result.properties = describeAllOwnProperties(value);
+
+  try {
+    proto = Object.getPrototypeOf(value);
+    if(proto !== null)
+      result.prototype = describePrototypeLevel(proto);
+  } catch(e) {
+    result.prototype = {
+      error: String(e)
+    };
+  }
+
+  if(depth <= 0)
+    return result;
+
+  keys = getShapeKeys(value);
+  for(i = 0; i < keys.length; i++) {
+    key = keys[i];
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if(!descriptor || !('value' in descriptor))
+        continue;
+
+      childType = typeof descriptor.value;
+      if(descriptor.value !== null &&
+         (childType == 'object' || childType == 'function')) {
+        nested[key] = describeLiveObject(descriptor.value, depth - 1);
+      }
+    } catch(e2) {
+      nested[key] = {
+        type: '<error>',
+        error: String(e2)
+      };
+    }
+  }
+
+  result.nested = nested;
+  return result;
+}
+
 function makeSkippedConstruction(reason, unreachable) {
   return {
     status: 'skipped',
@@ -498,6 +653,138 @@ function describeConstruction(name, value) {
   );
 }
 
+function makeTier3Skipped(reason, unreachable) {
+  return {
+    status: 'skipped',
+    attempted: false,
+    reason: reason,
+    unreachable: unreachable
+  };
+}
+
+function describeTier3Item(page, method, args) {
+  var item;
+
+  try {
+    if(!page || typeof page[method] != 'function')
+      throw new Error(method + ' is not callable on the route Page');
+
+    item = page[method].apply(page, args);
+    return {
+      status: 'constructed',
+      attempted: true,
+      method: method,
+      result: describeLiveObject(item, 0),
+      unreachable: []
+    };
+  } catch(e) {
+    return {
+      status: 'failed',
+      attempted: true,
+      method: method,
+      error: String(e),
+      unreachable: [{
+        'class': 'Item',
+        members: 'Item instance members',
+        reason: 'The route Page did not return an Item'
+      }]
+    };
+  }
+}
+
+function describeTier3Websocket() {
+  var url = 'ws://127.0.0.1:1/';
+  var websocket = moduleRefs['websocket'];
+  var socket;
+
+  if(!websocket || typeof websocket.w3cwebsocket != 'function') {
+    return {
+      status: 'failed',
+      attempted: true,
+      url: url,
+      error: 'websocket.w3cwebsocket is not callable',
+      unreachable: [{
+        'class': 'w3cwebsocket',
+        members: ['onopen', 'oninput', 'onclose', '_sock'],
+        reason: 'The websocket constructor was unavailable'
+      }]
+    };
+  }
+
+  try {
+    socket = new websocket.w3cwebsocket(url, null);
+    return {
+      status: 'constructed',
+      attempted: true,
+      url: url,
+      result: describeLiveObject(socket, 0),
+      unreachable: []
+    };
+  } catch(e) {
+    return {
+      status: 'failed',
+      attempted: true,
+      url: url,
+      error: String(e),
+      unreachable: [{
+        'class': 'w3cwebsocket',
+        members: ['onopen', 'oninput', 'onclose', '_sock'],
+        reason: 'Construction failed before the instance could be described'
+      }]
+    };
+  }
+}
+
+function describeTier3Page(page) {
+  try {
+    if(!page || typeof page != 'object')
+      throw new Error('Route callback did not receive a Page object');
+
+    tier3.page = {
+      status: 'constructed',
+      attempted: true,
+      source: 'route callback',
+      result: describeLiveObject(page, 0),
+      unreachable: []
+    };
+  } catch(e) {
+    tier3.page = {
+      status: 'failed',
+      attempted: true,
+      error: String(e),
+      unreachable: [{
+        'class': 'Page',
+        members: ['options'],
+        scope: 'All Page instance members',
+        reason: 'The route callback Page could not be described'
+      }]
+    };
+  }
+
+  tier3.items.appendItem = describeTier3Item(page, 'appendItem', [
+    'introspect:item',
+    'directory',
+    {
+      title: 'Runtime API introspector item'
+    }
+  ]);
+  tier3.items.appendAction = describeTier3Item(page, 'appendAction', [
+    'Runtime API introspector action',
+    function() {},
+    'action'
+  ]);
+  tier3.items.appendPassiveItem = describeTier3Item(page,
+                                                    'appendPassiveItem', [
+    'directory',
+    'introspector',
+    {
+      title: 'Runtime API introspector passive item'
+    }
+  ]);
+  tier3.websocket = describeTier3Websocket();
+  emitPayload();
+}
+
 function describeModule(value) {
   var type = typeof value;
   var result = {
@@ -537,11 +824,14 @@ function describeModule(value) {
 var before = {};
 var tier1 = {};
 var tier2 = {};
+var tier3 = {};
 var moduleRefs = {};
 var loadErrors = {};
 var i;
 var name;
 var settings;
+var routeRef = null;
+var tier3RouteUrl = 'introspect:page';
 var globalSettingsError = null;
 var afterSettings = null;
 var afterLegacySettings = null;
@@ -630,16 +920,106 @@ try {
   };
 }
 
-print('MOVIAN_API_INTROSPECTOR_JSON=' + JSON.stringify({
-  version: 2,
-  modules: moduleNames,
-  before: before,
-  tier1: tier1,
-  tier2: tier2,
-  afterGlobalSettings: {
-    'movian/settings': afterSettings,
-    'showtime/settings': afterLegacySettings
+tier3 = {
+  route: {
+    status: 'pending',
+    attempted: false,
+    url: tier3RouteUrl,
+    reason: 'Route registration has not run'
   },
-  loadErrors: loadErrors,
-  globalSettingsError: globalSettingsError
-}));
+  page: makeTier3Skipped(
+    'Route callback has not been reached',
+    [{
+      'class': 'Page',
+      members: ['options'],
+      scope: 'All Page instance members',
+      reason: 'Open ' + tier3RouteUrl + ' to receive a live Page'
+    }]
+  ),
+  items: {
+    appendItem: makeTier3Skipped(
+      'Route callback has not been reached',
+      [{
+        'class': 'Item',
+        members: 'Item instance members',
+        reason: 'appendItem runs only after a live Page is received'
+      }]
+    ),
+    appendAction: makeTier3Skipped(
+      'Route callback has not been reached',
+      [{
+        'class': 'Item',
+        members: 'Item instance members',
+        reason: 'appendAction runs only after a live Page is received'
+      }]
+    ),
+    appendPassiveItem: makeTier3Skipped(
+      'Route callback has not been reached',
+      [{
+        'class': 'Item',
+        members: 'Item instance members',
+        reason: 'appendPassiveItem runs only after a live Page is received'
+      }]
+    )
+  },
+  websocket: {
+    status: 'skipped',
+    attempted: false,
+    url: 'ws://127.0.0.1:1/',
+    reason: 'Route callback has not been reached',
+    unreachable: [{
+      'class': 'w3cwebsocket',
+      members: ['onopen', 'oninput', 'onclose', '_sock'],
+      reason: 'Loopback construction is deferred until the route is opened'
+    }]
+  }
+};
+
+function emitPayload() {
+  print('MOVIAN_API_INTROSPECTOR_JSON=' + JSON.stringify({
+    version: 2,
+    modules: moduleNames,
+    before: before,
+    tier1: tier1,
+    tier2: tier2,
+    tier3: tier3,
+    afterGlobalSettings: {
+      'movian/settings': afterSettings,
+      'showtime/settings': afterLegacySettings
+    },
+    loadErrors: loadErrors,
+    globalSettingsError: globalSettingsError
+  }));
+}
+
+try {
+  if(!moduleRefs['movian/page'] ||
+     typeof moduleRefs['movian/page'].Route != 'function')
+    throw new Error('movian/page.Route is not callable');
+
+  routeRef = new (moduleRefs['movian/page'].Route)(
+    tier3RouteUrl,
+    describeTier3Page
+  );
+  tier3.route = {
+    status: 'constructed',
+    attempted: true,
+    url: tier3RouteUrl,
+    result: describeLiveObject(routeRef, 0),
+    unreachable: []
+  };
+} catch(e6) {
+  tier3.route = {
+    status: 'failed',
+    attempted: true,
+    url: tier3RouteUrl,
+    error: String(e6),
+    unreachable: [{
+      'class': 'Page',
+      members: 'Page and Item instance members',
+      reason: 'The introspection route could not be registered'
+    }]
+  };
+}
+
+emitPayload();
