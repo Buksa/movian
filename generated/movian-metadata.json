@@ -3627,7 +3627,7 @@
                 }
               },
               {
-                "kind": "value",
+                "kind": "function",
                 "name": "onError",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
@@ -3635,7 +3635,7 @@
                 }
               },
               {
-                "kind": "value",
+                "kind": "function",
                 "name": "onResponse",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
@@ -3703,7 +3703,7 @@
                 }
               },
               {
-                "kind": "value",
+                "kind": "function",
                 "name": "onData",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
@@ -3711,7 +3711,7 @@
                 }
               },
               {
-                "kind": "value",
+                "kind": "function",
                 "name": "onEnd",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
@@ -6632,7 +6632,7 @@
                 }
               },
               {
-                "kind": "value",
+                "kind": "function",
                 "name": "onclose",
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
@@ -6640,7 +6640,7 @@
                 }
               },
               {
-                "kind": "value",
+                "kind": "function",
                 "name": "oninput",
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
@@ -6648,7 +6648,7 @@
                 }
               },
               {
-                "kind": "value",
+                "kind": "function",
                 "name": "onopen",
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
@@ -6802,6 +6802,6 @@
       }
     ]
   },
-  "movianRevision": "f4686c0e8389e13d8e45366a432aabdc8c766537",
+  "movianRevision": "8230fa54c4c7edbc608d30e327908ce9367e30a7",
   "schemaVersion": 1
 }

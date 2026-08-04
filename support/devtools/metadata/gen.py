@@ -64,6 +64,10 @@ METADATA_DIR = Path(__file__).resolve().parent
 ARTIFACT_PATH = REPO_ROOT / "generated" / "movian-metadata.json"
 DTS_PATH = REPO_ROOT / "generated" / "movian-api.d.ts"
 REFERENCE_DTS_CHECKER = METADATA_DIR / "check_reference_dts.py"
+RUNTIME_ORACLE_PATH = (
+    REPO_ROOT / "support" / "devtools" / "api-introspector"
+    / "runtime-api.json")
+RUNTIME_ORACLE_VERSION = 2
 
 ATTRIB_C = REPO_ROOT / "src" / "ui" / "glw" / "glw_view_attrib.c"
 EVAL_C = REPO_ROOT / "src" / "ui" / "glw" / "glw_view_eval.c"
@@ -952,18 +956,28 @@ def _scan_shape_properties(
     ) -> None:
         scan_text = _mask_nested_function_bodies(body)
         aliases = set(THIS_ALIAS_RE.findall(scan_text))
+
+        def assignment_kind(
+                assignment: re.Match[str]) -> str:
+            return ("function"
+                    if re.match(
+                        r"\s*function\b", scan_text[assignment.end():])
+                    else "value")
+
         for assignment in THIS_ASSIGN_RE.finditer(scan_text):
             name = assignment.group(1)
             if name != "__proto__":
                 _add_property(
                     properties, owner_receiver, name, path, comment_text,
-                    base_offset + assignment.start(1))
+                    base_offset + assignment.start(1),
+                    kind=assignment_kind(assignment))
         for assignment in ALIAS_MEMBER_ASSIGN_RE.finditer(scan_text):
             alias, name = assignment.groups()
             if alias in aliases and name != "__proto__":
                 _add_property(
                     properties, owner_receiver, name, path, comment_text,
-                    base_offset + assignment.start(2))
+                    base_offset + assignment.start(2),
+                    kind=assignment_kind(assignment))
 
         for match in _top_level_matches(body, DEFINE_PROPERTIES_RE):
             target = match.group(1)
@@ -1499,6 +1513,645 @@ def _check_commonjs_shape_coverage(
     return False, "\n".join(lines)
 
 
+def _runtime_member_kind(record: Any) -> str | None:
+    if not isinstance(record, dict):
+        return None
+    record_type = record.get("type")
+    if record_type == "function":
+        return "function"
+    if record_type == "accessor":
+        return "accessor"
+    if record_type in {
+            "object", "string", "number", "boolean", "undefined", "null"}:
+        return "value"
+    return None
+
+
+def _runtime_prototype_levels(
+        prototype: Any) -> list[dict[str, str]]:
+    levels: list[dict[str, str]] = []
+    current = prototype
+    while isinstance(current, dict):
+        members: dict[str, str] = {}
+        for name, record in (current.get("keys") or {}).items():
+            kind = _runtime_member_kind(record)
+            if kind is not None:
+                members[name] = kind
+        levels.append(members)
+        current = current.get("prototype")
+    return levels
+
+
+def _runtime_stage_reason(
+        stage: Any, fallback: str,
+        owner: str | None = None) -> str:
+    if not isinstance(stage, dict):
+        return fallback
+    parts: list[str] = []
+    status = stage.get("status")
+    if isinstance(status, str):
+        parts.append("status=%s" % status)
+    for key in ("reason", "error"):
+        value = stage.get(key)
+        if isinstance(value, str) and value not in parts:
+            parts.append(value)
+    for entry in stage.get("unreachable", []):
+        if not isinstance(entry, dict):
+            continue
+        entry_owner = entry.get("class")
+        if owner is not None and entry_owner not in (owner, None):
+            continue
+        value = entry.get("reason")
+        if isinstance(value, str) and value not in parts:
+            parts.append(value)
+    return "; ".join(parts) or fallback
+
+
+def _resolve_required_module(path: Path, spec: str) -> str | None:
+    if not (spec.startswith("./") or spec.startswith("../")):
+        return spec
+    target = (path.parent / spec).resolve()
+    if target.suffix != ".js":
+        target = target.with_suffix(".js")
+    try:
+        return target.relative_to(COMMONJS_DIR).with_suffix("").as_posix()
+    except ValueError:
+        return None
+
+
+def _required_aliases(path: Path) -> dict[str, str]:
+    text = path.read_text(encoding="utf-8")
+    aliases: dict[str, str] = {}
+    for match in re.finditer(
+            r"\b(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*="
+            r"\s*require\(\s*['\"]([^'\"]+)['\"]\s*\)", text):
+        module_name = _resolve_required_module(path, match.group(2))
+        if module_name is not None:
+            aliases[match.group(1)] = module_name
+    return aliases
+
+
+def _static_export_kind(
+        module_name: str, export_name: str,
+        modules: dict[str, dict[str, Any]],
+        cache: dict[tuple[str, str], str],
+        visiting: set[tuple[str, str]]) -> str:
+    key = (module_name, export_name)
+    if key in cache:
+        return cache[key]
+    if key in visiting:
+        return "value"
+    visiting.add(key)
+
+    module = modules.get(module_name)
+    if module is None:
+        result = "value"
+    elif module.get("kind") == "native":
+        result = ("function"
+                 if any(f.get("name") == export_name
+                        for f in module.get("functions", []))
+                 else "value")
+    else:
+        export = next(
+            (entry for entry in module.get("exports", [])
+             if entry.get("name") == export_name),
+            None)
+        if export is None:
+            result = "value"
+        elif "params" in export or export.get("constructor"):
+            result = "function"
+        else:
+            source = REPO_ROOT / export["source"]["file"]
+            lines = source.read_text(encoding="utf-8").splitlines()
+            line_number = export["source"]["line"]
+            line = lines[line_number - 1] if line_number <= len(lines) else ""
+            assignment = re.search(r"=\s*(.*?)\s*;?\s*$", line)
+            rhs = assignment.group(1).strip() if assignment else ""
+            if re.match(r"function\b", rhs):
+                result = "function"
+            elif re.fullmatch(
+                    r"[A-Za-z_$][A-Za-z0-9_$]*", rhs):
+                function_declared = re.search(
+                    r"\bfunction\s+%s\s*\(" % re.escape(rhs),
+                    source.read_text(encoding="utf-8")) is not None
+                result = "function" if function_declared else "value"
+            else:
+                dotted = re.fullmatch(
+                    r"([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$]"
+                    r"[A-Za-z0-9_$]*)", rhs)
+                if dotted is None:
+                    result = "value"
+                else:
+                    target = _required_aliases(source).get(dotted.group(1))
+                    result = (
+                        _static_export_kind(
+                            target, dotted.group(2), modules,
+                            cache, visiting)
+                        if target is not None else "value")
+    visiting.remove(key)
+    cache[key] = result
+    return result
+
+
+def _format_runtime_member(
+        record: dict[str, Any]) -> str:
+    text = (
+        "module=%s shape=%s member=%s"
+        % (record["module"], record["shape"], record["member"]))
+    if record.get("kind") is not None:
+        text += " kind=%s" % record["kind"]
+    if record.get("missing") == "artifact":
+        text += " missing-from=artifact"
+    elif record.get("missing") == "oracle":
+        text += " missing-from=oracle"
+    elif record.get("missing") == "kind":
+        text += (
+            " missing-from=neither kind-mismatch=%s/%s"
+            % (record.get("artifactKind"), record.get("oracleKind")))
+    if record.get("reason"):
+        text += " reason=%s" % record["reason"]
+    return text
+
+
+def _format_runtime_oracle_report(
+        report: dict[str, Any]) -> str:
+    status = report.get("status")
+    if status == "failed":
+        lines = ["RUNTIME ORACLE CROSS-CHECK FAILED"]
+        lines.append(
+            "counts: match %d, drift %d, oracle-unreachable %d"
+            % (report.get("match", 0), report.get("drift", 0),
+               report.get("oracleUnreachable", 0)))
+        if report.get("error"):
+            lines.append("error: %s" % report["error"])
+        return "\n".join(lines)
+
+    state = "OK" if report.get("drift", 0) == 0 else "DRIFT"
+    lines = [
+        "RUNTIME ORACLE CROSS-CHECK %s" % state,
+        "counts: match %d, drift %d, oracle-unreachable %d" %
+        (report["match"], report["drift"],
+         report["oracleUnreachable"]),
+    ]
+    drift = report.get("driftMembers", [])
+    if drift:
+        lines.append("drift members:")
+        lines.extend("  " + _format_runtime_member(entry)
+                     for entry in drift)
+    lines.append("oracle-unreachable members:")
+    unreachable = report.get("unreachableMembers", [])
+    if unreachable:
+        lines.extend("  " + _format_runtime_member(entry)
+                     for entry in unreachable)
+    else:
+        lines.append("  none")
+    return "\n".join(lines)
+
+
+def _check_runtime_oracle(
+        artifact: dict[str, Any],
+        oracle: Any) -> tuple[bool, str, dict[str, Any]]:
+    if not isinstance(oracle, dict):
+        report = {
+            "status": "failed",
+            "match": 0,
+            "drift": 0,
+            "oracleUnreachable": 0,
+            "error": "runtime oracle is not a JSON object",
+        }
+        return False, _format_runtime_oracle_report(report), report
+    if oracle.get("version") != RUNTIME_ORACLE_VERSION:
+        report = {
+            "status": "failed",
+            "match": 0,
+            "drift": 0,
+            "oracleUnreachable": 0,
+            "error": (
+                "runtime oracle version %r, expected %d"
+                % (oracle.get("version"), RUNTIME_ORACLE_VERSION)),
+        }
+        return False, _format_runtime_oracle_report(report), report
+
+    modules = {
+        module["name"]: module
+        for module in artifact.get("js", {}).get("modules", [])
+        if isinstance(module, dict) and isinstance(module.get("name"), str)
+    }
+    scopes: dict[
+            tuple[str, str, str], tuple[dict[str, str], bool, str]] = {}
+    reasons: dict[tuple[str, str, str], str] = {}
+
+    def add_reason(key: tuple[str, str, str], reason: str) -> None:
+        if reason:
+            reasons.setdefault(key, reason)
+
+    def add_scope(
+            key: tuple[str, str, str],
+            members: dict[str, str],
+            complete: bool,
+            reason: str) -> None:
+        known = {name: kind for name, kind in members.items()
+                 if kind is not None}
+        previous = scopes.get(key)
+        if previous is None:
+            scopes[key] = (known, complete, reason)
+            return
+        merged = dict(previous[0])
+        merged.update(known)
+        scopes[key] = (
+            merged, previous[1] and complete, previous[2] or reason)
+
+    def stage_members(stage: Any, field: str) -> tuple[dict[str, str], bool]:
+        members: dict[str, str] = {}
+        complete = isinstance(stage, dict)
+        for name, record in (stage.get(field) or {}).items() \
+                if isinstance(stage, dict) else []:
+            kind = _runtime_member_kind(record)
+            if kind is None:
+                complete = False
+            else:
+                members[name] = kind
+        return members, complete
+
+    before_all = oracle.get("before")
+    tier1_all = oracle.get("tier1")
+    tier2_all = oracle.get("tier2")
+    if not isinstance(before_all, dict):
+        before_all = {}
+    if not isinstance(tier1_all, dict):
+        tier1_all = {}
+    if not isinstance(tier2_all, dict):
+        tier2_all = {}
+
+    for module_name, module in modules.items():
+        before = before_all.get(module_name)
+        members, complete = stage_members(before, "keys")
+        if members or complete:
+            add_scope(
+                (module_name, "module", "own"), members, complete,
+                "runtime-api.json before module walk")
+        else:
+            add_reason(
+                (module_name, "module", "own"),
+                _runtime_stage_reason(
+                    before,
+                    "runtime oracle did not reach module %s" % module_name))
+
+    after_settings = oracle.get("afterGlobalSettings")
+    if not isinstance(after_settings, dict):
+        after_settings = {}
+    for module_name, module in modules.items():
+        if not module.get("receiverMembers"):
+            continue
+        after = after_settings.get(module_name)
+        members, complete = stage_members(after, "keys")
+        if members or complete:
+            add_scope(
+                (module_name, "module", "own"), members, complete,
+                "runtime-api.json afterGlobalSettings")
+        else:
+            add_reason(
+                (module_name, "module", "own"),
+                _runtime_stage_reason(
+                    after,
+                    "runtime oracle did not reach mutated module %s"
+                    % module_name))
+
+    for module_name, module in modules.items():
+        tier1 = tier1_all.get(module_name)
+        function_exports = (
+            tier1.get("functionExports", {})
+            if isinstance(tier1, dict) else {})
+        for shape in module.get("shapes", []):
+            receiver = shape.get("receiver", "")
+            if not isinstance(receiver, str) or \
+                    not receiver.startswith("exports."):
+                continue
+            export_name = receiver.split(".", 1)[1]
+            function_export = function_exports.get(export_name)
+            prototype = (
+                function_export.get("prototype")
+                if isinstance(function_export, dict) else None)
+            if isinstance(function_export, dict) and \
+                    function_export.get("status") == "walked" and \
+                    isinstance(prototype, dict):
+                levels = _runtime_prototype_levels(prototype)
+                for index, level in enumerate(levels[:2]):
+                    add_scope(
+                        (module_name, shape["name"],
+                         "prototype" if index == 0 else "prototype2"),
+                        level, True,
+                        "runtime-api.json tier1 %s" % export_name)
+            else:
+                reason_stage = (
+                    tier1 if function_export is not None
+                    else tier2_all.get(module_name))
+                add_reason(
+                    (module_name, shape["name"], "prototype"),
+                    _runtime_stage_reason(
+                        function_export if function_export is not None
+                        else reason_stage,
+                        _runtime_stage_reason(
+                            reason_stage,
+                            "runtime oracle did not reach shape %s"
+                            % shape["name"]),
+                        export_name))
+
+    # A tier2 result's nested objects are named by the `returns` facts that
+    # the generator already emits. No constructor or arity assumptions enter
+    # this comparison.
+    for module_name, module in modules.items():
+        stage = tier2_all.get(module_name)
+        if not isinstance(stage, dict) or \
+                stage.get("status") != "constructed":
+            continue
+        result = stage.get("result")
+        nested = result.get("nested", {}) if isinstance(result, dict) else {}
+        for export in module.get("exports", []):
+            returned = export.get("returns")
+            targets: list[tuple[str, str]] = []
+            if isinstance(returned, dict):
+                for field in returned.get("fields", []):
+                    if isinstance(field, dict) and \
+                            field.get("name") in nested and \
+                            isinstance(field.get("type"), str):
+                        targets.append((field["name"], field["type"]))
+            elif isinstance(returned, str):
+                targets = [(name, returned) for name in nested]
+            for nested_name, shape_name in targets:
+                child = nested.get(nested_name)
+                if not isinstance(child, dict):
+                    continue
+                members, complete = stage_members(child, "keys")
+                add_scope(
+                    (module_name, shape_name, "own"),
+                    members, complete,
+                    "runtime-api.json tier2 %s" % nested_name)
+                levels = _runtime_prototype_levels(child.get("prototype"))
+                for index, level in enumerate(levels[:2]):
+                    add_scope(
+                        (module_name, shape_name,
+                         "prototype" if index == 0 else "prototype2"),
+                        level, True,
+                        "runtime-api.json tier2 %s" % nested_name)
+
+    # A shared shape is installed as a module prototype by the runtime call.
+    # Its constructor-created fields remain unreachable because tier2 records
+    # that no side-effect-free construction was performed.
+    for module_name, module in modules.items():
+        shared_shapes = [
+            shape for shape in module.get("shapes", [])
+            if shape.get("kind") == "shared"
+        ]
+        if not shared_shapes:
+            continue
+        after = after_settings.get(module_name)
+        if not isinstance(after, dict):
+            for shape in shared_shapes:
+                add_reason(
+                    (module_name, shape["name"], "prototype"),
+                    _runtime_stage_reason(
+                        after,
+                        "runtime oracle did not reach shared shape %s"
+                        % shape["name"]))
+            continue
+        prototype = after.get("prototype")
+        levels = _runtime_prototype_levels(prototype)
+        for index, level in enumerate(levels[:2]):
+            for shape in shared_shapes:
+                add_scope(
+                    (module_name, shape["name"],
+                     "prototype" if index == 0 else "prototype2"),
+                    level, True,
+                    "runtime-api.json afterGlobalSettings")
+        module_names = {
+            entry.get("name") for entry in module.get("exports", [])
+        } | {
+            entry.get("name") for entry in module.get("receiverMembers", [])
+        }
+        own, _ = stage_members(after, "keys")
+        own = {name: kind for name, kind in own.items()
+               if name not in module_names}
+        for shape in shared_shapes:
+            add_scope(
+                (module_name, shape["name"], "own"), own, False,
+                "runtime-api.json tier2 status=skipped: "
+                "shared receiver instance was not safely constructed")
+
+    tier3 = oracle.get("tier3")
+    if not isinstance(tier3, dict):
+        tier3 = {}
+
+    def tier3_candidates(key: str) -> list[tuple[str, dict[str, Any]]]:
+        candidates: list[tuple[str, dict[str, Any]]] = []
+        if key == "items":
+            for module_name, module in modules.items():
+                for shape in module.get("shapes", []):
+                    if str(shape.get("name", "")).lower() == "item":
+                        candidates.append((module_name, shape))
+        else:
+            for module_name, module in modules.items():
+                for shape in module.get("shapes", []):
+                    if str(shape.get("name", "")).lower() == key.lower():
+                        candidates.append((module_name, shape))
+            if not candidates and key in modules:
+                module = modules[key]
+                candidates = [
+                    (key, shape) for shape in module.get("shapes", [])
+                    if any(
+                        entry.get("constructor") and
+                        entry.get("name") == shape.get("receiver", "")[8:]
+                        for entry in module.get("exports", [])
+                    )
+                ]
+            if not candidates:
+                for module_name, module in modules.items():
+                    for shape in module.get("shapes", []):
+                        receiver = str(shape.get("receiver", ""))
+                        if receiver.lower() == "exports." + key.lower():
+                            candidates.append((module_name, shape))
+        return candidates if len(candidates) == 1 else []
+
+    def add_tier3_result(
+            key: str, value: Any,
+            entry_name: str | None = None) -> None:
+        candidates = tier3_candidates(key)
+        if len(candidates) != 1:
+            return
+        module_name, shape = candidates[0]
+        shape_name = shape["name"]
+        result = value.get("result") if isinstance(value, dict) else None
+        constructed = (
+            isinstance(value, dict) and value.get("status") == "constructed"
+            and isinstance(result, dict))
+        if not constructed:
+            add_reason(
+                (module_name, shape_name, "own"),
+                _runtime_stage_reason(
+                    value,
+                    "runtime oracle did not reach tier3 shape %s"
+                    % shape_name,
+                    shape_name))
+            add_reason(
+                (module_name, shape_name, "prototype"),
+                _runtime_stage_reason(
+                    value,
+                    "runtime oracle did not reach tier3 shape %s"
+                    % shape_name,
+                    shape_name))
+            return
+        members, complete = stage_members(
+            result, "properties" if "properties" in result else "keys")
+        label = "runtime-api.json tier3 %s" % key
+        if entry_name is not None:
+            label += ".%s" % entry_name
+        add_scope(
+            (module_name, shape_name, "own"), members, complete, label)
+        levels = _runtime_prototype_levels(result.get("prototype"))
+        for index, level in enumerate(levels[:2]):
+            add_scope(
+                (module_name, shape_name,
+                 "prototype" if index == 0 else "prototype2"),
+                level, True, label)
+
+    for key, value in tier3.items():
+        if key == "items" and isinstance(value, dict):
+            for entry_name, entry in value.items():
+                add_tier3_result(key, entry, entry_name)
+        else:
+            add_tier3_result(key, value)
+
+    static_kind_cache: dict[tuple[str, str], str] = {}
+    expected: list[tuple[str, str, str, str, str]] = []
+    for module_name, module in modules.items():
+        for function in module.get("functions", []):
+            expected.append(
+                (module_name, "module", function["name"], "function", "own"))
+        for export in module.get("exports", []):
+            kind = _static_export_kind(
+                module_name, export["name"], modules,
+                static_kind_cache, set())
+            expected.append(
+                (module_name, "module", export["name"], kind, "own"))
+        for member in module.get("receiverMembers", []):
+            expected.append(
+                (module_name, "module", member["name"],
+                 member["kind"], "own"))
+        for shape in module.get("shapes", []):
+            shape_name = shape["name"]
+            receiver = str(shape.get("receiver", ""))
+            method_scope = (
+                "prototype2" if receiver.endswith("Proto")
+                else "prototype")
+            for method in shape.get("methods", []):
+                expected.append(
+                    (module_name, shape_name, method["name"],
+                     "function", method_scope))
+            for prop in shape.get("properties", []):
+                candidates = [
+                    scope_name for scope_name in
+                    ("own", "prototype", "prototype2")
+                    if (module_name, shape_name, scope_name) in scopes
+                    and prop["name"] in scopes[
+                        (module_name, shape_name, scope_name)][0]
+                ]
+                if len(candidates) == 1:
+                    prop_scope = candidates[0]
+                else:
+                    prop_scope = (
+                        "prototype" if receiver.endswith("Proto")
+                        else "own")
+                expected.append(
+                    (module_name, shape_name, prop["name"],
+                     prop.get("kind", "value"), prop_scope))
+
+    matches = 0
+    drift: list[dict[str, Any]] = []
+    unreachable: list[dict[str, Any]] = []
+    expected_keys = {(module, shape, name)
+                     for module, shape, name, _kind, _scope in expected}
+    for module_name, shape_name, name, kind, scope_name in expected:
+        scope_key = (module_name, shape_name, scope_name)
+        scope = scopes.get(scope_key)
+        if scope is None:
+            unreachable.append({
+                "module": module_name,
+                "shape": shape_name,
+                "member": name,
+                "kind": kind,
+                "reason": reasons.get(
+                    scope_key,
+                    _runtime_stage_reason(
+                        tier2_all.get(module_name),
+                        "runtime oracle did not reach shape %s"
+                        % shape_name,
+                        shape_name)),
+            })
+            continue
+        observed = scope[0].get(name)
+        if observed is None:
+            if not scope[1]:
+                unreachable.append({
+                    "module": module_name,
+                    "shape": shape_name,
+                    "member": name,
+                    "kind": kind,
+                    "reason": scope[2] or
+                    "runtime oracle did not complete this scope",
+                })
+            else:
+                drift.append({
+                    "module": module_name,
+                    "shape": shape_name,
+                    "member": name,
+                    "artifactKind": kind,
+                    "oracleKind": None,
+                    "missing": "oracle",
+                })
+        elif observed != kind:
+            drift.append({
+                "module": module_name,
+                "shape": shape_name,
+                "member": name,
+                "artifactKind": kind,
+                "oracleKind": observed,
+                "missing": "kind",
+            })
+        else:
+            matches += 1
+
+    reported_extras: set[tuple[str, str, str]] = set()
+    for (module_name, shape_name, _scope_name), (
+            members, _complete, _reason) in scopes.items():
+        for name, kind in members.items():
+            key = (module_name, shape_name, name)
+            if key in expected_keys or key in reported_extras:
+                continue
+            reported_extras.add(key)
+            drift.append({
+                "module": module_name,
+                "shape": shape_name,
+                "member": name,
+                "artifactKind": None,
+                "oracleKind": kind,
+                "missing": "artifact",
+            })
+
+    drift.sort(key=lambda entry: (
+        entry["module"], entry["shape"], entry["member"]))
+    unreachable.sort(key=lambda entry: (
+        entry["module"], entry["shape"], entry["member"]))
+    report = {
+        "status": "ok" if not drift else "drift",
+        "match": matches,
+        "drift": len(drift),
+        "oracleUnreachable": len(unreachable),
+        "driftMembers": drift,
+        "unreachableMembers": unreachable,
+    }
+    return not drift, _format_runtime_oracle_report(report), report
+
+
 def build_modules() -> list[dict[str, Any]]:
     modules = build_native_modules() + build_commonjs_modules()
     modules.sort(key=lambda r: r["name"])
@@ -1882,6 +2535,23 @@ def cmd_check(args: argparse.Namespace) -> int:
               % ARTIFACT_PATH, file=sys.stderr)
         return 1
     committed = json.loads(ARTIFACT_PATH.read_text(encoding="utf-8"))
+    try:
+        runtime_oracle = json.loads(
+            RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        runtime_oracle_report = {
+            "status": "failed",
+            "match": 0,
+            "drift": 0,
+            "oracleUnreachable": 0,
+            "error": "could not load %s: %s" % (RUNTIME_ORACLE_PATH, error),
+        }
+        runtime_oracle_ok = False
+        runtime_oracle_output = _format_runtime_oracle_report(
+            runtime_oracle_report)
+    else:
+        runtime_oracle_ok, runtime_oracle_output, runtime_oracle_report = (
+            _check_runtime_oracle(committed, runtime_oracle))
 
     fresh_norm = _strip_revision(fresh)
     committed_norm = _strip_revision(committed)
@@ -1908,13 +2578,15 @@ def cmd_check(args: argparse.Namespace) -> int:
         reference_dts_output = "\n".join(
             part for part in (reference_dts_output, coverage_output) if part)
 
-    if metadata_ok and dts_ok and reference_dts_ok and shape_coverage_ok:
+    if (metadata_ok and dts_ok and reference_dts_ok
+            and shape_coverage_ok and runtime_oracle_ok):
         if args.json:
             print(json.dumps({
                 "metadata": "ok",
                 "dts": "ok",
                 "referenceDts": "ok",
                 "shapeCoverage": "ok",
+                "runtimeOracle": runtime_oracle_report["status"],
             }, indent=2))
         else:
             print("METADATA OK (movianRevision: committed=%s current=%s)"
@@ -1922,6 +2594,7 @@ def cmd_check(args: argparse.Namespace) -> int:
                      fresh.get("movianRevision")))
             print("DTS OK")
             print(shape_coverage_output)
+            print(runtime_oracle_output)
             if reference_dts_output:
                 print(reference_dts_output)
         return 0
@@ -1936,6 +2609,7 @@ def cmd_check(args: argparse.Namespace) -> int:
             "dts": "ok" if dts_ok else "drift",
             "referenceDts": "ok" if reference_dts_ok else "failed",
             "shapeCoverage": "ok" if shape_coverage_ok else "failed",
+            "runtimeOracle": runtime_oracle_report["status"],
         }
         if diff is not None:
             result["diff"] = diff
@@ -1943,6 +2617,8 @@ def cmd_check(args: argparse.Namespace) -> int:
             result["referenceDtsOutput"] = reference_dts_output
         if not shape_coverage_ok:
             result["shapeCoverageOutput"] = shape_coverage_output
+        if not runtime_oracle_ok:
+            result["runtimeOracleOutput"] = runtime_oracle_report
         print(json.dumps(result, ensure_ascii=False, indent=2,
                          sort_keys=True))
     else:
@@ -1952,6 +2628,8 @@ def cmd_check(args: argparse.Namespace) -> int:
                 print(line)
         if not dts_ok:
             print("DTS DRIFT")
+        if not runtime_oracle_ok:
+            print(runtime_oracle_output)
         if not shape_coverage_ok:
             print(shape_coverage_output)
         if not reference_dts_ok:
