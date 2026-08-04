@@ -696,16 +696,35 @@ RECEIVER_FUNCTION_RE = re.compile(
 RECEIVER_ASSIGN_RE = re.compile(
     r"^\s*this\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)", re.M)
 RETURN_OBJECT_RE = re.compile(r"\breturn\s*\{")
-
-
-def _masked_js_text(path: Path) -> str:
+FUNCTION_HEAD_RE = re.compile(
+    r"^\s*(?:(?P<assigned>(?:exports\.)?[A-Za-z_$][A-Za-z0-9_$]*)"
+    r"\s*=\s*)?function\s*"
+    r"(?P<declared>[A-Za-z_$][A-Za-z0-9_$]*)?\s*"
+    r"\([^)]*\)\s*\{", re.M)
+DEFINE_PROPERTIES_RE = re.compile(
+    r"Object\.defineProperties\(\s*"
+    r"((?:this|exports\.[A-Za-z_$][A-Za-z0-9_$]*|"
+    r"[A-Za-z_$][A-Za-z0-9_$]*)(?:\.prototype)?)\s*,\s*\{")
+DEFINE_PROPERTY_RE = re.compile(
+    r"Object\.defineProperty\(\s*"
+    r"((?:this|exports\.[A-Za-z_$][A-Za-z0-9_$]*|"
+    r"[A-Za-z_$][A-Za-z0-9_$]*)(?:\.prototype)?)\s*,\s*"
+    r"(['\"])([^'\"]+)\2\s*,\s*\{")
+THIS_ASSIGN_RE = re.compile(
+    r"\bthis\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
+DEFINE_PROPERTIES_CALL_RE = re.compile(
+    r"Object\.defineProperties\(\s*([^,]+?)\s*,\s*\{")
+DEFINE_PROPERTY_CALL_RE = re.compile(
+    r"Object\.defineProperty\(\s*([^,]+?)\s*,\s*([^,]+?)\s*,\s*\{")
+def _masked_js_text(path: Path, mask_strings: bool = True) -> str:
     raw_lines = path.read_text(encoding="utf-8").splitlines()
     masked_lines: list[str] = []
     in_block_comment = False
     for raw_line in raw_lines:
         line, in_block_comment = _mask_js_comments(
             raw_line, in_block_comment)
-        masked_lines.append(_mask_js_strings(line))
+        masked_lines.append(
+            _mask_js_strings(line) if mask_strings else line)
     return "\n".join(masked_lines)
 
 
@@ -768,12 +787,236 @@ def _shape_method(
     return _member_record(
         name, _parse_params(raw_params), path, line, alias_of=alias_of)
 
+def _split_js_fields(text: str) -> list[str]:
+    fields: list[str] = []
+    start = 0
+
+    depths = {"(": 0, "[": 0, "{": 0}
+    closing = {")": "(", "]": "[", "}": "{"}
+    quote: str | None = None
+    escaped = False
+    for index, char in enumerate(text):
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in ("'", '"'):
+            quote = char
+        elif char in depths:
+            depths[char] += 1
+        elif char in closing:
+            depths[closing[char]] = max(
+                0, depths[closing[char]] - 1)
+        elif char == "," and not any(depths.values()):
+            fields.append(text[start:index])
+            start = index + 1
+    fields.append(text[start:])
+    return fields
+
+
+def _function_regions(
+        text: str
+) -> list[tuple[str, int, int]]:
+    regions: list[tuple[str, int, int]] = []
+    for match in FUNCTION_HEAD_RE.finditer(text):
+        owner = match.group("assigned") or match.group("declared")
+        if owner is None:
+            continue
+        end = _balanced_end(text, match.end() - 1)
+        if end is not None:
+            regions.append((owner, match.end(), end - 1))
+    return regions
+
+
+def _shape_receiver_for_owner(
+        owner: str, receivers: set[str]
+) -> str | None:
+    if owner in receivers:
+        return owner
+    owner_base = owner.rsplit(".", 1)[-1]
+    for receiver in sorted(receivers):
+        receiver_base = receiver.rsplit(".", 1)[-1]
+        if receiver_base == owner_base + "Proto":
+            return receiver
+    return None
+
+
+def _property_names(
+        body: str, path: Path, text: str, offset: int
+) -> list[tuple[str, int]]:
+    names: list[tuple[str, int]] = []
+    cursor = 0
+    for field in _split_js_fields(body):
+        entry = re.match(
+            r"\s*(?:([A-Za-z_$][A-Za-z0-9_$]*)|"
+            r"(['\"])([^'\"]+)\2)\s*:", field, re.S)
+        if entry is None:
+            if field.strip():
+                _shape_diagnostic(
+                    path, text, offset + cursor,
+                    "ignored unsupported defineProperties key")
+            cursor += len(field) + 1
+            continue
+        names.append((
+            entry.group(1) or entry.group(3),
+            offset + cursor + field.find(entry.group(0).lstrip())))
+        cursor += len(field) + 1
+    return names
+
+
+def _add_property(
+        properties: dict[str, dict[str, dict[str, Any]]],
+        receiver: str, name: str, path: Path, text: str, offset: int
+) -> None:
+    properties.setdefault(receiver, {})[name] = _member_record(
+        name, None, path, _source_line(text, offset), kind="property")
+
 
 def _shape_diagnostic(path: Path, text: str, offset: int, message: str) -> None:
     print(
         "gen.py: %s:%d: warning: %s" %
         (rel(path), _source_line(text, offset), message),
         file=sys.stderr)
+def _scan_shape_properties(
+        path: Path, text: str, receivers: set[str],
+        shared_receivers: set[str]
+) -> dict[str, dict[str, dict[str, Any]]]:
+    comment_text = _masked_js_text(path, mask_strings=False)
+    properties: dict[str, dict[str, dict[str, Any]]] = {}
+    handled_calls: set[int] = set()
+
+    def add_call_properties(
+            source: str, match: re.Match[str], receiver: str,
+            base_offset: int
+    ) -> None:
+        open_index = match.end() - 1
+        end = _balanced_end(source, open_index)
+        if end is None:
+            _shape_diagnostic(
+                path, comment_text, base_offset + match.start(1),
+                "ignored unterminated Object.defineProperties call")
+            return
+        body_start = base_offset + open_index + 1
+        for name, offset in _property_names(
+                source[open_index + 1:end - 1],
+                path, comment_text, body_start):
+            _add_property(properties, receiver, name,
+                          path, comment_text, offset)
+
+    def add_property_call(
+            source: str, match: re.Match[str], receiver: str,
+            base_offset: int
+    ) -> None:
+        name = match.group(3)
+        _add_property(
+            properties, receiver, name, path, comment_text,
+            base_offset + match.start(3))
+
+    def target_receiver(target: str) -> str | None:
+        if target.endswith(".prototype"):
+            return target[:-len(".prototype")]
+        return None
+
+    def scan_body(
+            body: str, owner_receiver: str, base_offset: int
+    ) -> None:
+        for assignment in _top_level_matches(body, THIS_ASSIGN_RE):
+            name = assignment.group(1)
+            if name != "__proto__":
+                _add_property(
+                    properties, owner_receiver, name, path, comment_text,
+                    base_offset + assignment.start(1))
+
+        for match in _top_level_matches(body, DEFINE_PROPERTIES_RE):
+            target = match.group(1)
+            receiver = owner_receiver if target == "this" \
+                else target_receiver(target)
+            if receiver not in receivers and receiver not in shared_receivers:
+                _shape_diagnostic(
+                    path, comment_text, base_offset + match.start(1),
+                    "ignored unsupported Object.defineProperties target %s" %
+                    target)
+                handled_calls.add(base_offset + match.start(1))
+                continue
+            add_call_properties(body, match, receiver, base_offset)
+            handled_calls.add(base_offset + match.start(1))
+
+        for match in _top_level_matches(body, DEFINE_PROPERTY_RE):
+            target = match.group(1)
+            receiver = owner_receiver if target == "this" \
+                else target_receiver(target)
+            if receiver not in receivers and receiver not in shared_receivers:
+                _shape_diagnostic(
+                    path, comment_text, base_offset + match.start(1),
+                    "ignored unsupported Object.defineProperty target %s" %
+                    target)
+                handled_calls.add(base_offset + match.start(1))
+                continue
+            add_property_call(body, match, receiver, base_offset)
+            handled_calls.add(base_offset + match.start(1))
+
+    for match in _top_level_matches(comment_text, DEFINE_PROPERTIES_RE):
+        target = match.group(1)
+        receiver = target_receiver(target)
+        if receiver not in receivers:
+            _shape_diagnostic(
+                path, comment_text, match.start(1),
+                "ignored unsupported Object.defineProperties target %s" %
+                target)
+            handled_calls.add(match.start(1))
+            continue
+        add_call_properties(comment_text, match, receiver, 0)
+        handled_calls.add(match.start(1))
+
+    for match in _top_level_matches(comment_text, DEFINE_PROPERTY_RE):
+        target = match.group(1)
+        receiver = target_receiver(target)
+        if receiver not in receivers:
+            _shape_diagnostic(
+                path, comment_text, match.start(1),
+                "ignored unsupported Object.defineProperty target %s" %
+                target)
+            handled_calls.add(match.start(1))
+            continue
+        add_property_call(comment_text, match, receiver, 0)
+        handled_calls.add(match.start(1))
+
+    for owner, body_start, body_end in _function_regions(text):
+        receiver = _shape_receiver_for_owner(owner, receivers)
+        if receiver is not None:
+            scan_body(
+                comment_text[body_start:body_end],
+                receiver, body_start)
+
+    for match in OBJECT_FUNCTION_RE.finditer(text):
+        receiver = match.group(1)
+        if receiver not in shared_receivers:
+            continue
+        open_index = text.find("{", match.end())
+        end = _balanced_end(text, open_index)
+        if open_index < 0 or end is None:
+            continue
+        scan_body(
+            comment_text[open_index + 1:end - 1],
+            receiver, open_index + 1)
+
+    for match in DEFINE_PROPERTIES_CALL_RE.finditer(comment_text):
+        if match.start(1) not in handled_calls:
+            _shape_diagnostic(
+                path, comment_text, match.start(1),
+                "ignored unsupported Object.defineProperties target %s" %
+                match.group(1).strip())
+    for match in DEFINE_PROPERTY_CALL_RE.finditer(comment_text):
+        if match.start(1) not in handled_calls:
+            _shape_diagnostic(
+                path, comment_text, match.start(1),
+                "ignored unsupported Object.defineProperty target %s" %
+                match.group(1).strip())
+    return properties
 
 def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
     """Scan top-level prototype and shared-object assignments."""
@@ -783,6 +1026,7 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
     top_prototype_starts = {
         match.start(1) for match in prototype_matches
     }
+    properties_by_receiver: dict[str, dict[str, dict[str, Any]]] = {}
     for match in PROTOTYPE_FUNCTION_RE.finditer(text):
         if match.start(1) not in top_prototype_starts:
             _shape_diagnostic(
@@ -865,11 +1109,15 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
         methods[name] = _shape_method(
             name, match.group(3), path,
             _source_line(text, match.start(1)))
+    properties_by_receiver = _scan_shape_properties(
+        path, text, set(by_receiver), consumed_shared_names)
 
     shapes: list[dict[str, Any]] = []
-    for receiver in sorted(by_receiver):
-        methods = by_receiver[receiver]
-        if not methods:
+    for receiver in sorted(
+            set(by_receiver) | set(properties_by_receiver)):
+        methods = by_receiver.get(receiver, {})
+        properties = properties_by_receiver.get(receiver, {})
+        if not methods and not properties:
             continue
         is_shared = receiver in consumed_shared_names
         shape = {
@@ -880,9 +1128,15 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
             "source": {
                 "file": rel(path),
                 "line": min(
-                    method["source"]["line"] for method in methods.values()),
+                    [method["source"]["line"]
+                     for method in methods.values()] +
+                    [prop["source"]["line"]
+                     for prop in properties.values()]),
             },
         }
+        if properties:
+            shape["properties"] = [
+                properties[name] for name in sorted(properties)]
         shapes.append(shape)
     return shapes
 
@@ -986,7 +1240,32 @@ def _merge_receiver_members(
             if len(new_params) > len(old_params):
                 merged[name] = member
     return [merged[name] for name in sorted(merged)]
+def _balanced_end(text: str, open_index: int) -> int | None:
+    depth = 0
+    for index in range(open_index, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}" and depth:
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return None
 
+
+def _export_region(
+        masked_lines: list[str], line_index: int, next_line: int
+) -> str:
+    region = "\n".join(
+        _mask_js_strings(line)
+        for line in masked_lines[line_index:next_line])
+    function = COMMONJS_FUNCTION_RE.search(region)
+    if function is None:
+        return region
+    open_index = region.find("{", function.end())
+    if open_index < 0:
+        return region
+    end = _balanced_end(region, open_index)
+    return region[:end] if end is not None else region
 
 def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
     raw_lines = path.read_text(encoding="utf-8").splitlines()
@@ -1012,9 +1291,7 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
         next_line = (candidates[candidate_index + 1][0]
                      if candidate_index + 1 < len(candidates)
                      else len(masked_lines))
-        region = "\n".join(
-            _mask_js_strings(line)
-            for line in masked_lines[line_index:next_line])
+        region = _export_region(masked_lines, line_index, next_line)
         record = {
             "name": export_name,
             "source": {"file": rel(path), "line": line_index + 1},
@@ -1129,6 +1406,9 @@ def _source_shape_inventory() -> set[tuple[str, str, str, str]]:
             for method in shape["methods"]:
                 inventory.add((
                     module_name, shape["kind"], receiver, method["name"]))
+            for prop in shape.get("properties", []):
+                inventory.add((
+                    module_name, "property", receiver, prop["name"]))
         for export in scan_commonjs_exports(path):
             for member in export.get("receiverMembers", []):
                 inventory.add((
@@ -1146,6 +1426,9 @@ def _artifact_shape_inventory(
             for method in shape["methods"]:
                 inventory.add((
                     module_name, shape["kind"], receiver, method["name"]))
+            for prop in shape.get("properties", []):
+                inventory.add((
+                    module_name, "property", receiver, prop["name"]))
         for member in module.get("receiverMembers", []):
             inventory.add((
                 module_name, "receiver", "module", member["name"]))
@@ -1412,6 +1695,8 @@ def render_dts(artifact: dict[str, Any]) -> str:
                         lines.append(
                             "    %s(%s): any;" %
                             (method["name"], params_signature(params)))
+                    for prop in shape.get("properties", []):
+                        lines.append("    %s: any;" % prop["name"])
                     lines.append("  }")
                 lines.append("")
 
@@ -1427,6 +1712,8 @@ def render_dts(artifact: dict[str, Any]) -> str:
                         lines.append(
                             "  function %s(%s): any;" %
                             (method["name"], params_signature(params)))
+                    for prop in shape.get("properties", []):
+                        lines.append("  var %s: any;" % prop["name"])
                 lines.append("")
             if receiver_members:
                 lines.append(
