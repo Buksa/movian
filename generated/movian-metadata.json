@@ -3574,7 +3574,6 @@
             }
           },
           {
-            "callbackShape": "Request",
             "name": "request",
             "nargs": 3,
             "params": [
@@ -3805,6 +3804,7 @@
       {
         "exports": [
           {
+            "callbackParam": "callback",
             "callbackShape": "HttpResponse",
             "name": "request",
             "nargs": 3,
@@ -3884,6 +3884,7 @@
       {
         "exports": [
           {
+            "callbackParam": "callback",
             "callbackShape": "Page",
             "constructor": true,
             "name": "Route",
@@ -3898,6 +3899,7 @@
             }
           },
           {
+            "callbackParam": "callback",
             "callbackShape": "Page",
             "constructor": true,
             "name": "Searcher",
@@ -6342,6 +6344,6 @@
       }
     ]
   },
-  "movianRevision": "ca5fbbdd467c673f0cc9c3bc869448db45652cd3",
+  "movianRevision": "523670d62eeb3fcd344fd213e37c99da0479282a",
   "schemaVersion": 1
 }
