@@ -712,6 +712,13 @@ DEFINE_PROPERTY_RE = re.compile(
     r"(['\"])([^'\"]+)\2\s*,\s*\{")
 THIS_ASSIGN_RE = re.compile(
     r"\bthis\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
+
+THIS_ALIAS_RE = re.compile(
+    r"\b(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*this\b")
+ALIAS_MEMBER_ASSIGN_RE = re.compile(
+    r"\b([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
+NESTED_FUNCTION_HEAD_RE = re.compile(
+    r"\bfunction\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\([^)]*\)\s*\{")
 DEFINE_PROPERTIES_CALL_RE = re.compile(
     r"Object\.defineProperties\(\s*([^,]+?)\s*,\s*\{")
 DEFINE_PROPERTY_CALL_RE = re.compile(
@@ -831,6 +838,19 @@ def _function_regions(
             regions.append((owner, match.end(), end - 1))
     return regions
 
+def _mask_nested_function_bodies(text: str) -> str:
+    """Keep constructor control flow while hiding nested callback bodies."""
+    chars = list(text)
+    for match in NESTED_FUNCTION_HEAD_RE.finditer(text):
+        open_index = text.find("{", match.end() - 1)
+        end = _balanced_end(text, open_index)
+        if open_index < 0 or end is None:
+            continue
+        for index in range(open_index + 1, end - 1):
+            if chars[index] != "\n":
+                chars[index] = " "
+    return "".join(chars)
+
 
 def _shape_receiver_for_owner(
         owner: str, receivers: set[str]
@@ -847,8 +867,8 @@ def _shape_receiver_for_owner(
 
 def _property_names(
         body: str, path: Path, text: str, offset: int
-) -> list[tuple[str, int]]:
-    names: list[tuple[str, int]] = []
+) -> list[tuple[str, int, str]]:
+    names: list[tuple[str, int, str]] = []
     cursor = 0
     for field in _split_js_fields(body):
         entry = re.match(
@@ -861,19 +881,25 @@ def _property_names(
                     "ignored unsupported defineProperties key")
             cursor += len(field) + 1
             continue
+        descriptor = field[entry.end():]
+        kind = ("accessor"
+                if re.search(r"\b(?:get|set)\s*:", descriptor)
+                else "value")
         names.append((
             entry.group(1) or entry.group(3),
-            offset + cursor + field.find(entry.group(0).lstrip())))
+            offset + cursor + field.find(entry.group(0).lstrip()),
+            kind))
         cursor += len(field) + 1
     return names
 
 
 def _add_property(
         properties: dict[str, dict[str, dict[str, Any]]],
-        receiver: str, name: str, path: Path, text: str, offset: int
+        receiver: str, name: str, path: Path, text: str, offset: int,
+        kind: str = "value"
 ) -> None:
     properties.setdefault(receiver, {})[name] = _member_record(
-        name, None, path, _source_line(text, offset), kind="property")
+        name, None, path, _source_line(text, offset), kind=kind)
 
 
 def _shape_diagnostic(path: Path, text: str, offset: int, message: str) -> None:
@@ -901,11 +927,11 @@ def _scan_shape_properties(
                 "ignored unterminated Object.defineProperties call")
             return
         body_start = base_offset + open_index + 1
-        for name, offset in _property_names(
+        for name, offset, kind in _property_names(
                 source[open_index + 1:end - 1],
                 path, comment_text, body_start):
             _add_property(properties, receiver, name,
-                          path, comment_text, offset)
+                          path, comment_text, offset, kind)
 
     def add_property_call(
             source: str, match: re.Match[str], receiver: str,
@@ -924,12 +950,20 @@ def _scan_shape_properties(
     def scan_body(
             body: str, owner_receiver: str, base_offset: int
     ) -> None:
-        for assignment in _top_level_matches(body, THIS_ASSIGN_RE):
+        scan_text = _mask_nested_function_bodies(body)
+        aliases = set(THIS_ALIAS_RE.findall(scan_text))
+        for assignment in THIS_ASSIGN_RE.finditer(scan_text):
             name = assignment.group(1)
             if name != "__proto__":
                 _add_property(
                     properties, owner_receiver, name, path, comment_text,
                     base_offset + assignment.start(1))
+        for assignment in ALIAS_MEMBER_ASSIGN_RE.finditer(scan_text):
+            alias, name = assignment.groups()
+            if alias in aliases and name != "__proto__":
+                _add_property(
+                    properties, owner_receiver, name, path, comment_text,
+                    base_offset + assignment.start(2))
 
         for match in _top_level_matches(body, DEFINE_PROPERTIES_RE):
             target = match.group(1)

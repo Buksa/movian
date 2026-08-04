@@ -3619,7 +3619,7 @@
             "name": "Request",
             "properties": [
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "headers",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
@@ -3627,7 +3627,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "onError",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
@@ -3635,7 +3635,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "onResponse",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
@@ -3643,7 +3643,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "url",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
@@ -3687,7 +3687,7 @@
             "name": "Response",
             "properties": [
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "bytes",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
@@ -3695,7 +3695,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "encoding",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
@@ -3703,7 +3703,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "onData",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
@@ -3711,7 +3711,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "onEnd",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
@@ -3719,7 +3719,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "statusCode",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
@@ -3867,7 +3867,7 @@
             "name": "Node",
             "properties": [
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "_gumboNode",
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
@@ -3875,7 +3875,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "accessor",
                 "name": "attributes",
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
@@ -3883,7 +3883,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "accessor",
                 "name": "children",
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
@@ -3891,7 +3891,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "accessor",
                 "name": "nodeName",
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
@@ -3899,7 +3899,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "accessor",
                 "name": "nodeType",
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
@@ -3907,7 +3907,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "accessor",
                 "name": "textContent",
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
@@ -3976,7 +3976,7 @@
             "name": "HttpResponse",
             "properties": [
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "allheaders",
                 "source": {
                   "file": "res/ecmascript/modules/movian/http.js",
@@ -3984,7 +3984,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "bytes",
                 "source": {
                   "file": "res/ecmascript/modules/movian/http.js",
@@ -3992,7 +3992,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "contenttype",
                 "source": {
                   "file": "res/ecmascript/modules/movian/http.js",
@@ -4000,7 +4000,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "headers",
                 "source": {
                   "file": "res/ecmascript/modules/movian/http.js",
@@ -4008,7 +4008,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "headers_lc",
                 "source": {
                   "file": "res/ecmascript/modules/movian/http.js",
@@ -4016,7 +4016,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "multiheaders",
                 "source": {
                   "file": "res/ecmascript/modules/movian/http.js",
@@ -4024,7 +4024,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "multiheaders_lc",
                 "source": {
                   "file": "res/ecmascript/modules/movian/http.js",
@@ -4032,7 +4032,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "statuscode",
                 "source": {
                   "file": "res/ecmascript/modules/movian/http.js",
@@ -4255,7 +4255,7 @@
             "name": "Item",
             "properties": [
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "eventhandlers",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4263,7 +4263,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "page",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4271,7 +4271,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "root",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4414,7 +4414,7 @@
             "name": "Page",
             "properties": [
               {
-                "kind": "property",
+                "kind": "accessor",
                 "name": "entries",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4422,7 +4422,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "eventhandlers",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4430,7 +4430,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "items",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4438,7 +4438,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "accessor",
                 "name": "loading",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4446,7 +4446,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "accessor",
                 "name": "metadata",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4454,7 +4454,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "model",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4462,7 +4462,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "nodesub",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4470,7 +4470,15 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
+                "name": "options",
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 197
+                }
+              },
+              {
+                "kind": "accessor",
                 "name": "paginator",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4478,7 +4486,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "root",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4486,7 +4494,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "accessor",
                 "name": "source",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4494,7 +4502,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "sync",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4502,7 +4510,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "accessor",
                 "name": "type",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4532,7 +4540,7 @@
             "name": "Route",
             "properties": [
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "route",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4562,7 +4570,7 @@
             "name": "Searcher",
             "properties": [
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "searcher",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
@@ -4686,7 +4694,7 @@
             "name": "Service",
             "properties": [
               {
-                "kind": "property",
+                "kind": "accessor",
                 "name": "enabled",
                 "source": {
                   "file": "res/ecmascript/modules/movian/service.js",
@@ -4694,7 +4702,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "id",
                 "source": {
                   "file": "res/ecmascript/modules/movian/service.js",
@@ -4930,7 +4938,7 @@
             "name": "sp",
             "properties": [
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "zombie",
                 "source": {
                   "file": "res/ecmascript/modules/movian/settings.js",
@@ -5013,7 +5021,7 @@
             "name": "DB",
             "properties": [
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "db",
                 "source": {
                   "file": "res/ecmascript/modules/movian/sqlite.js",
@@ -5021,7 +5029,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "accessor",
                 "name": "lastErrorCode",
                 "source": {
                   "file": "res/ecmascript/modules/movian/sqlite.js",
@@ -5029,7 +5037,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "accessor",
                 "name": "lastErrorString",
                 "source": {
                   "file": "res/ecmascript/modules/movian/sqlite.js",
@@ -5037,7 +5045,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "accessor",
                 "name": "lastRowId",
                 "source": {
                   "file": "res/ecmascript/modules/movian/sqlite.js",
@@ -5149,7 +5157,7 @@
             "name": "VideoScrobbler",
             "properties": [
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "hook",
                 "source": {
                   "file": "res/ecmascript/modules/movian/videoscrobbler.js",
@@ -5157,7 +5165,7 @@
                 }
               },
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "paused",
                 "source": {
                   "file": "res/ecmascript/modules/movian/videoscrobbler.js",
@@ -6616,18 +6624,42 @@
             "name": "w3cwebsocket",
             "properties": [
               {
-                "kind": "property",
+                "kind": "value",
                 "name": "_sock",
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
                   "line": 12
+                }
+              },
+              {
+                "kind": "value",
+                "name": "onclose",
+                "source": {
+                  "file": "res/ecmascript/modules/websocket.js",
+                  "line": 10
+                }
+              },
+              {
+                "kind": "value",
+                "name": "oninput",
+                "source": {
+                  "file": "res/ecmascript/modules/websocket.js",
+                  "line": 9
+                }
+              },
+              {
+                "kind": "value",
+                "name": "onopen",
+                "source": {
+                  "file": "res/ecmascript/modules/websocket.js",
+                  "line": 8
                 }
               }
             ],
             "receiver": "exports.w3cwebsocket",
             "source": {
               "file": "res/ecmascript/modules/websocket.js",
-              "line": 12
+              "line": 8
             }
           }
         ],
@@ -6770,6 +6802,6 @@
       }
     ]
   },
-  "movianRevision": "58cfb24267004b36a21040e8cc0bac5841bbc09d",
+  "movianRevision": "f4686c0e8389e13d8e45366a432aabdc8c766537",
   "schemaVersion": 1
 }
