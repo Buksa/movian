@@ -9,7 +9,7 @@ mdev run -p support/devtools/api-introspector
 mdev log
 ```
 
-- Modules required: **52** (the 52 `declare module` blocks in `generated/movian-api.d.ts:5-542`).
+- Modules required: **52** (the 52 `declare module` blocks in `generated/movian-api.d.ts`).
 - Require failures: **none** (`loadErrors` is `{}`).
 - `movian/settings.globalSettings(...)` call failure: **none** (`globalSettingsError` is `null`).
 - The key comparison below is the union of each module's `Object.keys` and the keys from the one prototype level recorded by the plugin. `export *` declarations are resolved before comparison.
@@ -85,7 +85,18 @@ The required method call was `settings.globalSettings('runtime-api-introspector'
 | `movian/settings` after `globalSettings(...)` | createAction, createBool, createDivider, createInfo, createInt, createMultiOpt, createString, destroy, dump, getvalue, id, nodes, properties, setvalue | — |
 | `showtime/settings` after call | — | — |
 
-The only key-surface difference is the 14 runtime-only keys on `movian/settings` after the method call: `globalSettings` assigns `this.__proto__ = sp` (`res/ecmascript/modules/movian/settings.js:266-269`), where `sp` defines the setting methods (`:46-259`), then assigns `id`, `nodes`, `getvalue`, `setvalue`, and `properties` (`:274-301`). The generated declaration contains only `globalSettings` and `kvstoreSettings` (`generated/movian-api.d.ts:90-100`).
+The only key-surface difference is the 14 runtime-only keys on `movian/settings` after the method call: `globalSettings` assigns `this.__proto__ = sp` (`res/ecmascript/modules/movian/settings.js`), where `sp` defines the setting methods, then assigns `id`, `nodes`, `getvalue`, `setvalue`, and `properties`.
+
+**This is the capture, not the current state.** The rows above record what the bundle looked like when the plugin ran, and that gap is what the capture existed to find. The bundle now declares all 14 — hoisted onto the module for the plain-call form, and gathered into the `sp` instance interface for the constructed form, since `this.__proto__ = sp` serves both and both in-repo callers construct.
+
+The comparison is no longer maintained by hand here. `gen.py --check` recomputes it against `runtime-api.json` on every run and fails on drift, so this document is a narrative of one capture rather than the authority on agreement:
+
+```text
+RUNTIME ORACLE CROSS-CHECK OK
+counts: match 242, drift 0, oracle-unreachable 31
+```
+
+The 31 unreachable members are members no tier could construct, and the cross-check still passes when that set is large or the snapshot is empty — the weakness tracked as #166.
 
 ## Function-length observations
 
@@ -114,10 +125,10 @@ The snapshot also records the runtime function `length` for every callable key. 
 | `native/websocket` | clientCreate (3→0), clientSend (2→0), serverCreate (2→0) |
 | `showtime/prop` | atomicAdd (2→0), create (1→0), deleteChild (2→0), deleteChilds (1→0), destroy (1→0), enumerate (1→0), getChild (2→0), getName (1→0), getValue (1→0), has (2→0), haveMore (2→0), isSame (2→0), isValue (1→0), isZombie (1→0), link (2→0), makeUrl (1→0), moveBefore (2→0), nodeFilterAddPred (6→0), nodeFilterCreate (2→0), nodeFilterDelPred (2→0), print (1→0), release (1→0), select (1→0), sendEvent (3→0), set (3→0), setClipRange (3→0), setParent (2→0), setRichStr (3→0), subscribe (3→0), tagClear (2→0), tagGet (2→0), tagSet (3→0), unlink (1→0), unloadDestroy (1→0) |
 
-The native declarations and their generated arities occupy `generated/movian-api.d.ts:147-463`; the runtime values are in `runtime-api.json`. CommonJS callable arities have no mismatch in this run. The native mismatch exists because the runtime exposes native functions with Duktape's zero-argument function metadata, while the generated `@arity` is source/metadata-derived.
+The native declarations carry the generated arities; the runtime values are in `runtime-api.json`. CommonJS callable arities have no mismatch in this run. The native mismatch exists because the runtime exposes native functions with Duktape's zero-argument function metadata, while the generated `@arity` is source/metadata-derived.
 
 ## Findings
 
-1. **Static key surface:** no initial module differs from the generated declarations when one prototype level and `export *` inheritance are included; `movian/prop` is the important control case (`generated/movian-api.d.ts:72-82`).
-2. **Runtime-only dynamic surface:** `movian/settings` gains the 14 keys listed above only after it is invoked as a method. A source-shape-only generator cannot observe that receiver mutation.
+1. **Static key surface:** no initial module differs from the generated declarations when one prototype level and `export *` inheritance are included; `movian/prop` is the important control case: it inherits `native/prop` through `exports.__proto__` and shadows `global` with an own property.
+2. **Runtime-only dynamic surface:** `movian/settings` gains the 14 keys listed above only after it is invoked as a method. A source-shape-only generator cannot observe that receiver mutation — which is why this capture exists. The generator now scans the `this.__proto__ = sp` idiom and declares the surface for both call forms, so the gap this row records is closed; the capture remains the evidence that it was real.
 3. **Callable metadata:** native function `length` values do not reproduce generated `@arity` values, even though the names are present.

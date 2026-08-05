@@ -3943,7 +3943,8 @@
             "source": {
               "file": "res/ecmascript/modules/movian/http.js",
               "line": 75
-            }
+            },
+            "voidWhen": "callback"
           }
         ],
         "kind": "commonjs",
@@ -4995,7 +4996,8 @@
                 "source": {
                   "file": "res/ecmascript/modules/movian/sqlite.js",
                   "line": 12
-                }
+                },
+                "variadic": true
               },
               {
                 "name": "step",
@@ -6803,6 +6805,6 @@
       }
     ]
   },
-  "movianRevision": "4f2107f4467b4e615adc71498b5c0ce46f29d35d",
+  "movianRevision": "0e9af36ec7b28ca48fd043c5333251c205516c40",
   "schemaVersion": 1
 }

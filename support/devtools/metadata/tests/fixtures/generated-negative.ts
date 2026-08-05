@@ -7,6 +7,8 @@
 
 import prop = require('movian/prop');
 import xmlrpc = require('movian/xmlrpc');
+import http = require('movian/http');
+import settings = require('movian/settings');
 
 // A module the loader does not have. If this ever stops erroring, the
 // declarations have grown a wildcard and TS2307 detection is dead.
@@ -24,4 +26,15 @@ const tooMany = prop.createRoot('a', 'b');  // EXPECT_TS2554
 // The variadic rest on xmlrpc.call must not leak onto its siblings.
 const bogus = xmlrpc.noSuchCall();  // EXPECT_TS2339
 
+// The callback form of http.request returns nothing. If the overload split
+// collapses back to a single signature promising HttpResponse, this line
+// stops erroring and the unsound declaration is back.
+const async = http.request('https://e.test', {}, () => { }).toString();  // EXPECT_TS2339
+
+// The settings instance type must stay a real surface: a construct signature
+// returning `any` would make this line legal again.
+const instance = new settings.globalSettings('id', 'T', 'i.png', 'd');
+const nothere = instance.noSuchSetting;  // EXPECT_TS2339
+
 void missing; void absent; void tooMany; void bogus;
+void async; void nothere;

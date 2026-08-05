@@ -676,26 +676,33 @@ def _function_params(region: str) -> list[str] | None:
 
 NESTED_FUNCTION_RE = re.compile(r"\bfunction\b")
 ARGUMENTS_RE = re.compile(r"\barguments\b")
+BARE_RETURN_RE = re.compile(r"\breturn\s*;")
 
 
-def _uses_arguments(region: str) -> bool:
-    """Whether the function assigned at the head of `region` reads its own
-    `arguments`.
+def _own_body(region: str) -> str:
+    """The body of the function assigned at the head of `region`, with the
+    bodies of nested function literals removed.
 
-    Scoped to that function's own body on purpose. An export's region runs to
-    the next `exports.NAME =` assignment, which `exports.DB.prototype.query =`
-    is not -- so `movian/sqlite`'s region for `DB` swallows every prototype
-    method below it, and a plain search over the region reported the
-    constructor as variadic because a *method* reads `arguments`. Comments and
-    string literals are already masked by the caller, so brace counting here
-    is safe.
+    Every question asked of a function body -- does it read `arguments`, does
+    it `return;` without a value -- has to exclude nested callbacks, whose
+    `arguments` and returns belong to them. Scoping also matters at the other
+    end: an export's region runs to the next `exports.NAME =` assignment,
+    which `exports.DB.prototype.query =` is not, so `movian/sqlite`'s region
+    for `DB` swallows every prototype method below it. Without this, a plain
+    search reported the constructor as variadic because a *method* reads
+    `arguments`. Comments and string literals are already masked by the
+    caller, so brace counting here is safe.
+
+    Returns the empty string when `region` does not open with a function
+    literal, which reads as "no evidence" at every call site.
     """
     match = COMMONJS_FUNCTION_RE.search(region)
     if match is None:
-        return False
+        return ""
     open_brace = region.find("{", match.end())
     if open_brace < 0:
-        return False
+        return ""
+    kept: list[str] = []
     depth = 0
     # Depth of the innermost enclosing nested function literal, or None while
     # the scan is in the outer function's own body.
@@ -708,17 +715,30 @@ def _uses_arguments(region: str) -> bool:
         elif char == "}":
             depth -= 1
             if depth == 0:
-                return False
+                break
             if nested_at is not None and depth <= nested_at:
                 nested_at = None
         elif nested_at is None and NESTED_FUNCTION_RE.match(region, index):
             # The nested body opens one level down and closes when depth
             # comes back to here.
             nested_at = depth
-        elif nested_at is None and ARGUMENTS_RE.match(region, index):
-            return True
+        if nested_at is None:
+            kept.append(char)
         index += 1
-    return False
+    return "".join(kept)
+
+
+def _uses_arguments(region: str) -> bool:
+    """Whether the function at the head of `region` reads its own
+    `arguments`."""
+    return ARGUMENTS_RE.search(_own_body(region)) is not None
+
+
+def _returns_without_value(region: str) -> bool:
+    """Whether the function at the head of `region` has a bare `return;` of
+    its own -- an early exit that yields `undefined` regardless of what the
+    function returns on its other paths."""
+    return BARE_RETURN_RE.search(_own_body(region)) is not None
 
 
 IDENT_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
@@ -842,9 +862,19 @@ def _member_record(
 
 def _shape_method(
         name: str, raw_params: str, path: Path, line: int,
-        alias_of: str | None = None) -> dict[str, Any]:
-    return _member_record(
+        alias_of: str | None = None,
+        region: str | None = None) -> dict[str, Any]:
+    record = _member_record(
         name, _parse_params(raw_params), path, line, alias_of=alias_of)
+    # Same rule the module exports get: a method that reads its own
+    # `arguments` takes more than it declares. `movian/sqlite`'s
+    # `DB.prototype.query` names no parameter and forwards every value in
+    # `arguments`, so a zero-argument declaration rejected every real
+    # `db.query('SELECT ...', value)`. `region` starts at the assignment, so
+    # `_uses_arguments` brace-matches this method's own body.
+    if region is not None and "params" in record and _uses_arguments(region):
+        record["variadic"] = True
+    return record
 
 def _split_js_fields(text: str) -> list[str]:
     fields: list[str] = []
@@ -1134,7 +1164,8 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
         methods = by_receiver.setdefault(receiver, {})
         methods[match.group(2)] = _shape_method(
             match.group(2), match.group(3), path,
-            _source_line(text, match.start(1)))
+            _source_line(text, match.start(1)),
+            region=text[match.start(1):])
 
     unresolved_aliases: list[tuple[str, str, str, int]] = []
     alias_matches = list(PROTOTYPE_ALIAS_RE.finditer(text))
@@ -1204,7 +1235,8 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
         methods = by_receiver.setdefault(receiver, {})
         methods[name] = _shape_method(
             name, match.group(3), path,
-            _source_line(text, match.start(1)))
+            _source_line(text, match.start(1)),
+            region=text[match.start(1):])
     properties_by_receiver = _scan_shape_properties(
         path, text, set(by_receiver), consumed_shared_names)
 
@@ -1432,6 +1464,16 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
         if callback_shapes and len(callback_params) == 1:
             record["callbackShapes"] = callback_shapes
             record["callbackParam"] = callback_params[0]
+            # `movian/http`'s `request` returns `new HttpResponse(res)` on the
+            # synchronous path, but when a callback is supplied it dispatches
+            # and falls out through a bare `return;`. Promising the value type
+            # unconditionally let `http.request(url, {}, cb).toString()` type
+            # -check and then dereference `undefined`, so the callback form is
+            # emitted as a separate overload returning `void`. Recorded only
+            # when the callback parameter is unambiguous, above.
+            if record.get("returns") is not None and \
+                    _returns_without_value(region):
+                record["voidWhen"] = callback_params[0]
         exports.append(record)
     exports.sort(key=lambda r: r["name"])
     return exports
@@ -1475,6 +1517,10 @@ def build_commonjs_modules() -> list[dict[str, Any]]:
             returned = export.get("returns")
             if isinstance(returned, str) and returned not in shape_names:
                 export.pop("returns", None)
+                # The overload split only says something once there is a
+                # value type to contrast `void` with; without one both forms
+                # render identically and the extra signature is noise.
+                export.pop("voidWhen", None)
             callback_param = export.pop("callbackParam", None)
             callback_shapes = [
                 shape for shape in export.pop("callbackShapes", [])
@@ -2355,6 +2401,32 @@ def render_dts(artifact: dict[str, Any]) -> str:
             parts.append("%s?: %s" % (name, annotation))
         return ", ".join(parts)
 
+    def member_signature(
+            member: dict[str, Any],
+            export: dict[str, Any] | None = None,
+            shape_names: set[str] | None = None
+    ) -> tuple[str | None, str]:
+        """`@arity` text and parameter list for one callable member.
+
+        Shared by every emission site -- module exports, prototype methods,
+        shared-object methods and receiver members -- so the variadic rule
+        cannot hold in one of them and not the others. Returns `None` for the
+        arity when the parameter list did not parse, which is the caller's
+        signal to omit the annotation.
+        """
+        params = member.get("params")
+        variadic = member.get("variadic", False)
+        signature = params_signature(params, export, shape_names)
+        if variadic:
+            # `params_signature(None)` is already `...args: any[]`, and
+            # `variadic` is only recorded when the formal list parsed, so the
+            # rest parameter is never appended twice.
+            signature = ", ".join([signature, "...args: any[]"]) \
+                if signature else "...args: any[]"
+        if params is None:
+            return None, signature
+        return ("%d+" % len(params) if variadic else str(len(params)),
+                signature)
 
     def render_return_type(
             returned: Any, shape_names: set[str]) -> str:
@@ -2439,13 +2511,12 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 for shape in prototype_shapes:
                     lines.append("  interface %s {" % shape["name"])
                     for method in shape["methods"]:
-                        params = method.get("params")
-                        if params is not None:
-                            lines.append("    /** @arity %d */"
-                                         % len(params))
+                        arity, signature = member_signature(method)
+                        if arity is not None:
+                            lines.append("    /** @arity %s */" % arity)
                         lines.append(
                             "    %s(%s): any;" %
-                            (method["name"], params_signature(params)))
+                            (method["name"], signature))
                     for prop in shape.get("properties", []):
                         lines.append("    %s: any;" % prop["name"])
                     lines.append("  }")
@@ -2456,28 +2527,59 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     "  // CommonJS receiver-mutated shared object shapes")
                 for shape in shared_shapes:
                     for method in shape["methods"]:
-                        params = method.get("params")
-                        if params is not None:
-                            lines.append("  /** @arity %d */"
-                                         % len(params))
+                        arity, signature = member_signature(method)
+                        if arity is not None:
+                            lines.append("  /** @arity %s */" % arity)
                         lines.append(
                             "  function %s(%s): any;" %
-                            (method["name"], params_signature(params)))
+                            (method["name"], signature))
                     for prop in shape.get("properties", []):
                         lines.append("  var %s: any;" % prop["name"])
+                lines.append("")
+                # The hoisted members above describe a PLAIN call, which
+                # mutates the module receiver. Both supported in-repo callers
+                # construct instead -- res/ecmascript/legacy/api-v1.js:140 and
+                # res/ecmascript/modules/movian/page.js:197 -- and
+                # `this.__proto__ = sp` works either way, so the same surface
+                # also has to be reachable as an instance type. Named after
+                # the shared object's own source identifier rather than an
+                # invented one.
+                for shape in shared_shapes:
+                    lines.append("  interface %s {" % shape["name"])
+                    for method in shape["methods"]:
+                        arity, signature = member_signature(method)
+                        if arity is not None:
+                            lines.append("    /** @arity %s */" % arity)
+                        lines.append(
+                            "    %s(%s): any;" %
+                            (method["name"], signature))
+                    for prop in shape.get("properties", []):
+                        lines.append("    %s: any;" % prop["name"])
+                    # The initializer assigns these onto the receiver, so a
+                    # constructed instance carries them too.
+                    for member in receiver_members:
+                        if member["kind"] == "function":
+                            arity, signature = member_signature(member)
+                            if arity is not None:
+                                lines.append("    /** @arity %s */" % arity)
+                            lines.append(
+                                "    %s(%s): any;" %
+                                (member["name"], signature))
+                        else:
+                            lines.append("    %s: any;" % member["name"])
+                    lines.append("  }")
                 lines.append("")
             if receiver_members:
                 lines.append(
                     "  // CommonJS receiver-mutated module exports")
                 for member in receiver_members:
                     if member["kind"] == "function":
-                        params = member.get("params")
-                        if params is not None:
-                            lines.append("  /** @arity %d */"
-                                         % len(params))
+                        arity, signature = member_signature(member)
+                        if arity is not None:
+                            lines.append("  /** @arity %s */" % arity)
                         lines.append(
                             "  function %s(%s): any;" %
-                            (member["name"], params_signature(params)))
+                            (member["name"], signature))
                     else:
                         lines.append("  var %s: any;" % member["name"])
                 lines.append("")
@@ -2487,10 +2589,15 @@ def render_dts(artifact: dict[str, Any]) -> str:
             shape_names = {
                 shape["name"] for shape in prototype_shapes
             }
+            # The instance type a receiver-mutating initializer produces.
+            # Only unambiguous with exactly one shared shape in the module;
+            # with none or several there is nothing to name, and the
+            # construct signature falls back to `any` rather than guessing.
+            receiver_shape = (shared_shapes[0]["name"]
+                              if len(shared_shapes) == 1 else None)
             for exp in exports:
                 ename = exp["name"]
                 params = exp.get("params")
-                variadic = exp.get("variadic", False)
                 # Parameters are emitted OPTIONAL on purpose. The names are
                 # source-derived fact and give editors signature help; the
                 # count is not a contract -- Duktape enforces no arity, and
@@ -2498,31 +2605,55 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 # arguments than they declare. Requiring them would generate
                 # errors the runtime does not have. The honest count stays in
                 # @arity.
-                sig = params_signature(params, exp, shape_names)
-                # `params_signature(None)` is already `...args: any[]`, and
-                # `variadic` is only set when the formal list parsed, so the
-                # rest parameter is never appended twice.
-                if variadic:
-                    sig = ", ".join([sig, "...args: any[]"]) if sig \
-                        else "...args: any[]"
-                if exp.get("constructor"):
-                    if params is not None:
-                        lines.append("  /** @arity %s */"
-                                     % ("%d+" % len(params) if variadic
-                                        else len(params)))
+                arity, sig = member_signature(exp, exp, shape_names)
+                if exp.get("receiverMutation"):
+                    # `this.__proto__ = sp` does not choose between the two
+                    # call forms: constructed, `this` is the new instance;
+                    # called plainly, it is the module receiver (which is why
+                    # the members are hoisted above). Emitting only the plain
+                    # form cost `new settings.globalSettings(...)` its
+                    # construct signature and produced TS7009 for both of the
+                    # in-repo callers, so both signatures are declared. The
+                    # plain form returns `void`: the initializers end by
+                    # assigning to `this` and never return a value.
+                    if arity is not None:
+                        lines.append("  /** @arity %s */" % arity)
+                    lines.append("  %sconst %s: {" % (decl, ename))
+                    lines.append("    new (%s): %s;"
+                                 % (sig, receiver_shape or "any"))
+                    lines.append("    (%s): void;" % sig)
+                    lines.append("  };")
+                elif exp.get("constructor"):
+                    if arity is not None:
+                        lines.append("  /** @arity %s */" % arity)
                     result_type = ename if ename in shape_names else "any"
                     lines.append("  %sconst %s: {" % (decl, ename))
                     lines.append("    new (%s): %s;" %
                                  (sig, result_type))
                     lines.append("  };")
                 elif params is not None:
-                    lines.append("  /** @arity %s */"
-                                 % ("%d+" % len(params) if variadic
-                                    else len(params)))
+                    lines.append("  /** @arity %s */" % arity)
                     return_type = render_return_type(
                         exp.get("returns", "any"), shape_names)
-                    lines.append("  %sfunction %s(%s): %s;" %
-                                 (decl, ename, sig, return_type))
+                    void_when = exp.get("voidWhen")
+                    if void_when is not None and void_when in params:
+                        # Two forms, split at the callback parameter: without
+                        # it the function returns its value, with it it
+                        # dispatches and returns nothing. The synchronous
+                        # overload is emitted first so it wins for calls that
+                        # supply neither form's optional tail.
+                        head = params[:params.index(void_when)]
+                        head_member = dict(exp)
+                        head_member["params"] = head
+                        _, head_sig = member_signature(
+                            head_member, exp, shape_names)
+                        lines.append("  %sfunction %s(%s): %s;" %
+                                     (decl, ename, head_sig, return_type))
+                        lines.append("  %sfunction %s(%s): void;" %
+                                     (decl, ename, sig))
+                    else:
+                        lines.append("  %sfunction %s(%s): %s;" %
+                                     (decl, ename, sig, return_type))
                 else:
                     lines.append("  %sconst %s: any;" % (decl, ename))
 

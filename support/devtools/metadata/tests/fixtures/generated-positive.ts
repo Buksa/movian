@@ -62,9 +62,37 @@ const response = http.request('https://example.test/api');
 const searcher = new page.Searcher('Example', 'icon.png', () => { });
 const route = new page.Route('example:(.*)', () => { });
 service.create('Example', 'example:start', 'video', true, 'icon.png');
+// movian/settings -- `this.__proto__ = sp` serves both call forms, so both
+// have to be declared. Constructed is what the two in-repo callers do
+// (res/ecmascript/legacy/api-v1.js:140, res/ecmascript/modules/movian/
+// page.js:197); the instance carries the shared surface plus what the
+// initializer assigns onto the receiver.
 const globals = new settings.globalSettings(
     'example', 'Example', 'icon.png', 'Description');
+const kvstore = new settings.kvstoreSettings(null, 'example:url', 'domain');
+globals.createBool('flag', 'Flag', false, () => { }, true);
+globals.createString('name', 'Name', '', () => { }, true);
+const settingsId = globals.id;
+const settingsNodes = kvstore.nodes;
+// Called plainly it mutates the module receiver instead, which is why the
+// same members are also reachable off the module itself.
+settings.globalSettings('example', 'Example', 'icon.png', 'Description');
+settings.createBool('module-flag', 'Flag', false, () => { }, true);
+
+// movian/sqlite -- `DB.prototype.query` names no parameter and forwards
+// everything in `arguments` (sqlite.js:12-19), so a zero-argument method
+// rejected every real query.
 const db = new sqlite.DB('example');
+const rows = db.query('SELECT ? AS value', 1);
+db.query('SELECT 1');
+
+// movian/http -- the synchronous form returns the response; the callback
+// form dispatches and returns nothing (http.js:93-101). Only the first may
+// be dereferenced, which the negative fixture pins.
+const syncBody = http.request('https://example.test/api', {}).toString();
+http.request('https://example.test/api', {}, (err: any, res: any) => {
+    void err; void res;
+});
 
 // Legacy aliases resolve to the same surface, local members included.
 const legacyRoot = legacyProp.createRoot('legacy');
@@ -73,3 +101,4 @@ const legacyRoute = new legacyPage.Route('legacy:(.*)', () => { });
 void anonymousRoot; void navigators; void popups; void language;
 void proxied; void rpc; void response; void searcher; void route;
 void globals; void db; void legacyRoot; void legacyRoute;
+void kvstore; void settingsId; void settingsNodes; void rows; void syncBody;
