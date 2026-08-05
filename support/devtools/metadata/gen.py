@@ -735,7 +735,7 @@ def _uses_arguments(region: str) -> bool:
 
 
 def _callback_shape_index(
-        region: str, param: str, shapes: list[str]) -> int | None:
+        region: str, param: str, shapes: list[str]) -> tuple[int | None, bool]:
     """Which argument of `param`'s invocation carries a `new <shape>(...)`.
 
     Assuming position 0 typed the wrong parameter: `movian/http`'s `request`
@@ -752,15 +752,30 @@ def _callback_shape_index(
     call_re = re.compile(r"\b%s\s*\(" % re.escape(param))
     new_res = [re.compile(r"\bnew\s+%s\s*\(" % re.escape(shape))
                for shape in shapes]
+    index = None
+    calls = []
     for call in call_re.finditer(region):
-        end = _balanced_end(region, call.end() - 1)
+        end = _balanced_call_end(region, call.end() - 1)
         if end is None:
             continue
         args = _split_js_fields(region[call.end():end - 1])
-        for index, arg in enumerate(args):
-            if any(pattern.search(arg) for pattern in new_res):
-                return index
-    return None
+        calls.append(args)
+        if index is None:
+            for position, arg in enumerate(args):
+                if any(pattern.search(arg) for pattern in new_res):
+                    index = position
+                    break
+    if index is None:
+        return None, False
+    # `callback(err, null)` on the failure path means the shape argument is
+    # not always a value. The hand-written canon already had
+    # `HttpResponse | null`; emitting it non-null let the new positive fixture
+    # dereference it unguarded, which is exactly the runtime crash the
+    # declaration is supposed to prevent.
+    nullable = any(
+        len(args) > index and args[index].strip() == "null"
+        for args in calls)
+    return index, nullable
 
 
 def _returns_without_value(region: str) -> bool:
@@ -1098,10 +1113,19 @@ def _scan_shape_properties(
         for assignment in THIS_ASSIGN_RE.finditer(scan_text):
             name = assignment.group(1)
             if name != "__proto__":
+                # An assignment nested inside a block is conditional, so the
+                # member is not always present. `movian/page` sets
+                # `this.options` only under `if(!flat)` (page.js:195-200) and
+                # `Searcher` builds flat pages, so declaring it required made
+                # `page.options` look guaranteed on a path that does not have
+                # it. Exactly one member in the corpus is assigned this way.
+                before = scan_text[:assignment.start()]
+                conditional = before.count("{") > before.count("}")
                 _add_property(
                     properties, owner_receiver, name, path, comment_text,
                     base_offset + assignment.start(1),
-                    kind=assignment_kind(assignment))
+                    kind=assignment_kind(assignment),
+                    optional=conditional)
         # Deliberately over `body` rather than `scan_text`: every one of these
         # guards sits inside a `.bind(this)` callback, where `this` is still
         # the shape, and masking nested bodies loses all seven.
@@ -1429,6 +1453,26 @@ def _merge_receiver_members(
             if len(new_params) > len(old_params):
                 merged[name] = member
     return [merged[name] for name in sorted(merged)]
+def _balanced_call_end(text: str, open_index: int) -> int | None:
+    """Index just past the `)` closing the call whose `(` is at `open_index`.
+
+    `_balanced_end` below matches BRACES, and calling it for a parenthesised
+    argument list silently runs to the next unbalanced `{` -- which made the
+    callback-argument split return the whole rest of the function as one
+    argument. The right index came out anyway on `movian/http`, by luck, which
+    is the worst way for this to be wrong.
+    """
+    depth = 0
+    for index in range(open_index, len(text)):
+        if text[index] == "(":
+            depth += 1
+        elif text[index] == ")" and depth:
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return None
+
+
 def _balanced_end(text: str, open_index: int) -> int | None:
     depth = 0
     for index in range(open_index, len(text)):
@@ -1525,10 +1569,12 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
         if callback_shapes and len(callback_params) == 1:
             record["callbackShapes"] = callback_shapes
             record["callbackParam"] = callback_params[0]
-            index = _callback_shape_index(
+            index, nullable = _callback_shape_index(
                 region, callback_params[0], callback_shapes)
             if index is not None:
                 record["callbackShapeIndex"] = index
+                if nullable:
+                    record["callbackShapeNullable"] = True
             # `movian/http`'s `request` returns `new HttpResponse(res)` on the
             # synchronous path, but when a callback is supplied it dispatches
             # and falls out through a bare `return;`. Promising the value type
@@ -1578,7 +1624,15 @@ def build_commonjs_modules() -> list[dict[str, Any]]:
         shape_names = {shape["name"] for shape in shapes}
         receiver_members: list[dict[str, Any]] = []
         for export in exports:
-            receiver_members.extend(export.pop("receiverMembers", []))
+            # Kept per-export as well as merged. The two `movian/settings`
+            # initializers install DIFFERENT surfaces -- globalSettings adds
+            # id and properties, kvstoreSettings does not -- so one merged
+            # instance type made `kvstoreSettings(...).properties` compile and
+            # then read undefined. The hand-written canon
+            # (tests/reference/movian-settings.d.ts) models them separately;
+            # this follows it, which is what #160's calibration section asks
+            # for when the canon and the generator disagree.
+            receiver_members.extend(export.get("receiverMembers", []))
             returned = export.get("returns")
             if isinstance(returned, str) and returned not in shape_names:
                 export.pop("returns", None)
@@ -1596,6 +1650,7 @@ def build_commonjs_modules() -> list[dict[str, Any]]:
                 export["callbackParam"] = callback_param
             else:
                 export.pop("callbackShapeIndex", None)
+                export.pop("callbackShapeNullable", None)
         receiver_members = _merge_receiver_members(receiver_members)
         record = {
             "name": module_name,
@@ -2503,9 +2558,12 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     # position is measured from the call site, their meaning
                     # is not, and TypeScript requires some name.
                     index = export.get("callbackShapeIndex", 0)
+                    shape_type = callback_shape
+                    if export.get("callbackShapeNullable"):
+                        shape_type += " | null"
                     callback_params = [
                         "arg%d: any" % position for position in range(index)
-                    ] + ["value: %s" % callback_shape, "...args: any[]"]
+                    ] + ["value: %s" % shape_type, "...args: any[]"]
                     annotation = (
                         "(%s) => any" % ", ".join(callback_params))
             parts.append("%s?: %s" % (name, annotation))
@@ -2653,13 +2711,23 @@ def render_dts(artifact: dict[str, Any]) -> str:
                         lines.append("  var %s: any;" % prop["name"])
                 lines.append("")
                 # The hoisted members above describe a PLAIN call, which
-                # mutates the module receiver. Both supported in-repo callers
-                # construct instead -- res/ecmascript/legacy/api-v1.js:140 and
-                # res/ecmascript/modules/movian/page.js:197 -- and
-                # `this.__proto__ = sp` works either way, so the same surface
-                # also has to be reachable as an instance type. Named after
-                # the shared object's own source identifier rather than an
-                # invented one.
+                # mutates the module receiver -- and that is what the shipped
+                # plugins do: movian-plugin-HDRezka/service.js:83,
+                # movian-plugin-trakt/trakt.js:51 and
+                # m7-jellyfin/src/settings.js:27 all call globalSettings
+                # plainly and then use settings.createString/createBool on the
+                # module. The in-repo callers construct instead
+                # (res/ecmascript/legacy/api-v1.js:140,
+                # res/ecmascript/modules/movian/page.js:197), and
+                # `this.__proto__ = sp` serves both, so the shared surface has
+                # to be reachable as an instance type as well.
+                #
+                # One interface PER INITIALIZER, not one shared: globalSettings
+                # assigns id and properties, kvstoreSettings does not, so a
+                # single merged type let `kvstoreSettings(...).properties`
+                # compile and then read undefined. Named after the export, the
+                # way the hand-written canon does it -- a value and a type of
+                # the same name occupy different declaration spaces.
                 for shape in shared_shapes:
                     lines.append("  interface %s {" % shape["name"])
                     for method in shape["methods"]:
@@ -2670,16 +2738,18 @@ def render_dts(artifact: dict[str, Any]) -> str:
                             "    %s(%s): any;" %
                             (method["name"], signature))
                     for prop in shape.get("properties", []):
-                        # A plugin-supplied hook the module only guards is
-                        # optional: requiring it would produce errors the
-                        # runtime does not have, since nothing forces a plugin
-                        # to set it.
                         lines.append("    %s%s: any;" % (
                             prop["name"],
                             "?" if prop.get("optional") else ""))
-                    # The initializer assigns these onto the receiver, so a
-                    # constructed instance carries them too.
-                    for member in receiver_members:
+                    lines.append("  }")
+                for export in exports:
+                    if not export.get("receiverMutation"):
+                        continue
+                    own = export.get("receiverMembers", [])
+                    bases = " extends %s" % ", ".join(
+                        shape["name"] for shape in shared_shapes)
+                    lines.append("  interface %s%s {" % (export["name"], bases))
+                    for member in own:
                         if member["kind"] == "function":
                             arity, signature = member_signature(member)
                             if arity is not None:
@@ -2715,8 +2785,13 @@ def render_dts(artifact: dict[str, Any]) -> str:
             # Only unambiguous with exactly one shared shape in the module;
             # with none or several there is nothing to name, and the
             # construct signature falls back to `any` rather than guessing.
-            receiver_shape = (shared_shapes[0]["name"]
-                              if len(shared_shapes) == 1 else None)
+            # Each initializer now has its own instance interface, named
+            # after the export, so the construct result is that -- not the
+            # shared base every initializer happens to share.
+            receiver_shapes = {
+                export["name"] for export in exports
+                if export.get("receiverMutation")
+            } if shared_shapes else set()
             for exp in exports:
                 ename = exp["name"]
                 params = exp.get("params")
@@ -2742,7 +2817,8 @@ def render_dts(artifact: dict[str, Any]) -> str:
                         lines.append("  /** @arity %s */" % arity)
                     lines.append("  %sconst %s: {" % (decl, ename))
                     lines.append("    new (%s): %s;"
-                                 % (sig, receiver_shape or "any"))
+                                 % (sig, ename if ename in receiver_shapes
+                                    else "any"))
                     lines.append("    (%s): void;" % sig)
                     lines.append("  };")
                 elif exp.get("constructor"):

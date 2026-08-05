@@ -94,8 +94,11 @@ const syncBody = http.request('https://example.test/api', {}).toString();
 // Error-first: the module calls `callback(err, null)` on failure and
 // `callback(null, new HttpResponse(res))` on success, so the response is the
 // SECOND argument. Typing it first made this callback's `err` a response.
+// The response is `HttpResponse | null` -- http.js:96 calls
+// `callback(err, null)` on the failure path. A plugin must check it, and this
+// fixture must not model the crash it is meant to prevent.
 http.request('https://example.test/api', {}, (err: any, res) => {
-    void err;
+    if (err || res === null) { return; }
     void res.statuscode;
 });
 // Pins the ORDER rather than the presence. The rest parameter types every

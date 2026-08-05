@@ -2401,6 +2401,10 @@ def check_typescript(tsc: str) -> list[str]:
 # passes on a fixture that imports nothing -- the failure mode the rest of this
 # checker keeps rediscovering. Named modules, not a count, so deleting the
 # `movian/prop` block cannot be masked by adding lines elsewhere.
+FIXTURE_IMPORT_RE = re.compile(
+    r"^\s*import\s+\w+\s*=\s*require\(\s*['\"]([^'\"]+)['\"]\s*\)",
+    re.MULTILINE)
+
 GENERATED_FIXTURE_REQUIRED_MODULES = (
     "movian/videoscrobbler",
     "movian/prop",
@@ -2417,9 +2421,15 @@ def check_generated_typescript(tsc: str) -> list[str]:
     """
     errors: list[str] = []
 
+    # Parsed from the import statements, not grepped from the raw text: the
+    # first version matched anywhere in the file, so a fixture whose entire
+    # content was a COMMENT naming the modules satisfied the floor. A guard
+    # against an emptied fixture that an empty fixture passes is worse than
+    # no guard, because it reads as covered.
     fixture_text = _read(GENERATED_POSITIVE_FIXTURE)
+    imported = set(FIXTURE_IMPORT_RE.findall(fixture_text))
     absent = [name for name in GENERATED_FIXTURE_REQUIRED_MODULES
-              if "'%s'" % name not in fixture_text]
+              if name not in imported]
     if absent:
         errors.append("generated positive fixture no longer imports %s"
                       % ", ".join(absent))
@@ -2561,8 +2571,14 @@ def main() -> int:
 
     tsc = shutil.which("tsc")
     if tsc is None:
-        print("reference-dts: tsc unavailable; skipping TypeScript fixtures")
-        return 0
+        # Hard failure, not a skip. The generated-d.ts gate lives below this
+        # point, so a host without tsc silently ran NONE of it while
+        # `gen.py --check` still printed every status `ok` -- a guard that
+        # disappears on the machines least likely to notice.
+        print("reference-dts: tsc unavailable; the TypeScript fixtures are "
+              "the only check on generated/movian-api.d.ts, so this is a "
+              "failure rather than a skip", file=sys.stderr)
+        return 1
 
     try:
         errors = check_typescript(tsc)

@@ -3933,6 +3933,7 @@
             "callbackParam": "callback",
             "callbackShape": "HttpResponse",
             "callbackShapeIndex": 1,
+            "callbackShapeNullable": true,
             "name": "request",
             "nargs": 3,
             "params": [
@@ -4483,6 +4484,7 @@
               {
                 "kind": "value",
                 "name": "options",
+                "optional": true,
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
                   "line": 197
@@ -4753,6 +4755,58 @@
               "icon",
               "desc"
             ],
+            "receiverMembers": [
+              {
+                "kind": "function",
+                "name": "getvalue",
+                "nargs": 2,
+                "params": [
+                  "id",
+                  "def"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 292
+                }
+              },
+              {
+                "kind": "value",
+                "name": "id",
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 274
+                }
+              },
+              {
+                "kind": "value",
+                "name": "nodes",
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 284
+                }
+              },
+              {
+                "kind": "value",
+                "name": "properties",
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 300
+                }
+              },
+              {
+                "kind": "function",
+                "name": "setvalue",
+                "nargs": 2,
+                "params": [
+                  "id",
+                  "value"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 296
+                }
+              }
+            ],
             "receiverMutation": true,
             "source": {
               "file": "res/ecmascript/modules/movian/settings.js",
@@ -4766,6 +4820,45 @@
               "nodes",
               "url",
               "domain"
+            ],
+            "receiverMembers": [
+              {
+                "kind": "function",
+                "name": "getvalue",
+                "nargs": 4,
+                "params": [
+                  "id",
+                  "def",
+                  "type",
+                  "persistent"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 317
+                }
+              },
+              {
+                "kind": "value",
+                "name": "nodes",
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 313
+                }
+              },
+              {
+                "kind": "function",
+                "name": "setvalue",
+                "nargs": 3,
+                "params": [
+                  "id",
+                  "value",
+                  "persistent"
+                ],
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 329
+                }
+              }
             ],
             "receiverMutation": true,
             "source": {
@@ -6860,6 +6953,6 @@
       }
     ]
   },
-  "movianRevision": "8892141b7e2840c44549dfdcb95388bd5bba3d7c",
+  "movianRevision": "c8e96be29f87a6e8969224a25b7a90195100c209",
   "schemaVersion": 1
 }
