@@ -4003,7 +4003,8 @@
             "source": {
               "file": "res/ecmascript/modules/movian/xmlrpc.js",
               "line": 1
-            }
+            },
+            "variadic": true
           }
         ],
         "kind": "commonjs",
@@ -5510,6 +5511,6 @@
       }
     ]
   },
-  "movianRevision": "b2c8bb8530dc877e7eb6881a9486fc4f7a311034",
+  "movianRevision": "97ac4ccada2f211e2e6c964abd413dec853b7a3a",
   "schemaVersion": 1
 }
