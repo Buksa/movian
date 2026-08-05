@@ -3932,6 +3932,7 @@
           {
             "callbackParam": "callback",
             "callbackShape": "HttpResponse",
+            "callbackShapeIndex": 1,
             "name": "request",
             "nargs": 3,
             "params": [
@@ -4415,6 +4416,15 @@
             "name": "Page",
             "properties": [
               {
+                "kind": "function",
+                "name": "asyncPaginator",
+                "optional": true,
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 208
+                }
+              },
+              {
                 "kind": "accessor",
                 "name": "entries",
                 "source": {
@@ -4484,6 +4494,15 @@
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
                   "line": 186
+                }
+              },
+              {
+                "kind": "function",
+                "name": "reorderer",
+                "optional": true,
+                "source": {
+                  "file": "res/ecmascript/modules/movian/page.js",
+                  "line": 228
                 }
               },
               {
@@ -5164,6 +5183,42 @@
                 "source": {
                   "file": "res/ecmascript/modules/movian/videoscrobbler.js",
                   "line": 7
+                }
+              },
+              {
+                "kind": "function",
+                "name": "onpause",
+                "optional": true,
+                "source": {
+                  "file": "res/ecmascript/modules/movian/videoscrobbler.js",
+                  "line": 25
+                }
+              },
+              {
+                "kind": "function",
+                "name": "onresume",
+                "optional": true,
+                "source": {
+                  "file": "res/ecmascript/modules/movian/videoscrobbler.js",
+                  "line": 28
+                }
+              },
+              {
+                "kind": "function",
+                "name": "onstart",
+                "optional": true,
+                "source": {
+                  "file": "res/ecmascript/modules/movian/videoscrobbler.js",
+                  "line": 15
+                }
+              },
+              {
+                "kind": "function",
+                "name": "onstop",
+                "optional": true,
+                "source": {
+                  "file": "res/ecmascript/modules/movian/videoscrobbler.js",
+                  "line": 37
                 }
               },
               {
@@ -6805,6 +6860,6 @@
       }
     ]
   },
-  "movianRevision": "0e9af36ec7b28ca48fd043c5333251c205516c40",
+  "movianRevision": "8892141b7e2840c44549dfdcb95388bd5bba3d7c",
   "schemaVersion": 1
 }

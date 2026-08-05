@@ -2402,6 +2402,7 @@ def check_typescript(tsc: str) -> list[str]:
 # checker keeps rediscovering. Named modules, not a count, so deleting the
 # `movian/prop` block cannot be masked by adding lines elsewhere.
 GENERATED_FIXTURE_REQUIRED_MODULES = (
+    "movian/videoscrobbler",
     "movian/prop",
     "movian/xmlrpc",
     "showtime/prop",

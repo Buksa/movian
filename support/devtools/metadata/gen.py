@@ -734,6 +734,35 @@ def _uses_arguments(region: str) -> bool:
     return ARGUMENTS_RE.search(_own_body(region)) is not None
 
 
+def _callback_shape_index(
+        region: str, param: str, shapes: list[str]) -> int | None:
+    """Which argument of `param`'s invocation carries a `new <shape>(...)`.
+
+    Assuming position 0 typed the wrong parameter: `movian/http`'s `request`
+    calls `callback(null, new HttpResponse(res))` on success and
+    `callback(err, null)` on failure, so annotating the first argument made
+    `http.request(url, {}, res => res.toString())` compile and then
+    dereference `null`. Searched over the whole region on purpose -- the
+    invocation usually sits inside a nested callback, which is the one place
+    `_own_body` deliberately does not look.
+
+    `None` when no invocation carries a construction, which leaves the
+    annotation off rather than guessing a position.
+    """
+    call_re = re.compile(r"\b%s\s*\(" % re.escape(param))
+    new_res = [re.compile(r"\bnew\s+%s\s*\(" % re.escape(shape))
+               for shape in shapes]
+    for call in call_re.finditer(region):
+        end = _balanced_end(region, call.end() - 1)
+        if end is None:
+            continue
+        args = _split_js_fields(region[call.end():end - 1])
+        for index, arg in enumerate(args):
+            if any(pattern.search(arg) for pattern in new_res):
+                return index
+    return None
+
+
 def _returns_without_value(region: str) -> bool:
     """Whether the function at the head of `region` has a bare `return;` of
     its own -- an early exit that yields `undefined` regardless of what the
@@ -978,10 +1007,34 @@ def _property_names(
 def _add_property(
         properties: dict[str, dict[str, dict[str, Any]]],
         receiver: str, name: str, path: Path, text: str, offset: int,
-        kind: str = "value"
+        kind: str = "value", optional: bool = False
 ) -> None:
-    properties.setdefault(receiver, {})[name] = _member_record(
+    members = properties.setdefault(receiver, {})
+    if optional and name in members:
+        # A slot the module both guards and assigns is not optional; the
+        # assignment is the stronger fact and already recorded it.
+        return
+    record = _member_record(
         name, None, path, _source_line(text, offset), kind=kind)
+    if optional:
+        record["optional"] = True
+    members[name] = record
+
+
+# `if(typeof this.asyncPaginator == 'function')` is the module DECLARING an
+# optional slot: it tests the member precisely because a plugin is expected to
+# assign it, and the module never assigns it itself. Nothing else in the source
+# records those members, so narrowing a callback parameter to the interface
+# turned every documented assignment into TS2339 -- `plugin_examples/
+# async_page_load/async_page_load.js:27` and `plugin_examples/videoscrobbling/
+# videoscrobbling_example.js:53-70` both stopped compiling. Seven such hooks
+# exist in the whole corpus, on `Page` (3) and `VideoScrobbler` (4).
+#
+# Matched against text whose string literals are intact -- the default mask
+# replaces `'function'` and the guard becomes invisible.
+THIS_HOOK_GUARD_RE = re.compile(
+    r"\btypeof\s*\(?\s*this\.([A-Za-z_$][A-Za-z0-9_$]*)\s*\)?"
+    r"\s*[=!]==?\s*['\"]function['\"]")
 
 
 def _shape_diagnostic(path: Path, text: str, offset: int, message: str) -> None:
@@ -1049,6 +1102,14 @@ def _scan_shape_properties(
                     properties, owner_receiver, name, path, comment_text,
                     base_offset + assignment.start(1),
                     kind=assignment_kind(assignment))
+        # Deliberately over `body` rather than `scan_text`: every one of these
+        # guards sits inside a `.bind(this)` callback, where `this` is still
+        # the shape, and masking nested bodies loses all seven.
+        for guard in THIS_HOOK_GUARD_RE.finditer(body):
+            _add_property(
+                properties, owner_receiver, guard.group(1), path,
+                comment_text, base_offset + guard.start(1),
+                kind="function", optional=True)
         for assignment in ALIAS_MEMBER_ASSIGN_RE.finditer(scan_text):
             alias, name = assignment.groups()
             if alias in aliases and name != "__proto__":
@@ -1464,6 +1525,10 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
         if callback_shapes and len(callback_params) == 1:
             record["callbackShapes"] = callback_shapes
             record["callbackParam"] = callback_params[0]
+            index = _callback_shape_index(
+                region, callback_params[0], callback_shapes)
+            if index is not None:
+                record["callbackShapeIndex"] = index
             # `movian/http`'s `request` returns `new HttpResponse(res)` on the
             # synchronous path, but when a callback is supplied it dispatches
             # and falls out through a bare `return;`. Promising the value type
@@ -1529,6 +1594,8 @@ def build_commonjs_modules() -> list[dict[str, Any]]:
             if len(callback_shapes) == 1 and callback_param is not None:
                 export["callbackShape"] = callback_shapes[0]
                 export["callbackParam"] = callback_param
+            else:
+                export.pop("callbackShapeIndex", None)
         receiver_members = _merge_receiver_members(receiver_members)
         record = {
             "name": module_name,
@@ -1791,8 +1858,10 @@ def _format_runtime_oracle_report(
     state = "OK" if report.get("drift", 0) == 0 else "DRIFT"
     lines = [
         "RUNTIME ORACLE CROSS-CHECK %s" % state,
-        "counts: match %d, drift %d, oracle-unreachable %d" %
+        "counts: match %d, drift %d, plugin-supplied %d,"
+        " oracle-unreachable %d" %
         (report["match"], report["drift"],
+         report.get("pluginSupplied", 0),
          report["oracleUnreachable"]),
     ]
     drift = report.get("driftMembers", [])
@@ -1800,6 +1869,11 @@ def _format_runtime_oracle_report(
         lines.append("drift members:")
         lines.extend("  " + _format_runtime_member(entry)
                      for entry in drift)
+    supplied = report.get("pluginSuppliedMembers", [])
+    if supplied:
+        lines.append("plugin-supplied members (declared optional, unset):")
+        lines.extend("  " + _format_runtime_member(entry)
+                     for entry in supplied)
     lines.append("oracle-unreachable members:")
     unreachable = report.get("unreachableMembers", [])
     if unreachable:
@@ -2124,21 +2198,28 @@ def _check_runtime_oracle(
             add_tier3_result(key, value)
 
     static_kind_cache: dict[tuple[str, str], str] = {}
-    expected: list[tuple[str, str, str, str, str]] = []
+    # The trailing flag marks a member the module only guards with
+    # `typeof this.X === 'function'` -- a slot a PLUGIN fills. Absent from
+    # a capture where no plugin filled it, which is the expected state, not
+    # drift. Kept as its own bucket rather than folded into `match`, so the
+    # set stays visible and cannot quietly absorb a real disagreement.
+    expected: list[tuple[str, str, str, str, str, bool]] = []
     for module_name, module in modules.items():
         for function in module.get("functions", []):
             expected.append(
-                (module_name, "module", function["name"], "function", "own"))
+                (module_name, "module", function["name"], "function",
+                 "own", False))
         for export in module.get("exports", []):
             kind = _static_export_kind(
                 module_name, export["name"], modules,
                 static_kind_cache, set())
             expected.append(
-                (module_name, "module", export["name"], kind, "own"))
+                (module_name, "module", export["name"], kind, "own",
+                 False))
         for member in module.get("receiverMembers", []):
             expected.append(
                 (module_name, "module", member["name"],
-                 member["kind"], "own"))
+                 member["kind"], "own", False))
         for shape in module.get("shapes", []):
             shape_name = shape["name"]
             receiver = str(shape.get("receiver", ""))
@@ -2148,7 +2229,7 @@ def _check_runtime_oracle(
             for method in shape.get("methods", []):
                 expected.append(
                     (module_name, shape_name, method["name"],
-                     "function", method_scope))
+                     "function", method_scope, False))
             for prop in shape.get("properties", []):
                 candidates = [
                     scope_name for scope_name in
@@ -2165,14 +2246,18 @@ def _check_runtime_oracle(
                         else "own")
                 expected.append(
                     (module_name, shape_name, prop["name"],
-                     prop.get("kind", "value"), prop_scope))
+                     prop.get("kind", "value"), prop_scope,
+                     bool(prop.get("optional"))))
 
     matches = 0
     drift: list[dict[str, Any]] = []
     unreachable: list[dict[str, Any]] = []
+    plugin_supplied: list[dict[str, Any]] = []
     expected_keys = {(module, shape, name)
-                     for module, shape, name, _kind, _scope in expected}
-    for module_name, shape_name, name, kind, scope_name in expected:
+                     for module, shape, name, _kind, _scope, _opt
+                     in expected}
+    for module_name, shape_name, name, kind, scope_name, optional \
+            in expected:
         scope_key = (module_name, shape_name, scope_name)
         scope = scopes.get(scope_key)
         if scope is None:
@@ -2200,6 +2285,17 @@ def _check_runtime_oracle(
                     "kind": kind,
                     "reason": scope[2] or
                     "runtime oracle did not complete this scope",
+                })
+            elif optional:
+                # The scope was constructed and the member is genuinely not
+                # there -- which is what an unfilled plugin hook looks like.
+                plugin_supplied.append({
+                    "module": module_name,
+                    "shape": shape_name,
+                    "member": name,
+                    "kind": kind,
+                    "reason": "declared by a typeof-guard; no plugin"
+                              " assigned it in this capture",
                 })
             else:
                 drift.append({
@@ -2247,6 +2343,10 @@ def _check_runtime_oracle(
         "status": "ok" if not drift else "drift",
         "match": matches,
         "drift": len(drift),
+        "pluginSupplied": len(plugin_supplied),
+        "pluginSuppliedMembers": sorted(
+            plugin_supplied,
+            key=lambda e: (e["module"], e["shape"], e["member"])),
         "oracleUnreachable": len(unreachable),
         "driftMembers": drift,
         "unreachableMembers": unreachable,
@@ -2395,9 +2495,19 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 callback_shape = export.get("callbackShape")
                 if callback_shape and shape_names and \
                         callback_shape in shape_names:
+                    # The shape does not necessarily arrive first. `movian/
+                    # http` calls `callback(null, new HttpResponse(res))`, so
+                    # typing argument 0 as the response made an error-first
+                    # callback look like a response-first one. The positions
+                    # ahead of it are named `argN` rather than `err`: their
+                    # position is measured from the call site, their meaning
+                    # is not, and TypeScript requires some name.
+                    index = export.get("callbackShapeIndex", 0)
+                    callback_params = [
+                        "arg%d: any" % position for position in range(index)
+                    ] + ["value: %s" % callback_shape, "...args: any[]"]
                     annotation = (
-                        "(value: %s, ...args: any[]) => any" %
-                        callback_shape)
+                        "(%s) => any" % ", ".join(callback_params))
             parts.append("%s?: %s" % (name, annotation))
         return ", ".join(parts)
 
@@ -2518,7 +2628,13 @@ def render_dts(artifact: dict[str, Any]) -> str:
                             "    %s(%s): any;" %
                             (method["name"], signature))
                     for prop in shape.get("properties", []):
-                        lines.append("    %s: any;" % prop["name"])
+                        # A plugin-supplied hook the module only guards is
+                        # optional: requiring it would produce errors the
+                        # runtime does not have, since nothing forces a plugin
+                        # to set it.
+                        lines.append("    %s%s: any;" % (
+                            prop["name"],
+                            "?" if prop.get("optional") else ""))
                     lines.append("  }")
                 lines.append("")
 
@@ -2554,7 +2670,13 @@ def render_dts(artifact: dict[str, Any]) -> str:
                             "    %s(%s): any;" %
                             (method["name"], signature))
                     for prop in shape.get("properties", []):
-                        lines.append("    %s: any;" % prop["name"])
+                        # A plugin-supplied hook the module only guards is
+                        # optional: requiring it would produce errors the
+                        # runtime does not have, since nothing forces a plugin
+                        # to set it.
+                        lines.append("    %s%s: any;" % (
+                            prop["name"],
+                            "?" if prop.get("optional") else ""))
                     # The initializer assigns these onto the receiver, so a
                     # constructed instance carries them too.
                     for member in receiver_members:
