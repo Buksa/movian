@@ -435,6 +435,16 @@ MODULES = (
 
 POSITIVE_FIXTURE = FIXTURE_DIR / "reference-positive.ts"
 NEGATIVE_FIXTURE = FIXTURE_DIR / "reference-negative.ts"
+# The fixtures above type-check REFERENCE_DIR -- the hand-written canon. The
+# artifact plugins actually consume is generated/movian-api.d.ts, and until
+# these three names existed nothing passed it to tsc at all: `gen.py --check`
+# only proved it was byte-identical to what the generator emits, which is true
+# of a wrong emission too. Two real defects shipped through that hole -- an
+# `export *` that hid every local member of `movian/prop`, and a zero-formal
+# `xmlrpc.call` that rejected its own call sites.
+GENERATED_DTS = REPO_ROOT / "generated" / "movian-api.d.ts"
+GENERATED_POSITIVE_FIXTURE = FIXTURE_DIR / "generated-positive.ts"
+GENERATED_NEGATIVE_FIXTURE = FIXTURE_DIR / "generated-negative.ts"
 PLUGIN_DECLARATION = REFERENCE_DIR / "movian-plugin.d.ts"
 PLUGIN_SOURCE = ECMASCRIPT_C_DIR / "ecmascript.c"
 
@@ -2319,13 +2329,42 @@ def _run_tsc(tsc: str, fixture: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _expected_diagnostics() -> set[tuple[str, int, int]]:
+def _generated_tsc_command(tsc: str, fixture: Path) -> list[str]:
+    inputs = [GENERATED_DTS, fixture]
+    return [
+        tsc,
+        "--noEmit",
+        "--strict",
+        "--target", "ES2015",
+        "--lib", "ES2015",
+        "--module", "commonjs",
+        "--pretty", "false",
+        "--noErrorTruncation",
+        *[str(path.relative_to(REPO_ROOT)) for path in inputs],
+    ]
+
+
+def _run_generated_tsc(
+        tsc: str, fixture: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        _generated_tsc_command(tsc, fixture),
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+        timeout=SUBPROCESS_TIMEOUT_SECONDS,
+    )
+
+
+def _expected_diagnostics(
+        fixture: Path = NEGATIVE_FIXTURE) -> set[tuple[str, int, int]]:
     expected: set[tuple[str, int, int]] = set()
-    for line_number, line in enumerate(_read(NEGATIVE_FIXTURE).splitlines(), 1):
+    for line_number, line in enumerate(_read(fixture).splitlines(), 1):
         for code in EXPECTED_DIAGNOSTIC_RE.findall(line):
-            expected.add((NEGATIVE_FIXTURE.name, line_number, int(code)))
+            expected.add((fixture.name, line_number, int(code)))
     if not expected:
-        raise ValueError("negative fixture has no EXPECT_TS markers")
+        raise ValueError("%s has no EXPECT_TS markers" % fixture.name)
     return expected
 
 
@@ -2355,6 +2394,55 @@ def check_typescript(tsc: str) -> list[str]:
         if extra:
             errors.append("negative fixture extra diagnostics: %s\n%s" %
                           (extra, negative.stdout.rstrip()))
+    return errors
+
+
+# Minimum call sites the positive fixture must exercise. Without this the gate
+# passes on a fixture that imports nothing -- the failure mode the rest of this
+# checker keeps rediscovering. Named modules, not a count, so deleting the
+# `movian/prop` block cannot be masked by adding lines elsewhere.
+GENERATED_FIXTURE_REQUIRED_MODULES = (
+    "movian/prop",
+    "movian/xmlrpc",
+    "showtime/prop",
+)
+
+
+def check_generated_typescript(tsc: str) -> list[str]:
+    """Type-check `generated/movian-api.d.ts` -- the artifact plugins import.
+
+    `gen.py --check` proves only that the file matches what the generator
+    emits; it cannot tell a correct emission from a wrong one. This does.
+    """
+    errors: list[str] = []
+
+    fixture_text = _read(GENERATED_POSITIVE_FIXTURE)
+    absent = [name for name in GENERATED_FIXTURE_REQUIRED_MODULES
+              if "'%s'" % name not in fixture_text]
+    if absent:
+        errors.append("generated positive fixture no longer imports %s"
+                      % ", ".join(absent))
+
+    positive = _run_generated_tsc(tsc, GENERATED_POSITIVE_FIXTURE)
+    if positive.returncode != 0:
+        errors.append("generated positive fixture failed:\n%s"
+                      % positive.stdout.rstrip())
+
+    negative = _run_generated_tsc(tsc, GENERATED_NEGATIVE_FIXTURE)
+    expected = _expected_diagnostics(GENERATED_NEGATIVE_FIXTURE)
+    actual = _actual_diagnostics(negative.stdout)
+    if negative.returncode == 0:
+        errors.append("generated negative fixture unexpectedly passed")
+    if actual != expected:
+        missing = sorted(expected - actual)
+        extra = sorted(actual - expected)
+        if missing:
+            errors.append(
+                "generated negative fixture missing diagnostics: %s" % missing)
+        if extra:
+            errors.append(
+                "generated negative fixture extra diagnostics: %s\n%s"
+                % (extra, negative.stdout.rstrip()))
     return errors
 
 
@@ -2488,6 +2576,20 @@ def main() -> int:
     print("reference-dts: tsc positive fixture OK")
     print("reference-dts: tsc negative diagnostics OK (%d expected)" %
           len(_expected_diagnostics()))
+
+    try:
+        errors = check_generated_typescript(tsc)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        print("reference-dts: generated-dts check failed to run: %s: %s" %
+              (type(error).__name__, error), file=sys.stderr)
+        return 1
+    if errors:
+        for error in errors:
+            print("reference-dts: %s" % error, file=sys.stderr)
+        return 1
+    print("reference-dts: generated-dts positive fixture OK")
+    print("reference-dts: generated-dts negative diagnostics OK (%d expected)"
+          % len(_expected_diagnostics(GENERATED_NEGATIVE_FIXTURE)))
     return 0
 
 

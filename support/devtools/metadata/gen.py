@@ -673,6 +673,53 @@ def _function_params(region: str) -> list[str] | None:
     return _parse_params(match.group(1))
 
 
+NESTED_FUNCTION_RE = re.compile(r"\bfunction\b")
+ARGUMENTS_RE = re.compile(r"\barguments\b")
+
+
+def _uses_arguments(region: str) -> bool:
+    """Whether the function assigned at the head of `region` reads its own
+    `arguments`.
+
+    Scoped to that function's own body on purpose. An export's region runs to
+    the next `exports.NAME =` assignment, which `exports.DB.prototype.query =`
+    is not -- so `movian/sqlite`'s region for `DB` swallows every prototype
+    method below it, and a plain search over the region reported the
+    constructor as variadic because a *method* reads `arguments`. Comments and
+    string literals are already masked by the caller, so brace counting here
+    is safe.
+    """
+    match = COMMONJS_FUNCTION_RE.search(region)
+    if match is None:
+        return False
+    open_brace = region.find("{", match.end())
+    if open_brace < 0:
+        return False
+    depth = 0
+    # Depth of the innermost enclosing nested function literal, or None while
+    # the scan is in the outer function's own body.
+    nested_at: int | None = None
+    index = open_brace
+    while index < len(region):
+        char = region[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return False
+            if nested_at is not None and depth <= nested_at:
+                nested_at = None
+        elif nested_at is None and NESTED_FUNCTION_RE.match(region, index):
+            # The nested body opens one level down and closes when depth
+            # comes back to here.
+            nested_at = depth
+        elif nested_at is None and ARGUMENTS_RE.match(region, index):
+            return True
+        index += 1
+    return False
+
+
 IDENT_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 
 
@@ -1348,6 +1395,14 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
         if params is not None:
             record["params"] = params
             record["nargs"] = len(params)
+            # A function that reads `arguments` takes more than it declares --
+            # `movian/xmlrpc`'s `call` declares none and uses arguments[0],
+            # arguments[1] and the tail from index 2. Emitting the formal list
+            # as the whole signature made tsc reject every real call site, so
+            # the formal count is not the arity here: keep the names for
+            # signature help and let a rest parameter carry what is unnamed.
+            if _uses_arguments(region):
+                record["variadic"] = True
         if re.search(r"this\.__proto__\s*=", region):
             # These functions mutate the receiver's prototype when called as
             # an exported function; they are not constructors in the public
@@ -2361,6 +2416,14 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 lines.append("  // exports.__proto__ = require('%s') --"
                              " inherits its whole surface" % inherits)
                 lines.append("  export * from '%s';" % inherits)
+            # An ambient module block auto-exports its declarations only while
+            # it carries no explicit export; the `export *` above flips that,
+            # and unmarked locals stop being visible to importers. They also
+            # have to be marked to shadow an inherited name of the same
+            # spelling -- `movian/prop` sets `exports.global` to a proxied
+            # object over `native/prop`'s `global` function, and the own
+            # property is what a plugin gets at runtime.
+            decl = "export " if inherits else ""
 
             prototype_shapes = [
                 shape for shape in shapes
@@ -2426,6 +2489,7 @@ def render_dts(artifact: dict[str, Any]) -> str:
             for exp in exports:
                 ename = exp["name"]
                 params = exp.get("params")
+                variadic = exp.get("variadic", False)
                 # Parameters are emitted OPTIONAL on purpose. The names are
                 # source-derived fact and give editors signature help; the
                 # count is not a contract -- Duktape enforces no arity, and
@@ -2434,22 +2498,32 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 # errors the runtime does not have. The honest count stays in
                 # @arity.
                 sig = params_signature(params, exp, shape_names)
+                # `params_signature(None)` is already `...args: any[]`, and
+                # `variadic` is only set when the formal list parsed, so the
+                # rest parameter is never appended twice.
+                if variadic:
+                    sig = ", ".join([sig, "...args: any[]"]) if sig \
+                        else "...args: any[]"
                 if exp.get("constructor"):
                     if params is not None:
-                        lines.append("  /** @arity %d */" % len(params))
+                        lines.append("  /** @arity %s */"
+                                     % ("%d+" % len(params) if variadic
+                                        else len(params)))
                     result_type = ename if ename in shape_names else "any"
-                    lines.append("  const %s: {" % ename)
+                    lines.append("  %sconst %s: {" % (decl, ename))
                     lines.append("    new (%s): %s;" %
                                  (sig, result_type))
                     lines.append("  };")
                 elif params is not None:
-                    lines.append("  /** @arity %d */" % len(params))
+                    lines.append("  /** @arity %s */"
+                                 % ("%d+" % len(params) if variadic
+                                    else len(params)))
                     return_type = render_return_type(
                         exp.get("returns", "any"), shape_names)
-                    lines.append("  function %s(%s): %s;" %
-                                 (ename, sig, return_type))
+                    lines.append("  %sfunction %s(%s): %s;" %
+                                 (decl, ename, sig, return_type))
                 else:
-                    lines.append("  const %s: any;" % ename)
+                    lines.append("  %sconst %s: any;" % (decl, ename))
 
         lines.append("}")
         lines.append("")
