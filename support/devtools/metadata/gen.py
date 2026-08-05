@@ -1610,6 +1610,183 @@ def _proto_parent(path: Path) -> str | None:
         % re.escape(ident), text)
     return require.group(1) if require is not None else None
 
+# ---------------------------------------------------------------------------
+# js.globals -- the environment es_create_env() builds on the global object
+# ---------------------------------------------------------------------------
+
+# The two C functions that populate the global object. `es_create_env`
+# builds the environment every context gets; `ecmascript_plugin_load` adds
+# `Plugin`, which only a loaded plugin sees. Same shape, so one scan reads
+# both rather than a second special-cased reader.
+ENV_FUNCTION_MARKERS = (
+    "es_create_env(es_context_t *ec",
+    "ecmascript_plugin_load(const char *id",
+)
+# `duk_put_function_list(ctx, -1, es_fnlist_timer)` puts a whole table on
+# whatever is at -1. Inside es_create_env that is either the global object
+# itself or an object just pushed, which the following put_prop_string names.
+PUT_FUNCTION_LIST_RE = re.compile(
+    r"duk_put_function_list\s*\(\s*ctx\s*,\s*(-?\d+|\w*obj_idx)\s*,"
+    r"\s*([A-Za-z_]\w*)\s*\)")
+PUT_PROP_STRING_RE = re.compile(
+    r'duk_put_prop_string\s*\(\s*ctx\s*,\s*(-?\d+|\w*obj_idx)\s*,\s*"([^"]+)"\s*\)')
+PUSH_OBJECT_RE = re.compile(r"duk_push_object\s*\(\s*ctx\s*\)")
+PUSH_VALUE_RE = re.compile(r"duk_push_(int|string|number|boolean)\s*\(")
+# One alternation so the scan sees the calls in source order; a separate
+# finditer per pattern would lose the ordering the C depends on.
+ENV_STATEMENT_RE = re.compile(
+    "|".join("(?:%s)" % pattern.pattern for pattern in (
+        PUSH_OBJECT_RE, PUSH_VALUE_RE,
+        PUT_FUNCTION_LIST_RE, PUT_PROP_STRING_RE)))
+
+
+def _table_functions(table: str) -> list[dict[str, Any]]:
+    """Names and nargs from a `duk_function_list_entry` table, wherever it
+    lives -- the env tables sit in ecmascript.c and es_*.c alike."""
+    for path in sorted(ECMASCRIPT_DIR.glob("*.c")):
+        try:
+            entries = scan_array_block(
+                path, "duk_function_list_entry %s[] = {" % table)
+        except GenError:
+            continue
+        functions = []
+        for entry_text, entry_line in entries:
+            fields = split_fields(entry_text)
+            if not fields or fields[0] == "NULL":
+                continue
+            nargs = (-1 if fields[2] == "DUK_VARARGS" else int(fields[2]))
+            functions.append({
+                "name": unquote(fields[0]),
+                "nargs": nargs,
+                "variadic": nargs == -1,
+                "source": {"file": rel(path), "line": entry_line},
+            })
+        return sorted(functions, key=lambda f: f["name"])
+    raise GenError("global function table not found: %s" % table)
+
+
+def build_globals() -> dict[str, Any]:
+    """The global surface, scanned out of `es_create_env()`.
+
+    Nothing in `generated/movian-api.d.ts` described it, so every plugin using
+    `console.log` or `setTimeout` -- both real globals installed here -- got a
+    false "cannot find name". The table names are read from the C rather than
+    listed here: `es_create_env` is the one function that builds the
+    environment, and it says which table lands where.
+
+    Read as a sequence, because that is what the C is: a `duk_push_object`
+    opens an object, function lists and value properties land on whatever is
+    open, and the `duk_put_prop_string(ctx, -2, "name")` that follows names
+    and closes it. A function list arriving with nothing open goes on the
+    global object itself, which is how the timer family is installed.
+    """
+    path = ECMASCRIPT_DIR / "ecmascript.c"
+    text = path.read_text(encoding="utf-8")
+    functions: list[dict[str, Any]] = []
+    objects: list[dict[str, Any]] = []
+    for marker in ENV_FUNCTION_MARKERS:
+        found, found_objects = _scan_global_env(path, text, marker)
+        functions.extend(found)
+        objects.extend(found_objects)
+    return {
+        "functions": sorted(functions, key=lambda f: f["name"]),
+        "objects": sorted(objects, key=lambda entry: entry["name"]),
+    }
+
+
+def _scan_global_env(
+        path: Path, text: str, marker: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    start = text.find(marker)
+    if start < 0:
+        raise GenError("%s not found in %s" % (marker, rel(path)))
+    open_brace = text.find("{", start)
+    end = _balanced_end(text, open_brace)
+    if end is None:
+        raise GenError("%s body not terminated in %s" % (marker, rel(path)))
+    # Everything before `duk_push_global_object` belongs to the global STASH,
+    # which is runtime bookkeeping and not plugin surface -- scanning from the
+    # top of the function picked up its `roots` object as a global.
+    global_object = text.find("duk_push_global_object", open_brace)
+    if global_object < 0 or global_object > end:
+        raise GenError(
+            "%s does not push the global object in %s" % (marker, rel(path)))
+    body = text[global_object:end]
+    base_line = text[:global_object].count("\n") + 1
+
+    def line_of(offset: int) -> int:
+        return base_line + body[:offset].count("\n")
+
+    functions: list[dict[str, Any]] = []
+    objects: list[dict[str, Any]] = []
+    # The object currently open, plus the pending value property whose
+    # duk_push_* has been seen but whose duk_put_prop_string has not.
+    open_object: dict[str, Any] | None = None
+    pending_value: tuple[str, bool] | None = None
+
+    for match in ENV_STATEMENT_RE.finditer(body):
+        text_at = match.group(0)
+        if PUSH_OBJECT_RE.match(text_at):
+            # `duk_get_prop_string(ctx, -1, "Duktape")` also opens a scope,
+            # but it reopens an EXISTING object rather than creating one, so
+            # it is deliberately not matched here -- modSearch is Duktape
+            # internals, not plugin surface.
+            open_object = {
+                "name": None,
+                "functions": [],
+                "properties": [],
+                "source": {"file": rel(path), "line": line_of(match.start())},
+            }
+            continue
+        push_value = PUSH_VALUE_RE.match(text_at)
+        if push_value is not None:
+            # `if(loaddir != NULL) {` guards two of Core's properties, so
+            # they are not always present. Same optional rule the plugin hooks
+            # get, for the same reason: requiring them would invent errors.
+            guarded = body[:match.start()].rstrip().endswith("{")
+            pending_value = (
+                {"int": "number", "number": "number",
+                 "string": "string", "boolean": "boolean"}[push_value.group(1)],
+                guarded)
+            continue
+        function_list = PUT_FUNCTION_LIST_RE.match(text_at)
+        if function_list is not None:
+            entries = _table_functions(function_list.group(2))
+            if open_object is not None:
+                open_object["functions"].extend(entries)
+            else:
+                functions.extend(entries)
+            continue
+        prop = PUT_PROP_STRING_RE.match(text_at)
+        if prop is None:
+            continue
+        name = prop.group(2)
+        if pending_value is not None and open_object is not None:
+            kind, guarded = pending_value
+            open_object["properties"].append({
+                "name": name,
+                "kind": kind,
+                "optional": guarded,
+                "source": {"file": rel(path), "line": line_of(match.start())},
+            })
+            pending_value = None
+            continue
+        pending_value = None
+        if open_object is not None:
+            open_object["name"] = name
+            open_object["functions"].sort(key=lambda f: f["name"])
+            open_object["properties"].sort(key=lambda entry: entry["name"])
+            objects.append(open_object)
+            open_object = None
+
+    if open_object is not None:
+        raise GenError(
+            "%s leaves an object unnamed at %s:%d"
+            % (marker, rel(path), open_object["source"]["line"]))
+
+    return functions, objects
+
+
 def build_commonjs_modules() -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -2556,6 +2733,7 @@ def build_artifact() -> dict[str, Any]:
             "scopes": build_scopes(),
         },
         "js": {
+            "globals": build_globals(),
             "modules": build_modules(),
             "pluginManifest": build_plugin_manifest(),
         },
@@ -2574,12 +2752,43 @@ def dumps(artifact: dict[str, Any]) -> str:
 def render_dts(artifact: dict[str, Any]) -> str:
     """Render a .d.ts file from js.modules data."""
     modules = artifact.get("js", {}).get("modules", [])
+    globals_record = artifact.get("js", {}).get("globals", {})
     rev = artifact.get("movianRevision", "unknown")
     lines: list[str] = []
     lines.append("// Generated by %s -- do not edit." % GENERATED_BY)
     lines.append("// movianRevision: %s" % rev)
     lines.append("// Duktape ES5.1 -- no ES6+ in plugin code.")
     lines.append("")
+
+    def global_signature(function: dict[str, Any]) -> str:
+        return "...args: any[]"
+
+    global_functions = globals_record.get("functions", [])
+    global_objects = globals_record.get("objects", [])
+    if global_functions or global_objects:
+        lines.append("// Globals installed on the global object by")
+        lines.append("// src/ecmascript/ecmascript.c. Not modules: they are")
+        lines.append("// reachable without require().")
+        lines.append("")
+        for function in global_functions:
+            lines.append("/** @arity %s */" % function["nargs"])
+            lines.append("declare function %s(%s): any;"
+                         % (function["name"], global_signature(function)))
+        if global_functions:
+            lines.append("")
+        for record in global_objects:
+            lines.append("declare const %s: {" % record["name"])
+            for function in record["functions"]:
+                lines.append("  /** @arity %s */" % function["nargs"])
+                lines.append("  %s(%s): any;"
+                             % (function["name"], global_signature(function)))
+            for prop in record["properties"]:
+                lines.append("  %s%s: %s;" % (
+                    prop["name"],
+                    "?" if prop.get("optional") else "",
+                    prop["kind"]))
+            lines.append("};")
+            lines.append("")
 
     def params_signature(
             params: list[str] | None, export: dict[str, Any] | None = None,

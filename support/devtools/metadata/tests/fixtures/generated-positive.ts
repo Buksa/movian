@@ -139,5 +139,21 @@ const legacyRoute = new legacyPage.Route('legacy:(.*)', () => { });
 void anonymousRoot; void navigators; void popups; void language;
 void proxied; void rpc; void response; void searcher; void route;
 void globals; void db; void legacyRoot; void legacyRoute;
+// Globals. `console` and the timer family are installed on the global object
+// by es_create_env (src/ecmascript/ecmascript.c), and `Plugin` by
+// ecmascript_plugin_load -- none of them were declared, so 24 uses across the
+// example corpus reported a false "cannot find name". See #169.
+console.log('example', 1);
+console.error('example');
+console.warn('example');
+const timer = setTimeout(() => { }, 1000);
+clearTimeout(timer);
+clearInterval(setInterval(() => { }, 1000));
+const pluginId: string = Plugin.id;
+const apiVersion: number = Plugin.apiversion;
+const versionInt: number = Core.currentVersionInt;
+const deviceId: string = Core.deviceId;
+void pluginId; void apiVersion; void versionInt; void deviceId;
+
 void kvstore; void settingsId; void settingsNodes; void rows; void syncBody;
 void scrobbler;

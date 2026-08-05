@@ -2,6 +2,54 @@
 // movianRevision: c8e96be29f87a6e8969224a25b7a90195100c209
 // Duktape ES5.1 -- no ES6+ in plugin code.
 
+// Globals installed on the global object by
+// src/ecmascript/ecmascript.c. Not modules: they are
+// reachable without require().
+
+/** @arity 1 */
+declare function clearInterval(...args: any[]): any;
+/** @arity 1 */
+declare function clearTimeout(...args: any[]): any;
+/** @arity 2 */
+declare function setInterval(...args: any[]): any;
+/** @arity 2 */
+declare function setTimeout(...args: any[]): any;
+
+declare const Core: {
+  /** @arity 1 */
+  compile(...args: any[]): any;
+  /** @arity 1 */
+  randomBytes(...args: any[]): any;
+  /** @arity 1 */
+  resourceDestroy(...args: any[]): any;
+  /** @arity 1 */
+  sleep(...args: any[]): any;
+  /** @arity 0 */
+  timestamp(...args: any[]): any;
+  currentVersionInt: number;
+  currentVersionString: string;
+  deviceId: string;
+  loadPath?: string;
+  storagePath?: string;
+};
+
+declare const Plugin: {
+  apiversion: number;
+  id: string;
+  manifest: string;
+  path?: string;
+  url: string;
+};
+
+declare const console: {
+  /** @arity -1 */
+  error(...args: any[]): any;
+  /** @arity -1 */
+  log(...args: any[]): any;
+  /** @arity -1 */
+  warn(...args: any[]): any;
+};
+
 declare module 'fs' {
   // CommonJS exports
   /** @arity 1 */
