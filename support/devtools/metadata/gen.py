@@ -637,6 +637,85 @@ def _mask_js_strings(line: str) -> str:
     return "".join(chars)
 
 
+# `exports.request = function(url, ctrl, callback)` -- the parameter names are
+# in the source, so v1's bare `const request: any` threw away information the
+# generator already had in hand. Anchored at the assignment so a nested
+# function literal further down the export's region cannot be mistaken for it.
+COMMONJS_FUNCTION_RE = re.compile(
+    r"=\s*function\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\(([^)]*)\)", re.S)
+
+
+def _function_params(region: str) -> list[str] | None:
+    """Parameter names of the function assigned at the head of `region`,
+    or None when the export is not assigned a function literal."""
+    match = COMMONJS_FUNCTION_RE.search(region)
+    if match is None:
+        return None
+    raw = match.group(1).strip()
+    if not raw:
+        return []
+    params = []
+    for part in raw.split(","):
+        name = part.strip()
+        if not IDENT_RE.fullmatch(name):
+            # Destructuring or a default value: ES5.1 has neither, so this is
+            # a source we do not understand -- report nothing rather than a
+            # guess.
+            return None
+        params.append(name)
+    return params
+
+
+NESTED_FUNCTION_RE = re.compile(r"\bfunction\b")
+ARGUMENTS_RE = re.compile(r"\barguments\b")
+
+
+def _uses_arguments(region: str) -> bool:
+    """Whether the function assigned at the head of `region` reads its own
+    `arguments`.
+
+    Scoped to that function's own body on purpose. An export's region runs to
+    the next `exports.NAME =` assignment, which `exports.DB.prototype.query =`
+    is not -- so `movian/sqlite`'s region for `DB` swallows every prototype
+    method below it, and a plain search over the region reported the
+    constructor as variadic because a *method* reads `arguments`. Comments and
+    string literals are already masked by the caller, so brace counting here
+    is safe.
+    """
+    match = COMMONJS_FUNCTION_RE.search(region)
+    if match is None:
+        return False
+    open_brace = region.find("{", match.end())
+    if open_brace < 0:
+        return False
+    depth = 0
+    # Depth of the innermost enclosing nested function literal, or None while
+    # the scan is in the outer function's own body.
+    nested_at: int | None = None
+    index = open_brace
+    while index < len(region):
+        char = region[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return False
+            if nested_at is not None and depth <= nested_at:
+                nested_at = None
+        elif nested_at is None and NESTED_FUNCTION_RE.match(region, index):
+            # The nested body opens one level down and closes when depth
+            # comes back to here.
+            nested_at = depth
+        elif nested_at is None and ARGUMENTS_RE.match(region, index):
+            return True
+        index += 1
+    return False
+
+
+IDENT_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
+
+
 def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
     raw_lines = path.read_text(encoding="utf-8").splitlines()
     masked_lines: list[str] = []
@@ -668,11 +747,44 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
             "name": export_name,
             "source": {"file": rel(path), "line": line_index + 1},
         }
+        params = _function_params(region)
+        if params is not None:
+            record["params"] = params
+            record["nargs"] = len(params)
+            # A function that reads `arguments` takes more than it declares --
+            # `movian/xmlrpc`'s `call` declares none and uses arguments[0],
+            # arguments[1] and the tail from index 2. Emitting the formal list
+            # as the whole signature made tsc reject every real call site, so
+            # the formal count is not the arity here: keep the names for
+            # signature help and let a rest parameter carry what is unnamed.
+            if _uses_arguments(region):
+                record["variadic"] = True
         if re.search(r"\bthis\b", region):
             record["constructor"] = True
         exports.append(record)
     exports.sort(key=lambda r: r["name"])
     return exports
+
+
+PROTO_EXPORT_RE = re.compile(
+    r"^\s*(?:module\.)?exports\.__proto__\s*=\s*"
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*;", re.M)
+
+
+def _proto_parent(path: Path) -> str | None:
+    """`exports.__proto__ = np;` where `np = require('native/prop')` makes the
+    module inherit that module's whole surface at load time. Static and
+    resolvable, unlike the per-instance `this.__proto__ = sp` idiom inside
+    constructors, which only a runtime probe can see."""
+    text = path.read_text(encoding="utf-8")
+    match = PROTO_EXPORT_RE.search(text)
+    if match is None:
+        return None
+    ident = match.group(1)
+    require = re.search(
+        r"\b(?:var|let|const)\s+%s\s*=\s*require\(\s*['\"]([^'\"]+)['\"]"
+        % re.escape(ident), text)
+    return require.group(1) if require is not None else None
 
 
 def build_commonjs_modules() -> list[dict[str, Any]]:
@@ -683,12 +795,18 @@ def build_commonjs_modules() -> list[dict[str, Any]]:
         if module_name in seen:
             raise GenError("duplicate CommonJS module name: %s" % module_name)
         seen.add(module_name)
-        records.append({
+        exports = [e for e in scan_commonjs_exports(path)
+                   if e["name"] != "__proto__"]
+        record = {
             "name": module_name,
             "kind": "commonjs",
-            "exports": scan_commonjs_exports(path),
+            "exports": exports,
             "source": {"file": rel(path), "line": 1},
-        })
+        }
+        parent = _proto_parent(path)
+        if parent is not None:
+            record["inherits"] = parent
+        records.append(record)
     records.sort(key=lambda r: r["name"])
     return records
 
@@ -847,22 +965,74 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     "  function %s(...args: any[]): any;" % fname)
         elif kind == "commonjs":
             exports = mod.get("exports", [])
-            if not exports:
+            if not exports and not mod.get("inherits"):
                 lines.append("}")
                 lines.append("")
                 continue
+            inherits = mod.get("inherits")
+            if inherits:
+                lines.append("  // exports.__proto__ = require('%s') --"
+                             " inherits its whole surface" % inherits)
+                lines.append("  export * from '%s';" % inherits)
+            # An ambient module block auto-exports its declarations only while
+            # it carries no explicit export; the `export *` above flips that,
+            # and unmarked locals stop being visible to importers. They also
+            # have to be marked to shadow an inherited name of the same
+            # spelling -- `movian/prop` sets `exports.global` to a proxied
+            # object over `native/prop`'s `global` function, and the own
+            # property is what a plugin gets at runtime.
+            decl = "export " if inherits else ""
             lines.append("  // CommonJS exports")
             for exp in exports:
                 ename = exp["name"]
+                params = exp.get("params")
+                variadic = exp.get("variadic", False)
+                # Parameters are emitted OPTIONAL on purpose. The names are
+                # source-derived fact and give editors signature help; the
+                # count is not a contract -- Duktape enforces no arity, and
+                # Movian's own modules are routinely called with fewer
+                # arguments than they declare. Requiring them would generate
+                # errors the runtime does not have. The honest count stays in
+                # @arity.
+                sig = ", ".join(
+                    ["%s?: any" % name for name in (params or [])]
+                    + (["...args: any[]"] if variadic else []))
                 if exp.get("constructor"):
-                    lines.append("  const %s: {" % ename)
-                    lines.append("    new (...args: any[]): any;")
+                    if params is not None:
+                        lines.append("  /** @arity %d */" % len(params))
+                    lines.append("  %sconst %s: {" % (decl, ename))
+                    lines.append("    new (%s): any;"
+                                 % (sig if params is not None
+                                    else "...args: any[]"))
                     lines.append("  };")
+                elif params is not None:
+                    lines.append("  /** @arity %s */"
+                                 % ("%d+" % len(params) if variadic
+                                    else len(params)))
+                    lines.append("  %sfunction %s(%s): any;"
+                                 % (decl, ename, sig))
                 else:
-                    lines.append("  const %s: any;" % ename)
+                    lines.append("  %sconst %s: any;" % (decl, ename))
 
         lines.append("}")
         lines.append("")
+
+    # `require('showtime/x')` is rewritten to `movian/x` by the loader
+    # (src/ecmascript/ecmascript.c, mystrbegins(id, "showtime/")), so the
+    # legacy names resolve at runtime. Without them here every legacy-style
+    # plugin gets a false "Cannot find module" from tsc.
+    aliases = sorted(mod["name"] for mod in modules
+                     if mod["name"].startswith("movian/"))
+    if aliases:
+        lines.append("// Legacy aliases: the loader rewrites showtime/* to"
+                     " movian/* at require time.")
+        lines.append("")
+        for name in aliases:
+            legacy = "showtime/" + name.split("/", 1)[1]
+            lines.append("declare module '%s' {" % legacy)
+            lines.append("  export * from '%s';" % name)
+            lines.append("}")
+            lines.append("")
 
     return "\n".join(lines)
 
