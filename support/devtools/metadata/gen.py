@@ -2,8 +2,9 @@
 """movian-metadata generator (issue #98).
 
 Generates `generated/movian-metadata.json` (schema v1): the single
-committed metadata artifact for the GLW view language, grown from
-`support/devtools/mdevlib/viewdoc.py` (issue #88). Sections:
+committed metadata artifact for the GLW view language, grown from the
+`viewdoc` drift detector (issue #88, since moved to movian-plugin-sdk
+along with the reference docs it validates). Sections:
 
 - glw.functions   -- `token_func_t funcvec[]`, src/ui/glw/glw_view_eval.c
                       (name, nargs/variadic, ctor/dtor/preproc presence).
