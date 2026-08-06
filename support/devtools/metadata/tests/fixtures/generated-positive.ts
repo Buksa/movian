@@ -153,7 +153,35 @@ const pluginId: string = Plugin.id;
 const apiVersion: number = Plugin.apiversion;
 const versionInt: number = Core.currentVersionInt;
 const deviceId: string = Core.deviceId;
+// The remaining members of the two global objects. Declaring a global and
+// never touching it leaves it deletable with every gate green -- measured:
+// removing Core.sleep, Core.currentVersionString, Core.loadPath or
+// Core.storagePath from the artifact left the whole checker at exit 0, while
+// removing console.log failed it. Half the surface this commit added was
+// ungated until these lines existed.
+Core.compile('1 + 1');
+Core.sleep(1);
+Core.randomBytes(16);
+Core.resourceDestroy(null);
+const timestamp: number = Core.timestamp();
+const versionString: string = Core.currentVersionString;
+const pluginUrl: string = Plugin.url;
+const pluginManifest: string = Plugin.manifest;
+// `loadPath` and `storagePath` are assigned under `if(loaddir != NULL)` and
+// `if(storage != NULL)` (ecmascript.c), so they are emitted optional. The
+// annotation is what pins that: under a required emission `string | undefined`
+// is still assignable, but the negative fixture's mirror line stops erroring.
+// Read together they pin the optionality in both directions, the way
+// Plugin.path already was.
+const loadPath: string | undefined = Core.loadPath;
+const storagePath: string | undefined = Core.storagePath;
+// Same shape for Plugin.path (`if(ec->ec_path)`). Its optionality was already
+// pinned by the negative fixture, but nothing here referenced it, so the
+// member could be deleted outright and only the negative side would notice.
+const pluginPath: string | undefined = Plugin.path;
 void pluginId; void apiVersion; void versionInt; void deviceId;
+void timestamp; void versionString; void pluginUrl; void pluginManifest;
+void loadPath; void storagePath; void pluginPath;
 
 void kvstore; void settingsId; void settingsNodes; void rows; void syncBody;
 void scrobbler;
