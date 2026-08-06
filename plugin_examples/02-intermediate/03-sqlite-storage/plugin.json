@@ -1,0 +1,9 @@
+{
+  "type": "ecmascript",
+  "id": "examples.sqlite-storage",
+  "file": "main.js",
+  "title": "SQLite & Storage Demo",
+  "version": "1.0.0",
+  "apiversion": 2,
+  "category": "other"
+}

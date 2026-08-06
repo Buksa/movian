@@ -1,0 +1,9 @@
+{
+  "type": "ecmascript",
+  "id": "examples.all-settings",
+  "file": "main.js",
+  "title": "Settings Types Demo",
+  "version": "1.0.0",
+  "apiversion": 2,
+  "category": "other"
+}

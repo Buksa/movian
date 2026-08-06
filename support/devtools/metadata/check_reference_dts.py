@@ -2755,7 +2755,32 @@ GENERATED_V1_DTS = REPO_ROOT / "generated" / "movian-api-v1.d.ts"
 # The audit that opened #169 found half this corpus not compiling against the
 # API it demonstrates. Measuring it once buys one clean snapshot; the corpus
 # only stays honest if a gate re-measures it, which is what this is.
-MINIMUM_EXAMPLE_PLUGINS = 8
+MINIMUM_EXAMPLE_PLUGINS = 20
+
+
+def _example_name(entry: Path) -> str:
+    """Path relative to plugin_examples, so a tier prefix stays visible."""
+    return entry.relative_to(EXAMPLES_DIR).as_posix()
+
+
+def _example_plugin_dirs() -> list[Path]:
+    """Every plugin directory under `plugin_examples`, at any depth.
+
+    A plugin is a directory holding JavaScript **or** a `plugin.json`, not one
+    holding either alone: `videoscrobbling/` ships no manifest (so it loads as
+    apiversion 1 by default), while a directory with a manifest and no sources
+    is the regression the empty check exists to catch. Defining a plugin by
+    the manifest alone would have dropped the first from the gate -- the same
+    vanishing act by a different route.
+
+    The tier directories (`01-basic/` and friends) hold neither and are
+    containers, not plugins.
+    """
+    return sorted(
+        (entry for entry in EXAMPLES_DIR.rglob("*")
+         if entry.is_dir()
+         and (any(entry.glob("*.js")) or (entry / "plugin.json").is_file())),
+        key=lambda entry: entry.as_posix())
 
 
 def _example_apiversion(entry: Path) -> int:
@@ -2820,12 +2845,12 @@ def _strtoll_base0(text: str) -> int:
 def check_plugin_examples(tsc: str) -> list[str]:
     """Type-check `plugin_examples/` against the declarations it would get."""
     errors: list[str] = []
-    plugins = sorted(
-        entry for entry in EXAMPLES_DIR.iterdir() if entry.is_dir())
+    plugins = _example_plugin_dirs()
     # A plugin directory with no JavaScript was silently skipped, so deleting
     # a corpus member's sources removed it from the gate instead of failing
     # it -- and the floor below counted the survivors.
-    empty = [entry.name for entry in plugins if not any(entry.glob("*.js"))]
+    empty = [_example_name(entry) for entry in plugins
+             if not any(entry.glob("*.js"))]
     if empty:
         errors.append(
             "plugin_examples/%s has no .js to check"
@@ -2871,7 +2896,7 @@ def _check_one_example(tsc: str, entry: Path) -> str | None:
     if own:
         return ("plugin_examples/%s does not compile against the "
                 "API it demonstrates:\n%s"
-                % (entry.name, "\n".join(own)))
+                % (_example_name(entry), "\n".join(own)))
     return None
 
 
