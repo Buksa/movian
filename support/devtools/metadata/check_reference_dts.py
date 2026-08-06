@@ -2704,10 +2704,14 @@ MINIMUM_EXAMPLE_PLUGINS = 8
 def _example_apiversion(entry: Path) -> int:
     """A plugin's apiversion, defaulting the way the loader does.
 
-    `src/plugins.c:688` reads `htsmsg_get_u32_or_default(ctrl, "apiversion",
+    `src/plugins.c:712` reads `htsmsg_get_u32_or_default(ctrl, "apiversion",
     1)`, so a manifest that omits the key is a version 1 plugin and gets
     api-v1.js -- and with it the `showtime` global. Defaulting to 2 here would
     report its every use as an error the runtime does not have.
+
+    The identical read at :688 is the *bitcode* branch, inside
+    `#if ENABLE_VMIR` and routed to `np_plugin_load`; it is not compiled at
+    all in a build without VMIR and never governs a JavaScript plugin.
     """
     manifest = entry / "plugin.json"
     if not manifest.is_file():
