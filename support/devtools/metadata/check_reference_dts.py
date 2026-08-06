@@ -2346,8 +2346,9 @@ def _tsc_input_argument(path: Path) -> str:
 
 
 def _generated_tsc_command(
-        tsc: str, fixture: Path, dts: Path = GENERATED_DTS) -> list[str]:
-    inputs = [dts, fixture]
+        tsc: str, fixture: Path, dts: Path = GENERATED_DTS,
+        extra: tuple[Path, ...] = ()) -> list[str]:
+    inputs = [dts, *extra, fixture]
     return [
         tsc,
         "--noEmit",
@@ -2362,10 +2363,10 @@ def _generated_tsc_command(
 
 
 def _run_generated_tsc(
-        tsc: str, fixture: Path,
-        dts: Path = GENERATED_DTS) -> subprocess.CompletedProcess[str]:
+        tsc: str, fixture: Path, dts: Path = GENERATED_DTS,
+        extra: tuple[Path, ...] = ()) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        _generated_tsc_command(tsc, fixture, dts),
+        _generated_tsc_command(tsc, fixture, dts, extra),
         cwd=REPO_ROOT,
         text=True,
         stdout=subprocess.PIPE,
@@ -2435,6 +2436,16 @@ GENERATED_FIXTURE_REQUIRED_MODULES = (
 # `declare module` rather than inside one.
 GLOBALS_SCOPE = "<globals>"
 
+# Stands where a module name goes for a member of generated/movian-api-v1.d.ts,
+# the apiversion-1 surface. Measured before this existed: 22 of that file's 26
+# members could be deleted with every gate green. `gen.py --check` compares the
+# file byte-wise against a fresh render, which catches a hand-edit and nothing
+# else -- if the SCANNER is wrong, generator and artifact agree on the same
+# false thing. The only real check on its contents is a fixture that uses them.
+V1_SCOPE = "<v1-showtime>"
+GENERATED_V1_DTS = REPO_ROOT / "generated" / "movian-api-v1.d.ts"
+GENERATED_V1_FIXTURE = FIXTURE_DIR / "generated-v1-positive.ts"
+
 # The import floor above proves the fixture NAMES a module. It cannot prove a
 # single member of it is still exercised: a fixture emptied down to its import
 # lines satisfies it, and members can then vanish from the artifact unnoticed.
@@ -2492,6 +2503,36 @@ GENERATED_COVERAGE_FLOOR = (
     (GLOBALS_SCOPE, "Plugin", "manifest"),
     (GLOBALS_SCOPE, "Plugin", "apiversion"),
     (GLOBALS_SCOPE, "Plugin", "path"),
+    # generated/movian-api-v1.d.ts. Every member, because the whole
+    # file is one scanned object literal: a scanner that drops a key
+    # or promotes a nested one produces an artifact the byte-wise
+    # --check agrees with.
+    (V1_SCOPE, "showtime", "JSONDecode"),
+    (V1_SCOPE, "showtime", "JSONEncode"),
+    (V1_SCOPE, "showtime", "RichText"),
+    (V1_SCOPE, "showtime", "basename"),
+    (V1_SCOPE, "showtime", "currentVersionInt"),
+    (V1_SCOPE, "showtime", "currentVersionString"),
+    (V1_SCOPE, "showtime", "deviceId"),
+    (V1_SCOPE, "showtime", "durationToString"),
+    (V1_SCOPE, "showtime", "entityDecode"),
+    (V1_SCOPE, "showtime", "getSubtitleLanguages"),
+    (V1_SCOPE, "showtime", "httpGet"),
+    (V1_SCOPE, "showtime", "httpReq"),
+    (V1_SCOPE, "showtime", "md5digest"),
+    (V1_SCOPE, "showtime", "message"),
+    (V1_SCOPE, "showtime", "notify"),
+    (V1_SCOPE, "showtime", "paramEscape"),
+    (V1_SCOPE, "showtime", "pathEscape"),
+    (V1_SCOPE, "showtime", "print"),
+    (V1_SCOPE, "showtime", "probe"),
+    (V1_SCOPE, "showtime", "queryStringSplit"),
+    (V1_SCOPE, "showtime", "sha1digest"),
+    (V1_SCOPE, "showtime", "sleep"),
+    (V1_SCOPE, "showtime", "systemIpAddress"),
+    (V1_SCOPE, "showtime", "textDialog"),
+    (V1_SCOPE, "showtime", "trace"),
+    (V1_SCOPE, "showtime", "xmlrpc"),
 )
 
 # A declaration line inside a `declare module`, an `interface`, or the globals
@@ -2571,7 +2612,11 @@ def _rename_declaration(text: str, module: str, interface: str | None,
     compile that follows fails on the missing member alone and not on a
     syntax error that would "prove" coverage for free.
     """
-    if module == GLOBALS_SCOPE:
+    if module == V1_SCOPE:
+        # The whole file is the region; its one declaration is the showtime
+        # object, and `interface` selects it the way it selects Core/Plugin.
+        start, end = 0, len(text)
+    elif module == GLOBALS_SCOPE:
         # Everything before the first module block. Bounded rather than
         # whole-file so a same-named member inside a module cannot be renamed
         # in its place and report coverage the globals do not have.
@@ -2605,16 +2650,26 @@ def _rename_declaration(text: str, module: str, interface: str | None,
 
 
 def _coverage_probe(tsc: str, entry: tuple[str, str | None, str],
-                    scratch: Path, artifact: str) -> str | None:
+                    scratch: Path, artifacts: dict[str, str]) -> str | None:
     module, interface, member = entry
     label = "%s%s.%s" % (module, "." + interface if interface else "", member)
+    # Which artifact holds the declaration, and what has to be compiled to
+    # exercise it. The v1 surface lives in its own file and its fixture needs
+    # the main bundle too -- a v1 plugin gets both.
+    if module == V1_SCOPE:
+        source, fixture = GENERATED_V1_DTS, GENERATED_V1_FIXTURE
+        companions: tuple[Path, ...] = (GENERATED_DTS,)
+    else:
+        source, fixture = GENERATED_DTS, GENERATED_POSITIVE_FIXTURE
+        companions = ()
     try:
-        mutated = _rename_declaration(artifact, module, interface, member)
+        mutated = _rename_declaration(
+            artifacts[str(source)], module, interface, member)
     except ValueError as error:
         return "coverage floor: %s: %s" % (label, error)
     dts = scratch / ("%s.d.ts" % abs(hash(label)))
     dts.write_text(mutated, encoding="utf-8")
-    probe = _run_generated_tsc(tsc, GENERATED_POSITIVE_FIXTURE, dts)
+    probe = _run_generated_tsc(tsc, fixture, dts, companions)
     if probe.returncode == 0:
         return ("coverage floor: removing %s from the artifact leaves the "
                 "positive fixture compiling -- the fixture no longer "
@@ -2628,7 +2683,8 @@ def _check_generated_coverage(tsc: str) -> list[str]:
     Without this the fixture proves only that its imports RESOLVE. Reduced to
     its import lines it stayed green while members disappeared underneath it.
     """
-    artifact = _read(GENERATED_DTS)
+    artifacts = {str(GENERATED_DTS): _read(GENERATED_DTS),
+                 str(GENERATED_V1_DTS): _read(GENERATED_V1_DTS)}
     with tempfile.TemporaryDirectory(prefix="movian-coverage-") as directory:
         scratch = Path(directory)
         # Capped rather than one worker per entry: the floor outgrew the
@@ -2637,7 +2693,8 @@ def _check_generated_coverage(tsc: str) -> list[str]:
         with concurrent.futures.ThreadPoolExecutor(
                 max_workers=min(8, len(GENERATED_COVERAGE_FLOOR))) as pool:
             results = list(pool.map(
-                lambda entry: _coverage_probe(tsc, entry, scratch, artifact),
+                lambda entry: _coverage_probe(
+                    tsc, entry, scratch, artifacts),
                 GENERATED_COVERAGE_FLOOR))
     return [error for error in results if error is not None]
 
