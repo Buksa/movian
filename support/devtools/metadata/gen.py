@@ -1832,6 +1832,46 @@ def build_legacy_globals() -> dict[str, Any]:
     if not members:
         raise GenError("showtime literal in %s scanned to nothing"
                        % rel(LEGACY_API_V1))
+    # Two independent derivations of the same set, required to agree. The
+    # brace-depth scan above cannot see a regex literal: `_masked_js_text`
+    # masks comments and strings but not `/.../`, so a `/}/` inside a member
+    # function drops the depth to zero and promotes the next `name:` to a
+    # top-level member -- demonstrated, it invented a 27th. Indentation alone
+    # is just as fragile in the other direction. Neither is trusted; a
+    # disagreement is raised rather than resolved, because the correct answer
+    # is unknown at exactly that point.
+    # A quoted or computed key is missed by BOTH derivations -- they agree,
+    # and agree wrongly -- so it cannot be caught by the cross-check below.
+    # The emitter has no way to render one either, so the honest response is
+    # to refuse rather than to emit a surface with a hole in it.
+    # ...and the key is checked on the MASKED text, where a quoted key has
+    # already lost its quotes along with its contents -- `"k": 2` arrives as
+    # `      : 2`. The first version of this looked for the quotes and found
+    # nothing, passing the very input it was written to reject. So: take
+    # whatever precedes the colon at the literal's own indentation and
+    # require it to be a plain identifier; blank and bracketed keys both
+    # fail, which is the point.
+    exotic = [
+        match.group(1) for match in re.finditer(r"^  ([^:\n]*):", body, re.M)
+        if not re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*",
+                            match.group(1).strip())
+    ]
+    if exotic:
+        raise GenError(
+            "showtime literal in %s uses keys this scan cannot read (%s) -- "
+            "quoted or computed; the emission cannot render them either"
+            % (rel(LEGACY_API_V1),
+               ", ".join(repr(key.strip()) for key in exotic)))
+    indented = {match.group(1) for match in re.finditer(
+        r"^  ([A-Za-z_$][A-Za-z0-9_$]*)\s*:", body, re.M)}
+    scanned = {member["name"] for member in members}
+    if scanned != indented:
+        raise GenError(
+            "showtime literal in %s: brace-depth scan and indentation "
+            "disagree (depth-only %s, indent-only %s) -- one of them is "
+            "misreading the file"
+            % (rel(LEGACY_API_V1), sorted(scanned - indented),
+               sorted(indented - scanned)))
     return {
         "name": "showtime",
         "apiversion": 1,
@@ -1872,13 +1912,49 @@ def build_interpreter_globals() -> list[dict[str, Any]]:
 
 
 def _require_anchor(relative_path: str, anchor: str, what: str) -> None:
+    """Fail unless `anchor` appears in live C -- not in a comment.
+
+    A raw substring search accepted `// #define DUK_USE_FILE_IO`, so an
+    anchor could survive being commented out and go on vouching for a global
+    that is no longer installed. Comments are stripped before the search;
+    conditional compilation is not resolved, and the entry's `enabledBy`
+    field records which macros the claim depends on so a reader can check
+    what this cannot.
+    """
     path = REPO_ROOT / relative_path
     if not path.is_file():
         raise GenError("%s: %s does not exist" % (what, relative_path))
-    if anchor not in path.read_text(encoding="utf-8", errors="replace"):
+    text = _strip_c_comments(path.read_text(encoding="utf-8",
+                                            errors="replace"))
+    if anchor not in text:
         raise GenError(
-            "%s: anchor %r no longer appears in %s"
+            "%s: anchor %r no longer appears in live code in %s"
             % (what, anchor, relative_path))
+
+
+def _strip_c_comments(text: str) -> str:
+    """Blank C comments, keeping every other character in place."""
+    out = list(text)
+    index = 0
+    length = len(out)
+    while index < length - 1:
+        pair = text[index:index + 2]
+        if pair == "//":
+            end = text.find("\n", index)
+            end = length if end < 0 else end
+            for position in range(index, end):
+                out[position] = " "
+            index = end
+        elif pair == "/*":
+            end = text.find("*/", index + 2)
+            end = length if end < 0 else end + 2
+            for position in range(index, end):
+                if out[position] != "\n":
+                    out[position] = " "
+            index = end
+        else:
+            index += 1
+    return "".join(out)
 
 
 def _scan_global_env(

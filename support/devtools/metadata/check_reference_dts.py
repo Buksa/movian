@@ -2773,20 +2773,64 @@ def _example_apiversion(entry: Path) -> int:
     manifest = entry / "plugin.json"
     if not manifest.is_file():
         return 1
-    try:
-        data = json.loads(manifest.read_text(encoding="utf-8"))
-    except ValueError:
+    # A manifest that does not parse is a corpus defect, not a version-1
+    # plugin: the runtime would refuse to load it. Silently defaulting hands
+    # it v1 declarations and reports the gate green over a plugin that cannot
+    # run at all.
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    if "apiversion" not in data:
         return 1
-    version = data.get("apiversion", 1)
-    return version if isinstance(version, int) else 1
+    version = data["apiversion"]
+    if isinstance(version, bool):
+        # htsmsg has no boolean->s64 conversion; HMF_BOOL falls to the
+        # `default:` arm and returns CONVERSION_IMPOSSIBLE, so the loader
+        # takes its default. Checked before `int`, since bool IS an int here.
+        return 1
+    if isinstance(version, int):
+        return version
+    if isinstance(version, str):
+        # `htsmsg_get_s64` converts an HMF_STR field with
+        # `strtoll(f->hmf_str, NULL, 0)` (src/htsmsg/htsmsg.c:330-332), so
+        # `"apiversion": "2"` really does load as version 2. Treating a
+        # string as "not an int, default to 1" granted such a plugin the v1
+        # declarations -- and with them `showtime`, a name it does not have
+        # at runtime. That is a false accept in the exact direction the
+        # v1/v2 split exists to prevent.
+        return _strtoll_base0(version)
+    # Any other JSON type is a map, list or null; htsmsg has no conversion
+    # for those either, so the loader defaults.
+    return 1
+
+
+def _strtoll_base0(text: str) -> int:
+    """`strtoll(s, NULL, 0)`: leading space, optional sign, base from prefix,
+    and a stop at the first character that does not fit -- with no digits at
+    all yielding 0 rather than an error."""
+    match = re.match(r"\s*[+-]?(?:0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)",
+                     text)
+    if match is None:
+        return 0
+    literal = match.group(0).strip()
+    try:
+        return int(literal, 0)
+    except ValueError:
+        return 0
 
 
 def check_plugin_examples(tsc: str) -> list[str]:
     """Type-check `plugin_examples/` against the declarations it would get."""
     errors: list[str] = []
     plugins = sorted(
-        entry for entry in EXAMPLES_DIR.iterdir()
-        if entry.is_dir() and any(entry.glob("*.js")))
+        entry for entry in EXAMPLES_DIR.iterdir() if entry.is_dir())
+    # A plugin directory with no JavaScript was silently skipped, so deleting
+    # a corpus member's sources removed it from the gate instead of failing
+    # it -- and the floor below counted the survivors.
+    empty = [entry.name for entry in plugins if not any(entry.glob("*.js"))]
+    if empty:
+        errors.append(
+            "plugin_examples/%s has no .js to check"
+            % ", plugin_examples/".join(sorted(empty)))
+        return errors
     if len(plugins) < MINIMUM_EXAMPLE_PLUGINS:
         errors.append(
             "plugin_examples has %d plugins, expected at least %d -- a gate "
