@@ -1910,15 +1910,21 @@ def _format_runtime_oracle_report(
             lines.append("error: %s" % report["error"])
         return "\n".join(lines)
 
-    state = "OK" if report.get("drift", 0) == 0 else "DRIFT"
+    missing_modules = report.get("missingModules", [])
+    state = "OK" if report.get("drift", 0) == 0 and not missing_modules \
+        else "DRIFT"
     lines = [
         "RUNTIME ORACLE CROSS-CHECK %s" % state,
-        "counts: match %d, drift %d, plugin-supplied %d,"
+        "counts: match %d, drift %d, missing-modules %d, plugin-supplied %d,"
         " oracle-unreachable %d" %
-        (report["match"], report["drift"],
+        (report["match"], report["drift"], len(missing_modules),
          report.get("pluginSupplied", 0),
          report["oracleUnreachable"]),
     ]
+    if missing_modules:
+        lines.append(
+            "modules the runtime has and the artifact dropped entirely:")
+        lines.extend("  " + name for name in missing_modules)
     drift = report.get("driftMembers", [])
     if drift:
         lines.append("drift members:")
@@ -1960,6 +1966,22 @@ def _check_runtime_oracle(
             "error": (
                 "runtime oracle version %r, expected %d"
                 % (oracle.get("version"), RUNTIME_ORACLE_VERSION)),
+        }
+        return False, _format_runtime_oracle_report(report), report
+    # The introspector emits twice per run and only the post-route payload is
+    # complete. Absent means the capture predates the marker split; an
+    # explicit false means someone committed the load-time payload, whose
+    # tier3 members are unattempted rather than absent.
+    if oracle.get("tier3PageOpened") is False:
+        report = {
+            "status": "failed",
+            "match": 0,
+            "drift": 0,
+            "oracleUnreachable": 0,
+            "error": (
+                "runtime oracle is the partial load-time payload "
+                "(tier3PageOpened false); capture the payload emitted after "
+                "opening the introspect:page route"),
         }
         return False, _format_runtime_oracle_report(report), report
 
@@ -2013,6 +2035,26 @@ def _check_runtime_oracle(
         tier1_all = {}
     if not isinstance(tier2_all, dict):
         tier2_all = {}
+
+    # Every comparison below walks the ARTIFACT's modules, so a module the
+    # runtime observed and the artifact no longer declares was invisible:
+    # dropping a whole module from the scanner made this leg GREENER (fewer
+    # members to disagree about) instead of redder. Only modules the capture
+    # actually reached count -- one that failed to load then must not invent
+    # drift now.
+    # `showtime/x` has no module record of its own: the bundle emits it as an
+    # `export * from 'movian/x'` alias block, so it is covered exactly when
+    # its canonical module is. Resolving the name here keeps the check honest
+    # in both directions -- dropping `movian/prop` reports `showtime/prop`
+    # missing too, because the alias block goes with it.
+    oracle_modules = {
+        name for name, stage in before_all.items()
+        if isinstance(stage, dict) and stage.get("keys")
+    }
+    missing_modules = sorted(
+        name for name in oracle_modules
+        if ("movian/" + name.split("/", 1)[1]
+            if name.startswith("showtime/") else name) not in modules)
 
     for module_name, module in modules.items():
         before = before_all.get(module_name)
@@ -2394,8 +2436,9 @@ def _check_runtime_oracle(
         entry["module"], entry["shape"], entry["member"]))
     unreachable.sort(key=lambda entry: (
         entry["module"], entry["shape"], entry["member"]))
+    agreed = not drift and not missing_modules
     report = {
-        "status": "ok" if not drift else "drift",
+        "status": "ok" if agreed else "drift",
         "match": matches,
         "drift": len(drift),
         "pluginSupplied": len(plugin_supplied),
@@ -2404,9 +2447,10 @@ def _check_runtime_oracle(
             key=lambda e: (e["module"], e["shape"], e["member"])),
         "oracleUnreachable": len(unreachable),
         "driftMembers": drift,
+        "missingModules": missing_modules,
         "unreachableMembers": unreachable,
     }
-    return not drift, _format_runtime_oracle_report(report), report
+    return agreed, _format_runtime_oracle_report(report), report
 
 
 def build_modules() -> list[dict[str, Any]]:

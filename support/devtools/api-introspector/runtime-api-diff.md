@@ -1,13 +1,16 @@
 # Movian runtime API introspector diff
 
-The committed snapshot in [runtime-api.json](runtime-api.json) is the payload extracted from the unique log marker `MOVIAN_API_INTROSPECTOR_JSON=`.
+The committed snapshot in [runtime-api.json](runtime-api.json) is the payload extracted from the log marker `MOVIAN_API_INTROSPECTOR_JSON=`.
 
 ## Run and extraction
 
 ```text
 mdev run -p support/devtools/api-introspector
+mdev open introspect:page
 mdev log
 ```
+
+**Opening the route is part of the capture, not an optional extra.** The plugin emits twice: once at load, where the tier3 page and its items have not been attempted, and once from the route callback, where they have. Only the second is complete, and only the second carries `MOVIAN_API_INTROSPECTOR_JSON=` — the load-time payload is marked `MOVIAN_API_INTROSPECTOR_PARTIAL_JSON=` and carries `tier3PageOpened: false`. Both markers were identical until this was corrected, so a run that followed the earlier two-step procedure extracted the partial payload and `gen.py --check` accepted it; it now refuses one that says so.
 
 - Modules required: **52** (the 52 `declare module` blocks in `generated/movian-api.d.ts`).
 - Require failures: **none** (`loadErrors` is `{}`).
@@ -93,10 +96,12 @@ The comparison is no longer maintained by hand here. `gen.py --check` recomputes
 
 ```text
 RUNTIME ORACLE CROSS-CHECK OK
-counts: match 242, drift 0, oracle-unreachable 31
+counts: match 242, drift 0, missing-modules 0, plugin-supplied 2, oracle-unreachable 35
 ```
 
-The 31 unreachable members are members no tier could construct, and the cross-check still passes when that set is large or the snapshot is empty — the weakness tracked as #166.
+These counts are recomputed from the committed inputs, not transcribed: an earlier revision of this document quoted `oracle-unreachable 31` and no plugin-supplied bucket, which no run had produced since the bucket was added. The 35 unreachable members are members no tier could construct.
+
+`missing-modules` closes the largest part of #166. Every other comparison walks the *artifact's* module list, so a module the runtime observed and the artifact dropped entirely was invisible — deleting `fs` from the artifact left the check reporting `ok`, and an artifact with **no modules at all** passed against the full oracle. The check now resolves `showtime/x` to its `movian/x` alias block and fails on any oracle module the artifact cannot account for: dropping `fs` reports 1, dropping `movian/prop` reports 2 (the alias goes with it), emptying the list reports 52. What remains open under #166 is the member-level direction: a large unreachable set still passes.
 
 ## Function-length observations
 
