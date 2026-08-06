@@ -3499,6 +3499,26 @@
           "variadic": false
         },
         {
+          "name": "print",
+          "nargs": -1,
+          "provider": "duktape",
+          "source": {
+            "file": "ext/duktape/duktape.c",
+            "line": 9145
+          },
+          "variadic": true
+        },
+        {
+          "name": "require",
+          "nargs": 1,
+          "provider": "duktape",
+          "source": {
+            "file": "ext/duktape/duktape.c",
+            "line": 9146
+          },
+          "variadic": false
+        },
+        {
           "name": "setInterval",
           "nargs": 2,
           "source": {
@@ -3712,6 +3732,172 @@
           }
         }
       ]
+    },
+    "legacyGlobals": {
+      "apiversion": 1,
+      "members": [
+        {
+          "callable": false,
+          "line": 19,
+          "name": "JSONDecode"
+        },
+        {
+          "callable": false,
+          "line": 20,
+          "name": "JSONEncode"
+        },
+        {
+          "callable": true,
+          "line": 67,
+          "name": "RichText",
+          "params": [
+            "x"
+          ]
+        },
+        {
+          "callable": false,
+          "line": 57,
+          "name": "basename"
+        },
+        {
+          "callable": false,
+          "line": 35,
+          "name": "currentVersionInt"
+        },
+        {
+          "callable": false,
+          "line": 36,
+          "name": "currentVersionString"
+        },
+        {
+          "callable": false,
+          "line": 37,
+          "name": "deviceId"
+        },
+        {
+          "callable": false,
+          "line": 47,
+          "name": "durationToString"
+        },
+        {
+          "callable": false,
+          "line": 43,
+          "name": "entityDecode"
+        },
+        {
+          "callable": false,
+          "line": 75,
+          "name": "getSubtitleLanguages"
+        },
+        {
+          "callable": true,
+          "line": 22,
+          "name": "httpGet",
+          "params": [
+            "url",
+            "args",
+            "headers",
+            "ctrl"
+          ]
+        },
+        {
+          "callable": true,
+          "line": 39,
+          "name": "httpReq",
+          "params": [
+            "url",
+            "ctrl",
+            "cb"
+          ]
+        },
+        {
+          "callable": true,
+          "line": 63,
+          "name": "md5digest",
+          "params": [
+            "str"
+          ]
+        },
+        {
+          "callable": false,
+          "line": 49,
+          "name": "message"
+        },
+        {
+          "callable": false,
+          "line": 51,
+          "name": "notify"
+        },
+        {
+          "callable": false,
+          "line": 46,
+          "name": "paramEscape"
+        },
+        {
+          "callable": false,
+          "line": 45,
+          "name": "pathEscape"
+        },
+        {
+          "callable": false,
+          "line": 17,
+          "name": "print"
+        },
+        {
+          "callable": false,
+          "line": 53,
+          "name": "probe"
+        },
+        {
+          "callable": false,
+          "line": 44,
+          "name": "queryStringSplit"
+        },
+        {
+          "callable": true,
+          "line": 59,
+          "name": "sha1digest",
+          "params": [
+            "str"
+          ]
+        },
+        {
+          "callable": true,
+          "line": 86,
+          "name": "sleep",
+          "params": [
+            "x"
+          ]
+        },
+        {
+          "callable": true,
+          "line": 71,
+          "name": "systemIpAddress",
+          "params": []
+        },
+        {
+          "callable": false,
+          "line": 50,
+          "name": "textDialog"
+        },
+        {
+          "callable": false,
+          "line": 56,
+          "name": "trace"
+        },
+        {
+          "callable": true,
+          "line": 77,
+          "name": "xmlrpc",
+          "params": [],
+          "variadic": true
+        }
+      ],
+      "name": "showtime",
+      "source": {
+        "file": "res/ecmascript/legacy/api-v1.js",
+        "line": 15
+      }
     },
     "modules": [
       {
@@ -7188,6 +7374,6 @@
       }
     ]
   },
-  "movianRevision": "22e860eff73c44380666f5b79428a1644ca211ef",
+  "movianRevision": "4869f96840316ebb749eb50be6637688747b939e",
   "schemaVersion": 1
 }

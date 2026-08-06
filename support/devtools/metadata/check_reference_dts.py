@@ -2472,6 +2472,8 @@ GENERATED_COVERAGE_FLOOR = (
     # deleting Core.sleep, Core.currentVersionString, Core.loadPath or
     # Core.storagePath left it at exit 0. The block was gated; its contents
     # were not, which is the same vacuity one level down.
+    (GLOBALS_SCOPE, None, "print"),
+    (GLOBALS_SCOPE, None, "require"),
     (GLOBALS_SCOPE, None, "setTimeout"),
     (GLOBALS_SCOPE, None, "clearInterval"),
     (GLOBALS_SCOPE, "console", "log"),
@@ -2691,6 +2693,83 @@ def check_generated_typescript(tsc: str) -> list[str]:
     return errors
 
 
+EXAMPLES_DIR = REPO_ROOT / "plugin_examples"
+GENERATED_V1_DTS = REPO_ROOT / "generated" / "movian-api-v1.d.ts"
+# The audit that opened #169 found half this corpus not compiling against the
+# API it demonstrates. Measuring it once buys one clean snapshot; the corpus
+# only stays honest if a gate re-measures it, which is what this is.
+MINIMUM_EXAMPLE_PLUGINS = 8
+
+
+def _example_apiversion(entry: Path) -> int:
+    """A plugin's apiversion, defaulting the way the loader does.
+
+    `src/plugins.c:688` reads `htsmsg_get_u32_or_default(ctrl, "apiversion",
+    1)`, so a manifest that omits the key is a version 1 plugin and gets
+    api-v1.js -- and with it the `showtime` global. Defaulting to 2 here would
+    report its every use as an error the runtime does not have.
+    """
+    manifest = entry / "plugin.json"
+    if not manifest.is_file():
+        return 1
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except ValueError:
+        return 1
+    version = data.get("apiversion", 1)
+    return version if isinstance(version, int) else 1
+
+
+def check_plugin_examples(tsc: str) -> list[str]:
+    """Type-check `plugin_examples/` against the declarations it would get."""
+    errors: list[str] = []
+    plugins = sorted(
+        entry for entry in EXAMPLES_DIR.iterdir()
+        if entry.is_dir() and any(entry.glob("*.js")))
+    if len(plugins) < MINIMUM_EXAMPLE_PLUGINS:
+        errors.append(
+            "plugin_examples has %d plugins, expected at least %d -- a gate "
+            "that shrinks with its corpus proves nothing"
+            % (len(plugins), MINIMUM_EXAMPLE_PLUGINS))
+        return errors
+    with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(8, len(plugins))) as pool:
+        errors.extend(
+            error for error in pool.map(
+                lambda entry: _check_one_example(tsc, entry), plugins)
+            if error is not None)
+    return errors
+
+
+def _check_one_example(tsc: str, entry: Path) -> str | None:
+    """One example plugin against the declarations its apiversion gets."""
+    sources = sorted(entry.glob("*.js"))
+    declarations = [GENERATED_DTS]
+    if _example_apiversion(entry) == 1:
+        declarations.append(GENERATED_V1_DTS)
+    command = [
+        tsc, "--noEmit", "--allowJs", "--checkJs",
+        "--target", "ES5", "--lib", "ES5",
+        "--module", "commonjs", "--moduleResolution", "node",
+        "--pretty", "false", "--noErrorTruncation",
+        *[_tsc_input_argument(path) for path in [*sources, *declarations]],
+    ]
+    result = subprocess.run(
+        command, cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, check=False,
+        timeout=SUBPROCESS_TIMEOUT_SECONDS)
+    # Only diagnostics against the example itself. A declaration file's
+    # own diagnostics belong to the fixtures above, and counting them here
+    # would make this gate fail for a reason it cannot explain.
+    own = [line for line in result.stdout.splitlines()
+           if line.startswith("plugin_examples/")]
+    if own:
+        return ("plugin_examples/%s does not compile against the "
+                "API it demonstrates:\n%s"
+                % (entry.name, "\n".join(own)))
+    return None
+
+
 def _load_metadata() -> dict:
     """Load the generated movian-metadata.json."""
     text = _read(METADATA_FILE)
@@ -2849,6 +2928,19 @@ def main() -> int:
     print("reference-dts: generated-dts coverage floor OK "
           "(%d members, each removed breaks the fixture)"
           % len(GENERATED_COVERAGE_FLOOR))
+
+    try:
+        errors = check_plugin_examples(tsc)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        print("reference-dts: plugin_examples check failed to run: %s: %s" %
+              (type(error).__name__, error), file=sys.stderr)
+        return 1
+    if errors:
+        for error in errors:
+            print("reference-dts: %s" % error, file=sys.stderr)
+        return 1
+    print("reference-dts: plugin_examples OK "
+          "(every example compiles against its own apiversion's declarations)")
     return 0
 
 

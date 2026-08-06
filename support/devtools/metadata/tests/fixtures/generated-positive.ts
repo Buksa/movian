@@ -179,6 +179,18 @@ const storagePath: string | undefined = Core.storagePath;
 // pinned by the negative fixture, but nothing here referenced it, so the
 // member could be deleted outright and only the negative side would notice.
 const pluginPath: string | undefined = Plugin.path;
+// Duktape's own globals, not Movian's. `print` is the one the plugin_examples
+// audit got wrong: 16 uses were filed as example rot because no module
+// exports it. This repo's own api-introspector calls it at introspector.js:985
+// to emit the capture gen.py --check diffs against, so the corpus was right
+// and the audit was wrong. See #169.
+print('example');
+print('example', 1, {});
+// The call form, not the `import x = require(...)` syntax above: that is
+// TypeScript syntax and resolves without any `require` declaration at all, so
+// the imports do not exercise this global. Plugins written for the runtime
+// call it plainly.
+require('movian/prop');
 void pluginId; void apiVersion; void versionInt; void deviceId;
 void timestamp; void versionString; void pluginUrl; void pluginManifest;
 void loadPath; void storagePath; void pluginPath;
