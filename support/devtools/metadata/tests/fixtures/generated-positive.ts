@@ -16,6 +16,7 @@ import page = require('movian/page');
 import service = require('movian/service');
 import settings = require('movian/settings');
 import sqlite = require('movian/sqlite');
+import videoscrobbler = require('movian/videoscrobbler');
 
 // Legacy spelling: the loader rewrites showtime/* to movian/* at require
 // time, so plugins written against the old names must resolve too.
@@ -62,9 +63,74 @@ const response = http.request('https://example.test/api');
 const searcher = new page.Searcher('Example', 'icon.png', () => { });
 const route = new page.Route('example:(.*)', () => { });
 service.create('Example', 'example:start', 'video', true, 'icon.png');
+// movian/settings -- `this.__proto__ = sp` serves both call forms, so both
+// have to be declared. Constructed is what the two in-repo callers do
+// (res/ecmascript/legacy/api-v1.js:140, res/ecmascript/modules/movian/
+// page.js:197); the instance carries the shared surface plus what the
+// initializer assigns onto the receiver.
 const globals = new settings.globalSettings(
     'example', 'Example', 'icon.png', 'Description');
+const kvstore = new settings.kvstoreSettings(null, 'example:url', 'domain');
+globals.createBool('flag', 'Flag', false, () => { }, true);
+globals.createString('name', 'Name', '', () => { }, true);
+const settingsId = globals.id;
+const settingsNodes = kvstore.nodes;
+// Called plainly it mutates the module receiver instead, which is why the
+// same members are also reachable off the module itself.
+settings.globalSettings('example', 'Example', 'icon.png', 'Description');
+settings.createBool('module-flag', 'Flag', false, () => { }, true);
+
+// movian/sqlite -- `DB.prototype.query` names no parameter and forwards
+// everything in `arguments` (sqlite.js:12-19), so a zero-argument method
+// rejected every real query.
 const db = new sqlite.DB('example');
+const rows = db.query('SELECT ? AS value', 1);
+db.query('SELECT 1');
+
+// movian/http -- the synchronous form returns the response; the callback
+// form dispatches and returns nothing (http.js:93-101). Only the first may
+// be dereferenced, which the negative fixture pins.
+const syncBody = http.request('https://example.test/api', {}).toString();
+// Error-first: the module calls `callback(err, null)` on failure and
+// `callback(null, new HttpResponse(res))` on success, so the response is the
+// SECOND argument. Typing it first made this callback's `err` a response.
+// The response is `HttpResponse | null` -- http.js:96 calls
+// `callback(err, null)` on the failure path. A plugin must check it, and this
+// fixture must not model the crash it is meant to prevent.
+http.request('https://example.test/api', {}, (err: any, res) => {
+    if (err || res === null) { return; }
+    void res.statuscode;
+});
+// Pins the ORDER rather than the presence. The rest parameter types every
+// position after the response as `any`, so dereferencing the second argument
+// passes under either ordering -- annotating the FIRST one is what
+// discriminates: under the old response-first signature `number` is not
+// assignable to `HttpResponse` and strictFunctionTypes rejects it.
+http.request('https://example.test/api', {}, (code: number, res: any) => {
+    void code; void res;
+});
+
+// Slots a plugin fills and the module only reads through a
+// `typeof this.X === 'function'` guard. Optional on purpose: nothing forces a
+// plugin to set them, so requiring them would invent errors the runtime does
+// not have. From plugin_examples/async_page_load/async_page_load.js:27 and
+// plugin_examples/videoscrobbling/videoscrobbling_example.js:53-70.
+// `paged` is deliberately un-annotated: the Route callback is narrowed to
+// `Page`, and annotating it `any` here would make this block pass without
+// testing the interface at all.
+new page.Route('paged:(.*)', (paged) => {
+    paged.asyncPaginator = () => { };
+    paged.reorderer = (item: any, before: any) => { void item; void before; };
+    // `paginator` is a real accessor from Object.defineProperties, not a
+    // guard-only hook, so it must NOT have become optional.
+    paged.paginator = () => true;
+});
+// plugin_examples/videoscrobbling/videoscrobbling_example.js:51 -- no arguments.
+const scrobbler = new videoscrobbler.VideoScrobbler();
+scrobbler.onstart = (data: any) => { void data; };
+scrobbler.onpause = (data: any) => { void data; };
+scrobbler.onresume = (data: any) => { void data; };
+scrobbler.onstop = (data: any) => { void data; };
 
 // Legacy aliases resolve to the same surface, local members included.
 const legacyRoot = legacyProp.createRoot('legacy');
@@ -73,3 +139,5 @@ const legacyRoute = new legacyPage.Route('legacy:(.*)', () => { });
 void anonymousRoot; void navigators; void popups; void language;
 void proxied; void rpc; void response; void searcher; void route;
 void globals; void db; void legacyRoot; void legacyRoute;
+void kvstore; void settingsId; void settingsNodes; void rows; void syncBody;
+void scrobbler;
