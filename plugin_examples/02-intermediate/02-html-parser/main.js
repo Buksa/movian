@@ -12,38 +12,53 @@ var page = require('movian/page');
 var html = require('movian/html');
 var service = require('movian/service');
 
+// `movian/html` nodes have no getAttribute. The API is
+// `node.attributes.getNamedItem(name)`, which returns the attribute object or
+// null (html.js:35-48) -- the same helper every shipping plugin writes.
+function attr(node, name) {
+  if (!node || !node.attributes)
+    return null;
+  var a = node.attributes.getNamedItem(name);
+  return a ? a.value : null;
+}
+
+
 // MOCK: Sample HTML structure (like from a real video site)
-var mockHtml = `
-<!DOCTYPE html>
-<html>
-<head><title>Video Gallery</title></head>
-<body>
-  <div class="video-item">
-    <a href="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4">
-      <h2>Big Buck Bunny</h2>
-    </a>
-    <img class="thumb" src="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/BigBuckBunny.jpg">
-    <p class="desc">Open source animated film</p>
-  </div>
-  
-  <div class="video-item">
-    <a href="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4">
-      <h2>Elephants Dream</h2>
-    </a>
-    <img class="thumb" src="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/ElephantsDream.jpg">
-    <p class="desc">World's first open movie</p>
-  </div>
-  
-  <div class="video-item">
-    <a href="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4">
-      <h2>Sintel</h2>
-    </a>
-    <img class="thumb" src="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/Sintel.jpg">
-    <p class="desc">Open source fantasy animation</p>
-  </div>
-</body>
-</html>
-`;
+// Duktape is ES5.1: no template literals. A backtick string does not
+// throw at runtime, it fails to COMPILE -- the whole plugin never loads,
+// with `SyntaxError: invalid token` as the only trace. Type-checking
+// against --target ES5 does not catch it, because tsc transpiles the
+// construct instead of rejecting it.
+var mockHtml =
+  '<!DOCTYPE html>\n' +
+  '<html>\n' +
+  '<head><title>Video Gallery</title></head>\n' +
+  '<body>\n' +
+  '  <div class="video-item">\n' +
+  '    <a href="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4">\n' +
+  '      <h2>Big Buck Bunny</h2>\n' +
+  '    </a>\n' +
+  '    <img class="thumb" src="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/BigBuckBunny.jpg">\n' +
+  '    <p class="desc">Open source animated film</p>\n' +
+  '  </div>\n' +
+  '  \n' +
+  '  <div class="video-item">\n' +
+  '    <a href="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4">\n' +
+  '      <h2>Elephants Dream</h2>\n' +
+  '    </a>\n' +
+  '    <img class="thumb" src="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/ElephantsDream.jpg">\n' +
+  '    <p class="desc">World\'s first open movie</p>\n' +
+  '  </div>\n' +
+  '  \n' +
+  '  <div class="video-item">\n' +
+  '    <a href="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4">\n' +
+  '      <h2>Sintel</h2>\n' +
+  '    </a>\n' +
+  '    <img class="thumb" src="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/Sintel.jpg">\n' +
+  '    <p class="desc">Open source fantasy animation</p>\n' +
+  '  </div>\n' +
+  '</body>\n' +
+  '</html>\n';
 
 // Parse videos from HTML
 new page.Route("example:scrape:", function(page) {
@@ -69,9 +84,9 @@ new page.Route("example:scrape:", function(page) {
       var descEl = item.getElementsByClassName("desc")[0];
       
       if (link && titleEl) {
-        var url = link.getAttribute("href");
+        var url = attr(link, "href");
         var title = titleEl.textContent.trim();
-        var thumb = thumbEl ? thumbEl.getAttribute("src") : null;
+        var thumb = attr(thumbEl, "src");
         var desc = descEl ? descEl.textContent.trim() : null;
         
         page.appendItem(url, "video", {
@@ -87,7 +102,7 @@ new page.Route("example:scrape:", function(page) {
     var foundVideos = 0;
     
     allLinks.forEach(function(link) {
-      var href = link.getAttribute("href");
+      var href = attr(link, "href");
       var text = link.textContent.trim();
       
       // Filter for video file extensions
@@ -116,21 +131,20 @@ new page.Route("example:scrape:links", function(page) {
   page.metadata.title = "Direct Links";
   
   // MOCK: Simple HTML with direct video links
-  var simpleHtml = `
-    <a href="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4">
-      Tears of Steel
-    </a>
-    <a href="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/VolkswagenGTIReview.mp4">
-      Car Review
-    </a>
-  `;
+  var simpleHtml =
+  '    <a href="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4">\n' +
+  '      Tears of Steel\n' +
+  '    </a>\n' +
+  '    <a href="http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/VolkswagenGTIReview.mp4">\n' +
+  '      Car Review\n' +
+  '    </a>\n';
   
   try {
     var doc = html.parse(simpleHtml);
     var links = doc.root.getElementsByTagName("a");
     
     links.forEach(function(link) {
-      var href = link.getAttribute("href");
+      var href = attr(link, "href");
       var title = link.textContent.trim();
       
       if (href && href.match(/\.mp4$/i)) {

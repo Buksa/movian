@@ -56,3 +56,27 @@ showtime.RichText('example');
 showtime.xmlrpc('http://example.test/rpc', 'sample.method', 'first', 42);
 
 void version; void versionString; void device; void decoded; void encoded;
+
+// The v1 `plugin` object. api-v1.js:102 declares it with a top-level `var`,
+// so it is a global binding of that program -- and measured on a running
+// instance, `this === plugin` at plugin top level, which is what makes the
+// legacy `(function(plugin){...})(this)` wrapper work.
+plugin.createService('Example', 'example:v1:', 'other', true, 'icon.png');
+plugin.createStore('example');
+plugin.addURI('example:v1:(.*)', function() { });
+plugin.addSearcher('Example', 'icon.png', function() { });
+plugin.createSettings('Example', 'icon.png', 'Description');
+plugin.addItemHook({ title: 'Example' });
+plugin.addSubtitleProvider(function() { });
+plugin.cachePut('stash', 'key', {}, 60);
+plugin.getAuthCredentials('Example', 'reason', true, 'example', false);
+plugin.addHTTPAuth('.*', function() { });
+plugin.copyFile('a', 'b');
+plugin.selectView('view');
+plugin.getDescriptor();
+const cached: any = plugin.cacheGet('stash', 'key');
+const pluginPath2: any = plugin.path;
+const pluginConfig: any = plugin.config;
+const pluginProps: any = plugin.properties;
+
+void cached; void pluginPath2; void pluginConfig; void pluginProps;

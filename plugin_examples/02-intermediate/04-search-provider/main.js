@@ -62,8 +62,15 @@ new page.Route("example:search:(.*)", function(page, query) {
   page.metadata.title = "Search: " + query;
 
   var lowerQuery = decodeURIComponent(query).toLowerCase();
+  // Title AND tags, the same rule the global Searcher above uses. Matching
+  // titles alone made every link below report "No matches", since the terms
+  // they offer are tags -- caught by opening the route, not by type-checking
+  // it.
   var matches = VIDEO_DATABASE.filter(function(video) {
-    return video.title.toLowerCase().indexOf(lowerQuery) !== -1;
+    return video.title.toLowerCase().indexOf(lowerQuery) !== -1 ||
+           video.tags.some(function(tag) {
+             return tag.indexOf(lowerQuery) !== -1;
+           });
   });
 
   matches.forEach(function(video) {

@@ -2533,6 +2533,23 @@ GENERATED_COVERAGE_FLOOR = (
     (V1_SCOPE, "showtime", "textDialog"),
     (V1_SCOPE, "showtime", "trace"),
     (V1_SCOPE, "showtime", "xmlrpc"),
+    (V1_SCOPE, "plugin", "addHTTPAuth"),
+    (V1_SCOPE, "plugin", "addItemHook"),
+    (V1_SCOPE, "plugin", "addSearcher"),
+    (V1_SCOPE, "plugin", "addSubtitleProvider"),
+    (V1_SCOPE, "plugin", "addURI"),
+    (V1_SCOPE, "plugin", "cacheGet"),
+    (V1_SCOPE, "plugin", "cachePut"),
+    (V1_SCOPE, "plugin", "config"),
+    (V1_SCOPE, "plugin", "copyFile"),
+    (V1_SCOPE, "plugin", "createService"),
+    (V1_SCOPE, "plugin", "createSettings"),
+    (V1_SCOPE, "plugin", "createStore"),
+    (V1_SCOPE, "plugin", "getAuthCredentials"),
+    (V1_SCOPE, "plugin", "getDescriptor"),
+    (V1_SCOPE, "plugin", "path"),
+    (V1_SCOPE, "plugin", "properties"),
+    (V1_SCOPE, "plugin", "selectView"),
 )
 
 # A declaration line inside a `declare module`, an `interface`, or the globals
@@ -2842,6 +2859,43 @@ def _strtoll_base0(text: str) -> int:
         return 0
 
 
+# `src/plugins.c:674-712` dispatches on the manifest's `type`, and the only
+# arm that runs JavaScript is `ecmascript`. A plugin declaring anything else
+# is loaded as far as the log is concerned -- `plugin_load()` returns 0 and
+# prints "Loaded dev plugin" on the very next line -- and its code never
+# executes. Type-checking cannot see this: the JavaScript is fine, the
+# manifest is what is wrong.
+EXAMPLE_MANIFEST_TYPE = "ecmascript"
+
+
+def _check_example_manifests(plugins: list[Path]) -> list[str]:
+    """Every example must be loadable, not merely well-typed.
+
+    Found by running the corpus: three of the eight legacy examples never
+    executed -- two declared `"type": "javascript"`, which no arm of the
+    loader's dispatch matches, and one shipped no manifest at all. Every gate
+    called them healthy because their JavaScript compiles.
+    """
+    errors: list[str] = []
+    for entry in plugins:
+        manifest = entry / "plugin.json"
+        name = _example_name(entry)
+        if not manifest.is_file():
+            errors.append(
+                "plugin_examples/%s has no plugin.json, so the loader cannot "
+                "run it" % name)
+            continue
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        declared = data.get("type")
+        if declared != EXAMPLE_MANIFEST_TYPE:
+            errors.append(
+                "plugin_examples/%s declares type %r; the loader runs "
+                "JavaScript only for %r and reports \"unknown type\" for "
+                "anything else -- while still logging \"Loaded dev plugin\""
+                % (name, declared, EXAMPLE_MANIFEST_TYPE))
+    return errors
+
+
 def check_plugin_examples(tsc: str) -> list[str]:
     """Type-check `plugin_examples/` against the declarations it would get."""
     errors: list[str] = []
@@ -2855,6 +2909,9 @@ def check_plugin_examples(tsc: str) -> list[str]:
         errors.append(
             "plugin_examples/%s has no .js to check"
             % ", plugin_examples/".join(sorted(empty)))
+        return errors
+    errors.extend(_check_example_manifests(plugins))
+    if errors:
         return errors
     if len(plugins) < MINIMUM_EXAMPLE_PLUGINS:
         errors.append(
