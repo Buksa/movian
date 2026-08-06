@@ -1,0 +1,28 @@
+[
+  {
+    "name": "print",
+    "nargs": -1,
+    "anchor": "duk_bi_global_object_print_helper",
+    "source": {"file": "ext/duktape/duktape.c", "line": 9145},
+    "enabledBy": [
+      {"macro": "DUK_USE_BROWSER_LIKE",
+       "source": {"file": "ext/duktape/duk_config.h", "line": 2749}},
+      {"macro": "DUK_USE_FILE_IO",
+       "source": {"file": "ext/duktape/duk_config.h", "line": 3021}}
+    ],
+    "evidence": "support/devtools/api-introspector/introspector.js:985 calls bare print() and that call emitted the committed runtime-api.json",
+    "why": "Installed by the interpreter, not by Movian, so es_create_env does not mention it and the C scanner cannot see it. Both macros take their default (defined) branch -- this tree sets no DUK_OPT_NO_BROWSER_LIKE or DUK_OPT_NO_FILE_IO -- and src/ecmascript/ never deletes a global builtin."
+  },
+  {
+    "name": "require",
+    "nargs": 1,
+    "anchor": "duk_bi_global_object_require",
+    "source": {"file": "ext/duktape/duktape.c", "line": 9146},
+    "enabledBy": [
+      {"macro": "DUK_USE_COMMONJS_MODULES",
+       "source": {"file": "ext/duktape/duk_config.h", "line": 2781}}
+    ],
+    "evidence": "every module under res/ecmascript/modules/ and every shipping plugin calls it",
+    "why": "Same as print: an interpreter builtin. Movian supplies only the resolver, Duktape.modSearch (ecmascript.c:436-439), never the function itself."
+  }
+]

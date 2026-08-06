@@ -44,7 +44,10 @@ new page.Route("devplug:webtest", function(page) {
         }
       });
 
-      var js = JSON.parse(d);
+      // http.request returns an HttpResponse, not a string. JSON.parse works
+      // on it only through Duktape's implicit toString coercion; every other
+      // example in this tree converts first, and so should this one.
+      var js = JSON.parse(d.toString());
       print("Session id: " + js.session_id);
     } else {
       print("User did not approve Showtime :(");

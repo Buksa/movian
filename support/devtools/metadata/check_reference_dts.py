@@ -2346,8 +2346,9 @@ def _tsc_input_argument(path: Path) -> str:
 
 
 def _generated_tsc_command(
-        tsc: str, fixture: Path, dts: Path = GENERATED_DTS) -> list[str]:
-    inputs = [dts, fixture]
+        tsc: str, fixture: Path, dts: Path = GENERATED_DTS,
+        extra: tuple[Path, ...] = ()) -> list[str]:
+    inputs = [dts, *extra, fixture]
     return [
         tsc,
         "--noEmit",
@@ -2362,10 +2363,10 @@ def _generated_tsc_command(
 
 
 def _run_generated_tsc(
-        tsc: str, fixture: Path,
-        dts: Path = GENERATED_DTS) -> subprocess.CompletedProcess[str]:
+        tsc: str, fixture: Path, dts: Path = GENERATED_DTS,
+        extra: tuple[Path, ...] = ()) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        _generated_tsc_command(tsc, fixture, dts),
+        _generated_tsc_command(tsc, fixture, dts, extra),
         cwd=REPO_ROOT,
         text=True,
         stdout=subprocess.PIPE,
@@ -2435,6 +2436,16 @@ GENERATED_FIXTURE_REQUIRED_MODULES = (
 # `declare module` rather than inside one.
 GLOBALS_SCOPE = "<globals>"
 
+# Stands where a module name goes for a member of generated/movian-api-v1.d.ts,
+# the apiversion-1 surface. Measured before this existed: 22 of that file's 26
+# members could be deleted with every gate green. `gen.py --check` compares the
+# file byte-wise against a fresh render, which catches a hand-edit and nothing
+# else -- if the SCANNER is wrong, generator and artifact agree on the same
+# false thing. The only real check on its contents is a fixture that uses them.
+V1_SCOPE = "<v1-showtime>"
+GENERATED_V1_DTS = REPO_ROOT / "generated" / "movian-api-v1.d.ts"
+GENERATED_V1_FIXTURE = FIXTURE_DIR / "generated-v1-positive.ts"
+
 # The import floor above proves the fixture NAMES a module. It cannot prove a
 # single member of it is still exercised: a fixture emptied down to its import
 # lines satisfies it, and members can then vanish from the artifact unnoticed.
@@ -2472,6 +2483,8 @@ GENERATED_COVERAGE_FLOOR = (
     # deleting Core.sleep, Core.currentVersionString, Core.loadPath or
     # Core.storagePath left it at exit 0. The block was gated; its contents
     # were not, which is the same vacuity one level down.
+    (GLOBALS_SCOPE, None, "print"),
+    (GLOBALS_SCOPE, None, "require"),
     (GLOBALS_SCOPE, None, "setTimeout"),
     (GLOBALS_SCOPE, None, "clearInterval"),
     (GLOBALS_SCOPE, "console", "log"),
@@ -2490,6 +2503,36 @@ GENERATED_COVERAGE_FLOOR = (
     (GLOBALS_SCOPE, "Plugin", "manifest"),
     (GLOBALS_SCOPE, "Plugin", "apiversion"),
     (GLOBALS_SCOPE, "Plugin", "path"),
+    # generated/movian-api-v1.d.ts. Every member, because the whole
+    # file is one scanned object literal: a scanner that drops a key
+    # or promotes a nested one produces an artifact the byte-wise
+    # --check agrees with.
+    (V1_SCOPE, "showtime", "JSONDecode"),
+    (V1_SCOPE, "showtime", "JSONEncode"),
+    (V1_SCOPE, "showtime", "RichText"),
+    (V1_SCOPE, "showtime", "basename"),
+    (V1_SCOPE, "showtime", "currentVersionInt"),
+    (V1_SCOPE, "showtime", "currentVersionString"),
+    (V1_SCOPE, "showtime", "deviceId"),
+    (V1_SCOPE, "showtime", "durationToString"),
+    (V1_SCOPE, "showtime", "entityDecode"),
+    (V1_SCOPE, "showtime", "getSubtitleLanguages"),
+    (V1_SCOPE, "showtime", "httpGet"),
+    (V1_SCOPE, "showtime", "httpReq"),
+    (V1_SCOPE, "showtime", "md5digest"),
+    (V1_SCOPE, "showtime", "message"),
+    (V1_SCOPE, "showtime", "notify"),
+    (V1_SCOPE, "showtime", "paramEscape"),
+    (V1_SCOPE, "showtime", "pathEscape"),
+    (V1_SCOPE, "showtime", "print"),
+    (V1_SCOPE, "showtime", "probe"),
+    (V1_SCOPE, "showtime", "queryStringSplit"),
+    (V1_SCOPE, "showtime", "sha1digest"),
+    (V1_SCOPE, "showtime", "sleep"),
+    (V1_SCOPE, "showtime", "systemIpAddress"),
+    (V1_SCOPE, "showtime", "textDialog"),
+    (V1_SCOPE, "showtime", "trace"),
+    (V1_SCOPE, "showtime", "xmlrpc"),
 )
 
 # A declaration line inside a `declare module`, an `interface`, or the globals
@@ -2569,7 +2612,11 @@ def _rename_declaration(text: str, module: str, interface: str | None,
     compile that follows fails on the missing member alone and not on a
     syntax error that would "prove" coverage for free.
     """
-    if module == GLOBALS_SCOPE:
+    if module == V1_SCOPE:
+        # The whole file is the region; its one declaration is the showtime
+        # object, and `interface` selects it the way it selects Core/Plugin.
+        start, end = 0, len(text)
+    elif module == GLOBALS_SCOPE:
         # Everything before the first module block. Bounded rather than
         # whole-file so a same-named member inside a module cannot be renamed
         # in its place and report coverage the globals do not have.
@@ -2603,16 +2650,26 @@ def _rename_declaration(text: str, module: str, interface: str | None,
 
 
 def _coverage_probe(tsc: str, entry: tuple[str, str | None, str],
-                    scratch: Path, artifact: str) -> str | None:
+                    scratch: Path, artifacts: dict[str, str]) -> str | None:
     module, interface, member = entry
     label = "%s%s.%s" % (module, "." + interface if interface else "", member)
+    # Which artifact holds the declaration, and what has to be compiled to
+    # exercise it. The v1 surface lives in its own file and its fixture needs
+    # the main bundle too -- a v1 plugin gets both.
+    if module == V1_SCOPE:
+        source, fixture = GENERATED_V1_DTS, GENERATED_V1_FIXTURE
+        companions: tuple[Path, ...] = (GENERATED_DTS,)
+    else:
+        source, fixture = GENERATED_DTS, GENERATED_POSITIVE_FIXTURE
+        companions = ()
     try:
-        mutated = _rename_declaration(artifact, module, interface, member)
+        mutated = _rename_declaration(
+            artifacts[str(source)], module, interface, member)
     except ValueError as error:
         return "coverage floor: %s: %s" % (label, error)
     dts = scratch / ("%s.d.ts" % abs(hash(label)))
     dts.write_text(mutated, encoding="utf-8")
-    probe = _run_generated_tsc(tsc, GENERATED_POSITIVE_FIXTURE, dts)
+    probe = _run_generated_tsc(tsc, fixture, dts, companions)
     if probe.returncode == 0:
         return ("coverage floor: removing %s from the artifact leaves the "
                 "positive fixture compiling -- the fixture no longer "
@@ -2626,7 +2683,8 @@ def _check_generated_coverage(tsc: str) -> list[str]:
     Without this the fixture proves only that its imports RESOLVE. Reduced to
     its import lines it stayed green while members disappeared underneath it.
     """
-    artifact = _read(GENERATED_DTS)
+    artifacts = {str(GENERATED_DTS): _read(GENERATED_DTS),
+                 str(GENERATED_V1_DTS): _read(GENERATED_V1_DTS)}
     with tempfile.TemporaryDirectory(prefix="movian-coverage-") as directory:
         scratch = Path(directory)
         # Capped rather than one worker per entry: the floor outgrew the
@@ -2635,7 +2693,8 @@ def _check_generated_coverage(tsc: str) -> list[str]:
         with concurrent.futures.ThreadPoolExecutor(
                 max_workers=min(8, len(GENERATED_COVERAGE_FLOOR))) as pool:
             results = list(pool.map(
-                lambda entry: _coverage_probe(tsc, entry, scratch, artifact),
+                lambda entry: _coverage_probe(
+                    tsc, entry, scratch, artifacts),
                 GENERATED_COVERAGE_FLOOR))
     return [error for error in results if error is not None]
 
@@ -2689,6 +2748,131 @@ def check_generated_typescript(tsc: str) -> list[str]:
     if not errors:
         errors.extend(_check_generated_coverage(tsc))
     return errors
+
+
+EXAMPLES_DIR = REPO_ROOT / "plugin_examples"
+GENERATED_V1_DTS = REPO_ROOT / "generated" / "movian-api-v1.d.ts"
+# The audit that opened #169 found half this corpus not compiling against the
+# API it demonstrates. Measuring it once buys one clean snapshot; the corpus
+# only stays honest if a gate re-measures it, which is what this is.
+MINIMUM_EXAMPLE_PLUGINS = 8
+
+
+def _example_apiversion(entry: Path) -> int:
+    """A plugin's apiversion, defaulting the way the loader does.
+
+    `src/plugins.c:712` reads `htsmsg_get_u32_or_default(ctrl, "apiversion",
+    1)`, so a manifest that omits the key is a version 1 plugin and gets
+    api-v1.js -- and with it the `showtime` global. Defaulting to 2 here would
+    report its every use as an error the runtime does not have.
+
+    The identical read at :688 is the *bitcode* branch, inside
+    `#if ENABLE_VMIR` and routed to `np_plugin_load`; it is not compiled at
+    all in a build without VMIR and never governs a JavaScript plugin.
+    """
+    manifest = entry / "plugin.json"
+    if not manifest.is_file():
+        return 1
+    # A manifest that does not parse is a corpus defect, not a version-1
+    # plugin: the runtime would refuse to load it. Silently defaulting hands
+    # it v1 declarations and reports the gate green over a plugin that cannot
+    # run at all.
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    if "apiversion" not in data:
+        return 1
+    version = data["apiversion"]
+    if isinstance(version, bool):
+        # htsmsg has no boolean->s64 conversion; HMF_BOOL falls to the
+        # `default:` arm and returns CONVERSION_IMPOSSIBLE, so the loader
+        # takes its default. Checked before `int`, since bool IS an int here.
+        return 1
+    if isinstance(version, int):
+        return version
+    if isinstance(version, str):
+        # `htsmsg_get_s64` converts an HMF_STR field with
+        # `strtoll(f->hmf_str, NULL, 0)` (src/htsmsg/htsmsg.c:330-332), so
+        # `"apiversion": "2"` really does load as version 2. Treating a
+        # string as "not an int, default to 1" granted such a plugin the v1
+        # declarations -- and with them `showtime`, a name it does not have
+        # at runtime. That is a false accept in the exact direction the
+        # v1/v2 split exists to prevent.
+        return _strtoll_base0(version)
+    # Any other JSON type is a map, list or null; htsmsg has no conversion
+    # for those either, so the loader defaults.
+    return 1
+
+
+def _strtoll_base0(text: str) -> int:
+    """`strtoll(s, NULL, 0)`: leading space, optional sign, base from prefix,
+    and a stop at the first character that does not fit -- with no digits at
+    all yielding 0 rather than an error."""
+    match = re.match(r"\s*[+-]?(?:0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)",
+                     text)
+    if match is None:
+        return 0
+    literal = match.group(0).strip()
+    try:
+        return int(literal, 0)
+    except ValueError:
+        return 0
+
+
+def check_plugin_examples(tsc: str) -> list[str]:
+    """Type-check `plugin_examples/` against the declarations it would get."""
+    errors: list[str] = []
+    plugins = sorted(
+        entry for entry in EXAMPLES_DIR.iterdir() if entry.is_dir())
+    # A plugin directory with no JavaScript was silently skipped, so deleting
+    # a corpus member's sources removed it from the gate instead of failing
+    # it -- and the floor below counted the survivors.
+    empty = [entry.name for entry in plugins if not any(entry.glob("*.js"))]
+    if empty:
+        errors.append(
+            "plugin_examples/%s has no .js to check"
+            % ", plugin_examples/".join(sorted(empty)))
+        return errors
+    if len(plugins) < MINIMUM_EXAMPLE_PLUGINS:
+        errors.append(
+            "plugin_examples has %d plugins, expected at least %d -- a gate "
+            "that shrinks with its corpus proves nothing"
+            % (len(plugins), MINIMUM_EXAMPLE_PLUGINS))
+        return errors
+    with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(8, len(plugins))) as pool:
+        errors.extend(
+            error for error in pool.map(
+                lambda entry: _check_one_example(tsc, entry), plugins)
+            if error is not None)
+    return errors
+
+
+def _check_one_example(tsc: str, entry: Path) -> str | None:
+    """One example plugin against the declarations its apiversion gets."""
+    sources = sorted(entry.glob("*.js"))
+    declarations = [GENERATED_DTS]
+    if _example_apiversion(entry) == 1:
+        declarations.append(GENERATED_V1_DTS)
+    command = [
+        tsc, "--noEmit", "--allowJs", "--checkJs",
+        "--target", "ES5", "--lib", "ES5",
+        "--module", "commonjs", "--moduleResolution", "node",
+        "--pretty", "false", "--noErrorTruncation",
+        *[_tsc_input_argument(path) for path in [*sources, *declarations]],
+    ]
+    result = subprocess.run(
+        command, cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, check=False,
+        timeout=SUBPROCESS_TIMEOUT_SECONDS)
+    # Only diagnostics against the example itself. A declaration file's
+    # own diagnostics belong to the fixtures above, and counting them here
+    # would make this gate fail for a reason it cannot explain.
+    own = [line for line in result.stdout.splitlines()
+           if line.startswith("plugin_examples/")]
+    if own:
+        return ("plugin_examples/%s does not compile against the "
+                "API it demonstrates:\n%s"
+                % (entry.name, "\n".join(own)))
+    return None
 
 
 def _load_metadata() -> dict:
@@ -2849,6 +3033,19 @@ def main() -> int:
     print("reference-dts: generated-dts coverage floor OK "
           "(%d members, each removed breaks the fixture)"
           % len(GENERATED_COVERAGE_FLOOR))
+
+    try:
+        errors = check_plugin_examples(tsc)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+        print("reference-dts: plugin_examples check failed to run: %s: %s" %
+              (type(error).__name__, error), file=sys.stderr)
+        return 1
+    if errors:
+        for error in errors:
+            print("reference-dts: %s" % error, file=sys.stderr)
+        return 1
+    print("reference-dts: plugin_examples OK "
+          "(every example compiles against its own apiversion's declarations)")
     return 0
 
 
