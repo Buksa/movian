@@ -2430,6 +2430,11 @@ GENERATED_FIXTURE_REQUIRED_MODULES = (
     "showtime/prop",
 )
 
+# Stands where a module name goes in a coverage-floor entry, for the globals:
+# they are reachable without require() and so are declared above the first
+# `declare module` rather than inside one.
+GLOBALS_SCOPE = "<globals>"
+
 # The import floor above proves the fixture NAMES a module. It cannot prove a
 # single member of it is still exercised: a fixture emptied down to its import
 # lines satisfies it, and members can then vanish from the artifact unnoticed.
@@ -2461,17 +2466,44 @@ GENERATED_COVERAGE_FLOOR = (
     # globalSettings from kvstoreSettings.
     ("movian/settings", None, "globalSettings"),
     ("movian/settings", "globalSettings", "id"),
+    # The globals -- reachable without require(), so they live above the first
+    # `declare module` rather than inside one. Measured before these existed:
+    # deleting the whole `declare const Core` block failed the checker, but
+    # deleting Core.sleep, Core.currentVersionString, Core.loadPath or
+    # Core.storagePath left it at exit 0. The block was gated; its contents
+    # were not, which is the same vacuity one level down.
+    (GLOBALS_SCOPE, None, "setTimeout"),
+    (GLOBALS_SCOPE, None, "clearInterval"),
+    (GLOBALS_SCOPE, "console", "log"),
+    (GLOBALS_SCOPE, "Core", "compile"),
+    (GLOBALS_SCOPE, "Core", "sleep"),
+    (GLOBALS_SCOPE, "Core", "timestamp"),
+    (GLOBALS_SCOPE, "Core", "randomBytes"),
+    (GLOBALS_SCOPE, "Core", "resourceDestroy"),
+    (GLOBALS_SCOPE, "Core", "currentVersionInt"),
+    (GLOBALS_SCOPE, "Core", "currentVersionString"),
+    (GLOBALS_SCOPE, "Core", "deviceId"),
+    (GLOBALS_SCOPE, "Core", "loadPath"),
+    (GLOBALS_SCOPE, "Core", "storagePath"),
+    (GLOBALS_SCOPE, "Plugin", "id"),
+    (GLOBALS_SCOPE, "Plugin", "url"),
+    (GLOBALS_SCOPE, "Plugin", "manifest"),
+    (GLOBALS_SCOPE, "Plugin", "apiversion"),
+    (GLOBALS_SCOPE, "Plugin", "path"),
 )
 
-# A declaration line inside a `declare module` or `interface` block. The
-# optional prefix covers both the module's own surface (`export function f`,
-# `const x`) and interface members (`query(...)`, `onstart?: any`, `id: any`).
+# A declaration line inside a `declare module`, an `interface`, or the globals
+# region. The optional prefix covers a module's own surface (`export function
+# f`, `const x`), the globals (`declare function setTimeout`, `declare const
+# Core`) and bare members of an interface or object type (`query(...)`,
+# `onstart?: any`, `id: any`).
 # The lookahead is what keeps it off type references: `): globalSettings;` and
 # `interface globalSettings extends sp {` are not followed by one of `(?:<`.
 def _declaration_re(member: str) -> re.Pattern[str]:
     return re.compile(
         r"^(?P<indent>[ \t]*)"
-        r"(?P<prefix>(?:export[ \t]+)?(?:function|const|var|let)[ \t]+)?"
+        r"(?P<prefix>(?:export[ \t]+|declare[ \t]+)?"
+        r"(?:function|const|var|let)[ \t]+)?"
         r"(?P<name>%s)(?=[ \t]*[(?:<])" % re.escape(member),
         re.MULTILINE)
 
@@ -2537,12 +2569,25 @@ def _rename_declaration(text: str, module: str, interface: str | None,
     compile that follows fails on the missing member alone and not on a
     syntax error that would "prove" coverage for free.
     """
-    start, end = _block_span(text, re.compile(
-        r"^(?P<indent>)declare module '%s' \{" % re.escape(module),
-        re.MULTILINE))
+    if module == GLOBALS_SCOPE:
+        # Everything before the first module block. Bounded rather than
+        # whole-file so a same-named member inside a module cannot be renamed
+        # in its place and report coverage the globals do not have.
+        end = text.find("declare module '")
+        if end < 0:
+            raise ValueError("artifact declares no modules")
+        start = 0
+    else:
+        start, end = _block_span(text, re.compile(
+            r"^(?P<indent>)declare module '%s' \{" % re.escape(module),
+            re.MULTILINE))
     if interface is not None:
+        # `interface X {` inside a module, or `declare const X: {` for a
+        # global object -- both are a named brace block closed at their own
+        # indentation.
         inner_start, inner_end = _block_span(text[start:end], re.compile(
-            r"^(?P<indent>[ \t]*)interface %s\b[^\n]*\{" % re.escape(interface),
+            r"^(?P<indent>[ \t]*)(?:interface|declare const) %s\b[^\n]*\{"
+            % re.escape(interface),
             re.MULTILINE))
         start, end = start + inner_start, start + inner_end
     block = text[start:end]
@@ -2584,8 +2629,11 @@ def _check_generated_coverage(tsc: str) -> list[str]:
     artifact = _read(GENERATED_DTS)
     with tempfile.TemporaryDirectory(prefix="movian-coverage-") as directory:
         scratch = Path(directory)
+        # Capped rather than one worker per entry: the floor outgrew the
+        # core count and 27 concurrent compilers spent more time contending
+        # than compiling (19.6s wall at unbounded, 8.7s at this cap).
         with concurrent.futures.ThreadPoolExecutor(
-                max_workers=len(GENERATED_COVERAGE_FLOOR)) as pool:
+                max_workers=min(8, len(GENERATED_COVERAGE_FLOOR))) as pool:
             results = list(pool.map(
                 lambda entry: _coverage_probe(tsc, entry, scratch, artifact),
                 GENERATED_COVERAGE_FLOOR))

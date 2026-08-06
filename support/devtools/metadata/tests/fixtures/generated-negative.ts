@@ -57,5 +57,17 @@ http.request('https://e.test', {}, (err: any, res) => {
     void res.statuscode;  // EXPECT_TS18047
 });
 
+// The globals must be real declarations, not an escape hatch: a member that
+// does not exist stays an error, and the guarded ones stay optional.
+console.nosuchmethod('x');  // EXPECT_TS2339
+const unguarded: string = Plugin.path;  // EXPECT_TS2322
+// The same pin for the two Core paths. Without these the positive fixture's
+// `string | undefined` annotations pass under a REQUIRED emission too, so the
+// optionality would be documented and unenforced -- which is what the two
+// guards exist to record.
+const unguardedLoad: string = Core.loadPath;  // EXPECT_TS2322
+const unguardedStorage: string = Core.storagePath;  // EXPECT_TS2322
+
 void missing; void absent; void tooMany; void bogus; void noProps;
-void async; void nothere;
+void async; void nothere; void unguarded;
+void unguardedLoad; void unguardedStorage;

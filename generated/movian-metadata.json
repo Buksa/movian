@@ -3478,6 +3478,241 @@
     ]
   },
   "js": {
+    "globals": {
+      "functions": [
+        {
+          "name": "clearInterval",
+          "nargs": 1,
+          "source": {
+            "file": "src/ecmascript/es_timer.c",
+            "line": 242
+          },
+          "variadic": false
+        },
+        {
+          "name": "clearTimeout",
+          "nargs": 1,
+          "source": {
+            "file": "src/ecmascript/es_timer.c",
+            "line": 241
+          },
+          "variadic": false
+        },
+        {
+          "name": "setInterval",
+          "nargs": 2,
+          "source": {
+            "file": "src/ecmascript/es_timer.c",
+            "line": 240
+          },
+          "variadic": false
+        },
+        {
+          "name": "setTimeout",
+          "nargs": 2,
+          "source": {
+            "file": "src/ecmascript/es_timer.c",
+            "line": 239
+          },
+          "variadic": false
+        }
+      ],
+      "objects": [
+        {
+          "functions": [
+            {
+              "name": "compile",
+              "nargs": 1,
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 375
+              },
+              "variadic": false
+            },
+            {
+              "name": "randomBytes",
+              "nargs": 1,
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 379
+              },
+              "variadic": false
+            },
+            {
+              "name": "resourceDestroy",
+              "nargs": 1,
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 376
+              },
+              "variadic": false
+            },
+            {
+              "name": "sleep",
+              "nargs": 1,
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 377
+              },
+              "variadic": false
+            },
+            {
+              "name": "timestamp",
+              "nargs": 0,
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 378
+              },
+              "variadic": false
+            }
+          ],
+          "name": "Core",
+          "properties": [
+            {
+              "kind": "number",
+              "name": "currentVersionInt",
+              "optional": false,
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 479
+              }
+            },
+            {
+              "kind": "string",
+              "name": "currentVersionString",
+              "optional": false,
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 482
+              }
+            },
+            {
+              "kind": "string",
+              "name": "deviceId",
+              "optional": false,
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 485
+              }
+            },
+            {
+              "kind": "string",
+              "name": "loadPath",
+              "optional": true,
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 489
+              }
+            },
+            {
+              "kind": "string",
+              "name": "storagePath",
+              "optional": true,
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 494
+              }
+            }
+          ],
+          "source": {
+            "file": "src/ecmascript/ecmascript.c",
+            "line": 476
+          }
+        },
+        {
+          "functions": [],
+          "name": "Plugin",
+          "properties": [
+            {
+              "kind": "number",
+              "name": "apiversion",
+              "optional": false,
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 903
+              }
+            },
+            {
+              "kind": "string",
+              "name": "id",
+              "optional": false,
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 894
+              }
+            },
+            {
+              "kind": "string",
+              "name": "manifest",
+              "optional": false,
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 900
+              }
+            },
+            {
+              "kind": "string",
+              "name": "path",
+              "optional": true,
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 907
+              }
+            },
+            {
+              "kind": "string",
+              "name": "url",
+              "optional": false,
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 897
+              }
+            }
+          ],
+          "source": {
+            "file": "src/ecmascript/ecmascript.c",
+            "line": 891
+          }
+        },
+        {
+          "functions": [
+            {
+              "name": "error",
+              "nargs": -1,
+              "source": {
+                "file": "src/ecmascript/es_console.c",
+                "line": 89
+              },
+              "variadic": true
+            },
+            {
+              "name": "log",
+              "nargs": -1,
+              "source": {
+                "file": "src/ecmascript/es_console.c",
+                "line": 88
+              },
+              "variadic": true
+            },
+            {
+              "name": "warn",
+              "nargs": -1,
+              "source": {
+                "file": "src/ecmascript/es_console.c",
+                "line": 90
+              },
+              "variadic": true
+            }
+          ],
+          "name": "console",
+          "properties": [],
+          "source": {
+            "file": "src/ecmascript/ecmascript.c",
+            "line": 509
+          }
+        }
+      ]
+    },
     "modules": [
       {
         "exports": [
@@ -6953,6 +7188,6 @@
       }
     ]
   },
-  "movianRevision": "c8e96be29f87a6e8969224a25b7a90195100c209",
+  "movianRevision": "22e860eff73c44380666f5b79428a1644ca211ef",
   "schemaVersion": 1
 }
