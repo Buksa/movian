@@ -78,6 +78,7 @@ void async; void nothere; void unguarded;
 new page.Route('items:(.*)', (p) => {
     p.appendItem('u', 'directory', {}).onSelect = () => { };  // EXPECT_TS2339
     p.appendAction('t', () => { }).onSelect = () => { };  // EXPECT_TS2339
+    p.appendPassiveItem('label', {}, {}).onSelect = () => { };  // EXPECT_TS2339
 });
 
 void unguardedLoad; void unguardedStorage;
