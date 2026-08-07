@@ -1,0 +1,9 @@
+{
+  "type": "ecmascript",
+  "id": "examples.websocket",
+  "file": "main.js",
+  "title": "WebSocket Client",
+  "version": "1.0.0",
+  "apiversion": 2,
+  "category": "other"
+}

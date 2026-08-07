@@ -1,0 +1,9 @@
+{
+  "type": "ecmascript",
+  "id": "examples.pagination",
+  "file": "main.js",
+  "title": "Pagination Example",
+  "version": "1.0.0",
+  "apiversion": 2,
+  "category": "video"
+}

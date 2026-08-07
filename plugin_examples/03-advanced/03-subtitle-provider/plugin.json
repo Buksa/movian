@@ -1,0 +1,9 @@
+{
+  "type": "ecmascript",
+  "id": "examples.subtitles",
+  "file": "main.js",
+  "title": "Subtitle Provider",
+  "version": "1.0.0",
+  "apiversion": 2,
+  "category": "subtitles"
+}

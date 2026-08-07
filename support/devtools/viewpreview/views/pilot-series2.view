@@ -1,0 +1,306 @@
+// Pilot page for the mockup -> .view design loop (issue #89).
+// Reproduces a TV-series episodes page from a user-supplied reference
+// screenshot: navbar, poster+info left column, focused season header
+// card and an episode list on the right. Driven entirely by
+// fixtures/pilot-series.json (viewpreview schema v1); placeholder
+// images live in fixtures/img/pilot/ -- no third-party artwork.
+//
+// $self here is the page prop (see ../README.md): fixture metadata is
+// $self.model.metadata.*, extra top-level keys land on $self.model.*
+// and list entries are children of $self.model.nodes.
+
+// 4-quad outline frame (backdrop border-scaling never renders the
+// horizontal bands on this stand -- see the #89 pilot report)
+#define FRAME(FALPHA) {
+  widget(container_y, {
+    alpha: FALPHA;
+    widget(quad, { height: 2; });
+    widget(dummy, { });
+    widget(quad, { height: 2; });
+  });
+  widget(container_x, {
+    alpha: FALPHA;
+    widget(quad, { width: 2; });
+    widget(dummy, { });
+    widget(quad, { width: 2; });
+  });
+}
+
+#define NAVICON(SRC) {
+  widget(icon, {
+    size: 1.4em;
+    color: 0.85;
+    source: SRC;
+  });
+}
+
+widget(container_z, {
+
+  // Dark greenish background
+  widget(quad, {
+    color: [0.055, 0.075, 0.045];
+  });
+
+  widget(container_y, {
+    padding: [1.5em, 0.6em];
+    spacing: 0.8em;
+
+    // ---------------------------------------------------------- navbar
+    widget(container_x, {
+      height: 2em;
+      spacing: 0.9em;
+
+      NAVICON("skin://icons/ic_arrow_back_48px.svg");
+      NAVICON("skin://icons/ic_menu_48px.svg");
+      widget(label, {
+        caption: $self.model.metadata.pageTitle;
+        size: 1.5em;
+      });
+
+      widget(dummy, { });
+
+      NAVICON("skin://icons/ic_search_48px.svg");
+
+      // bell substitute + red badge dot
+      widget(container_z, {
+        width: 1.6em;
+        NAVICON("skin://icons/ic_alarm_48px.svg");
+        widget(container_y, {
+          align: top;
+          widget(container_x, {
+            align: right;
+            widget(quad, {
+              width: 0.35em;
+              height: 0.35em;
+              color: [0.9, 0.15, 0.1];
+            });
+          });
+        });
+      });
+
+      NAVICON("skin://icons/ic_settings_48px.svg");
+      NAVICON("skin://icons/ic_person_48px.svg");
+      NAVICON("skin://icons/ic_fullscreen_48px.svg");
+
+      widget(label, {
+        caption: $self.model.metadata.clock;
+        size: 1.7em;
+      });
+
+      widget(container_y, {
+        align: center;
+        widget(label, {
+          caption: $self.model.metadata.date;
+          size: 0.75em;
+        });
+        widget(label, {
+          caption: $self.model.metadata.weekday;
+          size: 0.75em;
+          color: 0.8;
+        });
+      });
+    });
+
+    // ------------------------------------------------------- main split
+    widget(container_x, {
+      spacing: 2em;
+
+      // Left column: poster + series info
+      widget(container_y, {
+        weight: 1.0;
+        filterConstraintX: true;
+        spacing: 0.55em;
+
+        widget(container_x, {
+          height: 11em;
+          widget(image, {
+            width: 7.5em;
+            source: "../fixtures/" + $self.model.metadata.poster;
+          });
+          widget(dummy, { });
+        });
+
+        widget(label, {
+          caption: $self.model.metadata.year + " - " + $self.model.metadata.country;
+          size: 1.05em;
+        });
+
+        widget(container_x, {
+          spacing: 0.4em;
+          height: 1.4em;
+          widget(label, {
+            caption: "★";
+            size: 1.2em;
+            color: [0.95, 0.85, 0.4];
+          });
+          widget(label, {
+            caption: $self.model.metadata.rating;
+            size: 1.3em;
+          });
+        });
+
+        widget(container_x, {
+          height: 1.5em;
+          widget(container_z, {
+            width: 2.6em;
+            FRAME(0.9);
+            widget(label, {
+              caption: $self.model.metadata.ageRating;
+              align: center;
+              size: 0.9em;
+            });
+          });
+          widget(dummy, { });
+        });
+
+        widget(label, {
+          caption: $self.model.metadata.title;
+          size: 2.7em;
+        });
+
+        widget(label, {
+          caption: $self.model.metadata.genres;
+          size: 0.95em;
+          color: 0.85;
+        });
+
+        widget(label, {
+          caption: $self.model.metadata.description;
+          size: 1.0em;
+          maxlines: 10;
+          color: 0.9;
+        });
+      });
+
+      // Right column: season header card + episode list
+      widget(container_y, {
+        weight: 2.6;
+        filterConstraintX: true;
+        spacing: 0.7em;
+
+        // Focused season header card (focus weight above the rows so it
+        // owns initial focus like in the reference)
+        widget(container_z, {
+          height: 4.6em;
+          focusable: 2;
+          alpha: select(isFocused(), 1, 0.55);
+
+          FRAME(1);
+          widget(container_y, {
+            padding: [1em, 0.4em];
+            spacing: 0.3em;
+            widget(label, {
+              caption: $self.model.season.title;
+              size: 1.5em;
+            });
+            widget(container_x, {
+              spacing: 0.4em;
+              widget(label, {
+                caption: "Рейтинг: " + $self.model.season.rating +
+                  "  •  Дата релиза: " + $self.model.season.releaseDate +
+                  "  •  Серии: " + $self.model.season.episodeCount;
+                size: 0.9em;
+                color: 0.8;
+              });
+            });
+          });
+        });
+
+        // Episode list
+        widget(list_y, {
+          spacing: 0.7em;
+
+          cloner($self.model.nodes, container_z, {
+            height: 5.8em;
+            focusable: 0.5;
+
+            // subtle row highlight when focused
+            widget(quad, {
+              alpha: select(isFocused(), 0.12, 0.04);
+              color: [1, 1, 1];
+            });
+
+            widget(container_x, {
+              spacing: 1em;
+              padding: [0.2em, 0.2em];
+
+              // thumbnail with the big episode number overlaid
+              widget(container_z, {
+                width: 9.5em;
+                widget(image, {
+                  source: "../fixtures/" + $self.metadata.icon;
+                });
+                widget(label, {
+                  caption: $self.episode;
+                  size: 2.2em;
+                  align: bottomLeft;
+                  padding: [0.3em, 0.1em];
+                });
+              });
+
+              widget(container_y, {
+                spacing: 0.25em;
+                align: center;
+                filterConstraintX: true;
+
+                widget(container_x, {
+                  widget(label, {
+                    caption: $self.metadata.title;
+                    size: 1.35em;
+                  });
+                  widget(dummy, { });
+                  widget(label, {
+                    caption: $self.duration;
+                    size: 0.95em;
+                    color: 0.85;
+                    align: right;
+                  });
+                });
+
+                // progress bar
+                widget(container_z, {
+                  height: 0.25em;
+                  widget(quad, {
+                    color: [1, 1, 1];
+                    alpha: 0.15;
+                  });
+                  widget(container_x, {
+                    widget(quad, {
+                      weight: $self.progress;
+                      color: [0.85, 0.9, 0.85];
+                      alpha: select($self.progress > 0, 0.9, 0);
+                    });
+                    widget(dummy, {
+                      weight: 1 - $self.progress;
+                    });
+                  });
+                });
+
+                widget(container_x, {
+                  spacing: 0.4em;
+                  height: 1.2em;
+                  widget(label, {
+                    caption: "★";
+                    size: 0.95em;
+                    color: [0.95, 0.85, 0.4];
+                    hidden: $self.rating == "0.0";
+                  });
+                  widget(label, {
+                    caption: $self.rating;
+                    size: 1.0em;
+                    hidden: $self.rating == "0.0";
+                  });
+                  widget(label, {
+                    caption: "•  " + $self.airdate;
+                    size: 0.95em;
+                    color: 0.8;
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+});

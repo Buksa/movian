@@ -1,0 +1,9 @@
+{
+  "type": "ecmascript",
+  "id": "examples.html-parser",
+  "file": "main.js",
+  "title": "HTML Parser Example",
+  "version": "1.0.0",
+  "apiversion": 2,
+  "category": "video"
+}
