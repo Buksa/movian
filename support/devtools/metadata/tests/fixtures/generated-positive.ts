@@ -125,6 +125,13 @@ new page.Route('paged:(.*)', (paged) => {
     // guard-only hook, so it must NOT have become optional.
     paged.paginator = () => true;
 });
+// The append methods return a real `Item`, so its own members resolve --
+// this is what makes an invented one an error rather than a silent no-op.
+new page.Route('appended:(.*)', (p) => {
+    p.appendItem('u', 'directory', {}).addOptAction('t', () => { }, 's');
+    p.appendPassiveItem('label', {}, {}).disable();
+    p.appendAction('t', () => { }).enable();
+});
 // plugin_examples/videoscrobbling/videoscrobbling_example.js:51 -- no arguments.
 const scrobbler = new videoscrobbler.VideoScrobbler();
 scrobbler.onstart = (data: any) => { void data; };

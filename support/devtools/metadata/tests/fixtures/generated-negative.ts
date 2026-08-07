@@ -9,6 +9,7 @@ import prop = require('movian/prop');
 import xmlrpc = require('movian/xmlrpc');
 import http = require('movian/http');
 import settings = require('movian/settings');
+import page = require('movian/page');
 
 // A module the loader does not have. If this ever stops erroring, the
 // declarations have grown a wildcard and TS2307 detection is dead.
@@ -70,4 +71,14 @@ const unguardedStorage: string = Core.storagePath;  // EXPECT_TS2322
 
 void missing; void absent; void tooMany; void bogus; void noProps;
 void async; void nothere; void unguarded;
+// The append methods return `Item`, not `any`. While they returned `any`, a
+// plugin could assign any member name and it type-checked: `Item.onSelect`
+// shipped in two examples, was never called, and no gate could see it (#177).
+// Zero of the nine real plugins use it -- it existed only in examples.
+new page.Route('items:(.*)', (p) => {
+    p.appendItem('u', 'directory', {}).onSelect = () => { };  // EXPECT_TS2339
+    p.appendAction('t', () => { }).onSelect = () => { };  // EXPECT_TS2339
+    p.appendPassiveItem('label', {}, {}).onSelect = () => { };  // EXPECT_TS2339
+});
+
 void unguardedLoad; void unguardedStorage;

@@ -4858,6 +4858,7 @@
                   "func",
                   "subtype"
                 ],
+                "returns": "Item",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
                   "line": 299
@@ -4871,6 +4872,7 @@
                   "type",
                   "metadata"
                 ],
+                "returns": "Item",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
                   "line": 263
@@ -4884,6 +4886,7 @@
                   "data",
                   "metadata"
                 ],
+                "returns": "Item",
                 "source": {
                   "file": "res/ecmascript/modules/movian/page.js",
                   "line": 320
@@ -7512,6 +7515,6 @@
       }
     ]
   },
-  "movianRevision": "9a9000cd4279d98a26767a97865a3d655fcb0d8e",
+  "movianRevision": "a4dae4ec68cafc385aa0db144e4c327873b8e00a",
   "schemaVersion": 1
 }

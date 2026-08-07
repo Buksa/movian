@@ -2768,7 +2768,6 @@ def check_generated_typescript(tsc: str) -> list[str]:
 
 
 EXAMPLES_DIR = REPO_ROOT / "plugin_examples"
-GENERATED_V1_DTS = REPO_ROOT / "generated" / "movian-api-v1.d.ts"
 # The audit that opened #169 found half this corpus not compiling against the
 # API it demonstrates. Measuring it once buys one clean snapshot; the corpus
 # only stays honest if a gate re-measures it, which is what this is.

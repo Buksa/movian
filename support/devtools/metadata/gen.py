@@ -927,7 +927,53 @@ def _shape_method(
     # `_uses_arguments` brace-matches this method's own body.
     if region is not None and "params" in record and _uses_arguments(region):
         record["variadic"] = True
+    if region is not None:
+        returned = _returned_shape(region)
+        if returned is not None:
+            record["returns"] = returned
     return record
+
+
+def _returned_shape(region: str) -> str | None:
+    """The shape a method returns, when it plainly returns one.
+
+    Two forms, and the second is the one that mattered: `return new Item(...)`
+    directly, and the construct-then-return that `movian/page` actually uses --
+
+        Page.prototype.appendItem = function(url, type, metadata) {
+          var item = new Item(this);
+          ...
+          return item;
+        }
+
+    Module exports were already scanned for the first form; prototype methods
+    were scanned for neither and emitted `: any` unconditionally. That is the
+    hole `Item.onSelect` lived in: with the receiver typed `any`, a plugin
+    could assign any member name and every gate stayed green (#177).
+
+    Answers only when the evidence is unambiguous -- one shape, and every
+    value-returning path agreeing. A method returning two different things, or
+    a shape mixed with a plain value, keeps `any`, because a wrong return type
+    invents errors a plugin does not have.
+    """
+    body = _own_body(region)
+    if not body:
+        return None
+    direct = set(re.findall(
+        r"\breturn\s+new\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", body))
+    named = set(re.findall(r"\breturn\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*;", body))
+    shapes = set(direct)
+    for name in named:
+        constructed = re.findall(
+            r"\b(?:var|let|const)\s+%s\s*=\s*new\s+([A-Za-z_$][A-Za-z0-9_$]*)"
+            r"\s*\(" % re.escape(name), body)
+        if not constructed:
+            # `return someArgument;` or a value built another way -- no claim.
+            return None
+        shapes.update(constructed)
+    if len(shapes) != 1:
+        return None
+    return next(iter(shapes))
 
 def _split_js_fields(text: str) -> list[str]:
     fields: list[str] = []
@@ -3224,6 +3270,11 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 shape for shape in shapes
                 if shape.get("kind") == "shared"
             ]
+            # Defined before the first use below, not after it. The prototype
+            # emission needs it to render a return type, and it used to be
+            # assigned further down -- which would have read the PREVIOUS
+            # module's set, making the output depend on module order.
+            shape_names = {shape["name"] for shape in prototype_shapes}
             if prototype_shapes:
                 lines.append("  // CommonJS prototype shapes")
                 for shape in prototype_shapes:
@@ -3232,9 +3283,17 @@ def render_dts(artifact: dict[str, Any]) -> str:
                         arity, signature = member_signature(method)
                         if arity is not None:
                             lines.append("    /** @arity %s */" % arity)
+                        # A method that plainly returns a shape says so.
+                        # Emitting `any` left every member of the returned
+                        # object unchecked: `Item.onSelect` shipped in two
+                        # examples and was never called, because
+                        # `appendItem(...)` was `any` and any assignment onto
+                        # it type-checked (#177).
                         lines.append(
-                            "    %s(%s): any;" %
-                            (method["name"], signature))
+                            "    %s(%s): %s;" %
+                            (method["name"], signature,
+                             render_return_type(
+                                 method.get("returns", "any"), shape_names)))
                     for prop in shape.get("properties", []):
                         # A plugin-supplied hook the module only guards is
                         # optional: requiring it would produce errors the
@@ -3284,9 +3343,17 @@ def render_dts(artifact: dict[str, Any]) -> str:
                         arity, signature = member_signature(method)
                         if arity is not None:
                             lines.append("    /** @arity %s */" % arity)
+                        # A method that plainly returns a shape says so.
+                        # Emitting `any` left every member of the returned
+                        # object unchecked: `Item.onSelect` shipped in two
+                        # examples and was never called, because
+                        # `appendItem(...)` was `any` and any assignment onto
+                        # it type-checked (#177).
                         lines.append(
-                            "    %s(%s): any;" %
-                            (method["name"], signature))
+                            "    %s(%s): %s;" %
+                            (method["name"], signature,
+                             render_return_type(
+                                 method.get("returns", "any"), shape_names)))
                     for prop in shape.get("properties", []):
                         lines.append("    %s%s: any;" % (
                             prop["name"],
@@ -3328,9 +3395,6 @@ def render_dts(artifact: dict[str, Any]) -> str:
 
             if exports:
                 lines.append("  // CommonJS exports")
-            shape_names = {
-                shape["name"] for shape in prototype_shapes
-            }
             # The instance type a receiver-mutating initializer produces.
             # Only unambiguous with exactly one shared shape in the module;
             # with none or several there is nothing to name, and the
