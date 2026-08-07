@@ -48,24 +48,27 @@ new page.Route("example:paginate:append", function(page) {
   loadItems(currentOffset);
   currentOffset += limit;
   
-  // Add "More" entry
-  page.appendItem("", "directory", {
-    title: "Load More...",
-    description: "Click to load next " + limit + " items"
-  }).onSelect = function() {
-    // Remove the "More" item and load next batch
-    page.flush(); // Or use smarter removal
-    loadItems(currentOffset);
-    currentOffset += limit;
-    
-    // Re-add "More" button if we want
-    if (currentOffset < 100) { // arbitrary limit for demo
-      page.appendItem("", "directory", {
-        title: "Load More...",
-        description: "Loaded " + currentOffset + " items so far"
-      }).onSelect = arguments.callee; // recursive reference
-    }
-  };
+  // A row that runs a function is `page.appendAction(title, func)`
+  // (page.js:299-315) -- it creates an item of type "action" and calls the
+  // function on Activate.
+  //
+  // An `Item` has NO `onSelect`. The earlier version of this example assigned
+  // one, which is silently accepted (the item object is `any` to a type
+  // checker, and a plain property assignment is legal JavaScript) and then
+  // never called: "Load More" did nothing. Nothing in the corpus of nine real
+  // plugins uses `onSelect`; it exists only in examples. What an item CAN
+  // carry is a URL — that is how a row navigates — and `Item.onEvent(type, cb)`
+  // is the low-level hook underneath.
+  function appendMore() {
+    page.appendAction("Load More...", function() {
+      loadItems(currentOffset);
+      currentOffset += limit;
+      if (currentOffset < 100) {
+        appendMore();
+      }
+    });
+  }
+  appendMore();
   
   page.loading = false;
 });
