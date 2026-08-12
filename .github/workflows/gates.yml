@@ -1,0 +1,97 @@
+# Run the gates this repository already has.
+#
+# Between 2026-08-07 and 2026-08-11 nothing ran them: `gen.py --check` was green
+# because a human happened to type it. Five rounds (#160, #169, #175, #177, and
+# the SDK's typefloor) built gates whose value is proportional to how often they
+# run, and their answer to "what can change this gate's verdict?" was "whether
+# someone remembered".
+#
+# Deliberately NOT a build. `gen.py --check` reads sources only -- verified in a
+# pristine worktree with no `build.debug`: exit 0 in 30s. A compile job is a
+# separate decision with a much larger footprint (submodules, libav, ext-cache);
+# this one keeps the whole workflow under a minute so it can run on every push.
+name: gates
+
+on:
+  push:
+    branches: [movian6]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  metadata:
+    name: metadata + plugin API declarations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # No submodules: this gate reads res/ecmascript/, src/ecmascript/ and
+          # plugin_examples/ only. `git rev-parse HEAD` must work, so no
+          # shallow-clone tricks beyond the default.
+          submodules: false
+
+      - uses: actions/setup-python@v5
+        with:
+          # gen.py uses PEP 604 unions and 3.10+ syntax throughout.
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Pinned inside the band `check_reference_dts.py` enforces
+      # (TSC_SUPPORTED_MIN 5.3 .. TSC_SUPPORTED_BELOW 7.0). The negative
+      # fixtures pin exact diagnostic codes and TypeScript renumbers them across
+      # releases, so `latest` would eventually red a CORRECT tree -- measured on
+      # 5.2.2 and 7.0.2 during #165. The checker refuses an out-of-band compiler
+      # by design; pinning here means it never has to.
+      - name: Install TypeScript
+        run: npm install -g typescript@5.7.3
+
+      - name: Versions
+        run: |
+          python3 --version
+          tsc --version
+
+      # Regenerates in memory and diffs, then runs the reference-dts battery:
+      # source shapes, positive/negative fixtures for both declaration files,
+      # the 72-member coverage floor (each member removed must break the
+      # fixture), every plugin_examples plugin compiled against its own
+      # apiversion, and CommonJS coverage against the runtime oracle.
+      #
+      # The `movianRevision` line it prints is informational and never fails:
+      # the artifact is generated before the commit carrying it exists, so its
+      # stamp trails HEAD in every correct tree.
+      - name: gen.py --check
+        run: python3 support/devtools/metadata/gen.py --check
+
+  hygiene:
+    name: whitespace and merge markers
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      # `git diff --check` reports trailing whitespace, space-before-tab and
+      # conflict markers. Scoped to what the change actually touches, against
+      # the merge base, so a pre-existing offence elsewhere does not red an
+      # unrelated PR.
+      - name: git diff --check against the merge base
+        run: |
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "no usable base ref; checking the last commit only"
+            base="HEAD^"
+          fi
+          git diff --check "$base"...HEAD
