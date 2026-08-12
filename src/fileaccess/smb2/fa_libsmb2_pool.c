@@ -305,6 +305,17 @@ movian_smb2_connect_once(const movian_smb2_target_t *target,
 
   *status = smb2_connect_share(smb2, connect_server, share, user);
   if(*status == 0) {
+    if(credentials->password != NULL && credentials->password[0] != '\0' &&
+       (smb2_get_session_flags(smb2) & SMB2_SESSION_FLAG_IS_GUEST)) {
+      SMB2TRACE("%s/%s Server ignored credentials and granted guest access "
+                "-- treating as an authentication failure", target->server,
+                share != NULL ? share : "");
+      smb2_destroy_context(smb2);
+      *status = -EACCES;
+      snprintf(errbuf, errlen,
+               "Server ignored credentials and granted guest access");
+      return NULL;
+    }
     SMB2TRACE("%s/%s Session setup", target->server,
               share != NULL ? share : "");
     return smb2;
@@ -392,66 +403,92 @@ movian_smb2_connect_impl(const movian_smb2_target_t *target, const char *share,
     return NULL;
   }
 
-  movian_smb2_credentials_fini(&credentials);
-  memset(&credentials, 0, sizeof(credentials));
-  if(movian_smb2_apply_target_identity(target, &credentials,
-                                       errbuf, errlen)) {
-    free(keyring_id);
-    return NULL;
-  }
-  if(credentials.domain == NULL) {
-    credentials.domain = strdup("WORKGROUP");
-    if(credentials.domain == NULL) {
-      snprintf(errbuf, errlen, "Out of memory while preparing SMB2 login");
+  /*
+   * Prompt retry loop: mirrors native's smb_setup_andX "goto again" -- keep
+   * re-prompting with the latest failure reason until the user cancels, a
+   * non-auth error occurs, or the connect succeeds. No iteration cap: native
+   * is unbounded too, the keyring dialog blocks (so there is no spin risk),
+   * and the cancel button is the escape hatch.
+   */
+  int show_reason = have_saved_credentials;
+  for(;;) {
+    movian_smb2_credentials_fini(&credentials);
+    memset(&credentials, 0, sizeof(credentials));
+    if(movian_smb2_apply_target_identity(target, &credentials,
+                                         errbuf, errlen)) {
+      movian_smb2_credentials_fini(&credentials);
       free(keyring_id);
       return NULL;
     }
+    if(credentials.domain == NULL) {
+      credentials.domain = strdup("WORKGROUP");
+      if(credentials.domain == NULL) {
+        snprintf(errbuf, errlen, "Out of memory while preparing SMB2 login");
+        movian_smb2_credentials_fini(&credentials);
+        free(keyring_id);
+        return NULL;
+      }
+    }
+
+    size_t source_len = strlen(target->server) + 16;
+    char *source = malloc(source_len);
+    if(source == NULL) {
+      snprintf(errbuf, errlen, "Out of memory while preparing SMB2 login");
+      movian_smb2_credentials_fini(&credentials);
+      free(keyring_id);
+      return NULL;
+    }
+    snprintf(source, source_len, "SMB2 server '%s'", target->server);
+
+    keyring_status =
+      keyring_lookup(keyring_id,
+                     target->user != NULL ? NULL : &credentials.user,
+                     &credentials.password,
+                     target->domain != NULL ? NULL : &credentials.domain,
+                     NULL, source,
+                     show_reason ? reason : "Login required",
+                     KEYRING_QUERY_USER | KEYRING_SHOW_REMEMBER_ME |
+                     KEYRING_REMEMBER_ME_SET);
+    free(source);
+
+    if(keyring_status != KEYRING_OK) {
+      SMB2TRACE("Credential query rejected status=%d", keyring_status);
+      snprintf(errbuf, errlen, "Authentication rejected by user");
+      movian_smb2_credentials_fini(&credentials);
+      free(keyring_id);
+      return NULL;
+    }
+    SMB2TRACE("Credential query accepted");
+
+    smb2 = movian_smb2_connect_once(target, share, &credentials, timeout,
+                                    &status, reason, sizeof(reason));
+    if(smb2 != NULL) {
+      if(resolved != NULL) {
+        resolved->user =
+          strdup(credentials.user != NULL ? credentials.user : "");
+        resolved->password =
+          strdup(credentials.password != NULL ? credentials.password : "");
+        resolved->domain =
+          strdup(credentials.domain != NULL ? credentials.domain : "");
+      }
+      movian_smb2_credentials_fini(&credentials);
+      free(keyring_id);
+      return smb2;
+    }
+
+    auth_error = movian_smb2_is_auth_error(status, reason);
+    SMB2TRACE("Auth retry (prompted) auth_error=%d status=%d reason=%s",
+              auth_error, status, reason);
+    if(!auth_error) {
+      snprintf(errbuf, errlen, "Unable to connect to SMB2 share: %s", reason);
+      movian_smb2_credentials_fini(&credentials);
+      free(keyring_id);
+      return NULL;
+    }
+
+    /* Auth failed again: loop back and re-prompt with this failure reason. */
+    show_reason = 1;
   }
-
-  size_t source_len = strlen(target->server) + 16;
-  char *source = malloc(source_len);
-  if(source == NULL) {
-    snprintf(errbuf, errlen, "Out of memory while preparing SMB2 login");
-    free(keyring_id);
-    return NULL;
-  }
-  snprintf(source, source_len, "SMB2 server '%s'", target->server);
-
-  keyring_status =
-    keyring_lookup(keyring_id,
-                   target->user != NULL ? NULL : &credentials.user,
-                   &credentials.password,
-                   target->domain != NULL ? NULL : &credentials.domain,
-                   NULL, source,
-                   have_saved_credentials ? reason : "Login required",
-                   KEYRING_QUERY_USER | KEYRING_SHOW_REMEMBER_ME |
-                   KEYRING_REMEMBER_ME_SET);
-  free(source);
-
-  if(keyring_status != KEYRING_OK) {
-    SMB2TRACE("Credential query rejected status=%d", keyring_status);
-    snprintf(errbuf, errlen, "Authentication rejected by user");
-    movian_smb2_credentials_fini(&credentials);
-    free(keyring_id);
-    return NULL;
-  }
-  SMB2TRACE("Credential query accepted");
-
-  smb2 = movian_smb2_connect_once(target, share, &credentials, timeout,
-                                  &status, reason, sizeof(reason));
-  if(smb2 == NULL)
-    snprintf(errbuf, errlen, "Unable to connect to SMB2 share: %s", reason);
-  else if(resolved != NULL) {
-    resolved->user = strdup(credentials.user != NULL ? credentials.user : "");
-    resolved->password =
-      strdup(credentials.password != NULL ? credentials.password : "");
-    resolved->domain =
-      strdup(credentials.domain != NULL ? credentials.domain : "");
-  }
-
-  movian_smb2_credentials_fini(&credentials);
-  free(keyring_id);
-  return smb2;
 }
 
 
