@@ -41,6 +41,7 @@ typedef struct {
   movian_smb2_session_t *session;
   struct smb2fh *fh;
   int64_t size;
+  int read_timeout_sec;
 } movian_smb2_file_t;
 
 typedef struct {
@@ -150,14 +151,26 @@ movian_smb2_enum_callback(struct smb2_context *smb2, int status,
 }
 
 
+/*
+ * Drive a synchronous libsmb2 operation to completion.
+ *
+ * libsmb2 needs its socket serviced (poll on smb2_get_fd/smb2_which_events,
+ * then smb2_service) for any *_async callback to fire. This pumps that loop
+ * until is_done(opaque) returns true (set from a libsmb2 callback) or the
+ * deadline expires. timeout_sec is added to now to form the deadline; callers
+ * pass SMB2_DEFAULT_TIMEOUT + a margin so the network op has room but the loop
+ * still bails.
+ *
+ * Both the share-enum wait and the pipelined-read wait used to inline their own
+ * copy of this loop; they now both go through here.
+ */
 static int
-movian_smb2_wait_for_enum(struct smb2_context *smb2,
-                          movian_smb2_enum_state_t *state)
+movian_smb2_pump(struct smb2_context *smb2, int (*is_done)(void *),
+                 void *opaque, int timeout_sec)
 {
-  int64_t deadline =
-    arch_get_ts() + (SMB2_DEFAULT_TIMEOUT + 5) * 1000000LL;
+  int64_t deadline = arch_get_ts() + (int64_t)timeout_sec * 1000000LL;
 
-  while(!state->done) {
+  while(!is_done(opaque)) {
     int64_t remaining = deadline - arch_get_ts();
     if(remaining <= 0)
       return -1;
@@ -181,6 +194,22 @@ movian_smb2_wait_for_enum(struct smb2_context *smb2,
       return -1;
   }
   return 0;
+}
+
+
+static int
+enum_state_is_done(void *opaque)
+{
+  return ((movian_smb2_enum_state_t *)opaque)->done;
+}
+
+
+static int
+movian_smb2_wait_for_enum(struct smb2_context *smb2,
+                          movian_smb2_enum_state_t *state)
+{
+  return movian_smb2_pump(smb2, enum_state_is_done, state,
+                          SMB2_DEFAULT_TIMEOUT + 5);
 }
 
 
@@ -351,6 +380,79 @@ movian_smb2_scan(fa_protocol_t *fap, fa_dir_t *fd, const char *url,
 }
 
 
+/*
+ * Build a file handle for target under session->lock: open the path, fstat it
+ * (rejecting directories), allocate the handle, and seek to end for FA_APPEND.
+ * Returns the handle (without a session ref, which the caller wires up on
+ * success) or NULL with errbuf filled. The caller must hold session->lock for
+ * the whole call; on failure any opened smb2fh is closed before returning.
+ *
+ * Keeping the lock-scoped work in one function lets movian_smb2_open use a
+ * single, symmetric acquire/release discipline: it always releases on failure
+ * and always transfers the ref to the handle on success, with no goto asymmetry.
+ */
+static movian_smb2_file_t *
+movian_smb2_open_under_lock(fa_protocol_t *fap, const char *url,
+                            movian_smb2_session_t *session,
+                            const movian_smb2_target_t *target,
+                            int flags, char *errbuf, size_t errlen)
+{
+  struct smb2_context *smb2 = session->smb2;
+
+  int open_flags = O_RDONLY;
+  if(flags & FA_WRITE) {
+    open_flags = O_RDWR | O_CREAT;
+    if(!(flags & FA_APPEND))
+      open_flags |= O_TRUNC;
+  }
+
+  struct smb2fh *fh = smb2_open(smb2, target->path, open_flags);
+  if(fh == NULL) {
+    snprintf(errbuf, errlen, "Unable to open SMB2 file: %s",
+             smb2_get_error(smb2));
+    SMB2TRACE("open failed url=%s path='%s' open_flags=0x%x reason=%s",
+              url, target->path, open_flags, errbuf);
+    return NULL;
+  }
+
+  struct smb2_stat_64 statbuf;
+  if(smb2_fstat(smb2, fh, &statbuf) < 0 ||
+     statbuf.smb2_type == SMB2_TYPE_DIRECTORY) {
+    snprintf(errbuf, errlen, "Unable to stat SMB2 file: %s",
+             smb2_get_error(smb2));
+    SMB2TRACE("open fstat rejected url=%s path='%s' smb2_type=%d reason=%s",
+              url, target->path, statbuf.smb2_type, errbuf);
+    smb2_close(smb2, fh);
+    return NULL;
+  }
+  SMB2TRACE("open ok url=%s path='%s' size=%"PRId64, url, target->path,
+            statbuf.smb2_size);
+
+  movian_smb2_file_t *file = calloc(1, sizeof(*file));
+  if(file == NULL) {
+    snprintf(errbuf, errlen, "Out of memory while opening SMB2 file");
+    smb2_close(smb2, fh);
+    return NULL;
+  }
+
+  file->h.fh_proto = fap;
+  file->fh = fh;
+  file->size = statbuf.smb2_size;
+  file->read_timeout_sec = SMB2_DEFAULT_TIMEOUT;
+
+  if(flags & FA_APPEND) {
+    if(smb2_lseek(smb2, file->fh, 0, SEEK_END, NULL) < 0) {
+      snprintf(errbuf, errlen, "Unable to seek SMB2 file: %s",
+               smb2_get_error(smb2));
+      smb2_close(smb2, file->fh);
+      free(file);
+      return NULL;
+    }
+  }
+  return file;
+}
+
+
 static fa_handle_t *
 movian_smb2_open(fa_protocol_t *fap, const char *url,
                  char *errbuf, size_t errlen, int flags,
@@ -383,75 +485,23 @@ movian_smb2_open(fa_protocol_t *fap, const char *url,
     return NULL;
   }
 
-  struct smb2_context *smb2 = session->smb2;
-
-  int open_flags = O_RDONLY;
-  if(flags & FA_WRITE) {
-    open_flags = O_RDWR | O_CREAT;
-    if(!(flags & FA_APPEND))
-      open_flags |= O_TRUNC;
-  }
-
-  movian_smb2_file_t *file = NULL;
-
   hts_mutex_lock(&session->lock);
+  movian_smb2_file_t *file =
+    movian_smb2_open_under_lock(fap, url, session, &target, flags,
+                                errbuf, errlen);
+  hts_mutex_unlock(&session->lock);
 
-  struct smb2fh *fh = smb2_open(smb2, target.path, open_flags);
-  if(fh == NULL) {
-    snprintf(errbuf, errlen, "Unable to open SMB2 file: %s",
-             smb2_get_error(smb2));
-    SMB2TRACE("open failed url=%s path='%s' open_flags=0x%x reason=%s",
-              url, target.path, open_flags, errbuf);
-    goto fail_locked;
-  }
+  movian_smb2_target_fini(&target);
 
-  struct smb2_stat_64 statbuf;
-  if(smb2_fstat(smb2, fh, &statbuf) < 0 ||
-     statbuf.smb2_type == SMB2_TYPE_DIRECTORY) {
-    snprintf(errbuf, errlen, "Unable to stat SMB2 file: %s",
-             smb2_get_error(smb2));
-    SMB2TRACE("open fstat rejected url=%s path='%s' smb2_type=%d reason=%s",
-              url, target.path, statbuf.smb2_type, errbuf);
-    smb2_close(smb2, fh);
-    goto fail_locked;
-  }
-  SMB2TRACE("open ok url=%s path='%s' size=%"PRId64, url, target.path,
-            statbuf.smb2_size);
-
-  file = calloc(1, sizeof(*file));
   if(file == NULL) {
-    snprintf(errbuf, errlen, "Out of memory while opening SMB2 file");
-    smb2_close(smb2, fh);
-    goto fail_locked;
+    /* Symmetric release: acquire and release always pair up on the failure
+       path. On success the ref transfers to the handle (close() releases). */
+    movian_smb2_session_release(session);
+    return NULL;
   }
 
-  file->h.fh_proto = fap;
-  file->fh = fh;
-  file->size = statbuf.smb2_size;
-
-  if(flags & FA_APPEND) {
-    if(smb2_lseek(smb2, file->fh, 0, SEEK_END, NULL) < 0) {
-      snprintf(errbuf, errlen, "Unable to seek SMB2 file: %s",
-               smb2_get_error(smb2));
-      smb2_close(smb2, file->fh);
-      free(file);
-      file = NULL;
-      goto fail_locked;
-    }
-  }
-
-  hts_mutex_unlock(&session->lock);
-
-  /* The handle now owns the session reference. */
   file->session = session;
-  movian_smb2_target_fini(&target);
   return &file->h;
-
-fail_locked:
-  hts_mutex_unlock(&session->lock);
-  movian_smb2_session_release(session);
-  movian_smb2_target_fini(&target);
-  return NULL;
 }
 
 
@@ -470,31 +520,6 @@ movian_smb2_close(fa_handle_t *fh)
 }
 
 
-/*
- * Maximum number of READ PDUs we keep in flight for a single movian_smb2_read()
- * call. Pipelining overlaps the network round trip of one chunk with the
- * server-side disk read of the next, which is what makes the cifs native
- * backend fast for large files; SMB2 gains the same by issuing several
- * smb2_pread_async() PDUs before blocking on the first reply.
- */
-#define SMB2_READ_PIPELINE_DEPTH 4
-
-typedef struct {
-  int done;
-  int status;
-} movian_smb2_read_req_t;
-
-
-static void
-movian_smb2_read_cb(struct smb2_context *smb2, int status,
-                    void *command_data, void *opaque)
-{
-  movian_smb2_read_req_t *req = opaque;
-  req->status = status;
-  req->done = 1;
-}
-
-
 static int
 movian_smb2_read(fa_handle_t *fh, void *buf, size_t size)
 {
@@ -502,113 +527,43 @@ movian_smb2_read(fa_handle_t *fh, void *buf, size_t size)
   uint32_t count = size > INT_MAX ? INT_MAX : size;
 
   hts_mutex_lock(&file->session->lock);
+  struct smb2_context *smb2 = file->session->smb2;
+  struct smb2fh *sfh = file->fh;
+  smb2_set_timeout(smb2, file->read_timeout_sec);
 
-  /*
-   * Keep the simple synchronous path for small reads: the bookkeeping for a
-   * pipelined run is not worth it below one chunk, and short reads (tags,
-   * directory metadata) dominate browsing.
-   */
-  uint32_t max_read = smb2_get_max_read_size(file->session->smb2);
+  uint32_t max_read = smb2_get_max_read_size(smb2);
   if(max_read == 0 || count <= max_read) {
-    int status = smb2_read(file->session->smb2, file->fh, buf, count);
+    int status = smb2_read(smb2, sfh, buf, count);
+    smb2_set_timeout(smb2, SMB2_DEFAULT_TIMEOUT);
     hts_mutex_unlock(&file->session->lock);
     return status;
   }
 
-  struct smb2_context *smb2 = file->session->smb2;
-  struct smb2fh *sfh = file->fh;
+  int64_t start_offset = smb2_lseek(smb2, sfh, 0, SEEK_CUR, NULL);
 
-  int64_t base = smb2_lseek(smb2, sfh, 0, SEEK_CUR, NULL);
-  if(base < 0) {
-    hts_mutex_unlock(&file->session->lock);
-    return -1;
-  }
-
-  movian_smb2_read_req_t reqs[SMB2_READ_PIPELINE_DEPTH];
-  memset(reqs, 0, sizeof(reqs));
-
-  uint32_t chunk = max_read;
-  uint32_t issued = 0;
-  int nreqs = 0;
-  while(issued < count && nreqs < SMB2_READ_PIPELINE_DEPTH) {
-    uint32_t this_count = count - issued;
-    if(this_count > chunk)
-      this_count = chunk;
-
-    if(smb2_pread_async(smb2, sfh, (uint8_t *)buf + issued, this_count,
-                        base + issued, movian_smb2_read_cb,
-                        &reqs[nreqs]) < 0) {
-      if(nreqs == 0) {
-        hts_mutex_unlock(&file->session->lock);
-        return -1;
-      }
-      break;
-    }
-    issued += this_count;
-    nreqs++;
-  }
-
-  if(nreqs == 0) {
-    hts_mutex_unlock(&file->session->lock);
-    return -1;
-  }
-
-  int64_t deadline = arch_get_ts() +
-    (SMB2_DEFAULT_TIMEOUT + 5) * 1000000LL;
-  while(1) {
-    int all_done = 1;
-    for(int i = 0; i < nreqs; i++)
-      if(!reqs[i].done) {
-        all_done = 0;
-        break;
-      }
-    if(all_done)
-      break;
-
-    int64_t remaining = deadline - arch_get_ts();
-    if(remaining <= 0)
-      break;
-
-    struct pollfd pfd = {
-      .fd = smb2_get_fd(smb2),
-      .events = smb2_which_events(smb2),
-    };
-    int timeout = (remaining + 999) / 1000;
-    if(timeout > 1000)
-      timeout = 1000;
-
-    int rc = poll(&pfd, 1, timeout);
-    if(rc < 0) {
-      if(errno == EINTR)
-        continue;
-      break;
-    }
-    if(smb2_service(smb2, rc == 0 ? 0 : pfd.revents) < 0)
-      break;
-  }
-
-  /*
-   * Reassemble. Each pread wrote straight into its slice of buf, so we only
-   * need to total up the bytes and stop at the first short/error read the way
-   * a normal read() would.
-   */
-  int total = 0;
+  uint32_t total = 0;
   int failed = 0;
-  for(int i = 0; i < nreqs; i++) {
-    if(!reqs[i].done || reqs[i].status < 0) {
-      failed = 1;
+  while(total < count) {
+    uint32_t chunk = count - total;
+    if(chunk > max_read)
+      chunk = max_read;
+
+    int status = smb2_read(smb2, sfh, (uint8_t *)buf + total, chunk);
+    if(status <= 0) {
+      failed = status < 0;
       break;
     }
-    total += reqs[i].status;
-    if(reqs[i].status < (int)chunk)
+    total += status;
+    if((uint32_t)status < chunk)
       break;
   }
 
-  if(!failed && total > 0)
-    smb2_lseek(smb2, sfh, base + total, SEEK_SET, NULL);
+  if(failed && start_offset >= 0)
+    smb2_lseek(smb2, sfh, start_offset, SEEK_SET, NULL);
 
+  smb2_set_timeout(smb2, SMB2_DEFAULT_TIMEOUT);
   hts_mutex_unlock(&file->session->lock);
-  return failed ? -1 : total;
+  return failed ? -1 : (int)total;
 }
 
 
@@ -619,9 +574,40 @@ movian_smb2_write(fa_handle_t *fh, const void *buf, size_t size)
   uint32_t count = size > INT_MAX ? INT_MAX : size;
 
   hts_mutex_lock(&file->session->lock);
-  int status = smb2_write(file->session->smb2, file->fh, buf, count);
+  struct smb2_context *smb2 = file->session->smb2;
+  struct smb2fh *sfh = file->fh;
+
+  uint32_t max_write = smb2_get_max_write_size(smb2);
+
+  int status;
+  if(max_write == 0 || count <= max_write) {
+    status = smb2_write(smb2, sfh, buf, count);
+  } else {
+    uint32_t total = 0;
+    int failed = 0;
+    while(total < count) {
+      uint32_t chunk = count - total;
+      if(chunk > max_write)
+        chunk = max_write;
+
+      int wstatus = smb2_write(smb2, sfh, (const uint8_t *)buf + total, chunk);
+      if(wstatus <= 0) {
+        failed = wstatus < 0;
+        break;
+      }
+      total += wstatus;
+      if((uint32_t)wstatus < chunk)
+        break;
+    }
+    /* POSIX-style short-write semantics: report bytes actually written
+       whenever we wrote something, even if a later chunk failed. The
+       cursor already reflects the data that made it to the server, so
+       (unlike the read path) it is not restored on partial failure. */
+    status = (failed && total == 0) ? -1 : (int)total;
+  }
+
   if(status > 0) {
-    int64_t pos = smb2_lseek(file->session->smb2, file->fh, 0, SEEK_CUR, NULL);
+    int64_t pos = smb2_lseek(smb2, sfh, 0, SEEK_CUR, NULL);
     if(pos > file->size)
       file->size = pos;
   }
@@ -673,7 +659,7 @@ movian_smb2_set_read_timeout(fa_handle_t *fh, int ms)
   int seconds = ms > 0 ? (ms + 999) / 1000 : 0;
 
   hts_mutex_lock(&file->session->lock);
-  smb2_set_timeout(file->session->smb2, seconds);
+  file->read_timeout_sec = seconds;
   hts_mutex_unlock(&file->session->lock);
 }
 
@@ -745,9 +731,25 @@ movian_smb2_stat(fa_protocol_t *fap, const char *url, struct fa_stat *fs,
 }
 
 
+/*
+ * Run a single-path libsmb2 call against a pooled session.
+ *
+ * Parses the URL, requires a share + path, acquires the session, takes the
+ * session lock, invokes op(smb2, target->path), and tears everything down on
+ * every path. Returns the libsmb2 status from op on success/failure of the op
+ * itself (0 on success, <0 = -errno on failure), or -1 for URL/connect/acquire
+ * failures before op runs. Callers map that to their own return type.
+ *
+ * This collapses the near-identical parse/validate/acquire/lock/release
+ * scaffolding that unlink/rmdir/makedir would otherwise each duplicate.
+ */
+typedef int (*movian_smb2_path_op_t)(struct smb2_context *smb2,
+                                     const char *path);
+
 static int
-movian_smb2_unlink(const fa_protocol_t *fap, const char *url,
-                   char *errbuf, size_t errlen)
+movian_smb2_run_path_op(const char *url, const char *what,
+                        movian_smb2_path_op_t op,
+                        char *errbuf, size_t errlen)
 {
   movian_smb2_target_t target = {};
   if(movian_smb2_target_parse(url, &target, errbuf, errlen))
@@ -755,7 +757,7 @@ movian_smb2_unlink(const fa_protocol_t *fap, const char *url,
 
   if(target.share == NULL || target.share[0] == '\0' ||
      target.path[0] == '\0') {
-    snprintf(errbuf, errlen, "SMB2 URL does not identify a file");
+    snprintf(errbuf, errlen, "SMB2 URL does not identify a path");
     movian_smb2_target_fini(&target);
     return -1;
   }
@@ -769,15 +771,39 @@ movian_smb2_unlink(const fa_protocol_t *fap, const char *url,
   }
 
   hts_mutex_lock(&session->lock);
-  int status = smb2_unlink(session->smb2, target.path);
+  int status = op(session->smb2, target.path);
   if(status < 0)
-    snprintf(errbuf, errlen, "Unable to delete SMB2 file: %s",
+    snprintf(errbuf, errlen, "Unable to %s: %s", what,
              smb2_get_error(session->smb2));
   hts_mutex_unlock(&session->lock);
 
   movian_smb2_session_release(session);
   movian_smb2_target_fini(&target);
+  return status;
+}
+
+
+static int
+unlink_op(struct smb2_context *smb2, const char *path)
+{
+  return smb2_unlink(smb2, path);
+}
+
+
+static int
+movian_smb2_unlink(const fa_protocol_t *fap, const char *url,
+                   char *errbuf, size_t errlen)
+{
+  int status = movian_smb2_run_path_op(url, "delete SMB2 file", unlink_op,
+                                       errbuf, errlen);
   return status < 0 ? -1 : 0;
+}
+
+
+static int
+rmdir_op(struct smb2_context *smb2, const char *path)
+{
+  return smb2_rmdir(smb2, path);
 }
 
 
@@ -785,34 +811,8 @@ static int
 movian_smb2_rmdir(const fa_protocol_t *fap, const char *url,
                   char *errbuf, size_t errlen)
 {
-  movian_smb2_target_t target = {};
-  if(movian_smb2_target_parse(url, &target, errbuf, errlen))
-    return -1;
-
-  if(target.share == NULL || target.share[0] == '\0' ||
-     target.path[0] == '\0') {
-    snprintf(errbuf, errlen, "SMB2 URL does not identify a directory");
-    movian_smb2_target_fini(&target);
-    return -1;
-  }
-
-  movian_smb2_session_t *session =
-    movian_smb2_session_acquire(&target, target.share, 0,
-                                SMB2_DEFAULT_TIMEOUT, NULL, errbuf, errlen);
-  if(session == NULL) {
-    movian_smb2_target_fini(&target);
-    return -1;
-  }
-
-  hts_mutex_lock(&session->lock);
-  int status = smb2_rmdir(session->smb2, target.path);
-  if(status < 0)
-    snprintf(errbuf, errlen, "Unable to remove SMB2 directory: %s",
-             smb2_get_error(session->smb2));
-  hts_mutex_unlock(&session->lock);
-
-  movian_smb2_session_release(session);
-  movian_smb2_target_fini(&target);
+  int status = movian_smb2_run_path_op(url, "remove SMB2 directory", rmdir_op,
+                                       errbuf, errlen);
   return status < 0 ? -1 : 0;
 }
 
@@ -872,35 +872,19 @@ movian_smb2_rename(const fa_protocol_t *fap, const char *old_url,
 }
 
 
+static int
+mkdir_op(struct smb2_context *smb2, const char *path)
+{
+  return smb2_mkdir(smb2, path);
+}
+
+
 static fa_err_code_t
 movian_smb2_makedir(fa_protocol_t *fap, const char *url)
 {
   char errbuf[256];
-  movian_smb2_target_t target = {};
-  if(movian_smb2_target_parse(url, &target, errbuf, sizeof(errbuf)))
-    return FAP_ERROR;
-
-  if(target.share == NULL || target.share[0] == '\0' ||
-     target.path[0] == '\0') {
-    movian_smb2_target_fini(&target);
-    return FAP_ERROR;
-  }
-
-  movian_smb2_session_t *session =
-    movian_smb2_session_acquire(&target, target.share, 0,
-                                SMB2_DEFAULT_TIMEOUT, NULL,
-                                errbuf, sizeof(errbuf));
-  if(session == NULL) {
-    movian_smb2_target_fini(&target);
-    return FAP_ERROR;
-  }
-
-  hts_mutex_lock(&session->lock);
-  int status = smb2_mkdir(session->smb2, target.path);
-  hts_mutex_unlock(&session->lock);
-
-  movian_smb2_session_release(session);
-  movian_smb2_target_fini(&target);
+  int status = movian_smb2_run_path_op(url, "create SMB2 directory",
+                                       mkdir_op, errbuf, sizeof(errbuf));
   return status < 0 ? movian_smb2_errno_to_fap(status) : FAP_OK;
 }
 
@@ -957,9 +941,17 @@ movian_smb2_no_parking(fa_handle_t *fh)
 }
 
 
+static void
+movian_smb2_init(void)
+{
+  movian_smb2_pool_init();
+}
+
+
 static fa_protocol_t fa_protocol_smb2 = {
   .fap_flags = FAP_INCLUDE_PROTO_IN_URL | FAP_ALLOW_CACHE,
   .fap_name = "smb2",
+  .fap_init = movian_smb2_init,
   .fap_scan = movian_smb2_scan,
   .fap_open = movian_smb2_open,
   .fap_close = movian_smb2_close,

@@ -12,6 +12,7 @@
 #include <smb2/smb2.h>
 #include <smb2/libsmb2.h>
 
+#include "arch/atomic.h"
 #include "fileaccess/fa_proto.h"
 #include "misc/callout.h"
 #include "misc/queue.h"
@@ -83,15 +84,18 @@ typedef struct movian_smb2_session {
   char *domain;
   struct smb2_context *smb2;
   hts_mutex_t lock;
+  atomic_t lifetime_refcount;
   int refcount;
   int broken;
+  int linked;
   int64_t last_used;
   callout_t keepalive;
-  int echo_pending;
   int echo_missed;
   LIST_ENTRY(movian_smb2_session) link;
 } movian_smb2_session_t;
 
+
+void movian_smb2_pool_init(void);
 
 void movian_smb2_target_fini(movian_smb2_target_t *target);
 
