@@ -177,6 +177,13 @@ typedef struct movian_smb2_session {
   uint8_t io_thread_running;
   uint8_t io_shutdown;          /* ask the owner thread to exit */
   uint8_t io_dead;              /* transport failed; no more context I/O */
+  uint8_t io_servicing;         /* owner thread is inside smb2_service():
+                                  * a PDU callback may be writing into a
+                                  * caller buffer right now. op_run's
+                                  * in-flight-timeout path waits for this to
+                                  * clear before returning, so the caller
+                                  * cannot free/reuse its buffer while a
+                                  * service call is still touching it. */
   int wakeup_fd[2];
   /* Cached at connect time so VFS threads never query the context. */
   uint32_t max_read_size;
