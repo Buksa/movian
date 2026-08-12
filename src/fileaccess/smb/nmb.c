@@ -389,27 +389,23 @@ nmb_resolver_init(void)
 
 INITME(INIT_GROUP_NET, nmb_resolver_init, NULL, 0);
 
-#if ENABLE_NATIVESMB
 /**
- * Binds the shared NBT UDP socket and kicks off the LAN master-browser
- * discovery loop. Only needed when the native SMB1 backend is compiled in,
- * since query_master_browser() (the only consumer of the discovery replies)
- * depends on smb_enum_servers(), which lives in fa_nativesmb.c.
- *
- * A libsmb2-only build has no discovery, but nmb_resolve() (the DNS
- * fallback used by both backends) still needs the socket; see the
- * nmb_udp_fd == NULL guard in nmb_resolve() above for that case.
+ * Binds the shared NBT UDP socket and starts LAN master-browser discovery
+ * when the native SMB1 backend is present. The socket itself is also needed
+ * by nmb_resolve() in a libsmb2-only build, so initialization is unconditional
+ * and only the native discovery timers stay backend-gated.
  */
 static void
 nmb_init(void)
 {
   nmb_udp_fd = asyncio_udp_bind("nmb", 0, nmb_udp_input, NULL, 0, 1);
 
+#if ENABLE_NATIVESMB
   asyncio_timer_init(&nmb_timer, nmb_send_msb_query, NULL);
   asyncio_timer_init(&nmb_flush_timer, remove_all_servers, NULL);
 
   nmb_send_msb_query(NULL);
+#endif
 }
 
 INITME(INIT_GROUP_ASYNCIO, nmb_init, NULL, 0);
-#endif /* ENABLE_NATIVESMB */
