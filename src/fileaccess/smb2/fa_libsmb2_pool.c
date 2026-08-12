@@ -17,16 +17,23 @@
  * 30 s echo keepalive so a parked connection does not silently go stale. This
  * mirrors the cifs native cifs_connections / cc_refcount / cifs_periodic scheme.
  *
- * The VFS backend (fa_libsmb2.c) is the only consumer; it acquires a session,
- * takes session->lock around each libsmb2 call (libsmb2 is not thread safe and
- * a context is bound to one socket), and releases when done.
+ * Concurrency model: libsmb2 contexts are single threaded, so each session
+ * runs a dedicated I/O owner thread that exclusively drives its context. The
+ * VFS backend (fa_libsmb2.c) submits async op descriptors through
+ * movian_smb2_op_run() and blocks on a condvar until the owner thread
+ * completes them, so several VFS threads can have operations in flight on the
+ * same session simultaneously (the same model as fa_nativesmb's per-connection
+ * smb_dispatch thread). Waiter timeouts are per-op, not per-context.
  */
 
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
+#include <poll.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <smb2/smb2.h>
 #include <smb2/libsmb2.h>
@@ -43,6 +50,29 @@
 static LIST_HEAD(, movian_smb2_session) smb2_sessions =
   LIST_HEAD_INITIALIZER(smb2_sessions);
 static hts_mutex_t smb2_pool_mutex;
+static hts_cond_t smb2_pool_cond;
+
+/*
+ * In-flight connects, keyed like the pool. A second acquirer for the same key
+ * waits on smb2_pool_cond for the first handshake to settle instead of racing
+ * a duplicate TCP+auth+tree connect that would immediately be torn down.
+ */
+typedef struct movian_smb2_connecting {
+  LIST_ENTRY(movian_smb2_connecting) link;
+  const char *key;
+} movian_smb2_connecting_t;
+
+static LIST_HEAD(, movian_smb2_connecting) smb2_connecting_list =
+  LIST_HEAD_INITIALIZER(smb2_connecting_list);
+
+/*
+ * One long-lived context for smb2_parse_url(), shared under its own mutex.
+ * smb2_init_context() is far too heavy to run per parse (multi-KB calloc, a
+ * getlogin_r() syscall and a process-global srandom() reseed) and
+ * movian_smb2_target_parse() runs on every VFS operation.
+ */
+static hts_mutex_t smb2_parser_mutex;
+static struct smb2_context *smb2_parser_ctx;
 
 static void movian_smb2_keepalive_cb(callout_t *c, void *opaque);
 
@@ -62,28 +92,32 @@ movian_smb2_target_parse(const char *url, movian_smb2_target_t *target,
     return -1;
   }
 
-  struct smb2_context *smb2 = smb2_init_context();
-  if(smb2 == NULL) {
-    snprintf(errbuf, errlen, "Unable to initialize SMB2");
-    return -1;
-  }
-
   size_t parser_url_len = strlen(url);
   char *parser_url = malloc(parser_url_len);
   if(parser_url == NULL) {
     snprintf(errbuf, errlen, "Out of memory while parsing SMB2 URL");
-    smb2_destroy_context(smb2);
     return -1;
   }
   snprintf(parser_url, parser_url_len, "smb://%s", url + 7);
 
-  struct smb2_url *parsed = smb2_parse_url(smb2, parser_url);
+  hts_mutex_lock(&smb2_parser_mutex);
+  if(smb2_parser_ctx == NULL)
+    smb2_parser_ctx = smb2_init_context();
+  if(smb2_parser_ctx == NULL) {
+    hts_mutex_unlock(&smb2_parser_mutex);
+    snprintf(errbuf, errlen, "Unable to initialize SMB2");
+    free(parser_url);
+    return -1;
+  }
+
+  struct smb2_url *parsed = smb2_parse_url(smb2_parser_ctx, parser_url);
   free(parser_url);
   if(parsed == NULL || parsed->server == NULL || parsed->server[0] == '\0') {
-    snprintf(errbuf, errlen, "Invalid SMB2 URL: %s", smb2_get_error(smb2));
+    snprintf(errbuf, errlen, "Invalid SMB2 URL: %s",
+             smb2_get_error(smb2_parser_ctx));
     if(parsed != NULL)
       smb2_destroy_url(parsed);
-    smb2_destroy_context(smb2);
+    hts_mutex_unlock(&smb2_parser_mutex);
     return -1;
   }
 
@@ -98,7 +132,7 @@ movian_smb2_target_parse(const char *url, movian_smb2_target_t *target,
   target->domain = has_domain ? strdup(parsed->domain) : NULL;
 
   smb2_destroy_url(parsed);
-  smb2_destroy_context(smb2);
+  hts_mutex_unlock(&smb2_parser_mutex);
 
   if(target->server == NULL || target->path == NULL ||
      (has_share && target->share == NULL) ||
@@ -500,6 +534,332 @@ void
 movian_smb2_pool_init(void)
 {
   hts_mutex_init(&smb2_pool_mutex);
+  hts_cond_init(&smb2_pool_cond, &smb2_pool_mutex);
+  hts_mutex_init(&smb2_parser_mutex);
+}
+
+
+/*
+ * Per-session I/O owner thread + async op machinery.
+ *
+ * Ownership rule: after a session is connected, only its owner thread touches
+ * the smb2_context -- request building (smb2_*_async), smb2_service(),
+ * smb2_get_error(), freeing context-owned data. VFS threads describe work in
+ * movian_smb2_op_t descriptors, enqueue them and block in
+ * movian_smb2_op_run(); the owner loop polls the context socket plus a
+ * self-pipe, drains the submit queue on wakeup, and libsmb2 completion
+ * callbacks (running inside smb2_service on the owner thread) resolve ops.
+ *
+ * Transport death (poll/smb2_service failure, or a waiter abandoning an
+ * in-flight op) fails every queued and in-flight op; in-flight blobs are
+ * parked on the deferred list because the dead context still holds PDU
+ * callback pointers into them. The context is only destroyed after the owner
+ * thread has been joined, so parked blobs stay valid until
+ * smb2_destroy_context() has failed every pending callback.
+ */
+
+static void
+movian_smb2_deferred_push_locked(movian_smb2_session_t *session, void *ptr)
+{
+  movian_smb2_deferred_t *d = malloc(sizeof(*d));
+  if(d == NULL)
+    return;                     /* leak the blob rather than risk a UAF */
+  d->ptr = ptr;
+  d->next = session->deferred;
+  session->deferred = d;
+}
+
+
+static void
+movian_smb2_op_park_locked(movian_smb2_session_t *session,
+                           movian_smb2_op_t *op)
+{
+  if(op->parked)
+    return;
+  op->parked = 1;
+  movian_smb2_deferred_push_locked(session, op);
+}
+
+
+/*
+ * Wake the owner thread out of poll(). The pipe is non-blocking; a full pipe
+ * means a wakeup is already pending, which is just as good.
+ */
+static void
+movian_smb2_io_wakeup(movian_smb2_session_t *session)
+{
+  uint8_t b = 0;
+  if(write(session->wakeup_fd[1], &b, 1) < 0) {
+    /* EAGAIN: wakeup already pending */
+  }
+}
+
+
+/*
+ * Fail every queued and in-flight op. Called with q_mutex held, on transport
+ * death and on shutdown. Queued ops were never submitted to the context, so
+ * their blobs stay caller-owned; in-flight ops have PDU callback pointers
+ * into their blobs, so ownership moves to the deferred list (the waiter sees
+ * op->parked and must not free).
+ */
+static void
+movian_smb2_io_fail_all_locked(movian_smb2_session_t *session, int status,
+                               const char *reason)
+{
+  movian_smb2_op_t *op;
+
+  while((op = TAILQ_FIRST(&session->submit_queue)) != NULL) {
+    TAILQ_REMOVE(&session->submit_queue, op, link);
+    op->status = status;
+    snprintf(op->errmsg, sizeof(op->errmsg), "%s", reason);
+    op->state = MOVIAN_SMB2_OP_DONE;
+  }
+
+  while((op = TAILQ_FIRST(&session->inflight_queue)) != NULL) {
+    TAILQ_REMOVE(&session->inflight_queue, op, link);
+    op->status = status;
+    snprintf(op->errmsg, sizeof(op->errmsg), "%s", reason);
+    op->state = MOVIAN_SMB2_OP_DONE;
+    if(op->abandoned) {
+      if(op->abandoned_fini != NULL)
+        op->abandoned_fini(op);
+    } else {
+      movian_smb2_op_park_locked(session, op);
+    }
+  }
+  hts_cond_broadcast(&session->q_cond);
+}
+
+
+static void
+movian_smb2_io_declare_dead_locked(movian_smb2_session_t *session,
+                                   const char *reason)
+{
+  if(session->io_dead)
+    return;
+  session->io_dead = 1;
+  SMB2TRACE("Session %s/%s transport dead: %s",
+            session->server, session->share, reason);
+  movian_smb2_io_fail_all_locked(session, -ENOTCONN, reason);
+  movian_smb2_io_wakeup(session);
+}
+
+
+/*
+ * The owner loop. Never takes the pool mutex (movian_smb2_session_free joins
+ * this thread while holding it); pool-level invalidation on transport death
+ * is done by the waiters when their ops fail.
+ */
+static void *
+movian_smb2_io_thread_fn(void *aux)
+{
+  movian_smb2_session_t *session = aux;
+  struct smb2_context *smb2 = session->smb2;
+
+  SMB2TRACE("Session %s/%s I/O thread running",
+            session->server, session->share);
+
+  for(;;) {
+    hts_mutex_lock(&session->q_mutex);
+
+    if(session->io_shutdown) {
+      movian_smb2_io_fail_all_locked(session, -ENOTCONN,
+                                     "SMB2 session closed");
+      hts_mutex_unlock(&session->q_mutex);
+      break;
+    }
+
+    movian_smb2_op_t *op;
+    while(!session->io_dead &&
+          (op = TAILQ_FIRST(&session->submit_queue)) != NULL) {
+      TAILQ_REMOVE(&session->submit_queue, op, link);
+      op->state = MOVIAN_SMB2_OP_INFLIGHT;
+      TAILQ_INSERT_TAIL(&session->inflight_queue, op, link);
+      hts_mutex_unlock(&session->q_mutex);
+
+      int rc = op->submit(session, op);
+
+      hts_mutex_lock(&session->q_mutex);
+      if(rc < 0 && op->state == MOVIAN_SMB2_OP_INFLIGHT) {
+        /* Builder failed; no callback will ever fire. */
+        TAILQ_REMOVE(&session->inflight_queue, op, link);
+        op->status = rc;
+        snprintf(op->errmsg, sizeof(op->errmsg), "%s", smb2_get_error(smb2));
+        op->state = MOVIAN_SMB2_OP_DONE;
+        if(!op->abandoned)
+          hts_cond_broadcast(&session->q_cond);
+      }
+    }
+
+    if(session->io_dead)
+      movian_smb2_io_fail_all_locked(session, -ENOTCONN,
+                                     "SMB2 transport is dead");
+
+    int dead = session->io_dead;
+    hts_mutex_unlock(&session->q_mutex);
+
+    struct pollfd pfd[2];
+    memset(pfd, 0, sizeof(pfd));
+    pfd[0].fd = session->wakeup_fd[0];
+    pfd[0].events = POLLIN;
+    int nfds = 1;
+    if(!dead) {
+      pfd[1].fd = smb2_get_fd(smb2);
+      pfd[1].events = smb2_which_events(smb2);
+      nfds = 2;
+    }
+
+    int prc = poll(pfd, nfds, -1);
+    if(prc < 0) {
+      if(errno == EINTR)
+        continue;
+      hts_mutex_lock(&session->q_mutex);
+      movian_smb2_io_declare_dead_locked(session, "SMB2 socket poll failed");
+      hts_mutex_unlock(&session->q_mutex);
+      continue;
+    }
+
+    if(pfd[0].revents & POLLIN) {
+      uint8_t drain[64];
+      while(read(session->wakeup_fd[0], drain, sizeof(drain)) ==
+            (ssize_t)sizeof(drain)) {}
+    }
+
+    if(nfds == 2 && pfd[1].revents != 0) {
+      int src = smb2_service(smb2, pfd[1].revents);
+      if(src < 0) {
+        char reason[164];
+        snprintf(reason, sizeof(reason), "%s", smb2_get_error(smb2));
+        hts_mutex_lock(&session->q_mutex);
+        movian_smb2_io_declare_dead_locked(session, reason);
+        hts_mutex_unlock(&session->q_mutex);
+      }
+    }
+  }
+
+  SMB2TRACE("Session %s/%s I/O thread exiting",
+            session->server, session->share);
+  return NULL;
+}
+
+
+void
+movian_smb2_op_completed(movian_smb2_op_t *op, int status)
+{
+  movian_smb2_session_t *session = op->session;
+
+  hts_mutex_lock(&session->q_mutex);
+  if(op->state == MOVIAN_SMB2_OP_DONE) {
+    /* Late completion (smb2_destroy_context failing pending callbacks) of
+       an op that fail_all already resolved; the blob is parked, nothing
+       left to do. */
+    hts_mutex_unlock(&session->q_mutex);
+    return;
+  }
+  if(op->state == MOVIAN_SMB2_OP_INFLIGHT)
+    TAILQ_REMOVE(&session->inflight_queue, op, link);
+  op->status = status;
+  if(status < 0)
+    snprintf(op->errmsg, sizeof(op->errmsg), "%s",
+             smb2_get_error(session->smb2));
+  op->state = MOVIAN_SMB2_OP_DONE;
+  if(op->abandoned) {
+    if(op->abandoned_fini != NULL)
+      op->abandoned_fini(op);
+  } else {
+    hts_cond_broadcast(&session->q_cond);
+  }
+  hts_mutex_unlock(&session->q_mutex);
+}
+
+
+void
+movian_smb2_op_cb(struct smb2_context *smb2, int status,
+                  void *command_data, void *cb_data)
+{
+  movian_smb2_op_completed(cb_data, status);
+}
+
+
+int
+movian_smb2_op_run(movian_smb2_session_t *session, movian_smb2_op_t *op,
+                   const char *name, movian_smb2_op_submit_fn_t *submit,
+                   int timeout_sec, char *errbuf, size_t errlen)
+{
+  op->session = session;
+  op->submit = submit;
+  op->name = name;
+
+  int64_t deadline = timeout_sec > 0 ?
+    arch_get_ts() + (int64_t)timeout_sec * 1000000LL : 0;
+
+  hts_mutex_lock(&session->q_mutex);
+  if(session->io_dead || session->io_shutdown) {
+    hts_mutex_unlock(&session->q_mutex);
+    if(errbuf != NULL)
+      snprintf(errbuf, errlen, "SMB2 session is disconnected");
+    op->status = -ENOTCONN;
+    movian_smb2_session_invalidate(session);
+    return -ENOTCONN;
+  }
+
+  op->state = MOVIAN_SMB2_OP_QUEUED;
+  TAILQ_INSERT_TAIL(&session->submit_queue, op, link);
+  movian_smb2_io_wakeup(session);
+  SMB2TRACE("op %s submit ts=%"PRId64" session=%s/%s",
+            name, arch_get_ts(), session->server, session->share);
+
+  while(op->state != MOVIAN_SMB2_OP_DONE) {
+    if(deadline == 0) {
+      hts_cond_wait(&session->q_cond, &session->q_mutex);
+      continue;
+    }
+    if(!hts_cond_wait_timeout_abs(&session->q_cond, &session->q_mutex,
+                                  deadline))
+      continue;
+    if(op->state == MOVIAN_SMB2_OP_DONE)
+      break;
+
+    /* This waiter's deadline expired. */
+    if(op->state == MOVIAN_SMB2_OP_QUEUED) {
+      /* The owner thread never touched the context for this op: take it
+         back; the session itself is not implicated. */
+      TAILQ_REMOVE(&session->submit_queue, op, link);
+      op->state = MOVIAN_SMB2_OP_DONE;
+      op->status = -ETIMEDOUT;
+      hts_mutex_unlock(&session->q_mutex);
+      if(errbuf != NULL)
+        snprintf(errbuf, errlen, "SMB2 %s timed out", name);
+      SMB2TRACE("op %s timed out while queued ts=%"PRId64" session=%s/%s",
+                name, arch_get_ts(), session->server, session->share);
+      return -ETIMEDOUT;
+    }
+
+    /* In flight: a PDU with callback pointers into *op is stuck in the
+       context. Park the blob, declare the transport dead (same policy as
+       an smb2_service failure) and drop the session from the pool. Other
+       waiters on this session fail with their own explicit statuses. */
+    op->abandoned = 1;
+    movian_smb2_op_park_locked(session, op);
+    movian_smb2_io_declare_dead_locked(session, "SMB2 operation timed out");
+    hts_mutex_unlock(&session->q_mutex);
+    movian_smb2_session_invalidate(session);
+    if(errbuf != NULL)
+      snprintf(errbuf, errlen, "SMB2 %s timed out", name);
+    SMB2TRACE("op %s timed out in flight after %d s ts=%"PRId64
+              " session=%s/%s -> session dropped",
+              name, timeout_sec, arch_get_ts(),
+              session->server, session->share);
+    return -ETIMEDOUT;
+  }
+
+  int status = op->status;
+  if(status < 0 && errbuf != NULL)
+    snprintf(errbuf, errlen, "%s", op->errmsg);
+  hts_mutex_unlock(&session->q_mutex);
+  SMB2TRACE("op %s done status=%d ts=%"PRId64" session=%s/%s",
+            name, status, arch_get_ts(), session->server, session->share);
+  return status;
 }
 
 
@@ -526,11 +886,38 @@ movian_smb2_session_key(const movian_smb2_target_t *target, const char *share,
 static void
 movian_smb2_session_free(movian_smb2_session_t *session)
 {
+  if(session->io_thread_running) {
+    hts_mutex_lock(&session->q_mutex);
+    session->io_shutdown = 1;
+    movian_smb2_io_wakeup(session);
+    hts_mutex_unlock(&session->q_mutex);
+    hts_thread_join(&session->io_thread);
+  }
+  if(session->wakeup_fd[0] >= 0)
+    close(session->wakeup_fd[0]);
+  if(session->wakeup_fd[1] >= 0)
+    close(session->wakeup_fd[1]);
+
   if(session->smb2 != NULL) {
+    /* The owner thread is gone, so this thread owns the context again.
+       Restore a finite transport timeout so a dead server cannot hang the
+       disconnect round trip. */
+    smb2_set_timeout(session->smb2, SMB2_DEFAULT_TIMEOUT);
     smb2_disconnect_share(session->smb2);
     smb2_destroy_context(session->smb2);
   }
-  hts_mutex_destroy(&session->lock);
+  /* smb2_destroy_context() has failed every still-queued PDU callback
+     (SMB2_STATUS_SHUTDOWN), so states parked by
+     movian_smb2_session_defer_free() can no longer be referenced. */
+  movian_smb2_deferred_t *d = session->deferred;
+  while(d != NULL) {
+    movian_smb2_deferred_t *next = d->next;
+    free(d->ptr);
+    free(d);
+    d = next;
+  }
+  hts_cond_destroy(&session->q_cond);
+  hts_mutex_destroy(&session->q_mutex);
   free(session->key);
   free(session->server);
   free(session->share);
@@ -642,6 +1029,21 @@ movian_smb2_pool_evict_locked(void)
 }
 
 
+/*
+ * Drop our in-flight connect marker and wake acquirers that were waiting for
+ * this handshake to settle (they rescan the pool and either reuse the session
+ * we inserted or start their own connect if ours failed).
+ */
+static void
+movian_smb2_connecting_done(movian_smb2_connecting_t *pending)
+{
+  hts_mutex_lock(&smb2_pool_mutex);
+  LIST_REMOVE(pending, link);
+  hts_cond_broadcast(&smb2_pool_cond);
+  hts_mutex_unlock(&smb2_pool_mutex);
+}
+
+
 movian_smb2_session_t *
 movian_smb2_session_acquire(const movian_smb2_target_t *target,
                             const char *share, int flags, int timeout,
@@ -654,19 +1056,33 @@ movian_smb2_session_acquire(const movian_smb2_target_t *target,
   }
 
   movian_smb2_session_t *session = NULL;
+  movian_smb2_connecting_t pending = { .key = key };
 
   hts_mutex_lock(&smb2_pool_mutex);
-  LIST_FOREACH(session, &smb2_sessions, link) {
-    if(!strcmp(session->key, key) && !session->broken) {
-      session->refcount++;
-      session->last_used = arch_get_ts();
-      hts_mutex_unlock(&smb2_pool_mutex);
-      free(key);
-      SMB2TRACE("Pool reuse %s/%s refcount=%d",
-                target->server, share != NULL ? share : "", session->refcount);
-      return session;
+  for(;;) {
+    LIST_FOREACH(session, &smb2_sessions, link) {
+      if(!strcmp(session->key, key) && !session->broken) {
+        session->refcount++;
+        session->last_used = arch_get_ts();
+        hts_mutex_unlock(&smb2_pool_mutex);
+        free(key);
+        SMB2TRACE("Pool reuse %s/%s refcount=%d",
+                  target->server, share != NULL ? share : "",
+                  session->refcount);
+        return session;
+      }
     }
+    movian_smb2_connecting_t *conn;
+    LIST_FOREACH(conn, &smb2_connecting_list, link)
+      if(!strcmp(conn->key, key))
+        break;
+    if(conn == NULL)
+      break;
+    /* Same-key handshake already in flight: wait for it instead of racing
+       a duplicate connect that would immediately be torn down again. */
+    hts_cond_wait(&smb2_pool_cond, &smb2_pool_mutex);
   }
+  LIST_INSERT_HEAD(&smb2_connecting_list, &pending, link);
   hts_mutex_unlock(&smb2_pool_mutex);
 
   movian_smb2_credentials_t resolved = {};
@@ -674,6 +1090,7 @@ movian_smb2_session_acquire(const movian_smb2_target_t *target,
     movian_smb2_connect_impl(target, share, flags, timeout, auth_needed,
                              &resolved, errbuf, errlen);
   if(smb2 == NULL) {
+    movian_smb2_connecting_done(&pending);
     free(key);
     return NULL;
   }
@@ -684,11 +1101,16 @@ movian_smb2_session_acquire(const movian_smb2_target_t *target,
     smb2_disconnect_share(smb2);
     smb2_destroy_context(smb2);
     movian_smb2_credentials_fini(&resolved);
+    movian_smb2_connecting_done(&pending);
     free(key);
     return NULL;
   }
 
-  hts_mutex_init(&session->lock);
+  hts_mutex_init(&session->q_mutex);
+  hts_cond_init(&session->q_cond, &session->q_mutex);
+  TAILQ_INIT(&session->submit_queue);
+  TAILQ_INIT(&session->inflight_queue);
+  session->wakeup_fd[0] = session->wakeup_fd[1] = -1;
   atomic_set(&session->lifetime_refcount, 1);
   session->key = key;
   session->smb2 = smb2;
@@ -698,14 +1120,25 @@ movian_smb2_session_acquire(const movian_smb2_target_t *target,
   session->share = strdup(share != NULL ? share : "");
   session->user = resolved.user;
   session->domain = resolved.domain;
+  /* Cached so VFS threads never have to query the context. */
+  session->max_read_size = smb2_get_max_read_size(smb2);
+  session->max_write_size = smb2_get_max_write_size(smb2);
   resolved.user = NULL;
   resolved.domain = NULL;
-  if(session->server == NULL || session->share == NULL) {
-    snprintf(errbuf, errlen, "Out of memory while opening SMB2 session");
+  if(session->server == NULL || session->share == NULL ||
+     pipe(session->wakeup_fd)) {
+    snprintf(errbuf, errlen, "Unable to set up SMB2 session");
     movian_smb2_credentials_fini(&resolved);
+    movian_smb2_connecting_done(&pending);
     movian_smb2_session_destroy(session);
     return NULL;
   }
+  fcntl(session->wakeup_fd[0], F_SETFL,
+        fcntl(session->wakeup_fd[0], F_GETFL) | O_NONBLOCK);
+  fcntl(session->wakeup_fd[1], F_SETFL,
+        fcntl(session->wakeup_fd[1], F_GETFL) | O_NONBLOCK);
+  fcntl(session->wakeup_fd[0], F_SETFD, FD_CLOEXEC);
+  fcntl(session->wakeup_fd[1], F_SETFD, FD_CLOEXEC);
   /*
    * resolved.password is intentionally not retained: the session never
    * re-authenticates (it is dropped when the server tears it down), and the
@@ -714,20 +1147,26 @@ movian_smb2_session_acquire(const movian_smb2_target_t *target,
   free(resolved.password);
   resolved = (movian_smb2_credentials_t){};
 
+  /*
+   * Operation pacing is per waiter (movian_smb2_op_run deadlines), not per
+   * context: disable libsmb2's internal PDU timeout so it cannot fail a
+   * request some caller is deliberately waiting forever on
+   * (fa_set_read_timeout(0)). Dead transports are detected by the owner
+   * loop (poll/smb2_service errors) and by waiter deadlines.
+   */
+  smb2_set_timeout(smb2, 0);
+
+  /* From this point the ownership rule applies: only the owner thread may
+     touch session->smb2. */
+  hts_thread_create_joinable("smb2io", &session->io_thread,
+                             movian_smb2_io_thread_fn, session,
+                             THREAD_PRIO_FILESYSTEM);
+  session->io_thread_running = 1;
+
   hts_mutex_lock(&smb2_pool_mutex);
-  movian_smb2_session_t *existing;
-  LIST_FOREACH(existing, &smb2_sessions, link) {
-    if(!strcmp(existing->key, key) && !existing->broken) {
-      existing->refcount++;
-      existing->last_used = arch_get_ts();
-      hts_mutex_unlock(&smb2_pool_mutex);
-      SMB2TRACE("Pool reuse after connect race %s/%s refcount=%d",
-                target->server, share != NULL ? share : "",
-                existing->refcount);
-      movian_smb2_session_destroy(session);
-      return existing;
-    }
-  }
+  /* The connecting gate guarantees no same-key session appeared meanwhile. */
+  LIST_REMOVE(&pending, link);
+  hts_cond_broadcast(&smb2_pool_cond);
   LIST_INSERT_HEAD(&smb2_sessions, session, link);
   session->linked = 1;
   movian_smb2_pool_evict_locked();
@@ -776,14 +1215,70 @@ movian_smb2_session_invalidate(movian_smb2_session_t *session)
 }
 
 
+void
+movian_smb2_session_error(movian_smb2_session_t *session, int status)
+{
+  if(session == NULL || status >= 0)
+    return;
+  if(status < -4096)
+    return;                     /* raw NT status: the server replied */
+
+  switch(-status) {
+  case ENOENT:
+  case EEXIST:
+  case EACCES:
+  case EPERM:
+  case ENOTDIR:
+  case EISDIR:
+  case ENOTEMPTY:
+  case EINVAL:
+  case ENOSPC:
+  case EXDEV:
+  case ENAMETOOLONG:
+    return;                     /* application-level: the session is healthy */
+  default:
+    break;
+  }
+
+  /* Transport-suspect status (every op reports a real errno from its async
+     completion callback, so -EPERM above is a genuine server verdict, not
+     the legacy sync wrappers' ambiguous "-1"). The owner thread already
+     failed every other queued op if the socket died; dropping the session
+     from the pool is what is left to do. */
+  SMB2TRACE("Session %s/%s failed op status=%d -> dropping from pool",
+            session->server, session->share, status);
+  movian_smb2_session_invalidate(session);
+}
+
+
+void
+movian_smb2_session_defer_free(movian_smb2_session_t *session, void *ptr)
+{
+  hts_mutex_lock(&session->q_mutex);
+  movian_smb2_deferred_push_locked(session, ptr);
+  hts_mutex_unlock(&session->q_mutex);
+}
+
+
+/*
+ * Echo keepalive op: the callout thread submits it through the owner thread
+ * like any other operation instead of driving the context itself.
+ */
+static int
+movian_smb2_echo_submit(movian_smb2_session_t *session, movian_smb2_op_t *op)
+{
+  return smb2_echo_async(session->smb2, movian_smb2_op_cb, op);
+}
+
+
 /*
  * Periodic keepalive. Runs on the callout thread. The managed callout holds a
  * lifetime ref while queued or running, so an idle-session eviction can unlink
  * and logically destroy the session without freeing memory out from under this
  * callback. Echoes only run for idle, refcount==0 sessions.
  *
- * smb2_echo() blocks (up to SMB2_DEFAULT_TIMEOUT) with the pool mutex
- * dropped, so a concurrent acquire()/evict_locked() can unlink (and
+ * The echo op blocks this callback (up to SMB2_DEFAULT_TIMEOUT) with the pool
+ * mutex dropped, so a concurrent acquire()/evict_locked() can unlink (and
  * logically destroy) this very session while the echo is in flight. All
  * outcomes of that race are resolved in one place, at the end of the
  * callback, under the pool mutex: session->linked is the source of truth
@@ -797,21 +1292,21 @@ movian_smb2_keepalive_cb(callout_t *c, void *opaque)
   int destroy = 0;
 
   hts_mutex_lock(&smb2_pool_mutex);
-  if(!session->broken && session->refcount <= 0 &&
-     session->echo_missed > SMB2_ECHO_MAX_MISSED) {
-    SMB2TRACE("Keepalive %s/%s giving up (missed=%d) -> broken",
-              session->server, session->share, session->echo_missed);
-    session->broken = 1;
-  }
   do_echo = !session->broken && session->refcount <= 0;
   hts_mutex_unlock(&smb2_pool_mutex);
 
   int rc = 0;
   int missed = 0;
   if(do_echo) {
-    hts_mutex_lock(&session->lock);
-    rc = smb2_echo(session->smb2);
-    hts_mutex_unlock(&session->lock);
+    movian_smb2_op_t *op = calloc(1, sizeof(*op));
+    if(op != NULL) {
+      rc = movian_smb2_op_run(session, op, "echo", movian_smb2_echo_submit,
+                              SMB2_DEFAULT_TIMEOUT, NULL, 0);
+      if(!op->parked)
+        free(op);
+    } else {
+      rc = -ENOMEM;
+    }
   }
 
   hts_mutex_lock(&smb2_pool_mutex);
