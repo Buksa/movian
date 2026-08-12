@@ -91,6 +91,7 @@ enable dvd
 enable libfreetype
 enable libfontconfig
 enable libpulse
+enable libsmb2
 enable lirc
 enable stdin
 enable avahi
