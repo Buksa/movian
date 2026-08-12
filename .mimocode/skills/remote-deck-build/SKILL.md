@@ -1,27 +1,46 @@
 ---
 name: remote-deck-build
-description: Use when building and testing Movian on the remote Steam Deck (movian_deck). Covers SSH setup, file sync, remote build, and verification. Trigger on "build on deck", "test on stand", "remote build", "SSH to deck", or when cross-validating changes on the ARM target.
+description: Use when building and testing Movian on a remote Steam Deck. Covers SSH setup, file sync, remote build, and verification. Trigger on "build on deck", "test on stand", "remote build", "SSH to deck", or when cross-validating changes on the ARM target.
 ---
 
 # Remote Deck Build
 
-Standardized workflow for building and testing Movian on the remote Steam Deck (`movian_deck` at `192.168.1.82`).
+Standardized workflow for building and testing Movian on a remote Steam Deck.
 
-## Connection Details
+## Connection details are yours, not this file's
 
-- **Host**: `192.168.1.82`
-- **User**: `user`
-- **SSH key**: `~/.ssh/movian_deck`
-- **Repo on deck**: `~/GitHub/movian`
+`AGENTS.md` forbids committing machine-specific paths, so the host, user, key and
+remote repo path live in **your environment**, not here. Put them in a shell
+profile or a local untracked file:
+
+```sh
+export DECK_HOST="deck.lan"          # or an IP on your own network
+export DECK_USER="user"
+export DECK_KEY="$HOME/.ssh/movian_deck"
+export DECK_REPO="~/GitHub/movian"   # path on the deck, expanded remotely
+```
+
+An `~/.ssh/config` entry is the tidier form and lets you drop `DECK_KEY`:
+
+```
+Host movian-deck
+  HostName deck.lan
+  User user
+  IdentityFile ~/.ssh/movian_deck
+```
 
 ## Setup Variables
 
 Always define these at the top of your script:
 
 ```sh
-SSH="ssh -i ~/.ssh/movian_deck -o BatchMode=yes -o ConnectTimeout=8 user@192.168.1.82"
-SCP="scp -i ~/.ssh/movian_deck -o BatchMode=yes"
+: "${DECK_HOST:?set DECK_HOST}" "${DECK_USER:?set DECK_USER}" "${DECK_REPO:?set DECK_REPO}"
+SSH="ssh -i ${DECK_KEY:-$HOME/.ssh/movian_deck} -o BatchMode=yes -o ConnectTimeout=8 $DECK_USER@$DECK_HOST"
+SCP="scp -i ${DECK_KEY:-$HOME/.ssh/movian_deck} -o BatchMode=yes"
 ```
+
+The `:?` guards fail loudly on an unset variable instead of silently building an
+`ssh @` command that hangs.
 
 ## Standard Workflow
 
@@ -45,13 +64,13 @@ $SSH 'cd ~/GitHub/movian && \
 ### 3. Sync specific files (faster than full branch reset)
 
 ```sh
-$SCP src/sd/wsd.c user@192.168.1.82:/home/user/GitHub/movian/src/sd/wsd.c
+$SCP src/sd/wsd.c "$DECK_USER@$DECK_HOST":"$DECK_REPO"/src/sd/wsd.c
 ```
 
 For multiple files:
 ```sh
 for f in src/sd/wsd.c src/fileaccess/smb2/fa_libsmb2.c; do
-  $SCP "$f" user@192.168.1.82:/home/user/GitHub/movian/"$f"
+  $SCP "$f" "$DECK_USER@$DECK_HOST":"$DECK_REPO"/"$f"
 done
 ```
 
@@ -90,7 +109,7 @@ Note: Movian requires a display. On the deck, it uses the physical display. For 
 ### Incremental build (single file changed)
 
 ```sh
-$SCP src/sd/wsd.c user@192.168.1.82:/home/user/GitHub/movian/src/sd/wsd.c
+$SCP src/sd/wsd.c "$DECK_USER@$DECK_HOST":"$DECK_REPO"/src/sd/wsd.c
 $SSH 'cd ~/GitHub/movian && \
   touch src/sd/wsd.c && \
   make BUILD=debug -j"$(nproc)" 2>&1 | grep -iE "wsd|warning|error" | tail -10; \
@@ -119,7 +138,7 @@ $SSH 'cd ~/GitHub/movian && \
 ### Instrument and rebuild (for debugging)
 
 ```sh
-$SCP /tmp/instrument.py user@192.168.1.82:/tmp/instrument.py
+$SCP /tmp/instrument.py "$DECK_USER@$DECK_HOST":/tmp/instrument.py
 $SSH 'cd ~/GitHub/movian && \
   cp ext/libsmb2/lib/libsmb2.c /tmp/libsmb2.c.bak && \
   python3 /tmp/instrument.py ext/libsmb2/lib/libsmb2.c && \
