@@ -259,10 +259,12 @@ SRCS-$(CONFIG_LIBAV) += \
 SRCS-$(CONFIG_LOCATEDB)        += src/fileaccess/fa_locatedb.c
 SRCS-$(CONFIG_SPOTLIGHT)       += src/fileaccess/fa_spotlight.c
 SRCS-$(CONFIG_LIBNTFS)         += src/fileaccess/fa_ntfs.c
-SRCS-$(CONFIG_NATIVESMB)       += src/fileaccess/smb/fa_nativesmb.c \
-				  src/fileaccess/smb/nmb.c
+SRCS-$(CONFIG_NATIVESMB)       += src/fileaccess/smb/fa_nativesmb.c
 SRCS-$(CONFIG_LIBSMB2)         += src/fileaccess/smb2/fa_libsmb2.c \
 				  src/fileaccess/smb2/fa_libsmb2_pool.c
+ifneq (,$(filter yes,$(CONFIG_NATIVESMB) $(CONFIG_LIBSMB2)))
+SRCS += src/fileaccess/smb/nmb.c
+endif
 SRCS-$(CONFIG_RAR)             += src/fileaccess/fa_rar.c
 
 BUNDLES += res/fileaccess

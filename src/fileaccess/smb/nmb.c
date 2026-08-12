@@ -20,6 +20,7 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "config.h"
 #include "main.h"
 #include "networking/asyncio.h"
 #include "misc/endian.h"
@@ -32,8 +33,8 @@
 static hts_mutex_t nmb_mutex;
 static hts_cond_t nmb_resolver_cond;
 
+#if ENABLE_NATIVESMB
 LIST_HEAD(nmb_server_list, nmb_server);
-LIST_HEAD(nmb_resolve_list, nmb_resolve);
 
 typedef struct nmb_server {
   LIST_ENTRY(nmb_server) ns_link;
@@ -44,6 +45,9 @@ typedef struct nmb_server {
 } nmb_server_t;
 
 static struct nmb_server_list nmb_servers;
+#endif
+
+LIST_HEAD(nmb_resolve_list, nmb_resolve);
 
 typedef struct nmb_resolve {
   LIST_ENTRY(nmb_resolve) nr_link;
@@ -58,11 +62,14 @@ static struct nmb_resolve_list nmb_resolve_pending;
 static struct nmb_resolve_list nmb_resolve_sent;
 
 static asyncio_fd_t *nmb_udp_fd;
+static int nmb_resolver_signal;
+static uint16_t nmb_transaction_id_tally;
+
+#if ENABLE_NATIVESMB
 static struct asyncio_timer nmb_timer;
 static struct asyncio_timer nmb_flush_timer;
 static uint16_t nmb_txid;
-static int nmb_resolver_signal;
-static uint16_t nmb_transaction_id_tally;
+#endif
 
 typedef struct {
   uint16_t transaction_id;
@@ -120,6 +127,7 @@ encode_name(const char *in, char *out, char name_type)
 
 
 
+#if ENABLE_NATIVESMB
 /**
  *
  */
@@ -184,7 +192,11 @@ query_master_browser(void *a)
       LIST_INSERT_HEAD(&nmb_servers, ns, ns_link);
 
       snprintf(id, sizeof(id), "%s/%s", workgroup, name);
+#if ENABLE_LIBSMB2
+      snprintf(url, sizeof(url), "smb2://%s", name);
+#else
       snprintf(url, sizeof(url), "smb://%s", name);
+#endif
 
       ns->ns_service = service_create_managed(id, name, url, "server", NULL,
                                               0, 0, SVC_ORIGIN_DISCOVERED);
@@ -204,6 +216,7 @@ query_master_browser(void *a)
   }
   hts_mutex_unlock(&nmb_mutex);
 }
+#endif /* ENABLE_NATIVESMB */
 
 /**
  *
@@ -225,6 +238,7 @@ nmb_udp_input(void *opaque, const void *data, int size,
     return;
 
 
+#if ENABLE_NATIVESMB
   if(pkt->h.transaction_id == nmb_txid) {
     void *a = malloc(4);
     memcpy(a, pkt->addr, 4);
@@ -232,6 +246,7 @@ nmb_udp_input(void *opaque, const void *data, int size,
     asyncio_timer_arm_delta_sec(&nmb_flush_timer, 60);
     return;
   }
+#endif
 
   nmb_resolve_t *nr;
 
@@ -278,6 +293,7 @@ nmb_send_query(const char *name, uint8_t type, int dups)
 }
 
 
+#if ENABLE_NATIVESMB
 /**
  *
  */
@@ -288,6 +304,7 @@ nmb_send_msb_query(void *aux)
 
   nmb_txid = nmb_send_query("\001\002__MSBROWSE__\002\001", 1, 0);
 }
+#endif /* ENABLE_NATIVESMB */
 
 
 /**
@@ -296,6 +313,12 @@ nmb_send_msb_query(void *aux)
 int
 nmb_resolve(const char *hostname, struct net_addr *na)
 {
+  if(nmb_udp_fd == NULL) {
+    // UDP socket never bound (e.g. discovery-only init skipped) -- nothing
+    // to send the query on, fail cleanly instead of touching a NULL fd.
+    return -1;
+  }
+
   nmb_resolve_t nr = {
     .nr_hostname = hostname,
     .nr_addr = na,
@@ -366,8 +389,16 @@ nmb_resolver_init(void)
 
 INITME(INIT_GROUP_NET, nmb_resolver_init, NULL, 0);
 
+#if ENABLE_NATIVESMB
 /**
+ * Binds the shared NBT UDP socket and kicks off the LAN master-browser
+ * discovery loop. Only needed when the native SMB1 backend is compiled in,
+ * since query_master_browser() (the only consumer of the discovery replies)
+ * depends on smb_enum_servers(), which lives in fa_nativesmb.c.
  *
+ * A libsmb2-only build has no discovery, but nmb_resolve() (the DNS
+ * fallback used by both backends) still needs the socket; see the
+ * nmb_udp_fd == NULL guard in nmb_resolve() above for that case.
  */
 static void
 nmb_init(void)
@@ -381,3 +412,4 @@ nmb_init(void)
 }
 
 INITME(INIT_GROUP_ASYNCIO, nmb_init, NULL, 0);
+#endif /* ENABLE_NATIVESMB */
