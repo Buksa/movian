@@ -261,6 +261,7 @@ SRCS-$(CONFIG_SPOTLIGHT)       += src/fileaccess/fa_spotlight.c
 SRCS-$(CONFIG_LIBNTFS)         += src/fileaccess/fa_ntfs.c
 SRCS-$(CONFIG_NATIVESMB)       += src/fileaccess/smb/fa_nativesmb.c \
 				  src/fileaccess/smb/nmb.c
+SRCS-$(CONFIG_LIBSMB2)         += src/fileaccess/smb2/fa_libsmb2.c
 SRCS-$(CONFIG_RAR)             += src/fileaccess/fa_rar.c
 
 BUNDLES += res/fileaccess
