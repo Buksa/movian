@@ -1,0 +1,25 @@
+{
+  "name": "keyboard-mode",
+  "describe": "Verify arrow actions engage GLW keyboard mode.",
+  "needs": {
+    "plugin": null,
+    "binary": "build.debug/movian"
+  },
+  "steps": [
+    {
+      "do": "assert_prop",
+      "path": "global/userinterfaces/ui/keyboard",
+      "one_of": [0, null]
+    },
+    {
+      "do": "action",
+      "name": "down",
+      "count": 2
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/userinterfaces/ui/keyboard",
+      "equals": 1
+    }
+  ]
+}

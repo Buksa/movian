@@ -11,6 +11,7 @@ import os
 import re
 import signal
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -42,13 +43,34 @@ VIEW_ERROR_RE = re.compile(r"GLW\s+\[ERROR\]:\s*Error (.+?):(\d+): (.*)$")
 # ("viewpreview: showing ...") deliberately does not match this.
 VIEWPREVIEW_ERROR_RE = re.compile(r"viewpreview:\s*ERROR:")
 
-# Error-signal set ported from movian_agent.py SIGNALS["errors"],
-# extended with the GLW view error shape.
+# `mdev reload --js` (issue #93): action ReloadData -> plugins_reload_dev_plugin()
+# (src/plugins.c:1453) logs one of these two lines per `-p` dev plugin.
+RELOAD_JS_OK_RE = re.compile(r"Reloaded dev plugin (\S+)")
+RELOAD_JS_FAIL_RE = re.compile(r"Unable to reload development plugin: (\S+)")
+
+# Compile-error fallback (issue #93 spike finding): plugin_load()
+# (src/plugins.c:611) unconditionally returns 0 for an "ecmascript" plugin
+# even when ecmascript_plugin_load() fails to compile the JS -- so
+# "Reloaded dev plugin <path>" can appear ALONGSIDE this compile-error
+# trace for the very same failed reload. Treat this line as authoritative
+# over a same-tick "Reloaded" line for the same plugin.
+RELOAD_JS_COMPILE_ERROR_RE = re.compile(r"Unable to compile (\S+) -- (.*)$")
+
+# Error-signal set; the single source of truth for what a generic "error
+# line" is (movian_agent.py's SIGNALS["errors"] imports this). GLW view
+# errors and viewpreview failures have their own shapes above and are
+# matched alongside this in error_lines().
 ERROR_SIGNALS = re.compile(
     r"TypeError|ReferenceError|Cannot read property|Unable to load image|"
     r"Unknown format|\|E\||CRASH|assert|Segmentation fault",
     re.IGNORECASE,
 )
+
+# nav_open0() (src/navigator.c:763) TRACEs this for every processed open
+# event -- the only deterministic signal that a queued /api/open actually
+# ran (the prop tree alone can't distinguish "old page still showing" from
+# "same URL re-opened").
+NAV_OPENING_RE = re.compile(r"navigator.*Opening (\S+)")
 
 IMAGE_MAGIC = [
     (b"\x89PNG\r\n\x1a\n", "png"),
@@ -77,7 +99,9 @@ class Instance:
     """One named mdev-managed Movian instance under /tmp/mdev/<name>/."""
 
     def __init__(self, name: str):
-        if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        # Must contain at least one non-dot char: "." / ".." would resolve
+        # the state dir outside /tmp/mdev/.
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", name) or set(name) == {"."}:
             raise MdevError("invalid instance name: %r" % name)
         self.name = name
         self.dir = STATE_ROOT / name
@@ -104,14 +128,29 @@ class Instance:
         )
 
     def live_pid(self) -> int | None:
-        """Pid from state.json if it is alive and still a movian process."""
+        """Pid from state.json if it is alive and still THIS instance's
+        movian process (comm + cmdline check, see owns_pid())."""
         state = self.load_state()
         if not state:
             return None
         pid = state.get("pid")
-        if isinstance(pid, int) and pid_is_movian(pid):
+        if isinstance(pid, int) and self.owns_pid(pid):
             return pid
         return None
+
+    def owns_pid(self, pid: int) -> bool:
+        """True only when `pid` is a movian process launched against this
+        instance's own --persistent dir. The comm check alone is not
+        enough: a stale state.json pid recycled by an UNRELATED movian
+        would pass it, and stop/--force would then signal a foreign
+        process."""
+        if not pid_is_movian(pid):
+            return False
+        try:
+            cmdline = Path("/proc/%d/cmdline" % pid).read_bytes()
+        except OSError:
+            return False
+        return str(self.persistent).encode() in cmdline.split(b"\0")
 
     def base_url(self) -> str:
         state = self.load_state()
@@ -133,8 +172,9 @@ class Instance:
 # Process guard
 # ---------------------------------------------------------------------------
 
-def movian_pids() -> list[int]:
-    """All live pids whose command line invokes a movian binary.
+def movian_procs() -> list[tuple[int, str]]:
+    """All live (pid, cmdline) pairs whose command line invokes a movian
+    binary. `cmdline` is the raw `pgrep -fa` argv string (space-joined).
 
     Uses `pgrep -fa movian` and keeps only processes where some argv token's
     basename is exactly "movian" (avoids matching unrelated processes whose
@@ -147,7 +187,7 @@ def movian_pids() -> list[int]:
         ).stdout
     except OSError as error:
         raise MdevError("pgrep failed: %s" % error)
-    pids = []
+    procs = []
     for line in out.splitlines():
         try:
             pid_str, cmdline = line.split(" ", 1)
@@ -155,9 +195,62 @@ def movian_pids() -> list[int]:
             continue
         for token in cmdline.split():
             if os.path.basename(token) == "movian":
-                pids.append(int(pid_str))
+                procs.append((int(pid_str), cmdline))
                 break
-    return [p for p in pids if p != os.getpid()]
+    return [(p, c) for p, c in procs if p != os.getpid()]
+
+
+def classify_foreign(
+    inst: "Instance", own_pid: int | None
+) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
+    """Split live movian pids (excluding `own_pid`) into (coexistable
+    foreign, same-dir collisions) (issue #94).
+
+    A "collision" is a live movian pid whose cmdline references this
+    instance's own `--persistent` path -- i.e. something is running against
+    our state dir that `state.json` did not confirm as `own_pid` (stale/
+    corrupted state.json, or a race). That case still refuses (exit 2):
+    coexistence is only safe for genuinely separate instances/profiles.
+    Every other live movian pid is a "foreign" instance -- isolated profile,
+    dynamic port, no state.json overlap -- safe to warn-and-coexist with.
+    """
+    persistent_str = str(inst.persistent)
+    foreign: list[tuple[int, str]] = []
+    collisions: list[tuple[int, str]] = []
+    for pid, cmdline in movian_procs():
+        if pid == own_pid:
+            continue
+        if persistent_str in cmdline:
+            collisions.append((pid, cmdline))
+        else:
+            foreign.append((pid, cmdline))
+    return foreign, collisions
+
+
+def coexist_warning(foreign: list[tuple[int, str]]) -> str:
+    """One-line coexistence warning naming each foreign pid + cmdline
+    (issue #94 contract)."""
+    return "coexisting with foreign movian: " + "; ".join(
+        "pid %d (%s)" % (pid, cmdline) for pid, cmdline in foreign
+    )
+
+
+def collision_refusal(inst: "Instance",
+                      collisions: list[tuple[int, str]]) -> MdevError:
+    """The exit-2 refusal for a same-dir collision (issue #94): a live
+    movian pid uses this instance's own --persistent path but state.json
+    can't confirm it as ours (stale/corrupted state, or a race). Shared
+    by `mdev run` and ensure_running() so the message can't drift."""
+    return MdevError(
+        "refusing to start: live movian pid(s) using %s are not "
+        "confirmed as instance %r's own process by state.json: %s -- "
+        "this instance's state may be corrupted; investigate before "
+        "retrying (don't --force blindly)." % (
+            inst.persistent, inst.name,
+            ", ".join("%d (%s)" % (p, c) for p, c in collisions),
+        ),
+        exit_code=2,
+    )
 
 
 def pid_is_movian(pid: int) -> bool:
@@ -168,18 +261,20 @@ def pid_is_movian(pid: int) -> bool:
     return comm == "movian"
 
 
-def kill_owned_pid(pid: int, timeout: float = 5.0) -> None:
-    """Terminate a pid we own per state.json.  Refuses to signal anything
-    that is not a movian process (stale-pid safety)."""
-    if not pid_is_movian(pid):
-        return  # already gone (or pid recycled by another program: hands off)
+def kill_owned_pid(inst: "Instance", pid: int, timeout: float = 5.0) -> None:
+    """Terminate a pid this instance owns per state.json.  Refuses to
+    signal anything whose comm+cmdline do not prove it is this instance's
+    own movian (stale-pid safety: a recycled pid -- even one recycled by
+    another movian -- is hands-off)."""
+    if not inst.owns_pid(pid):
+        return  # already gone or pid recycled: hands off
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         return
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not pid_is_movian(pid):
+        if not inst.owns_pid(pid):
             return
         time.sleep(0.1)
     try:
@@ -257,21 +352,37 @@ def launch(inst: Instance, argv: list[str], timeout: float = 30.0) -> dict[str, 
 
     port = None
     deadline = time.monotonic() + timeout
+    scanned = ""
+    offset = 0
     while time.monotonic() < deadline:
+        # Incremental scan: only read what movian appended since the last
+        # tick (stdbuf -oL keeps the log line-buffered, so the port line
+        # never lands split across reads of a growing file).
+        size = log_size(inst)
+        if size > offset:
+            scanned += read_log_delta(inst, offset)
+            offset = size
         if proc.poll() is not None:
-            tail = "\n".join(read_log(inst).splitlines()[-10:])
+            tail = "\n".join(scanned.splitlines()[-10:])
             raise MdevError(
                 "movian exited with code %s before the HTTP server came up;"
                 " log tail:\n%s" % (proc.returncode, tail)
             )
-        match = PORT_RE.search(read_log(inst))
+        match = PORT_RE.search(scanned)
         if match:
             port = int(match.group(1))
             break
         time.sleep(0.2)
 
     if port is None:
-        kill_owned_pid(proc.pid)
+        # The child is ours by construction (we hold the Popen handle);
+        # kill_owned_pid()'s comm check could miss it if stdbuf has not
+        # exec'd into movian yet, so signal the handle directly.
+        proc.terminate()
+        try:
+            proc.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
         raise MdevError(
             "timed out (%.0fs) waiting for 'Listening on port' in %s"
             % (timeout, inst.log_path)
@@ -293,8 +404,10 @@ def ensure_running(name: str, plugins: list[str]) -> Instance:
     """Return a live Instance named `name`, launching one with `plugins`
     if it is not already up. Reuses an already-running instance as-is
     (its existing plugin/skin selection wins -- this does not restart
-    it even if `plugins` differs). Same foreign-pid guard as `mdev run`:
-    never touches a movian process this state dir doesn't own.
+    it even if `plugins` differs). Same coexistence guard as `mdev run`
+    (issue #94): warns and proceeds next to a foreign movian instance;
+    never touches a movian process this state dir doesn't own, and still
+    refuses (exit 2) on a same-dir collision (see `classify_foreign()`).
 
     Used by `mdev preview` (issue #87) to auto-start the viewpreview
     instance on first use. Passes the existing core CLI flag
@@ -309,17 +422,11 @@ def ensure_running(name: str, plugins: list[str]) -> Instance:
     if inst.live_pid() is not None:
         return inst
 
-    foreign = movian_pids()
+    foreign, collisions = classify_foreign(inst, None)
+    if collisions:
+        raise collision_refusal(inst, collisions)
     if foreign:
-        raise MdevError(
-            "refusing to start: live movian process(es) not owned by "
-            "instance %r: pid %s (their state is not in %s). "
-            "Stop them from their own instance; mdev preview never "
-            "kills foreign pids." % (
-                name, ", ".join(str(p) for p in foreign), inst.state_path,
-            ),
-            exit_code=2,
-        )
+        print(coexist_warning(foreign), file=sys.stderr)
 
     inst.ensure_dirs()
     argv = build_argv(inst, plugins, None, False, None,
@@ -391,24 +498,41 @@ def node_count(base_url: str, path: str = PAGE_NODES) -> int:
 
 
 def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, Any]:
-    """POST /api/open for `url` and wait for page-ready; return
+    """GET /api/open for `url` and wait for page-ready; return
     {"url", "title", "type", "nodes"}. Shared by `mdev open` and
     `mdev preview`.
     """
     base = inst.base_url()
     before_url = prop_value(base, PAGE_URL)
+    offset = log_size(inst)
 
     result = http_request(
         base, "/api/open?" + urllib.parse.urlencode({"url": url}),
         timeout=5.0)
     if not result.get("ok"):
-        raise MdevError("POST /api/open failed: %s"
+        raise MdevError("GET /api/open failed: %s"
                         % (result.get("error") or result.get("status")))
 
     deadline = time.monotonic() + timeout
     cur_url = title = None
-    ready = False
+    ready = nav_seen = False
     while time.monotonic() < deadline:
+        # /api/open only QUEUES a nav event. Before trusting the prop
+        # tree, require nav_open0()'s per-open "Opening <url>" trace in
+        # the log delta -- when `url` is already the open page, the props
+        # (same url, loading=0, title set) look "ready" immediately and
+        # would otherwise report the OLD page's state as the result.
+        if not nav_seen:
+            delta = read_log_delta(inst, offset)
+            nav_seen = any(m.group(1) == url
+                           for m in NAV_OPENING_RE.finditer(delta))
+            if nav_seen:
+                # Grace tick: the trace fires just before the currentpage
+                # prop swap becomes visible over HTTP.
+                time.sleep(0.3)
+            else:
+                time.sleep(0.2)
+            continue
         cur_url = prop_value(base, PAGE_URL)
         loading = prop_value(base, PAGE_LOADING)
         title = prop_value(base, PAGE_TITLE)
@@ -417,7 +541,8 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
         if loading in ("0", "(void)", None) and prop_has_value(title):
             # Verify navigation actually targeted our URL: either the page
             # url now equals the requested one, or it at least changed away
-            # from what was open before.
+            # from what was open before (redirecting backends may rewrite
+            # the page url).
             if cur_url == url or cur_url != before_url:
                 ready = True
                 break
@@ -425,8 +550,10 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
 
     if not ready:
         raise MdevError(
-            "page not ready after %.0fs: url=%r loading=%r title=%r"
-            % (timeout, cur_url, prop_value(base, PAGE_LOADING), title)
+            "page not ready after %.0fs: nav_event_seen=%r url=%r "
+            "loading=%r title=%r"
+            % (timeout, nav_seen, cur_url,
+               prop_value(base, PAGE_LOADING), title)
         )
 
     ptype = prop_value(base, PAGE_TYPE)
@@ -465,6 +592,7 @@ def error_lines(text: str) -> list[str]:
     return [
         line for line in text.splitlines()
         if ERROR_SIGNALS.search(line) or VIEW_ERROR_RE.search(line)
+        or VIEWPREVIEW_ERROR_RE.search(line)
     ]
 
 
@@ -475,6 +603,40 @@ def view_error_lines(text: str) -> list[str]:
 def viewpreview_error_lines(text: str) -> list[str]:
     return [line for line in text.splitlines()
             if VIEWPREVIEW_ERROR_RE.search(line)]
+
+
+def reload_js_ok_lines(text: str) -> list[str]:
+    return [line for line in text.splitlines() if RELOAD_JS_OK_RE.search(line)]
+
+
+def reload_js_fail_lines(text: str) -> list[str]:
+    """"Unable to reload development plugin" (the errbuf-reported failure
+    path) plus the duktape compile-error fallback (see
+    RELOAD_JS_COMPILE_ERROR_RE's docstring) -- either is a failure."""
+    return [
+        line for line in text.splitlines()
+        if RELOAD_JS_FAIL_RE.search(line) or RELOAD_JS_COMPILE_ERROR_RE.search(line)
+    ]
+
+
+def reload_line_matches_dir(line: str, plugin_dir: str) -> bool:
+    """True when a reload-result log line refers to `plugin_dir`: the path
+    token it names is the dir itself ("Reloaded dev plugin <dir>") or a
+    file under it (the compile-error line names a .js file). Core logs the
+    successful directory as a file:// URL, while state.json records a plain
+    absolute path, so normalize that URL before comparing. A plain substring
+    test would also credit a sibling dir like <dir>-extra's lines to <dir>.
+    """
+    for pattern in (RELOAD_JS_OK_RE, RELOAD_JS_FAIL_RE,
+                    RELOAD_JS_COMPILE_ERROR_RE):
+        match = pattern.search(line)
+        if match:
+            path = match.group(1)
+            if path.startswith("file://"):
+                path = urllib.parse.unquote(urllib.parse.urlparse(path).path)
+            return (path == plugin_dir
+                    or path.startswith(plugin_dir.rstrip("/") + "/"))
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -503,6 +665,102 @@ def do_reload(inst: Instance, settle: float = 2.0) -> tuple[bool, list[str]]:
             break
         time.sleep(0.2)
     return (not errors, errors)
+
+
+def plugin_dirs_from_argv(argv: list[str]) -> list[str]:
+    """Extract every `-p`/`--plugin` value from a recorded launch argv
+    (see `state.json`'s "argv"; `build_argv()` always stores an
+    `os.path.abspath()`'d value there)."""
+    dirs = []
+    i = 0
+    while i < len(argv):
+        if argv[i] in ("-p", "--plugin") and i + 1 < len(argv):
+            dirs.append(argv[i + 1])
+            i += 2
+        else:
+            i += 1
+    return dirs
+
+
+def do_reload_js(inst: Instance, settle: float = 2.0) -> tuple[bool, list[dict]]:
+    """POST ReloadData (issue #93) and grep the log delta for the
+    per-dev-plugin reload result reported by `plugins_reload_dev_plugin()`
+    (src/plugins.c:1453).
+
+    Exit criteria: ok only when every `-p` dev plugin recorded for this
+    instance reports "Reloaded dev plugin ..." AND no
+    "Unable to reload development plugin"/duktape compile-error line
+    matches that plugin's path -- see RELOAD_JS_COMPILE_ERROR_RE's
+    docstring for why the compile-error line must win over a same-tick
+    "Reloaded" line for the same plugin.
+
+    Returns (ok, per_plugin) where per_plugin is a list of
+    {"plugin": <dir or None>, "ok": bool, "detail": <matched log line>}
+    (one entry per `-p` dir, plus a trailing entry for any failure line
+    that couldn't be attributed to a specific plugin dir).
+    """
+    state = inst.load_state() or {}
+    plugin_dirs = plugin_dirs_from_argv(state.get("argv") or [])
+    if not plugin_dirs:
+        raise MdevError(
+            "instance %r has no dev plugins (-p) to reload with --js"
+            % inst.name
+        )
+
+    base = inst.base_url()
+    offset = log_size(inst)
+    result = http_request(base, "/api/input/action/ReloadData",
+                          timeout=5.0, method="POST")
+    if not result.get("ok"):
+        raise MdevError(
+            "POST /api/input/action/ReloadData failed: %s"
+            % (result.get("error") or result.get("status"))
+        )
+
+    deadline = time.monotonic() + settle
+    ok_lines: list[str] = []
+    fail_lines: list[str] = []
+    while time.monotonic() < deadline:
+        delta = read_log_delta(inst, offset)
+        ok_lines = reload_js_ok_lines(delta)
+        fail_lines = reload_js_fail_lines(delta)
+        accounted = sum(
+            1 for d in plugin_dirs
+            if any(reload_line_matches_dir(line, d)
+                   for line in ok_lines + fail_lines)
+        )
+        if accounted >= len(plugin_dirs):
+            break
+        time.sleep(0.15)
+
+    per_plugin: list[dict] = []
+    for plugin_dir in plugin_dirs:
+        matched_fail = [line for line in fail_lines
+                        if reload_line_matches_dir(line, plugin_dir)]
+        matched_ok = [line for line in ok_lines
+                      if reload_line_matches_dir(line, plugin_dir)]
+        ok = bool(matched_ok) and not matched_fail
+        per_plugin.append({
+            "plugin": plugin_dir,
+            "ok": ok,
+            "detail": matched_fail[0] if matched_fail else (
+                matched_ok[0] if matched_ok else "no reload result seen"
+            ),
+        })
+
+    # A failure line that names no known plugin dir still fails the
+    # overall reload (belt-and-suspenders; observed to always be
+    # attributable in practice -- see RELOAD_JS_COMPILE_ERROR_RE).
+    unattributed = [
+        line for line in fail_lines
+        if not any(reload_line_matches_dir(line, d) for d in plugin_dirs)
+    ]
+    if unattributed:
+        per_plugin.append({"plugin": None, "ok": False,
+                           "detail": unattributed[0]})
+
+    overall_ok = all(p["ok"] for p in per_plugin)
+    return overall_ok, per_plugin
 
 
 def sniff_image(body: bytes) -> str | None:

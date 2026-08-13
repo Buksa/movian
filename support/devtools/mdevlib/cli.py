@@ -1,7 +1,7 @@
 """mdev subcommand implementations and argument parsing (issue #85).
 
-Exit codes: 0 = verified success, 2 = stale-process guard refusal,
-1 = any other failure (one-line reason on stderr).
+Exit codes: 0 = verified success, 1 = assertion/operation failure,
+2 = stale-process guard refusal or smoke instance-health failure.
 """
 
 from __future__ import annotations
@@ -9,14 +9,15 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
 from . import harness
+from . import smoke
 from . import viewdoc
-
 from .harness import Instance, MdevError
 
 
@@ -34,21 +35,14 @@ def emit(args: argparse.Namespace, data: dict, human: str) -> None:
 def cmd_run(args: argparse.Namespace) -> int:
     inst = Instance(args.name)
     own_pid = inst.live_pid()
-    all_pids = harness.movian_pids()
-    foreign = [p for p in all_pids if p != own_pid]
+    foreign, collisions = harness.classify_foreign(inst, own_pid)
 
-    if foreign:
-        raise MdevError(
-            "refusing to start: live movian process(es) not owned by "
-            "instance %r: pid %s (their state is not in %s). "
-            "Stop them from their own instance; --force never kills "
-            "foreign pids." % (
-                args.name,
-                ", ".join(str(p) for p in foreign),
-                inst.state_path,
-            ),
-            exit_code=2,
-        )
+    # Same-dir collision: a live movian pid is using this instance's own
+    # --persistent path but state.json didn't confirm it as `own_pid`
+    # (stale/corrupted state.json, or a race). Refuse -- this is not a
+    # foreign instance, it's ambiguity about our own state (issue #94).
+    if collisions:
+        raise harness.collision_refusal(inst, collisions)
 
     if own_pid is not None:
         if not args.force:
@@ -57,7 +51,13 @@ def cmd_run(args: argparse.Namespace) -> int:
                 "use --force to restart it" % (args.name, own_pid),
                 exit_code=2,
             )
-        harness.kill_owned_pid(own_pid)
+        harness.kill_owned_pid(inst, own_pid)
+
+    # Foreign movian instances (not ours, not a same-dir collision) are
+    # safe to coexist with: isolated profile + dynamic port, no state.json
+    # overlap. Warn instead of refusing (issue #94).
+    if foreign:
+        print(harness.coexist_warning(foreign), file=sys.stderr)
 
     inst.ensure_dirs()
 
@@ -86,8 +86,8 @@ def cmd_stop(args: argparse.Namespace) -> int:
                     "reason": "not running"},
              "instance %r is not running" % args.name)
         return 0
-    harness.kill_owned_pid(pid)
-    if harness.pid_is_movian(pid):
+    harness.kill_owned_pid(inst, pid)
+    if inst.owns_pid(pid):
         raise MdevError("pid %d still alive after SIGKILL" % pid)
     state = inst.load_state() or {}
     state.pop("pid", None)
@@ -203,12 +203,18 @@ def cmd_log(args: argparse.Namespace) -> int:
 # reload
 # ---------------------------------------------------------------------------
 
+def _maybe_shot(args: argparse.Namespace) -> str | None:
+    """Screenshot path when --shot was passed, else None (shared by every
+    shot-on-success reporter)."""
+    if getattr(args, "shot", False):
+        return str(harness.take_shot(Instance(args.name)))
+    return None
+
+
 def report_reload(args: argparse.Namespace, ok: bool,
                   errors: list[str]) -> int:
     if ok:
-        shot = None
-        if getattr(args, "shot", False):
-            shot = str(harness.take_shot(Instance(args.name)))
+        shot = _maybe_shot(args)
         emit(args, {"reload": "ok", "shot": shot},
              "RELOAD OK" + (("\nshot: " + shot) if shot else ""))
         return 0
@@ -223,56 +229,176 @@ def report_reload(args: argparse.Namespace, ok: bool,
 
 def cmd_reload(args: argparse.Namespace) -> int:
     inst = Instance(args.name)
+    if getattr(args, "js", False):
+        ok, per_plugin = harness.do_reload_js(inst)
+        return report_reload_js(args, ok, per_plugin)
     ok, errors = harness.do_reload(inst)
     return report_reload(args, ok, errors)
+
+
+def report_reload_js(args: argparse.Namespace, ok: bool,
+                     per_plugin: list[dict]) -> int:
+    """Report a `mdev reload --js` result: one line per `-p` dev plugin
+    (issue #93 contract: "prints per-plugin result")."""
+    lines = [
+        "%s: %s%s" % (
+            "OK" if p["ok"] else "FAILED",
+            p["plugin"] or "(unattributed)",
+            "" if p["ok"] else (" -- " + p["detail"]),
+        )
+        for p in per_plugin
+    ]
+    if ok:
+        shot = _maybe_shot(args)
+        emit(args, {"reload_js": "ok", "plugins": per_plugin, "shot": shot},
+             "\n".join(lines) + "\nRELOAD JS OK"
+             + (("\nshot: " + shot) if shot else ""))
+        return 0
+    if args.json:
+        print(json.dumps({"reload_js": "error", "plugins": per_plugin},
+                         ensure_ascii=False, indent=2))
+    else:
+        for line in lines:
+            print(line)
+    return 1
 
 
 # ---------------------------------------------------------------------------
 # watch
 # ---------------------------------------------------------------------------
 
-def scan_views(root: Path) -> dict[Path, float]:
-    return {p: p.stat().st_mtime for p in root.rglob("*.view")}
+def scan_watch_files(
+    root: Path, include_js: bool
+) -> tuple[dict[Path, float], dict[Path, float]]:
+    """One directory traversal returning ({*.view: mtime}, {*.js /
+    plugin.json: mtime}) -- cmd_watch polls this twice a second, so a
+    single os.walk pass instead of one rglob per pattern (issue #93)."""
+    views: dict[Path, float] = {}
+    plugin: dict[Path, float] = {}
+    for dirpath, _dirnames, filenames in os.walk(root):
+        parent = Path(dirpath)
+        for name in filenames:
+            if name.endswith(".view"):
+                target = views
+            elif include_js and (name.endswith(".js")
+                                 or name == "plugin.json"):
+                target = plugin
+            else:
+                continue
+            path = parent / name
+            try:
+                target[path] = path.stat().st_mtime
+            except OSError:
+                continue  # deleted between listing and stat
+    return views, plugin
+
+
+def _changed_paths(root: Path, seen: dict[Path, float],
+                   current: dict[Path, float]) -> list[str]:
+    return sorted(
+        str(p.relative_to(root)) for p in
+        (set(current) ^ set(seen))
+        | {p for p in current if p in seen and current[p] != seen[p]}
+    )
+
+
+def _resolve_watch_root(args: argparse.Namespace, inst: Instance) -> Path:
+    if args.dir is not None:
+        root = Path(args.dir)
+        if not root.is_absolute():
+            root = harness.REPO_ROOT / root
+        return root
+    if not args.js:
+        return harness.REPO_ROOT / "glwskins" / "flat"
+    # --js with no --dir: default to this instance's own -p plugin dir,
+    # but only when it is unambiguous.
+    state = inst.load_state() or {}
+    dirs = harness.plugin_dirs_from_argv(state.get("argv") or [])
+    if len(dirs) != 1:
+        raise MdevError(
+            "--js needs --dir <plugin-dir> when the instance has %d "
+            "dev plugins (need exactly 1 to default unambiguously)"
+            % len(dirs)
+        )
+    return Path(dirs[0])
+
+
+def _watch_tick(args: argparse.Namespace, inst: Instance, stamp: str,
+                changed_view: list[str], changed_js: list[str]) -> list[str]:
+    """Run the reload flow(s) for one tick's changes; return report lines.
+
+    A mixed tick (JS and views changed together) runs BOTH flows: the
+    ReloadData page reload alone would re-render against GLW's still-
+    cached OLD .view parses -- and do_reload_js never scans for GLW view
+    errors -- so a view syntax error would go unreported (false green).
+    JS first (it resets page state), then ReloadUI to flush and re-parse
+    the views.
+    """
+    lines: list[str] = []
+    if changed_js:
+        ok, per_plugin = harness.do_reload_js(inst, settle=1.2)
+        if ok:
+            line = "[%s] JS %s: RELOAD JS OK" % (stamp, ", ".join(changed_js))
+            if args.shot and not changed_view:
+                line += " shot=%s" % harness.take_shot(inst)
+        else:
+            failed = next(p for p in per_plugin if not p["ok"])
+            line = "[%s] JS %s: FAILED: %s" % (
+                stamp, ", ".join(changed_js), failed["detail"])
+        lines.append(line)
+        if not changed_view:
+            return lines
+
+    # Tighter settle than plain `mdev reload` so the report lands
+    # within 2 s of the file change (0.5 s poll + 1.2 s settle);
+    # view errors surface within milliseconds of ReloadUI anyway.
+    ok, errors = harness.do_reload(inst, settle=1.2)
+    if ok:
+        line = "[%s] %s: RELOAD OK" % (stamp, ", ".join(changed_view))
+        if args.shot:
+            line += " shot=%s" % harness.take_shot(inst)
+    else:
+        line = "[%s] %s: %d error(s): %s" % (
+            stamp, ", ".join(changed_view), len(errors), errors[0])
+    lines.append(line)
+    return lines
 
 
 def cmd_watch(args: argparse.Namespace) -> int:
     inst = Instance(args.name)
     inst.base_url()  # verify instance is up before entering the loop
-    root = Path(args.dir)
-    if not root.is_absolute():
-        root = harness.REPO_ROOT / root
+    root = _resolve_watch_root(args, inst)
     if not root.is_dir():
         raise MdevError("watch dir not found: %s" % root)
 
-    seen = scan_views(root)
-    print("watching %d .view files under %s (Ctrl-C to stop)"
-          % (len(seen), root))
+    seen_view, seen_js = scan_watch_files(root, args.js)
+    extra = (" + %d JS/plugin.json file(s)" % len(seen_js)) if args.js else ""
+    print("watching %d .view file(s)%s under %s (Ctrl-C to stop)"
+          % (len(seen_view), extra, root))
     try:
         while True:
             time.sleep(0.5)
-            current = scan_views(root)
-            changed = sorted(
-                str(p.relative_to(root)) for p in
-                (set(current) ^ set(seen))
-                | {p for p in current if p in seen
-                   and current[p] != seen[p]}
-            )
-            seen = current
-            if not changed:
+            current_view, current_js = scan_watch_files(root, args.js)
+            changed_view = _changed_paths(root, seen_view, current_view)
+            changed_js = _changed_paths(root, seen_js, current_js)
+            seen_view, seen_js = current_view, current_js
+
+            if not changed_view and not changed_js:
                 continue
-            # Tighter settle than plain `mdev reload` so the report lands
-            # within 2 s of the file change (0.5 s poll + 1.2 s settle);
-            # view errors surface within milliseconds of ReloadUI anyway.
-            ok, errors = harness.do_reload(inst, settle=1.2)
+
             stamp = time.strftime("%H:%M:%S")
-            if ok:
-                line = "[%s] %s: RELOAD OK" % (stamp, ", ".join(changed))
-                if args.shot:
-                    line += " shot=%s" % harness.take_shot(inst)
-            else:
-                line = "[%s] %s: %d error(s): %s" % (
-                    stamp, ", ".join(changed), len(errors), errors[0])
-            print(line, flush=True)
+            try:
+                for line in _watch_tick(args, inst, stamp,
+                                        changed_view, changed_js):
+                    print(line, flush=True)
+            except MdevError as error:
+                # One flaky reload/screenshot must not kill a long-running
+                # watch; only bail when the instance itself is gone.
+                if inst.live_pid() is None:
+                    raise MdevError(
+                        "instance %r died: %s" % (args.name, error))
+                print("[%s] reload failed (will retry on next change): %s"
+                      % (stamp, error), flush=True)
     except KeyboardInterrupt:
         return 0
 
@@ -311,7 +437,28 @@ def cmd_preview(args: argparse.Namespace) -> int:
     inst = harness.ensure_running(args.name, [str(harness.VIEWPREVIEW_DIR)])
     route = viewpreview_route(args.view, args.fixture)
 
+    # Flush GLW's per-path view cache before opening: GLW only re-parses
+    # a .view on ReloadUI (glw_load_universe, src/ui/glw/glw.c:2522), so
+    # a re-preview of a just-edited file would otherwise render the stale
+    # cached parse -- and report it error-free (false green).
+    #
+    # The log offset must be taken BEFORE the flush: when the previous
+    # page already shows this same view (the normal iterate loop), the
+    # flush itself re-parses the edited file and traces its error right
+    # then -- the open below is then served from that already-loaded
+    # cache entry without a second trace. View errors are filtered to the
+    # target view's path below, so re-parse errors from unrelated views
+    # in the skin can't leak into this preview's report.
+    base = inst.base_url()
     offset = harness.log_size(inst)
+    flush = harness.http_request(base, "/api/input/action/ReloadUI",
+                                 timeout=5.0, method="POST")
+    if not flush.get("ok"):
+        raise MdevError(
+            "POST /api/input/action/ReloadUI (view-cache flush) failed: %s"
+            % (flush.get("error") or flush.get("status")))
+    time.sleep(0.4)  # let the universe reload land before the open below
+
     result = harness.open_and_wait(inst, route, timeout=20.0)
 
     # Settle window: a prop change (page.metadata.glwview) is dispatched
@@ -321,12 +468,15 @@ def cmd_preview(args: argparse.Namespace) -> int:
     # open_and_wait already sees the page as ready. Poll briefly rather
     # than reading the log delta once immediately (same idea as
     # do_reload's settle window).
+    view_path = str(resolve_repo_path(args.view))
     deadline = time.monotonic() + 1.5
     errors: list[str] = []
     while time.monotonic() < deadline:
         delta = harness.read_log_delta(inst, offset)
-        errors = (harness.viewpreview_error_lines(delta)
-                 + harness.view_error_lines(delta))
+        errors = harness.viewpreview_error_lines(delta) + [
+            line for line in harness.view_error_lines(delta)
+            if view_path in line
+        ]
         if errors:
             break
         time.sleep(0.2)
@@ -358,7 +508,6 @@ def cmd_preview(args: argparse.Namespace) -> int:
          % (result["url"], result["title"], result["type"], result["nodes"],
             ("\nshot:  " + shot_path) if shot_path else ""))
     return 0
-
 
 
 # ---------------------------------------------------------------------------
@@ -400,16 +549,47 @@ def cmd_viewdoc(args: argparse.Namespace) -> int:
             print("VIEWDOC OK")
     return 1 if drift_lines else 0
 
+
+
+
+# ---------------------------------------------------------------------------
+# smoke (issue #90 -- declarative regression smokes)
+# ---------------------------------------------------------------------------
+
+def cmd_smoke_list(args: argparse.Namespace) -> int:
+    definitions = smoke.load_definitions()
+    data = {
+        "smokes": [
+            {"name": item["name"], "describe": item["describe"]}
+            for item in definitions
+        ]
+    }
+    human = "\n".join(
+        "%-16s %s" % (item["name"], item["describe"])
+        for item in definitions
+    )
+    emit(args, data, human)
+    return 0
+
+
+def cmd_smoke_run(args: argparse.Namespace) -> int:
+    definitions = smoke.load_definitions()
+    code, data, human = smoke.run(
+        definitions, args.smoke_name, args.name, viewpreview_route
+    )
+    emit(args, data, human)
+    return code
+
+
 # ---------------------------------------------------------------------------
 # parser
 # ---------------------------------------------------------------------------
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mdev",
         description="Single-entrypoint Movian dev/test harness "
-                    "(isolated launch, open, shot, props, log, reload, watch)."
+                    "(isolated launch, open, smoke, shot, props, log, reload, watch)."
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -420,8 +600,21 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--json", action="store_true",
                         help="machine-readable JSON output")
 
-    run = sub.add_parser("run", parents=[common],
-                         help="launch an isolated Movian instance")
+    run = sub.add_parser(
+        "run", parents=[common],
+        help="launch an isolated Movian instance",
+        description="Launch an isolated Movian instance under "
+                    "/tmp/mdev/<name>/. Coexists with any foreign movian "
+                    "process (own isolated profile + dynamic port): prints "
+                    "a one-line warning naming the foreign pid(s) and "
+                    "proceeds. Exit 2 is reserved for (a) this same --name "
+                    "already alive (use --force to restart it) and (b) a "
+                    "live pid using this instance's own --persistent path "
+                    "that state.json can't confirm as ours (corrupted/"
+                    "stale state -- investigate, don't --force blindly). "
+                    "`mdev stop`/`--force` only ever signal the pid "
+                    "recorded in this instance's own state.json, never a "
+                    "foreign pid.")
     run.add_argument("-p", "--plugin", action="append", default=[],
                      metavar="DIR", help="plugin dev directory; repeatable")
     run.add_argument("--skin", metavar="DIR",
@@ -470,18 +663,48 @@ def build_parser() -> argparse.ArgumentParser:
                      help="only error-signal lines; exit 1 if any matched")
     log.set_defaults(func=cmd_log)
 
-    reload_ = sub.add_parser("reload", parents=[common],
-                             help="ReloadUI and grep the log for view errors")
+    reload_ = sub.add_parser(
+        "reload", parents=[common],
+        help="ReloadUI and grep the log for view errors",
+        description="Plain `mdev reload` sends ReloadUI (views-only, "
+                    "unchanged). `--js` instead sends ReloadData (issue "
+                    "#93): reloads every `-p` dev plugin's ECMAScript "
+                    "(core plugins_reload_dev_plugin(), src/plugins.c) "
+                    "and reloads the current page as a side effect -- "
+                    "page state resets, so it is opt-in rather than the "
+                    "default. Exit 0 only when every `-p` plugin reports "
+                    "reloaded.")
     reload_.add_argument("--shot", action="store_true",
                          help="screenshot after a clean reload")
+    reload_.add_argument("--js", action="store_true",
+                         help="reload dev-plugin JS via ReloadData instead "
+                              "of views via ReloadUI; resets page state")
     reload_.set_defaults(func=cmd_reload)
 
-    watch = sub.add_parser("watch", parents=[common],
-                           help="auto-reload when .view files change")
-    watch.add_argument("--dir", default="glwskins/flat",
-                       help="directory to watch (default: glwskins/flat)")
+    watch = sub.add_parser(
+        "watch", parents=[common],
+        help="auto-reload when .view (or, with --js, plugin JS) files "
+             "change",
+        description="Polls `--dir` for changed `*.view` files and runs "
+                    "the `reload` (ReloadUI) flow on change (default: "
+                    "glwskins/flat). With `--js`, ALSO polls the same "
+                    "root for `*.js`/`plugin.json` and runs the `reload "
+                    "--js` (ReloadData) flow instead when those change -- "
+                    "default root becomes this instance's own `-p` "
+                    "plugin dir (only when there is exactly one; pass "
+                    "--dir explicitly otherwise). A tick with both kinds "
+                    "of changes runs the JS reload first, then the view "
+                    "reload (ReloadUI is what re-parses changed views "
+                    "and surfaces their errors).")
+    watch.add_argument("--dir", default=None,
+                       help="directory to watch (default: glwskins/flat, "
+                            "or this instance's own -p plugin dir with "
+                            "--js)")
     watch.add_argument("--shot", action="store_true",
                        help="screenshot after each clean reload")
+    watch.add_argument("--js", action="store_true",
+                       help="also watch *.js/plugin.json and run the "
+                            "ReloadData flow on change")
     watch.set_defaults(func=cmd_watch)
 
     # Own --name/--json (not `common`): the default instance name is
@@ -505,6 +728,39 @@ def build_parser() -> argparse.ArgumentParser:
                          help="screenshot after a clean render")
     preview.set_defaults(func=cmd_preview)
 
+    smoke_parser = sub.add_parser(
+        "smoke",
+        help="list or run declarative regression smokes (issue #90)",
+    )
+    smoke_sub = smoke_parser.add_subparsers(
+        dest="smoke_command", required=True
+    )
+    smoke_list = smoke_sub.add_parser(
+        "list",
+        help="list available regression smokes",
+    )
+    smoke_list.add_argument(
+        "--json", action="store_true", help="machine-readable JSON output"
+    )
+    smoke_list.set_defaults(func=cmd_smoke_list)
+
+    smoke_run = smoke_sub.add_parser(
+        "run",
+        help="run one regression smoke or the full health-first set",
+    )
+    smoke_run.add_argument(
+        "smoke_name", metavar="NAME|all",
+        help="smoke name from `mdev smoke list`, or all",
+    )
+    smoke_run.add_argument(
+        "--name", default="smoke",
+        help="instance name; state in /tmp/mdev/<name>/ (default: smoke)",
+    )
+    smoke_run.add_argument(
+        "--json", action="store_true", help="machine-readable JSON output"
+    )
+    smoke_run.set_defaults(func=cmd_smoke_run)
+
     # No instance/--name: viewdoc reads files only, never talks to a
     # running Movian.
     viewdoc_ = sub.add_parser(
@@ -526,6 +782,8 @@ def build_parser() -> argparse.ArgumentParser:
     viewdoc_.add_argument("--json", action="store_true",
                           help="machine-readable JSON output")
     viewdoc_.set_defaults(func=cmd_viewdoc)
+
+
 
     return parser
 
