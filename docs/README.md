@@ -123,7 +123,12 @@ The public stack currently includes these user-visible changes:
 - Linux debug and Flatpak builds include pinned static libsmb2 support.
   `smb2://` provides read-only SMB2/SMB3 browsing and playback while the
   existing `smb://` backend remains available for compatibility. See
-  `Guides/LINUX_SMB2_BACKEND.md`.
+  `Guides/LINUX_SMB2_BACKEND.md`. Movian also ships a built-in SMB2 *server*
+  (`Guides/SMB_SERVER_SPECIFICATION.md`,
+  `Guides/SMB_SERVER_LIFECYCLE_ARCHITECTURE.md`). It listens on an
+  unprivileged port by default; what it would take to reach it from Windows
+  Explorer on TCP `445` is researched in
+  `Guides/SMB2_WINDOWS_VISIBILITY_RESEARCH.md`.
 - Steam launches avoid the X11 fullscreen `override_redirect` path when
   `SteamGameId` or `SteamAppId` is set. `XK_Menu` maps to Movian's menu action
   for Steam Input keyboard layouts.
