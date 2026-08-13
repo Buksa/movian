@@ -721,7 +721,7 @@ decode_propref(stpp_t *stpp, const uint8_t **datap, int *lenp)
   if(strvec == NULL)
     return prop_ref_inc(p);
 
-  prop_t *p2 = prop_findv(p, strvec);
+  prop_t *p2 = prop_findv(p, strvec, 0);
   strvec_free(strvec);
   return p2;
 }
