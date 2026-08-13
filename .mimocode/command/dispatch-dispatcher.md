@@ -21,10 +21,18 @@ mimo run --dangerously-skip-permissions --print -p <worktree-path> "<prompt>"
 
 **Codex dispatch** — both `-a never` AND `-s workspace-write` are MANDATORY:
 ```
-codex exec -a never -s workspace-write "<prompt>"
+codex -a never -C "$WORKTREE" exec -s workspace-write "<prompt>"
 ```
 
-Never omit these flags. Never gate them behind a config check. Never use them conditionally. There is no interactive approver in an Orca worktree.
+Never omit these flags. Never gate them behind a config check. Never use them
+conditionally. There is no interactive approver in an Orca worktree.
+
+**Flag order is not cosmetic.** `-a` is a *global* option, not an `exec` one:
+`codex exec -a never ...` exits 2 with `unexpected argument '-a' found`
+(measured on codex-cli 0.144 and 0.147), so the previous spelling could not
+start a single dispatch. `-C/--cd` is likewise global, and without it Codex
+edits whatever checkout the dispatcher was invoked from rather than the
+selected worktree.
 
 ## Step 3 — Cross-vendor review routing (pattern 3)
 

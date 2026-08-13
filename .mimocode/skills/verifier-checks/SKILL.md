@@ -113,9 +113,15 @@ Before running any dynamic test (mdev, smbclient, curl, etc.), verify the build 
 
 **Required check:**
 ```sh
-git diff --name-only HEAD -- build.debug/ | head -5
+# The binary's mtime against the commit's. `git diff` CANNOT answer this:
+# .gitignore:1 is `/build.*`, so `git diff -- build.debug/` prints nothing on a
+# fresh tree and nothing on a six-month-old one. It was the required check here
+# and it could not fail. (incident-class: vacuous-gate)
+test build.debug/movian -nt .git/HEAD && echo "binary newer than HEAD" \
+  || echo "STALE: binary predates the checked-out commit -- rebuild"
+strings build.debug/movian | grep -c '<marker from the change under test>'
 ```
-If the build tree has uncommitted changes relative to HEAD, either:
+If the binary predates HEAD, or the marker count is 0, either:
 - Rebuild: `make BUILD=debug -j$(nproc)`
 - Or explicitly document that the shared build is being reused and cite the static-marker evidence (Rule 2) that proves the commit's code is present.
 
