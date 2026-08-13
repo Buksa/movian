@@ -27,11 +27,20 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 MOVIAN_BINARY = "./build.debug/movian"
 
+# The viewpreview dev plugin (issue #87): `mdev preview` auto-starts an
+# instance with just this plugin loaded if none is running yet.
+VIEWPREVIEW_DIR = REPO_ROOT / "support" / "devtools" / "viewpreview"
+
 PORT_RE = re.compile(r"http-server: Listening on port (\d+)")
 
 # GLW view load/parse errors as emitted by glw_view_seterr()
 # (src/ui/glw/glw_view_support.c): "Error <file>:<line>: <message>"
 VIEW_ERROR_RE = re.compile(r"GLW\s+\[ERROR\]:\s*Error (.+?):(\d+): (.*)$")
+
+# viewpreview.js's fail() logs "viewpreview: ERROR: <msg>" (see
+# support/devtools/viewpreview/viewpreview.js); its non-error status line
+# ("viewpreview: showing ...") deliberately does not match this.
+VIEWPREVIEW_ERROR_RE = re.compile(r"viewpreview:\s*ERROR:")
 
 # Error-signal set ported from movian_agent.py SIGNALS["errors"],
 # extended with the GLW view error shape.
@@ -203,7 +212,8 @@ def parse_dev_flags(spec: str) -> dict[str, Any]:
 
 
 def build_argv(inst: Instance, plugins: list[str], skin: str | None,
-               libav_log: bool, start_url: str | None) -> list[str]:
+               libav_log: bool, start_url: str | None,
+               extra_flags: list[str] | None = None) -> list[str]:
     argv = [
         "stdbuf", "-oL", "-eL",
         MOVIAN_BINARY, "-d",
@@ -217,6 +227,8 @@ def build_argv(inst: Instance, plugins: list[str], skin: str | None,
         argv += ["--skin", os.path.abspath(skin)]
     if libav_log:
         argv.append("--libav-log")
+    if extra_flags:
+        argv += extra_flags
     if start_url:
         argv.append(start_url)
     return argv
@@ -275,6 +287,45 @@ def launch(inst: Instance, argv: list[str], timeout: float = 30.0) -> dict[str, 
     }
     inst.save_state(state)
     return state
+
+
+def ensure_running(name: str, plugins: list[str]) -> Instance:
+    """Return a live Instance named `name`, launching one with `plugins`
+    if it is not already up. Reuses an already-running instance as-is
+    (its existing plugin/skin selection wins -- this does not restart
+    it even if `plugins` differs). Same foreign-pid guard as `mdev run`:
+    never touches a movian process this state dir doesn't own.
+
+    Used by `mdev preview` (issue #87) to auto-start the viewpreview
+    instance on first use. Passes the existing core CLI flag
+    `--bypass-ecmascript-acl` (src/main.c, gconf.bypass_ecmascript_acl):
+    the ecmascript file ACL (src/ecmascript/es_fs.c:filename_is_allowed)
+    otherwise restricts a plugin's own `fs`/`native/fs` reads to its own
+    directory, but viewpreview.js needs to read fixture JSON and check
+    view-file paths anywhere in the repo (or a sibling checkout) -- this
+    is a pre-existing core flag, not a new C change.
+    """
+    inst = Instance(name)
+    if inst.live_pid() is not None:
+        return inst
+
+    foreign = movian_pids()
+    if foreign:
+        raise MdevError(
+            "refusing to start: live movian process(es) not owned by "
+            "instance %r: pid %s (their state is not in %s). "
+            "Stop them from their own instance; mdev preview never "
+            "kills foreign pids." % (
+                name, ", ".join(str(p) for p in foreign), inst.state_path,
+            ),
+            exit_code=2,
+        )
+
+    inst.ensure_dirs()
+    argv = build_argv(inst, plugins, None, False, None,
+                      extra_flags=["--bypass-ecmascript-acl"])
+    launch(inst, argv)
+    return inst
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +390,50 @@ def node_count(base_url: str, path: str = PAGE_NODES) -> int:
     return len(parsed.get("children", []))
 
 
+def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, Any]:
+    """POST /api/open for `url` and wait for page-ready; return
+    {"url", "title", "type", "nodes"}. Shared by `mdev open` and
+    `mdev preview`.
+    """
+    base = inst.base_url()
+    before_url = prop_value(base, PAGE_URL)
+
+    result = http_request(
+        base, "/api/open?" + urllib.parse.urlencode({"url": url}),
+        timeout=5.0)
+    if not result.get("ok"):
+        raise MdevError("POST /api/open failed: %s"
+                        % (result.get("error") or result.get("status")))
+
+    deadline = time.monotonic() + timeout
+    cur_url = title = None
+    ready = False
+    while time.monotonic() < deadline:
+        cur_url = prop_value(base, PAGE_URL)
+        loading = prop_value(base, PAGE_LOADING)
+        title = prop_value(base, PAGE_TITLE)
+        # Ready when loading is 0 -- or void/absent: routes like
+        # page:settings never create the loading prop at all.
+        if loading in ("0", "(void)", None) and prop_has_value(title):
+            # Verify navigation actually targeted our URL: either the page
+            # url now equals the requested one, or it at least changed away
+            # from what was open before.
+            if cur_url == url or cur_url != before_url:
+                ready = True
+                break
+        time.sleep(0.2)
+
+    if not ready:
+        raise MdevError(
+            "page not ready after %.0fs: url=%r loading=%r title=%r"
+            % (timeout, cur_url, prop_value(base, PAGE_LOADING), title)
+        )
+
+    ptype = prop_value(base, PAGE_TYPE)
+    nodes = node_count(base)
+    return {"url": cur_url, "title": title, "type": ptype, "nodes": nodes}
+
+
 # ---------------------------------------------------------------------------
 # Log access
 # ---------------------------------------------------------------------------
@@ -375,6 +470,11 @@ def error_lines(text: str) -> list[str]:
 
 def view_error_lines(text: str) -> list[str]:
     return [line for line in text.splitlines() if VIEW_ERROR_RE.search(line)]
+
+
+def viewpreview_error_lines(text: str) -> list[str]:
+    return [line for line in text.splitlines()
+            if VIEWPREVIEW_ERROR_RE.search(line)]
 
 
 # ---------------------------------------------------------------------------
