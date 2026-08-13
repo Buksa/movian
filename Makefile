@@ -262,6 +262,11 @@ SRCS-$(CONFIG_LIBNTFS)         += src/fileaccess/fa_ntfs.c
 SRCS-$(CONFIG_NATIVESMB)       += src/fileaccess/smb/fa_nativesmb.c
 SRCS-$(CONFIG_LIBSMB2)         += src/fileaccess/smb2/fa_libsmb2.c \
 				  src/fileaccess/smb2/fa_libsmb2_pool.c
+SRCS-$(CONFIG_LIBSMB2)         += src/networking/smb_server.c \
+				  src/networking/smb_server_session.c \
+				  src/networking/smb_server_handles.c \
+				  src/networking/smb_server_vfs.c \
+				  src/networking/smb_server_srvsvc.c
 ifneq (,$(filter yes,$(CONFIG_NATIVESMB) $(CONFIG_LIBSMB2)))
 SRCS += src/fileaccess/smb/nmb.c
 endif
