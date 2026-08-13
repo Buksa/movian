@@ -1,6 +1,6 @@
 ---
 name: verifier-checks
-description: Reusable verifier checks for the Buksa/movian issue-first pipeline. Covers build-tree isolation, source-marker validation before dynamic proof, portable file-copy fallbacks, and verdict-evidence consistency. Trigger when acting as a verifier, reviewing verifier reports, or when the orchestrator audits evidence quality. Layered on verifier-evidence (report format) and mdev-plugin-testing (harness mechanics).
+description: Reusable verifier checks for the Buksa/movian issue-first pipeline. Covers build-tree isolation, source-marker validation before dynamic proof, portable file-copy fallbacks, and verdict-evidence consistency. Trigger when acting as a verifier, reviewing verifier reports, or when the orchestrator audits evidence quality. Layered on verifier-evidence (report format); harness mechanics live in the SDK's `movian:run` skill.
 ---
 
 # Verifier Checks — Reusable Rules
@@ -147,4 +147,8 @@ If the binary predates HEAD, or the marker count is 0, either:
 - Issue #135: TypeScript calibration (Mechanism B capture timing)
 - PR #142: `4160c5ef4` — pre-kill thread-backtrace capture, GDB gating, prctl
 - Digest: `.mimocode/digest/135-138-round-lessons.md`
-- Related skills: `verifier-evidence` (report format), `mdev-plugin-testing` (harness mechanics)
+- Related skills: `verifier-evidence` (report format); harness mechanics are the
+  SDK's `movian:run` (drive an instance) and `movian:verify` (what a result
+  proves). The Mimo-era `mdev-plugin-testing` they used to name is gone: its
+  usable half is `movian:verify/references/plugin-type-patterns.md`, and the
+  rest duplicated `movian:run`.
