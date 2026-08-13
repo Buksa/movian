@@ -72,6 +72,72 @@ print(json.dumps({"path": sys.argv[1]}, separators=(",", ":")))
 PY
 }
 
+smb_smoke_profile_summary() {
+  local profile="$1"
+  local output="$2"
+  python3 - "$profile" >"$output" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+profile = Path(sys.argv[1])
+settings = profile / "persistent" / "settings"
+
+def read_json(name, default):
+    try:
+        return json.loads((settings / name).read_text())
+    except Exception:
+        return default
+
+print(f"profile={profile}")
+print(f"bittorrent.path={read_json('bittorrent', {}).get('path', '<unset>')}")
+
+keyring = read_json("keyring", {})
+print("keyring.ids=" + ",".join(sorted(keyring)) if keyring else "keyring.ids=<none>")
+
+bookmarks = read_json("bookmarks2", [])
+urls = []
+if isinstance(bookmarks, list):
+    for bookmark in bookmarks:
+        url = bookmark.get("url") if isinstance(bookmark, dict) else None
+        if isinstance(url, str) and ("smb://" in url or "smb2://" in url):
+            urls.append(url)
+print("bookmarks.smb=" + ",".join(urls) if urls else "bookmarks.smb=<none>")
+PY
+}
+
+smb_smoke_check_no_unexpected_remote_smb2_client() {
+  local log="$1"
+  local allowed="${2:-127\\.0\\.0\\.1}"
+
+  [ "${SMB_SMOKE_ALLOW_REMOTE_CLIENTS:-0}" != "1" ] || return 0
+  [ -f "$log" ] || return 0
+
+  python3 - "$log" "$allowed" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+log = Path(sys.argv[1])
+allowed = sys.argv[2].split(",")
+bad = []
+
+for line in log.read_text(errors="replace").splitlines():
+    if "SMB2-CLIENT" not in line or "Connecting to " not in line:
+        continue
+    target = line.split("Connecting to ", 1)[1].split()[0]
+    host = target.split("/", 1)[0].rsplit(":", 1)[0]
+    if not any(re.fullmatch(pattern, host) for pattern in allowed):
+        bad.append(line)
+
+if bad:
+    print("Unexpected remote SMB2 client activity:", file=sys.stderr)
+    for line in bad:
+        print(line, file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 smb_smoke_sanitize_file() {
   local file="$1"
   [ -f "$file" ] || return 0

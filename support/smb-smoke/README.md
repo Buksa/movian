@@ -74,3 +74,29 @@ The following are deliberately not copied into this client feature:
 - server-specific `smb_server*.c` coverage;
 - server patches and server lifecycle tests;
 - any test requiring `codex/smb2-server-mvp` or the future `feature/smb-server`.
+
+## Embedded Movian server smoke
+
+These scripts are separate from the remote client smoke and start a disposable
+Movian SMB2 server on the historical default test port range:
+
+```sh
+support/smb-smoke/run-embedded-server-smoke.sh
+```
+
+The server smoke uses `smbclient` against a local Movian listener and covers
+anonymous/password sessions, SMB2 and SMB3 dialects, signing, IPC$/srvsvc host
+enumeration, VFS root mapping, read/write/truncate, mkdir/rmdir, rename
+collision, and traversal rejection. It creates a disposable profile and share
+root under `/tmp`; it does not use the standard user profile.
+
+For the navigation-focused server/client path:
+
+```sh
+support/smb-smoke/run-http-nav-smoke.sh
+```
+
+The embedded tests do not change the server default port `1445`; their
+disposable listener defaults to `1786` to avoid collisions. They do not test
+TCP/445 deployment or delete-on-close status behavior. The latter remains a
+separate baseline investigation.
