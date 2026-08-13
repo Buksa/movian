@@ -44,6 +44,16 @@ create_cb(struct smb2_context *smb2, int status, void *command_data,
 }
 
 static void
+create_only_cb(struct smb2_context *smb2, int status, void *command_data,
+               void *private_data)
+{
+        struct wait_state *state = private_data;
+
+        create_cb(smb2, status, command_data, private_data);
+        state->done = 1;
+}
+
+static void
 middle_cb(struct smb2_context *smb2, int status, void *command_data,
           void *private_data)
 {
@@ -221,7 +231,7 @@ send_create_only(struct smb2_context *smb2, const char *path, int is_dir,
         memset(state, 0, sizeof(*state));
         state->status = UINT32_MAX;
         fill_create_request(&request, path, is_dir, 1);
-        pdu = smb2_cmd_create_async(smb2, &request, create_cb, state);
+        pdu = smb2_cmd_create_async(smb2, &request, create_only_cb, state);
         if (pdu == NULL) {
                 fprintf(stderr, "CREATE construction failed: %s\n",
                         smb2_get_error(smb2));
@@ -255,20 +265,28 @@ close_created_file(struct smb2_context *smb2, struct wait_state *state)
 }
 
 static int
-connect_context(struct smb2_context **out, const char *host, const char *share,
-                const char *user, const char *password, const char *domain)
+connect_context(struct smb2_context **out, const char *host, int port,
+                const char *share, const char *user, const char *password,
+                const char *domain)
 {
+        char server[256];
         struct smb2_context *smb2 = smb2_init_context();
 
         if (smb2 == NULL) {
                 fprintf(stderr, "smb2_init_context failed\n");
                 return -1;
         }
+        if (snprintf(server, sizeof(server), "%s:%d", host, port) >=
+            (int)sizeof(server)) {
+                fprintf(stderr, "server address is too long\n");
+                smb2_destroy_context(smb2);
+                return -1;
+        }
         smb2_set_security_mode(smb2, SMB2_NEGOTIATE_SIGNING_ENABLED);
         smb2_set_user(smb2, user);
         smb2_set_password(smb2, password);
         smb2_set_domain(smb2, domain);
-        if (smb2_connect_share(smb2, host, share, user) != 0) {
+        if (smb2_connect_share(smb2, server, share, user) != 0) {
                 fprintf(stderr, "smb2_connect_share failed: %s\n",
                         smb2_get_error(smb2));
                 smb2_destroy_context(smb2);
@@ -318,7 +336,8 @@ main(int argc, char **argv)
                 fprintf(stderr, "invalid port: %s\n", argv[2]);
                 return 2;
         }
-        if (connect_context(&smb2, host, share, user, password, domain) < 0)
+        if (connect_context(&smb2, host, port, share, user, password,
+                            domain) < 0)
                 return 1;
 
         if (strcmp(operation, "delete-file") == 0) {

@@ -401,6 +401,10 @@ run_delete_on_close_case() {
   run_tool disconnect-cleanup disconnect disconnect.txt
   [ "$tool_rc" -eq 0 ] ||
     fail "disconnect cleanup request failed; see $case_art/disconnect-cleanup.log"
+  for _ in $(seq 1 20); do
+    [ ! -e "$root/disconnect.txt" ] && break
+    sleep 0.1
+  done
   [ ! -e "$root/disconnect.txt" ] ||
     fail "disconnect cleanup left DELETE_ON_CLOSE file behind"
 
