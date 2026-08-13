@@ -140,8 +140,9 @@ PY
 
 smb_smoke_sanitize_file() {
   local file="$1"
+  local password="${2:-${SMB_SMOKE_PASSWORD:-}}"
   [ -f "$file" ] || return 0
-  python3 - "$file" "${SMB_SMOKE_PASSWORD:-}" <<'PY'
+  python3 - "$file" "$password" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -164,8 +165,9 @@ smb_smoke_cleanup_profiles() {
 
 smb_smoke_check_no_secret() {
   local art="$1"
-  if [ -n "${SMB_SMOKE_PASSWORD:-}" ] &&
-     grep -R --fixed-strings "$SMB_SMOKE_PASSWORD" "$art" >/dev/null 2>&1; then
+  local password="${2:-${SMB_SMOKE_PASSWORD:-}}"
+  if [ -n "$password" ] &&
+     grep -R --fixed-strings "$password" "$art" >/dev/null 2>&1; then
     echo "Secret leaked into artifacts under $art" >&2
     return 1
   fi

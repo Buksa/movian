@@ -90,6 +90,14 @@ enumeration, VFS root mapping, read/write/truncate, mkdir/rmdir, rename
 collision, and traversal rejection. It creates a disposable profile and share
 root under `/tmp`; it does not use the standard user profile.
 
+The embedded suite also runs
+`smb2-delete-on-close.c` against a separate disposable listener. It probes
+file `CREATE` with `SMB2_FILE_DELETE_ON_CLOSE`, empty-directory cleanup,
+`FILE_DISPOSITION_INFORMATION`, non-empty-directory and permission failures,
+an ENOENT race, and disconnect cleanup. Failure cases assert that data remains
+intact and record the server status; they do not import the later f2e1 close
+error-propagation behavior.
+
 For the navigation-focused server/client path:
 
 ```sh
@@ -97,6 +105,5 @@ support/smb-smoke/run-http-nav-smoke.sh
 ```
 
 The embedded tests do not change the server default port `1445`; their
-disposable listener defaults to `1786` to avoid collisions. They do not test
-TCP/445 deployment or delete-on-close status behavior. The latter remains a
-separate baseline investigation.
+disposable listeners default to `1786`, `1787`, and `1788` to avoid collisions.
+They do not test TCP/445 deployment.

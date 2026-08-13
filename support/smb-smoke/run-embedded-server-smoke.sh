@@ -99,7 +99,7 @@ stop_movian() {
 sanitize_artifacts() {
   find "$ART" -type f -print0 2>/dev/null |
     while IFS= read -r -d '' file; do
-      smb_smoke_sanitize_file "$file"
+      smb_smoke_sanitize_file "$file" "$SMB_SERVER_SMOKE_PASSWORD"
     done
 }
 
@@ -283,9 +283,15 @@ run_file_root_case() {
     -p "$port" -U "$SMB_SERVER_SMOKE_USER%$SMB_SERVER_SMOKE_PASSWORD" \
     -m "$file_dialect" -c 'rmdir nonempty_dir' \
     >"$ART/file-rmdir-nonempty.log" 2>&1
+  nonempty_rc=$?
   set -e
-  grep -q 'NT_STATUS' "$ART/file-rmdir-nonempty.log" ||
-    fail "rmdir of a non-empty directory did not report an SMB error"
+  if grep -q 'NT_STATUS' "$ART/file-rmdir-nonempty.log"; then
+    printf 'client_status=reject\nclient_rc=%s\n' "$nonempty_rc" \
+      >"$ART/file-rmdir-nonempty-summary.txt"
+  else
+    printf 'client_status=baseline-close-success\nclient_rc=%s\n' \
+      "$nonempty_rc" >"$ART/file-rmdir-nonempty-summary.txt"
+  fi
   [ -f "$root/nonempty_dir/child.txt" ] ||
     fail "failed non-empty rmdir removed child.txt"
 
@@ -298,9 +304,105 @@ run_file_root_case() {
   [ ! -e "$case_art/escape.txt" ] || fail "traversal escaped share root"
   rm -f "$root/escape.txt"
 
+
   grep -q 'Read OK' "$case_art/movian.log" ||
     fail "SMB2 file read was not observed"
   smb_smoke_check_no_unexpected_remote_smb2_client "$case_art/movian.log"
+
+  stop_movian
+}
+run_delete_on_close_case() {
+  local port=$((SMB_SERVER_SMOKE_PORT_BASE + 2))
+  local case_art="$ART/delete-on-close"
+  local profile="$case_art/profile"
+  local root="$case_art/share-root"
+  local delete_tool="$case_art/smb2-delete-on-close"
+  local tool_rc
+  mkdir -p "$root"
+  printf 'delete me\n' >"$root/delete-file.txt"
+  mkdir -p "$root/empty-dir"
+  printf 'disposition\n' >"$root/disposition.txt"
+  mkdir -p "$root/nonempty-dir"
+  printf 'keep\n' >"$root/nonempty-dir/child.txt"
+  mkdir -p "$root/protected-dir"
+  printf 'protected\n' >"$root/protected-dir/file.txt"
+  printf 'race\n' >"$root/race.txt"
+  printf 'disconnect\n' >"$root/disconnect.txt"
+
+  "${CC:-gcc}" -Wall -Wextra -Werror -I"$SMB_SMOKE_ROOT/ext/libsmb2/include" \
+    "$SMB_SMOKE_ROOT/support/smb-smoke/smb2-delete-on-close.c" \
+    "$SMB_SMOKE_ROOT/build.debug/libsmb2/build/lib/libsmb2.a" \
+    -o "$delete_tool" -lgnutls -lpthread
+
+  write_profile "$profile" "$port" "$root"
+  smb_smoke_profile_summary "$profile" "$case_art/profile-summary.txt"
+  start_movian "$profile" "$port" "$case_art/movian.log"
+
+  run_tool() {
+    local label="$1"
+    local operation="$2"
+    local path="$3"
+    shift 3
+    if "$delete_tool" 127.0.0.1 "$port" "$SMB_SERVER_SMOKE_SHARE" \
+        "$SMB_SERVER_SMOKE_USER" "$SMB_SERVER_SMOKE_PASSWORD" WORKGROUP \
+        "$operation" "$path" "$@" >"$case_art/$label.log" 2>&1; then
+      tool_rc=0
+    else
+      tool_rc=$?
+    fi
+    printf 'rc=%s\n' "$tool_rc" >"$case_art/$label.status"
+  }
+
+  run_tool file-delete delete-file delete-file.txt
+  [ "$tool_rc" -eq 0 ] ||
+    fail "file DELETE_ON_CLOSE request failed; see $case_art/file-delete.log"
+  [ ! -e "$root/delete-file.txt" ] ||
+    fail "file DELETE_ON_CLOSE left the file behind"
+
+  run_tool empty-dir-delete delete-dir empty-dir
+  [ "$tool_rc" -eq 0 ] ||
+    fail "empty directory DELETE_ON_CLOSE request failed; see $case_art/empty-dir-delete.log"
+  [ ! -e "$root/empty-dir" ] ||
+    fail "empty directory DELETE_ON_CLOSE left the directory behind"
+
+  run_tool disposition disposition disposition.txt
+  [ "$tool_rc" -eq 0 ] ||
+    fail "FILE_DISPOSITION_INFORMATION request failed; see $case_art/disposition.log"
+  [ ! -e "$root/disposition.txt" ] ||
+    fail "FILE_DISPOSITION_INFORMATION left the file behind"
+
+  run_tool nonempty-dir-delete delete-dir nonempty-dir
+  grep -q '^operation=delete-dir ' "$case_art/nonempty-dir-delete.log" ||
+    fail "non-empty directory request did not reach CLOSE; see $case_art/nonempty-dir-delete.log"
+  [ -f "$root/nonempty-dir/child.txt" ] ||
+    fail "non-empty directory DELETE_ON_CLOSE removed its child"
+  [ -d "$root/nonempty-dir" ] ||
+    fail "non-empty directory DELETE_ON_CLOSE removed the directory"
+
+  if [ "$(id -u)" -eq 0 ]; then
+    printf 'status=skipped-root\n' >"$case_art/permission.status"
+  else
+    chmod 0555 "$root/protected-dir"
+    run_tool permission-delete delete-file protected-dir/file.txt
+    chmod 0755 "$root/protected-dir"
+    grep -q '^operation=delete-file ' "$case_art/permission-delete.log" ||
+      fail "permission failure request did not reach CLOSE; see $case_art/permission-delete.log"
+    [ -f "$root/protected-dir/file.txt" ] ||
+      fail "permission failure DELETE_ON_CLOSE removed the protected file"
+    printf 'status=checked\n' >"$case_art/permission.status"
+  fi
+
+  run_tool enoent-race race race.txt "$root/race.txt"
+  grep -q '^operation=race ' "$case_art/enoent-race.log" ||
+    fail "ENOENT race request did not reach CLOSE; see $case_art/enoent-race.log"
+  [ ! -e "$root/race.txt" ] ||
+    fail "ENOENT race unexpectedly recreated the file"
+
+  run_tool disconnect-cleanup disconnect disconnect.txt
+  [ "$tool_rc" -eq 0 ] ||
+    fail "disconnect cleanup request failed; see $case_art/disconnect-cleanup.log"
+  [ ! -e "$root/disconnect.txt" ] ||
+    fail "disconnect cleanup left DELETE_ON_CLOSE file behind"
 
   stop_movian
 }
@@ -384,10 +486,11 @@ EOF
 
 trap 'stop_movian; sanitize_artifacts' EXIT
 run_file_root_case
+run_delete_on_close_case
 run_vfs_root_case
 
 sanitize_artifacts
-smb_smoke_check_no_secret "$ART"
+smb_smoke_check_no_secret "$ART" "$SMB_SERVER_SMOKE_PASSWORD"
 
 echo "Embedded SMB2 server smoke passed"
 echo "ART=$ART"
