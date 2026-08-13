@@ -125,8 +125,9 @@ The public stack currently includes these user-visible changes:
   existing `smb://` backend remains available for compatibility. See
   `Guides/LINUX_SMB2_BACKEND.md`. Movian also ships a built-in SMB2 *server*
   (`Guides/SMB_SERVER_SPECIFICATION.md`,
-  `Guides/SMB_SERVER_LIFECYCLE_ARCHITECTURE.md`). It listens on an
-  unprivileged port by default; what it would take to reach it from Windows
+  `Guides/SMB_SERVER_LIFECYCLE_ARCHITECTURE.md`). It is **disabled by
+  default** and listens on nothing until enabled in Settings → Network; the
+  configured port is then `1445`. What it would take to reach it from Windows
   Explorer on TCP `445` is researched in
   `Guides/SMB2_WINDOWS_VISIBILITY_RESEARCH.md`.
 - Steam launches avoid the X11 fullscreen `override_redirect` path when

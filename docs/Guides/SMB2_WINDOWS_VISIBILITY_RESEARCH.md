@@ -15,8 +15,12 @@ each such claim cites file and line. Host addresses are written as
 
 ## Current State
 
-The server listens on a non-privileged port: `smb_port` defaults to `1445`
-(`src/networking/smb_server.c:55`). On the Steam Deck Flatpak test host:
+The server is **off unless the user turns it on**: `smbserver.enable` defaults
+to `0` (`src/networking/smb_server.c:416-423`) and the listener thread is only
+created while `smb_enable` is true (`:266-291`). When enabled it listens on a
+non-privileged port — `smb_port` defaults to `1445`
+(`src/networking/smb_server.c:55`). On the Steam Deck Flatpak test host, with
+the server enabled:
 
 - `192.0.2.56:1445` is open and accepts libsmb2 session setup.
 - `192.0.2.56:445` is closed.
@@ -27,12 +31,21 @@ The server listens on a non-privileged port: `smb_port` defaults to `1445`
 The request handlers are therefore usable on high ports, but Windows Explorer
 and `net use` still need a way to reach the server on TCP `445`.
 
-Authentication is a separate current blocker from TCP visibility. Runtime tests
-on Steam Deck show anonymous high-port browsing succeeds with Samba
-`smbclient`, while password-protected NTLM sessions fail before the first
-directory create/query request. Do not treat anonymous high-port success as
-proof that ordinary Windows password-authenticated UNC access is complete.
-This observation predates the current server; re-measure before acting on it.
+Authentication is **not** a blocker, and the June note claiming it was has been
+removed rather than carried over. Against the MVP, password-protected NTLM
+sessions failed before the first directory request. Against the current server
+that is a hard gate in CI-adjacent tooling:
+`support/smb-smoke/run-embedded-server-smoke.sh` performs
+password-authenticated listings over SMB2 and over each of `SMB3_00`,
+`SMB3_02` and `SMB3_11` with client min and max pinned to the same dialect, and
+`fail`s the run if any of them errors or if a *wrong* password is accepted.
+
+What that gate does not cover is a **Windows** client, because no Windows
+client can reach the server at all while 445 is closed. So: password auth is
+proven against Samba `smbclient`; Windows-side auth is simply unmeasured, and
+becomes measurable only once this document's subject is solved. Do not read the
+smoke's green as evidence about Windows, and do not read the June note as
+evidence that auth is broken.
 
 This is not only a Flatpak problem. It is a general host-platform exposure
 problem: Windows SMB clients expect TCP `445`, while many platforms reserve or
@@ -166,6 +179,10 @@ Cons:
 - Still requires privileged host unit installation.
 - Adds one proxy process per connection with `Accept=yes`.
 - Needs runtime validation with Windows `net use`.
+- Connections arriving while Movian is not running are refused by `socat`, not
+  queued. This is the correct behaviour for a media player and is *why* the
+  proxy works: systemd starts `socat`, never Movian. See Option C for what
+  happens when you ask systemd to start Movian instead.
 
 This is the recommended next experiment because it is reversible and does not
 require changing Movian's SMB2 server internals.
@@ -174,15 +191,35 @@ The same pattern applies to native Linux packages and Flatpak installations:
 the host service manager owns privileged TCP `445`; Movian continues to run as
 an unprivileged process on a high port.
 
-## Option C: Direct systemd Socket Activation
+## Option C: Direct systemd Socket Activation — ruled out
 
-In direct socket activation, systemd binds TCP `445`, starts Movian, and passes
-the listening socket through file descriptor `3` using the `LISTEN_FDS`
+In direct socket activation, systemd binds TCP `445`, **starts Movian**, and
+passes the listening socket through file descriptor `3` using the `LISTEN_FDS`
 protocol. The daemon must call `sd_listen_fds()` or implement the same protocol
 and then accept clients from the inherited descriptor.
 
-This is architecturally clean, but it is not a small packaging-only change.
-Each obstacle below was re-checked against the current tree:
+The June note called this the clean design and listed only mechanical
+obstacles. It missed the disqualifying one, which is a project decision, not an
+implementation cost: **Movian has no headless daemon mode and one will not be
+added** (`AGENTS.md:60-61`). Its lifetime is tied to the UI event loop —
+`main()` blocks in `glw_x11_main()` — and a launch with no display
+self-terminates **~2.5–3 s after startup** (`AGENTS.md:63-65`).
+
+Socket activation is precisely a request to start Movian on demand, from
+systemd, outside any UI session. The accepted connection would be handed to a
+process that exits before a Windows client finishes browsing, and an idle
+session would be impossible — the same blind spot that let the #76 signing
+guard's rejection of Samba's unsigned `SMB2_ECHO` keepalive pass every one-shot
+smoke (`AGENTS.md:66-69`).
+
+Any revival of this option must first answer how systemd learns about the
+user's graphical session and refrains from starting anything outside it — at
+which point it is no longer socket activation but Option B with extra steps.
+Prefer Option B.
+
+The mechanical obstacles below are recorded because they remain true and would
+still have to be solved even under a UI-session-aware design. Each was
+re-checked against the current tree:
 
 - `src/networking/smb_server.c:244` calls `smb2_serve_port()`.
 - `smb2_serve_port()` in bundled libsmb2 calls `smb2_bind_and_listen()` itself,
@@ -197,9 +234,9 @@ Each obstacle below was re-checked against the current tree:
   blocked `smb2_serve_port()` (`src/networking/smb_server.c:295`), which is
   exactly the fd systemd would own.
 
-This is a plausible v2/v3 design if we want to remove the proxy layer. It
-applies to native Linux too, but it is more invasive than a host redirect or
-systemd socket proxy.
+Note the last one is not merely a lifecycle wrinkle: the fd systemd would own
+is the fd we close to stop the server, so the two designs are in direct
+conflict over the same descriptor.
 
 ## Option D: Lower `ip_unprivileged_port_start`
 
@@ -233,7 +270,8 @@ cmd /c "net use \\192.0.2.56\Media /user:movian <password> /persistent:no"
 Validate a reversible systemd socket proxy on Linux/SteamOS, starting with the
 Steam Deck test host:
 
-1. Keep Movian SMB2 serving on `127.0.0.1:1445` / `0.0.0.0:1445`.
+1. Enable the SMB server in Settings → Network (it is off by default) and keep
+   Movian, UI and all, serving on `127.0.0.1:1445` / `0.0.0.0:1445`.
 2. Install temporary root-owned `movian-smb2-forward.socket` and
    `movian-smb2-forward@.service`.
 3. Start the socket and verify host TCP `445` is listening.
