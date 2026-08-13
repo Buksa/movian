@@ -252,7 +252,10 @@ static int
 es_file_ftruncate(duk_context *ctx)
 {
   es_fd_t *efd = es_fd_get(ctx, 0);
-  fa_ftruncate(efd->efd_fh, duk_to_number(ctx, 1));
+  int status = fa_ftruncate(efd->efd_fh, duk_to_number(ctx, 1));
+  if(status < 0)
+    duk_error(ctx, DUK_ERR_ERROR, "Unable to truncate '%s' -- %s",
+              efd->efd_path, fa_err_code_str(status));
   return 0;
 }
 
@@ -293,6 +296,76 @@ es_file_mkdirs(duk_context *ctx)
               filename, errbuf);
 
   return 0;
+}
+
+
+/**
+ * filename
+ */
+static int
+es_file_unlink(duk_context *ctx)
+{
+  es_context_t *ec = es_get(ctx);
+
+  const char *filename = get_filename(ctx, 0, ec, 1);
+  char errbuf[512];
+
+  if(fa_unlink(filename, errbuf, sizeof(errbuf)))
+    duk_error(ctx, DUK_ERR_ERROR, "Unable to remove '%s' -- %s",
+              filename, errbuf);
+
+  return 0;
+}
+
+
+/**
+ * path
+ */
+static int
+es_file_rmdir(duk_context *ctx)
+{
+  es_context_t *ec = es_get(ctx);
+
+  const char *path = get_filename(ctx, 0, ec, 1);
+  char errbuf[512];
+
+  if(fa_rmdir(path, errbuf, sizeof(errbuf)))
+    duk_error(ctx, DUK_ERR_ERROR, "Unable to remove directory '%s' -- %s",
+              path, errbuf);
+
+  return 0;
+}
+
+
+/**
+ * path
+ */
+static int
+es_file_readdir(duk_context *ctx)
+{
+  es_context_t *ec = es_get(ctx);
+
+  const char *path = get_filename(ctx, 0, ec, 0);
+  char errbuf[512];
+
+  fa_dir_t *fd = fa_scandir(path, errbuf, sizeof(errbuf));
+  if(fd == NULL)
+    duk_error(ctx, DUK_ERR_ERROR, "Unable to scan directory '%s' -- %s",
+              path, errbuf);
+
+  duk_push_array(ctx);
+  int idx = 0;
+  fa_dir_entry_t *fde;
+  RB_FOREACH(fde, &fd->fd_entries, fde_link) {
+    const char *name = rstr_get(fde->fde_filename);
+    if(!strcmp(name, ".") || !strcmp(name, ".."))
+      continue;
+    duk_push_string(ctx, name);
+    duk_put_prop_index(ctx, -2, idx++);
+  }
+
+  fa_dir_free(fd);
+  return 1;
 }
 
 
@@ -364,9 +437,13 @@ static const duk_function_list_entry fnlist_fs[] = {
   { "read",             es_file_read,             5 },
   { "write",            es_file_write,            5 },
   { "fsize",            es_file_fsize,            1 },
+  { "ftruncate",        es_file_ftruncate,        2 },
   { "ftrunctae",        es_file_ftruncate,        2 },
   { "rename",           es_file_rename,           2 },
   { "mkdirs",           es_file_mkdirs,           2 },
+  { "unlink",           es_file_unlink,           1 },
+  { "rmdir",            es_file_rmdir,            1 },
+  { "readdir",          es_file_readdir,          1 },
   { "dirname",          es_file_dirname,          1 },
   { "basename",         es_file_basename,         1 },
   { "copyfile",         es_file_copy,             2 },
