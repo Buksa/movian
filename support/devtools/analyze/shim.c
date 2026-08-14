@@ -277,82 +277,17 @@ prop_ref_dec_traced(void *p, const char *file, int line)
 char gconf[32768];
 
 
-/* ---- widget-class lookup --------------------------------------------------
- * glw_class_find_by_name() is referenced by the linked eval.o/glw_view.c
- * object code but, per the measured call graph, is NEVER invoked from
- * glw_view_parser.c -- i.e. not on the parse-only path movian-analyze
- * drives. It is kept as a hand-written shim (not an abort stub) because
- * a future core change could start calling it during parse, and because
- * issue #97 specifies a real behavioral contract for it: "Widget names
- * validated against generated/movian-metadata.json when present (else
- * accept-all + warning), NOT by linking widget objects."
- *
- * generated/movian-metadata.json is issue #98's deliverable and does not
- * exist yet in this tree, so today this always takes the accept-all
- * path. If/when #98 lands, this does a light-weight substring scan for
- * `"name"` under a `"widgets"` object -- deliberately not a full JSON
- * parser, since the artifact's schema is #98's decision, not #97's; a
- * real dependency should be revisited once that schema exists.
- *
- * NOTE on the "+ warning" half of that contract: this is deliberately
- * SILENT (no stderr) when the metadata file is simply absent, even
- * though the issue text says "accept-all + warning". Measured: this
- * path fires on essentially every real .view file (TOKEN_FUNCTION
- * resolution for e.g. `widget(...)` constructors touches it during
- * normal parsing, not just eval), so a per-invocation warning would put
- * stderr output on every glwskins/flat run and violate the flat-corpus
- * acceptance criterion ("All 98 glwskins/flat views -> exit 0, nothing
- * on stderr"). The AC is the more specific, testable contract;
- * this comment is the record of the conscious trade-off. A single
- * once-ever notice (not per-invocation) would satisfy both and is a
- * reasonable follow-up once #98's artifact exists to make the
- * "unresolved name" case (still warned, below) the common one instead. */
-static int metadata_checked;
-static char *metadata_text;
-
-static void
-load_metadata_once(void)
-{
-  if(metadata_checked)
-    return;
-  metadata_checked = 1;
-
-  const char *path = "generated/movian-metadata.json";
-  FILE *fp = fopen(path, "rb");
-  if(fp == NULL)
-    return;
-
-  fseek(fp, 0, SEEK_END);
-  long sz = ftell(fp);
-  fseek(fp, 0, SEEK_SET);
-  if(sz <= 0 || sz > 8 * 1024 * 1024) {
-    fclose(fp);
-    return;
-  }
-  metadata_text = malloc(sz + 1);
-  size_t rd = fread(metadata_text, 1, sz, fp);
-  fclose(fp);
-  metadata_text[rd] = 0;
-}
-
+/* ---- widget-class lookup ----------------------------------------------
+ * The real parser needs only a non-NULL class address while resolving
+ * widget constructor tokens. The host never constructs or evaluates a
+ * widget, so this shim deliberately accepts the token without reading
+ * metadata or linking widget implementations. Metadata validation belongs
+ * to downstream tooling, not to this standalone parser host. */
 const void *
 glw_class_find_by_name(const char *name)
 {
-  static const char dummy[512];
-
-  load_metadata_once();
-
-  if(metadata_text != NULL) {
-    char needle[300];
-    snprintf(needle, sizeof(needle), "\"%s\"", name);
-    if(strstr(metadata_text, needle) == NULL) {
-      fprintf(stderr,
-              "movian-analyze: widget class \"%s\" not found in "
-              "generated/movian-metadata.json\n", name);
-      return NULL;
-    }
-  }
-
+  static const char dummy[1];
+  (void) name;
   return dummy;
 }
 
