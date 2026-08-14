@@ -6,7 +6,7 @@
 
 - base: `plugin-api` at `734b18d4e1ad9f902dc37c211f438737695a8436`;
 - branch: `devtools-lsp`;
-- final implementation commit at report time: `38f14f0a59e59e32cdfc9129f41bbfd130ed8acd`;
+- final implementation commit at report time: `a8b3ebf6b409dcf91b3f01af92c8cf93d464c4a0`;
 - M7 authority: `/tmp/movian-movian6`, commit `977a5c5c110f1d9928c8f85b79b1a58e7dcb2ce5`.
 
 The branch contains the LSP implementation, editor assets, tests, fixtures, and
