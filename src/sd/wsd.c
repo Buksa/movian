@@ -348,21 +348,32 @@ wsd_handle_probematch(htsmsg_t *pm, const net_addr_t *remote_addr)
   if(sp != NULL)
     *sp = 0;
 
-  hts_mutex_lock(&wsd_mutex);
-
-  wsd_host_t *wh = wsd_host_find(epr);
-  if(wh != NULL) {
-    wh->wh_mark = 0;
-    hts_mutex_unlock(&wsd_mutex);
-    return;
-  }
-
   /* net_addr_str() appends ":port" when na_port != 0 -- remote_addr's
    * port is wherever the host's WSD stack happened to send the reply
    * from (3702 here), not anything we want baked into an smb2:// URL,
    * so format the bare address ourselves. */
   net_addr_t addr_only = *remote_addr;
   addr_only.na_port = 0;
+
+  hts_mutex_lock(&wsd_mutex);
+
+  wsd_host_t *wh = wsd_host_find(epr);
+  if(wh != NULL) {
+    if(wh->wh_pending || !strcmp(wh->wh_addr, net_addr_str(&addr_only))) {
+      wh->wh_mark = 0;
+      hts_mutex_unlock(&wsd_mutex);
+      return;
+    }
+    /* Same endpoint, new source address (DHCP move / other NIC): the
+     * registered smb2:// URL still points at the old address, and every
+     * ProbeMatch from the new one would keep that stale entry alive.
+     * Drop it and rebuild below so the service follows the host. While
+     * a resolve is pending we must not destroy (the task holds the
+     * pointer); the next probe round re-checks once it clears. */
+    TRACE(TRACE_DEBUG, "WSD", "%s moved to %s, re-registering",
+          wh->wh_addr, net_addr_str(&addr_only));
+    wsd_host_destroy(wh);
+  }
 
   wh = calloc(1, sizeof(wsd_host_t));
   wh->wh_epr = strdup(epr);
@@ -389,6 +400,8 @@ wsd_udp_input(void *opaque, const void *data, int size,
 {
   char errbuf[256];
   char *xml = malloc(size + 1);
+  if(xml == NULL)
+    return;
   memcpy(xml, data, size);
   xml[size] = 0;
 
