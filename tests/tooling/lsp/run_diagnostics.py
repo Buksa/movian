@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -17,7 +18,12 @@ from lsp_client import LspClient
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_SERVER = REPOSITORY_ROOT / "support" / "devtools" / "movian-lsp"
-ANALYZER = REPOSITORY_ROOT / "build.debug" / "movian-analyze"
+_configured_analyzer = os.environ.get("MOVIAN_ANALYZER")
+ANALYZER = Path(_configured_analyzer).expanduser() \
+    if _configured_analyzer else REPOSITORY_ROOT / "build.debug" / \
+    "movian-analyze"
+if not ANALYZER.is_absolute():
+    ANALYZER = REPOSITORY_ROOT / ANALYZER
 FIXTURES = REPOSITORY_ROOT / "tests" / "tooling" / "lsp" / "fixtures" / \
     "diagnostics"
 
