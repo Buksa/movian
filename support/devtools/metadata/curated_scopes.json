@@ -1,0 +1,62 @@
+[
+  {
+    "name": "self",
+    "meaning": "The widget/clone's own bound prop (e.g. a page, or the current clone item).",
+    "anchor": "\"self\"",
+    "source": {"file": "src/ui/glw/glw_scope.c", "line": 54}
+  },
+  {
+    "name": "parent",
+    "meaning": "The enclosing scope's self, one level up -- set when a loader/widget block rebinds self.",
+    "anchor": "\"parent\"",
+    "source": {"file": "src/ui/glw/glw_scope.c", "line": 55}
+  },
+  {
+    "name": "view",
+    "meaning": "Per-view-file scratch root, fresh each time the .view file is loaded.",
+    "anchor": "\"view\"",
+    "source": {"file": "src/ui/glw/glw_scope.c", "line": 56}
+  },
+  {
+    "name": "args",
+    "meaning": "Arguments passed in via the args: attribute.",
+    "anchor": "\"args\"",
+    "source": {"file": "src/ui/glw/glw_scope.c", "line": 57}
+  },
+  {
+    "name": "clone",
+    "meaning": "Scratch root local to one cloner()-generated clone instance.",
+    "anchor": "\"clone\"",
+    "source": {"file": "src/ui/glw/glw_scope.c", "line": 58}
+  },
+  {
+    "name": "core",
+    "meaning": "Global core-service props (e.g. $core.stpp, $core.popups, $core.clipboard).",
+    "anchor": "\"core\"",
+    "source": {"file": "src/ui/glw/glw_scope.c", "line": 59}
+  },
+  {
+    "name": "parentview",
+    "meaning": "The view root one level up (companion to parent).",
+    "anchor": "\"parentview\"",
+    "source": {"file": "src/ui/glw/glw_scope.c", "line": 60}
+  },
+  {
+    "name": "ui",
+    "meaning": "Global per-glw_root_t UI prop tree ($ui.width, $ui.aspect, $ui.keyboard, $ui.pointerVisible, ...); resolves because the prop node itself is named \"ui\", not via an explicit named-root tag.",
+    "anchor": "prop_create_root(\"ui\")",
+    "source": {"file": "src/ui/glw/glw_x11.c", "line": 1431}
+  },
+  {
+    "name": "nav",
+    "meaning": "The navigator ($nav.currentpage, $nav.pages), wired in via PROP_TAG_NAMED_ROOT.",
+    "anchor": "PROP_TAG_NAMED_ROOT",
+    "source": {"file": "src/ui/glw/glw_view_eval.c", "line": 831}
+  },
+  {
+    "name": "global",
+    "meaning": "Prop root's absolute global tree; rarely used directly in views.",
+    "anchor": "strcmp(name, \"global\")",
+    "source": {"file": "src/prop/prop_core.c", "line": 2769}
+  }
+]

@@ -1,0 +1,5515 @@
+{
+  "generatedBy": "support/devtools/metadata/gen.py",
+  "glw": {
+    "attributes": [
+      {
+        "attribConst": "GLW_ATTRIB_X_SPACING",
+        "confidence": "medium",
+        "fn": null,
+        "name": "Xspacing",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1472
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_Y_SPACING",
+        "confidence": "medium",
+        "fn": null,
+        "name": "Yspacing",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1473
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_IMAGE_ADDITIVE",
+        "confidence": "high",
+        "fn": "mod_img_flags",
+        "name": "additive",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1409
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "enumValues": [
+          "center",
+          "left",
+          "right",
+          "top",
+          "bottom",
+          "topLeft",
+          "topRight",
+          "bottomLeft",
+          "bottomRight",
+          "justified"
+        ],
+        "fn": null,
+        "name": "align",
+        "noSubscription": false,
+        "setter": "set_align",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1490
+        },
+        "valueType": "enum"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": "glw_set_alpha",
+        "name": "alpha",
+        "noSubscription": false,
+        "setter": "set_float",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1433
+        },
+        "valueType": "float"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_ALPHA_EDGES",
+        "confidence": "medium",
+        "fn": null,
+        "name": "alphaEdges",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1469
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_ALPHA_FALLOFF",
+        "confidence": "medium",
+        "fn": null,
+        "name": "alphaFallOff",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1461
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_ALPHA_SELF",
+        "confidence": "medium",
+        "fn": null,
+        "name": "alphaSelf",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1446
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": null,
+        "name": "alt",
+        "noSubscription": false,
+        "setter": "set_alt",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1376
+        },
+        "valueType": "string"
+      },
+      {
+        "attribConst": "GLW2_ALWAYS_GRAB_KNOB",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "alwaysGrabKnob",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1389
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_ANGLE",
+        "confidence": "medium",
+        "fn": null,
+        "name": "angle",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1451
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": null,
+        "name": "args",
+        "noSubscription": false,
+        "setter": "set_args",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1493
+        },
+        "valueType": "block"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_ASPECT",
+        "confidence": "medium",
+        "fn": null,
+        "name": "aspect",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1460
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_IMAGE_SET_ASPECT",
+        "confidence": "high",
+        "fn": "mod_img_flags",
+        "name": "aspectConstraint",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1408
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_AUDIO_VOLUME",
+        "confidence": "medium",
+        "fn": null,
+        "name": "audioVolume",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1459
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW2_AUTO_FOCUS_LIMIT",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "autoFocusLimit",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1395
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW2_AUTOREFOCUSABLE",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "autoRefocusable",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1385
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW2_AUTOFADE",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "autofade",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1392
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW2_AUTOHIDE",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "autohide",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1390
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_IMAGE_BEVEL_BOTTOM",
+        "confidence": "high",
+        "fn": "mod_img_flags",
+        "name": "bevelBottom",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1407
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_IMAGE_BEVEL_LEFT",
+        "confidence": "high",
+        "fn": "mod_img_flags",
+        "name": "bevelLeft",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1404
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_IMAGE_BEVEL_RIGHT",
+        "confidence": "high",
+        "fn": "mod_img_flags",
+        "name": "bevelRight",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1406
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_IMAGE_BEVEL_TOP",
+        "confidence": "high",
+        "fn": "mod_img_flags",
+        "name": "bevelTop",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1405
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_BACKGROUND_ALPHA",
+        "confidence": "medium",
+        "fn": null,
+        "name": "bgalpha",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1447
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_BACKGROUND_COLOR",
+        "confidence": "high",
+        "fn": null,
+        "name": "bgcolor",
+        "noSubscription": false,
+        "setter": "set_float3",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1481
+        },
+        "valueType": "vec3"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": "glw_set_blur",
+        "name": "blur",
+        "noSubscription": false,
+        "setter": "set_float",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1434
+        },
+        "valueType": "float"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_BLUR_FALLOFF",
+        "confidence": "medium",
+        "fn": null,
+        "name": "blurFallOff",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1462
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GTB_BOLD",
+        "confidence": "high",
+        "fn": "mod_text_flags",
+        "name": "bold",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1422
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_BORDER",
+        "confidence": "high",
+        "fn": null,
+        "name": "border",
+        "noSubscription": false,
+        "setter": "set_int16_4",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1487
+        },
+        "valueType": "vec4i"
+      },
+      {
+        "attribConst": "GLW_IMAGE_BORDER_ONLY",
+        "confidence": "high",
+        "fn": "mod_img_flags",
+        "name": "borderOnly",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1410
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": null,
+        "name": "caption",
+        "noSubscription": false,
+        "setter": "set_caption",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1372
+        },
+        "valueType": "string"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_CENTER",
+        "confidence": "medium",
+        "fn": null,
+        "name": "center",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1458
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_CHILD_ASPECT",
+        "confidence": "medium",
+        "fn": null,
+        "name": "childAspect",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1457
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_CHILD_SCALE",
+        "confidence": "medium",
+        "fn": null,
+        "name": "childScale",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1464
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_CHILD_TILES_X",
+        "confidence": "medium",
+        "fn": null,
+        "name": "childTilesX",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1466
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_CHILD_TILES_Y",
+        "confidence": "medium",
+        "fn": null,
+        "name": "childTilesY",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1467
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW2_CLICKABLE",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "clickable",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1398
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_RGB",
+        "confidence": "high",
+        "fn": null,
+        "name": "color",
+        "noSubscription": false,
+        "setter": "set_float3",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1476
+        },
+        "valueType": "vec3"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_COLOR1",
+        "confidence": "high",
+        "fn": null,
+        "name": "color1",
+        "noSubscription": false,
+        "setter": "set_float3",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1479
+        },
+        "valueType": "vec3"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_COLOR2",
+        "confidence": "high",
+        "fn": null,
+        "name": "color2",
+        "noSubscription": false,
+        "setter": "set_float3",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1480
+        },
+        "valueType": "vec3"
+      },
+      {
+        "attribConst": "GLW_IMAGE_CORNER_BOTTOMLEFT",
+        "confidence": "high",
+        "fn": "mod_img_flags",
+        "name": "cornerBottomLeft",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1416
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_IMAGE_CORNER_BOTTOMRIGHT",
+        "confidence": "high",
+        "fn": "mod_img_flags",
+        "name": "cornerBottomRight",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1417
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_RADIUS",
+        "confidence": "medium",
+        "fn": null,
+        "name": "cornerRadius",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1474
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_IMAGE_CORNER_TOPLEFT",
+        "confidence": "high",
+        "fn": "mod_img_flags",
+        "name": "cornerTopLeft",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1414
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_IMAGE_CORNER_TOPRIGHT",
+        "confidence": "high",
+        "fn": "mod_img_flags",
+        "name": "cornerTopRight",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1415
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW2_CURSOR",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "cursor",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1396
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW2_DEBUG",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "debug",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1382
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": "set_description_rstr",
+        "name": "description",
+        "noSubscription": false,
+        "setter": "set_rstring",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1370
+        },
+        "valueType": "string"
+      },
+      {
+        "attribConst": "GTB_DIR_REQUEST",
+        "confidence": "high",
+        "fn": "mod_text_flags",
+        "name": "dirRequest",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1428
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": "glw_set_divider",
+        "name": "divider",
+        "noSubscription": false,
+        "setter": "set_int",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1439
+        },
+        "valueType": "int"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "enumValues": [
+          "blend",
+          "flipHorizontal",
+          "flipVertical",
+          "slideHorizontal",
+          "slideVertical"
+        ],
+        "fn": null,
+        "name": "effect",
+        "noSubscription": false,
+        "setter": "set_transition_effect",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1491
+        },
+        "valueType": "enum"
+      },
+      {
+        "attribConst": "GTB_ELLIPSIZE",
+        "confidence": "high",
+        "fn": "mod_text_flags",
+        "name": "ellipsize",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1421
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW2_ENABLED",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "enabled",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1388
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_EXPANSION",
+        "confidence": "medium",
+        "fn": null,
+        "name": "expansion",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1452
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW2_EXPEDITE_SUBSCRIPTIONS",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "expediteSubscriptions",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1393
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW2_FHP_SPILL",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "fhpSpill",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1399
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GTB_FILE_REQUEST",
+        "confidence": "high",
+        "fn": "mod_text_flags",
+        "name": "fileRequest",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1427
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_FILL",
+        "confidence": "medium",
+        "fn": null,
+        "name": "fill",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1463
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW2_CONSTRAINT_IGNORE_W",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "filterConstraintWeight",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1381
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW2_CONSTRAINT_IGNORE_X",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "filterConstraintX",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1379
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW2_CONSTRAINT_IGNORE_Y",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "filterConstraintY",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1380
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_IMAGE_FIXED_SIZE",
+        "confidence": "high",
+        "fn": "mod_img_flags",
+        "name": "fixedSize",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1403
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW2_FOCUS_ON_CLICK",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "focusOnClick",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1384
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": "glw_set_focus_weight",
+        "name": "focusable",
+        "noSubscription": false,
+        "setter": "set_float",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1436
+        },
+        "valueType": "float"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": null,
+        "name": "font",
+        "noSubscription": false,
+        "setter": "set_font",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1373
+        },
+        "valueType": "string"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": null,
+        "name": "fragmentShader",
+        "noSubscription": false,
+        "setter": "set_fs",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1374
+        },
+        "valueType": "string"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": "glw_set_height",
+        "name": "height",
+        "noSubscription": false,
+        "setter": "set_int",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1437
+        },
+        "valueType": "int"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": null,
+        "name": "hidden",
+        "noSubscription": false,
+        "setter": "mod_hidden",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1378
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW2_HOMOGENOUS",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "homogenous",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1387
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": "set_how_rstr",
+        "name": "how",
+        "noSubscription": false,
+        "setter": "set_rstring",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1369
+        },
+        "valueType": "string"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": "set_id_rstr",
+        "name": "id",
+        "noSubscription": false,
+        "setter": "set_rstring",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1368
+        },
+        "valueType": "string"
+      },
+      {
+        "attribConst": "GTB_ITALIC",
+        "confidence": "high",
+        "fn": "mod_text_flags",
+        "name": "italic",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1423
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_PROP_ITEM_MODEL",
+        "confidence": "high",
+        "fn": null,
+        "name": "itemModel",
+        "noSubscription": true,
+        "setter": "set_propref",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1496
+        },
+        "valueType": "propref"
+      },
+      {
+        "attribConst": "GLW_IMAGE_BORDER_LEFT",
+        "confidence": "high",
+        "fn": "mod_img_flags",
+        "name": "leftBorder",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1411
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": null,
+        "name": "margin",
+        "noSubscription": false,
+        "setter": "set_margin",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1488
+        },
+        "valueType": "vec4i"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_INT_MAX",
+        "confidence": "medium",
+        "fn": null,
+        "name": "max",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1454
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_MAX_WIDTH",
+        "confidence": "medium",
+        "fn": null,
+        "name": "maxWidth",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1445
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_MAX_LINES",
+        "confidence": "medium",
+        "fn": null,
+        "name": "maxlines",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1442
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_INT_MIN",
+        "confidence": "medium",
+        "fn": null,
+        "name": "min",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1453
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW2_NAV_FOCUSABLE",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "navFocusable",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1386
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW2_POSITIONAL_NAVIGATION",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "navPositional",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1397
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW2_NAV_WRAP",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "navWrap",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1394
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_VIDEO_NO_AUDIO",
+        "confidence": "high",
+        "fn": "mod_video_flags",
+        "name": "noAudio",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1431
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW2_NO_INITIAL_TRANS",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "noInitialTransform",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1383
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GTB_OSK_PASSWORD",
+        "confidence": "high",
+        "fn": "mod_text_flags",
+        "name": "oskPassword",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1426
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GTB_OUTLINE",
+        "confidence": "high",
+        "fn": "mod_text_flags",
+        "name": "outline",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1424
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_PADDING",
+        "confidence": "high",
+        "fn": null,
+        "name": "padding",
+        "noSubscription": false,
+        "setter": "set_int16_4",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1486
+        },
+        "valueType": "vec4i"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_PROP_PARENT_MODEL",
+        "confidence": "high",
+        "fn": null,
+        "name": "parentModel",
+        "noSubscription": true,
+        "setter": "set_propref",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1498
+        },
+        "valueType": "propref"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": "set_parent_url_rstr",
+        "name": "parentUrl",
+        "noSubscription": false,
+        "setter": "set_rstring",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1371
+        },
+        "valueType": "string"
+      },
+      {
+        "attribConst": "GTB_PASSWORD",
+        "confidence": "high",
+        "fn": "mod_text_flags",
+        "name": "password",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1420
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GTB_PERMANENT_CURSOR",
+        "confidence": "high",
+        "fn": "mod_text_flags",
+        "name": "permanentCursor",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1425
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_PLANE",
+        "confidence": "high",
+        "fn": null,
+        "name": "plane",
+        "noSubscription": false,
+        "setter": "set_float4",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1484
+        },
+        "valueType": "vec4"
+      },
+      {
+        "attribConst": "GLW_VIDEO_PRIMARY",
+        "confidence": "high",
+        "fn": "mod_video_flags",
+        "name": "primary",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1430
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_PRIORITY",
+        "confidence": "medium",
+        "fn": null,
+        "name": "priority",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1470
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_IMAGE_BORDER_RIGHT",
+        "confidence": "high",
+        "fn": "mod_img_flags",
+        "name": "rightBorder",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1412
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_ROTATION",
+        "confidence": "high",
+        "fn": null,
+        "name": "rotation",
+        "noSubscription": false,
+        "setter": "set_float4",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1483
+        },
+        "valueType": "vec4"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_SATURATION",
+        "confidence": "medium",
+        "fn": null,
+        "name": "saturation",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1448
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_SCALING",
+        "confidence": "high",
+        "fn": null,
+        "name": "scaling",
+        "noSubscription": false,
+        "setter": "set_float3",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1478
+        },
+        "valueType": "vec3"
+      },
+      {
+        "attribConst": "GLW2_SELECT_ON_FOCUS",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "selectOnFocus",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1400
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW2_SELECT_ON_HOVER",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "selectOnHover",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1401
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_PROP_SELF",
+        "confidence": "high",
+        "fn": null,
+        "name": "self",
+        "noSubscription": true,
+        "setter": "set_propref",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1494
+        },
+        "valueType": "propref"
+      },
+      {
+        "attribConst": "GLW2_SHADOW",
+        "confidence": "high",
+        "fn": "mod_flags2",
+        "name": "shadow",
+        "noSubscription": false,
+        "setter": "mod_flag",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1391
+        },
+        "valueType": "bool"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_SIZE",
+        "confidence": "medium",
+        "fn": null,
+        "name": "size",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1444
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_SIZE_SCALE",
+        "confidence": "medium",
+        "fn": null,
+        "name": "sizeScale",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1443
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": null,
+        "name": "source",
+        "noSubscription": false,
+        "setter": "set_source",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1375
+        },
+        "valueType": "string|string[]"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_SPACING",
+        "confidence": "medium",
+        "fn": null,
+        "name": "spacing",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1471
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_INT_STEP",
+        "confidence": "medium",
+        "fn": null,
+        "name": "step",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1455
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": null,
+        "name": "style",
+        "noSubscription": false,
+        "setter": "set_style",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1366
+        },
+        "valueType": "style"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_TENTATIVE_VALUE",
+        "confidence": "high",
+        "fn": null,
+        "name": "tentative",
+        "noSubscription": true,
+        "setter": "set_propref",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1500
+        },
+        "valueType": "propref"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_TIME",
+        "confidence": "medium",
+        "fn": null,
+        "name": "time",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1449
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_TRANSITION_TIME",
+        "confidence": "medium",
+        "fn": null,
+        "name": "transitionTime",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1450
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_TRANSLATION",
+        "confidence": "high",
+        "fn": null,
+        "name": "translation",
+        "noSubscription": false,
+        "setter": "set_float3",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1477
+        },
+        "valueType": "vec3"
+      },
+      {
+        "attribConst": "GLW_ATTRIB_VALUE",
+        "confidence": "medium",
+        "fn": null,
+        "name": "value",
+        "noSubscription": false,
+        "setter": "set_number",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1456
+        },
+        "valueType": "number"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": "glw_set_weight",
+        "name": "weight",
+        "noSubscription": false,
+        "setter": "set_float",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1435
+        },
+        "valueType": "float"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": "glw_set_width",
+        "name": "width",
+        "noSubscription": false,
+        "setter": "set_int",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1438
+        },
+        "valueType": "int"
+      },
+      {
+        "attribConst": null,
+        "confidence": "high",
+        "fn": "glw_set_zoffset",
+        "name": "zoffset",
+        "noSubscription": false,
+        "setter": "set_int",
+        "source": {
+          "file": "src/ui/glw/glw_view_attrib.c",
+          "line": 1440
+        },
+        "valueType": "int"
+      }
+    ],
+    "functions": [
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_rgb_to_string",
+        "name": "RGBToString",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7372
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_pluralise",
+        "name": "_pl",
+        "nargs": 3,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7353
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_abs",
+        "name": "abs",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7363
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_bind",
+        "name": "bind",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7323
+        },
+        "variadic": false
+      },
+      {
+        "ctor": true,
+        "dtor": true,
+        "impl": "glwf_browse",
+        "name": "browse",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7330
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_canScroll",
+        "name": "canScroll",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7327
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_canSelectNext",
+        "name": "canSelectNext",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7356
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_canSelectPrev",
+        "name": "canSelectPrevious",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7357
+        },
+        "variadic": false
+      },
+      {
+        "ctor": true,
+        "dtor": true,
+        "impl": "glwf_changed",
+        "name": "changed",
+        "nargs": -1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7303
+        },
+        "variadic": true
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_clamp",
+        "name": "clamp",
+        "nargs": 3,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7350
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_cloneIndex",
+        "name": "cloneIndex",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7362
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_cloner",
+        "name": "cloner",
+        "nargs": 3,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7279
+        },
+        "variadic": false
+      },
+      {
+        "ctor": true,
+        "dtor": true,
+        "impl": "glwf_coreAttach",
+        "name": "coreAttach",
+        "nargs": 3,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7280
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_count",
+        "name": "count",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7341
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_createchild",
+        "name": "createChild",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7313
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_currentEvent",
+        "name": "currentEvent",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7300
+        },
+        "variadic": false
+      },
+      {
+        "ctor": true,
+        "dtor": true,
+        "impl": "glwf_delay",
+        "name": "delay",
+        "nargs": 3,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7335
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_delete",
+        "name": "delete",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7314
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_deliverEvent",
+        "name": "deliverEvent",
+        "nargs": -1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7298
+        },
+        "variadic": true
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_deliverRef",
+        "name": "deliverRef",
+        "nargs": 2,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7299
+        },
+        "variadic": false
+      },
+      {
+        "ctor": true,
+        "dtor": true,
+        "impl": "glwf_delta",
+        "name": "delta",
+        "nargs": 2,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7324
+        },
+        "variadic": false
+      },
+      {
+        "condition": "#ifndef NDEBUG",
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_dumpdynamicstatements",
+        "name": "dumpDynamicStatements",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7375
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_enqueueTrack",
+        "name": "enqueuetrack",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7291
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_event",
+        "name": "event",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7295
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_eventWithProp",
+        "name": "eventWithProp",
+        "nargs": 2,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7368
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_fireEvent",
+        "name": "fireEvent",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7294
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_fmt",
+        "name": "fmt",
+        "nargs": -1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7352
+        },
+        "variadic": true
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_focus",
+        "name": "focus",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7366
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_focusedChild",
+        "name": "focusedChild",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7319
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_focusedClone",
+        "name": "focusedClone",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7320
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_focusedIndex",
+        "name": "focusedIndex",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7321
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_getCaption",
+        "name": "getCaption",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7322
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_getHeight",
+        "name": "getHeight",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7348
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_getLayer",
+        "name": "getLayer",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7346
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_getWidth",
+        "name": "getWidth",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7347
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_iir",
+        "name": "iir",
+        "nargs": -1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7304
+        },
+        "variadic": true
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_inject_events",
+        "name": "injectEventsFrom",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7371
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_int",
+        "name": "int",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7349
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_isError",
+        "name": "isError",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7338
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_isFocused",
+        "name": "isFocused",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7315
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_isHovered",
+        "name": "isHovered",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7317
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_isLink",
+        "name": "isLink",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7331
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_isLoaded",
+        "name": "isLoaded",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7337
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_isLoading",
+        "name": "isLoading",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7336
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_isFocused",
+        "name": "isNavFocused",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7316
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_isPreloaded",
+        "name": "isPreloaded",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7326
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_isPressed",
+        "name": "isPressed",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7318
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_isset",
+        "name": "isSet",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7308
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_isVisible",
+        "name": "isVisible",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7325
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_isvoid",
+        "name": "isVoid",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7309
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_join",
+        "name": "join",
+        "nargs": -1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7351
+        },
+        "variadic": true
+      },
+      {
+        "ctor": true,
+        "dtor": true,
+        "impl": "glwf_lookup",
+        "name": "lookup",
+        "nargs": 2,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7370
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_makeUri",
+        "name": "makeUri",
+        "nargs": 2,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7355
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_monotime",
+        "name": "monotime",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7334
+        },
+        "variadic": false
+      },
+      {
+        "ctor": true,
+        "dtor": true,
+        "impl": "glwf_multiopt",
+        "name": "multiopt",
+        "nargs": -1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7354
+        },
+        "variadic": true
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_navOpen",
+        "name": "navOpen",
+        "nargs": -1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7289
+        },
+        "variadic": true
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_newstyle",
+        "name": "newstyle",
+        "nargs": 2,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7282
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_onEvent",
+        "name": "onEvent",
+        "nargs": -1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7288
+        },
+        "variadic": true
+      },
+      {
+        "ctor": true,
+        "dtor": true,
+        "impl": "glwf_onInactivity",
+        "name": "onInactivity",
+        "nargs": 2,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7302
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_playTrackFromSource",
+        "name": "playTrackFromSource",
+        "nargs": -1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7290
+        },
+        "variadic": true
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_primary_color",
+        "name": "primaryColor",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7339
+        },
+        "variadic": false
+      },
+      {
+        "ctor": true,
+        "dtor": true,
+        "impl": "glwf_propGrouper",
+        "name": "propGrouper",
+        "nargs": 2,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7343
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_propName",
+        "name": "propName",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7364
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_propSelect",
+        "name": "propSelect",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7365
+        },
+        "variadic": false
+      },
+      {
+        "ctor": true,
+        "dtor": true,
+        "impl": "glwf_propSorter",
+        "name": "propSorter",
+        "nargs": -1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7344
+        },
+        "variadic": true
+      },
+      {
+        "ctor": true,
+        "dtor": true,
+        "impl": "glwf_propWindow",
+        "name": "propWindow",
+        "nargs": 3,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7345
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_rand",
+        "name": "rand",
+        "nargs": 0,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7359
+        },
+        "variadic": false
+      },
+      {
+        "ctor": true,
+        "dtor": true,
+        "impl": "glwf_scurve",
+        "name": "scurve",
+        "nargs": -1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7305
+        },
+        "variadic": true
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_select",
+        "name": "select",
+        "nargs": 3,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7328
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_selectAudioTrack",
+        "name": "selectAudioTrack",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7292
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_selectSubtitleTrack",
+        "name": "selectSubtitleTrack",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7293
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_selectedElement",
+        "name": "selectedElement",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7360
+        },
+        "variadic": false
+      },
+      {
+        "ctor": true,
+        "dtor": true,
+        "impl": "glwf_set",
+        "name": "set",
+        "nargs": 2,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7361
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_setDefaultFont",
+        "name": "setDefaultFont",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7358
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_sin",
+        "name": "sin",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7332
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_sinewave",
+        "name": "sinewave",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7333
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_space",
+        "name": "space",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7283
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_strftime",
+        "name": "strftime",
+        "nargs": 2,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7307
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_style",
+        "name": "style",
+        "nargs": 2,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7281
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_suggestFocus",
+        "name": "suggestFocus",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7340
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_targetedEvent",
+        "name": "targetedEvent",
+        "nargs": 2,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7297
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_timeAgo",
+        "name": "timeAgo",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7369
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_toggle",
+        "name": "toggle",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7367
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_trace",
+        "name": "trace",
+        "nargs": 2,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7329
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_translate",
+        "name": "translate",
+        "nargs": -1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7306
+        },
+        "variadic": true
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_value2duration",
+        "name": "value2duration",
+        "nargs": -1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7310
+        },
+        "variadic": true
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_value2quantity",
+        "name": "value2quantity",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7312
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_value2size",
+        "name": "value2size",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7311
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_vectorize",
+        "name": "vectorize",
+        "nargs": 1,
+        "preproc": false,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7342
+        },
+        "variadic": false
+      },
+      {
+        "ctor": false,
+        "dtor": false,
+        "impl": "glwf_widget",
+        "name": "widget",
+        "nargs": 1,
+        "preproc": true,
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 7278
+        },
+        "variadic": false
+      }
+    ],
+    "operators": [
+      {
+        "anchor": "TOKEN_BOOLEAN_AND",
+        "category": "boolean",
+        "semantics": "Short-circuit-free boolean and/or/xor over token2bool() results -- this DSL's RPN evaluator resolves both operands before combining.",
+        "source": {
+          "file": "src/ui/glw/glw_view_lexer.c",
+          "line": 248
+        },
+        "symbols": [
+          "&&",
+          "||",
+          "^^"
+        ],
+        "token": "TOKEN_BOOLEAN_AND / TOKEN_BOOLEAN_OR / TOKEN_BOOLEAN_XOR"
+      },
+      {
+        "anchor": "TOKEN_ADD",
+        "category": "arithmetic",
+        "semantics": "Numeric arithmetic; '+' is overloaded for string concatenation when either operand is a string.",
+        "source": {
+          "file": "src/ui/glw/glw_view_lexer.c",
+          "line": 142
+        },
+        "symbols": [
+          "+",
+          "-",
+          "*",
+          "/",
+          "%"
+        ],
+        "token": "TOKEN_ADD / TOKEN_SUB / TOKEN_MULTIPLY / TOKEN_DIVIDE / TOKEN_MODULO"
+      },
+      {
+        "anchor": "TOKEN_REF_ASSIGNMENT",
+        "category": "assignment",
+        "semantics": "Reference assignment: the right side is not resolved to a value, it stays a property reference. Assigning a bare property with ':=' creates a live prop-symlink; assigning to self/args/itemModel/parentModel/tentative passes the actual prop_t* into the setter.",
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 2758
+        },
+        "symbols": [
+          ":="
+        ],
+        "token": "TOKEN_REF_ASSIGNMENT"
+      },
+      {
+        "anchor": "TOKEN_LINK_ASSIGNMENT",
+        "category": "assignment",
+        "semantics": "Link assignment: always creates a one-way, continuously-live prop_link_ex() link from the right-hand property to the left. The left side may be a bare identifier inside an args/block scope, auto-created as a child prop of the current target.",
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 2763
+        },
+        "symbols": [
+          "<-"
+        ],
+        "token": "TOKEN_LINK_ASSIGNMENT"
+      },
+      {
+        "anchor": "TOKEN_ASSIGNMENT",
+        "category": "assignment",
+        "semantics": "Normal assignment. If the right side is a property path it is resolved through a live subscription (re-evaluates whenever the underlying prop changes), unless the target attribute is flagged GLW_ATTRIB_FLAG_NO_SUBSCRIPTION (self, itemModel, parentModel, tentative).",
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 2743
+        },
+        "symbols": [
+          "="
+        ],
+        "token": "TOKEN_ASSIGNMENT"
+      },
+      {
+        "anchor": "TOKEN_EQ",
+        "category": "comparison",
+        "semantics": "Numeric/string comparison via token_cmp()-style helpers; mixed int/float compares by value.",
+        "source": {
+          "file": "src/ui/glw/glw_view_lexer.c",
+          "line": 290
+        },
+        "symbols": [
+          "==",
+          "!=",
+          "<",
+          ">"
+        ],
+        "token": "TOKEN_EQ / TOKEN_NEQ / TOKEN_LT / TOKEN_GT"
+      },
+      {
+        "anchor": "eval_tenary",
+        "category": "other",
+        "semantics": "'cond ? a : b': resolves cond via token2bool(), then (unlike '??') does not eagerly resolve both branches -- pushes the unresolved chosen branch.",
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 1088
+        },
+        "symbols": [
+          "?:"
+        ],
+        "token": "TOKEN_TENARY"
+      },
+      {
+        "anchor": "TOKEN_COND_ASSIGNMENT",
+        "category": "assignment",
+        "semantics": "Conditional assignment: identical to '=', except if the resolved right-hand value is void the assignment is skipped entirely and the left side keeps its previous value.",
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 2748
+        },
+        "symbols": [
+          "?="
+        ],
+        "token": "TOKEN_COND_ASSIGNMENT"
+      },
+      {
+        "anchor": "TOKEN_NULL_COALESCE",
+        "category": "other",
+        "semantics": "'a ?? b': resolves a; if a is void, evaluates to b, else to a. Idiom for falling back to a default only when a prop is genuinely unset.",
+        "source": {
+          "file": "src/ui/glw/glw_view_lexer.c",
+          "line": 302
+        },
+        "symbols": [
+          "??"
+        ],
+        "token": "TOKEN_NULL_COALESCE"
+      },
+      {
+        "anchor": "TOKEN_DEBUG_ASSIGNMENT",
+        "category": "assignment",
+        "semantics": "Debug assignment: functionally identical to '=' for the common case; in the direct prop-to-prop link case it passes debug=1 into prop_link_ex(), turning on subscription-debug tracing for that link.",
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 2753
+        },
+        "symbols": [
+          "_=_"
+        ],
+        "token": "TOKEN_DEBUG_ASSIGNMENT"
+      }
+    ],
+    "scopes": [
+      {
+        "anchor": "\"args\"",
+        "meaning": "Arguments passed in via the args: attribute.",
+        "name": "args",
+        "source": {
+          "file": "src/ui/glw/glw_scope.c",
+          "line": 57
+        }
+      },
+      {
+        "anchor": "\"clone\"",
+        "meaning": "Scratch root local to one cloner()-generated clone instance.",
+        "name": "clone",
+        "source": {
+          "file": "src/ui/glw/glw_scope.c",
+          "line": 58
+        }
+      },
+      {
+        "anchor": "\"core\"",
+        "meaning": "Global core-service props (e.g. $core.stpp, $core.popups, $core.clipboard).",
+        "name": "core",
+        "source": {
+          "file": "src/ui/glw/glw_scope.c",
+          "line": 59
+        }
+      },
+      {
+        "anchor": "strcmp(name, \"global\")",
+        "meaning": "Prop root's absolute global tree; rarely used directly in views.",
+        "name": "global",
+        "source": {
+          "file": "src/prop/prop_core.c",
+          "line": 2769
+        }
+      },
+      {
+        "anchor": "PROP_TAG_NAMED_ROOT",
+        "meaning": "The navigator ($nav.currentpage, $nav.pages), wired in via PROP_TAG_NAMED_ROOT.",
+        "name": "nav",
+        "source": {
+          "file": "src/ui/glw/glw_view_eval.c",
+          "line": 831
+        }
+      },
+      {
+        "anchor": "\"parent\"",
+        "meaning": "The enclosing scope's self, one level up -- set when a loader/widget block rebinds self.",
+        "name": "parent",
+        "source": {
+          "file": "src/ui/glw/glw_scope.c",
+          "line": 55
+        }
+      },
+      {
+        "anchor": "\"parentview\"",
+        "meaning": "The view root one level up (companion to parent).",
+        "name": "parentview",
+        "source": {
+          "file": "src/ui/glw/glw_scope.c",
+          "line": 60
+        }
+      },
+      {
+        "anchor": "\"self\"",
+        "meaning": "The widget/clone's own bound prop (e.g. a page, or the current clone item).",
+        "name": "self",
+        "source": {
+          "file": "src/ui/glw/glw_scope.c",
+          "line": 54
+        }
+      },
+      {
+        "anchor": "prop_create_root(\"ui\")",
+        "meaning": "Global per-glw_root_t UI prop tree ($ui.width, $ui.aspect, $ui.keyboard, $ui.pointerVisible, ...); resolves because the prop node itself is named \"ui\", not via an explicit named-root tag.",
+        "name": "ui",
+        "source": {
+          "file": "src/ui/glw/glw_x11.c",
+          "line": 1431
+        }
+      },
+      {
+        "anchor": "\"view\"",
+        "meaning": "Per-view-file scratch root, fresh each time the .view file is loaded.",
+        "name": "view",
+        "source": {
+          "file": "src/ui/glw/glw_scope.c",
+          "line": 56
+        }
+      }
+    ],
+    "widgets": [
+      {
+        "aliases": [],
+        "name": "array",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_array.c",
+          "line": 750
+        },
+        "symbol": "glw_array"
+      },
+      {
+        "aliases": [],
+        "name": "backdrop",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_image.c",
+          "line": 1559
+        },
+        "symbol": "glw_backdrop"
+      },
+      {
+        "aliases": [],
+        "name": "bar",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_bar.c",
+          "line": 181
+        },
+        "symbol": "glw_bar"
+      },
+      {
+        "aliases": [],
+        "name": "bloom",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_bloom.c",
+          "line": 298
+        },
+        "symbol": "glw_bloom"
+      },
+      {
+        "aliases": [],
+        "name": "border",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_primitives.c",
+          "line": 245
+        },
+        "symbol": "glw_border"
+      },
+      {
+        "aliases": [],
+        "name": "clip",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_clip.c",
+          "line": 153
+        },
+        "symbol": "glw_clip"
+      },
+      {
+        "aliases": [],
+        "name": "clist",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_clist.c",
+          "line": 283
+        },
+        "symbol": "glw_clist"
+      },
+      {
+        "aliases": [
+          "hbox"
+        ],
+        "name": "container_x",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_container.c",
+          "line": 995
+        },
+        "symbol": "glw_container_x"
+      },
+      {
+        "aliases": [
+          "vbox"
+        ],
+        "name": "container_y",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_container.c",
+          "line": 1011
+        },
+        "symbol": "glw_container_y"
+      },
+      {
+        "aliases": [
+          "zbox"
+        ],
+        "name": "container_z",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_container.c",
+          "line": 1027
+        },
+        "symbol": "glw_container_z"
+      },
+      {
+        "aliases": [],
+        "name": "coverflow",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_coverflow.c",
+          "line": 234
+        },
+        "symbol": "glw_coverflow"
+      },
+      {
+        "aliases": [],
+        "name": "cube",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_cube.c",
+          "line": 102
+        },
+        "symbol": "glw_cube"
+      },
+      {
+        "aliases": [],
+        "name": "cursor",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_cursor.c",
+          "line": 244
+        },
+        "symbol": "glw_cursor"
+      },
+      {
+        "aliases": [],
+        "name": "deck",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_deck.c",
+          "line": 493
+        },
+        "symbol": "glw_deck"
+      },
+      {
+        "aliases": [],
+        "name": "detachable",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_detachable.c",
+          "line": 112
+        },
+        "symbol": "glw_detachable"
+      },
+      {
+        "aliases": [],
+        "name": "displacement",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_displacement.c",
+          "line": 201
+        },
+        "symbol": "glw_displacement"
+      },
+      {
+        "aliases": [],
+        "name": "dummy",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_dummy.c",
+          "line": 46
+        },
+        "symbol": "glw_dummy"
+      },
+      {
+        "aliases": [],
+        "name": "expander_x",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_expander.c",
+          "line": 217
+        },
+        "symbol": "glw_expander_x"
+      },
+      {
+        "aliases": [],
+        "name": "expander_y",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_expander.c",
+          "line": 228
+        },
+        "symbol": "glw_expander_y"
+      },
+      {
+        "aliases": [],
+        "condition": "#if NUM_FADERS > 0",
+        "name": "fader",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_clip.c",
+          "line": 292
+        },
+        "symbol": "glw_fader"
+      },
+      {
+        "aliases": [],
+        "name": "flicker",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_flicker.c",
+          "line": 98
+        },
+        "symbol": "glw_flicker"
+      },
+      {
+        "aliases": [],
+        "name": "freefloat",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_freefloat.c",
+          "line": 276
+        },
+        "symbol": "glw_freefloat"
+      },
+      {
+        "aliases": [],
+        "name": "frontdrop",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_image.c",
+          "line": 1590
+        },
+        "symbol": "glw_frontdrop"
+      },
+      {
+        "aliases": [],
+        "name": "icon",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_image.c",
+          "line": 1528
+        },
+        "symbol": "glw_icon"
+      },
+      {
+        "aliases": [],
+        "name": "image",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_image.c",
+          "line": 1498
+        },
+        "symbol": "glw_image"
+      },
+      {
+        "aliases": [],
+        "name": "keyintercept",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_keyintercept.c",
+          "line": 224
+        },
+        "symbol": "glw_keyintercept"
+      },
+      {
+        "aliases": [],
+        "name": "label",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_text_bitmap.c",
+          "line": 1514
+        },
+        "symbol": "glw_label"
+      },
+      {
+        "aliases": [],
+        "name": "layer",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_layer.c",
+          "line": 175
+        },
+        "symbol": "glw_layer"
+      },
+      {
+        "aliases": [],
+        "name": "linebox",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_primitives.c",
+          "line": 288
+        },
+        "symbol": "glw_linebox"
+      },
+      {
+        "aliases": [],
+        "name": "list_x",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_list.c",
+          "line": 747
+        },
+        "symbol": "glw_list_x"
+      },
+      {
+        "aliases": [],
+        "name": "list_y",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_list.c",
+          "line": 723
+        },
+        "symbol": "glw_list_y"
+      },
+      {
+        "aliases": [],
+        "name": "loader",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_view_loader.c",
+          "line": 411
+        },
+        "symbol": "glw_view_loader"
+      },
+      {
+        "aliases": [],
+        "name": "mirror",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_mirror.c",
+          "line": 92
+        },
+        "symbol": "glw_mirror"
+      },
+      {
+        "aliases": [],
+        "name": "playfield",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_playfield.c",
+          "line": 327
+        },
+        "symbol": "glw_playfield"
+      },
+      {
+        "aliases": [],
+        "name": "popup",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_popup.c",
+          "line": 192
+        },
+        "symbol": "glw_popup"
+      },
+      {
+        "aliases": [],
+        "name": "quad",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_primitives.c",
+          "line": 232
+        },
+        "symbol": "glw_quad"
+      },
+      {
+        "aliases": [],
+        "name": "repeatedimage",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_image.c",
+          "line": 1621
+        },
+        "symbol": "glw_repeatedimage"
+      },
+      {
+        "aliases": [],
+        "name": "resizer",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_resizer.c",
+          "line": 119
+        },
+        "symbol": "glw_resizer"
+      },
+      {
+        "aliases": [],
+        "name": "rotator",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_rotator.c",
+          "line": 70
+        },
+        "symbol": "glw_rotator"
+      },
+      {
+        "aliases": [],
+        "name": "segway",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_segway.c",
+          "line": 151
+        },
+        "symbol": "glw_segway"
+      },
+      {
+        "aliases": [],
+        "name": "slider_x",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_slider.c",
+          "line": 706
+        },
+        "symbol": "glw_slider_x"
+      },
+      {
+        "aliases": [],
+        "name": "slider_y",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_slider.c",
+          "line": 723
+        },
+        "symbol": "glw_slider_y"
+      },
+      {
+        "aliases": [],
+        "name": "slideshow",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_slideshow.c",
+          "line": 325
+        },
+        "symbol": "glw_slideshow"
+      },
+      {
+        "aliases": [],
+        "condition": "#if NUM_STENCILERS > 0",
+        "name": "stencil",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_clip.c",
+          "line": 495
+        },
+        "symbol": "glw_stencil"
+      },
+      {
+        "aliases": [],
+        "name": "style",
+        "registered": false,
+        "source": {
+          "file": "src/ui/glw/glw_style.c",
+          "line": 1026
+        },
+        "symbol": "glw_style"
+      },
+      {
+        "aliases": [],
+        "name": "table",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_container.c",
+          "line": 1037
+        },
+        "symbol": "glw_table"
+      },
+      {
+        "aliases": [],
+        "name": "text",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_text_bitmap.c",
+          "line": 1544
+        },
+        "symbol": "glw_text"
+      },
+      {
+        "aliases": [],
+        "name": "throbber",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_throbber.c",
+          "line": 271
+        },
+        "symbol": "glw_throbber"
+      },
+      {
+        "aliases": [],
+        "name": "throbber3d",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_throbber.c",
+          "line": 141
+        },
+        "symbol": "glw_throbber3d"
+      },
+      {
+        "aliases": [],
+        "name": "throbbertri",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_throbber.c",
+          "line": 385
+        },
+        "symbol": "glw_throbber_tri"
+      },
+      {
+        "aliases": [],
+        "name": "underscan",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_underscan.c",
+          "line": 80
+        },
+        "symbol": "glw_underscan"
+      },
+      {
+        "aliases": [],
+        "name": "video",
+        "registered": true,
+        "source": {
+          "file": "src/ui/glw/glw_video_common.c",
+          "line": 1007
+        },
+        "symbol": "glw_video"
+      },
+      {
+        "aliases": [],
+        "name": "view",
+        "registered": false,
+        "source": {
+          "file": "src/ui/glw/glw_view.c",
+          "line": 98
+        },
+        "symbol": "glw_view"
+      }
+    ]
+  },
+  "js": {
+    "modules": [
+      {
+        "exports": [
+          {
+            "name": "mkdirSync",
+            "nargs": 1,
+            "params": [
+              "path"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/fs.js",
+              "line": 34
+            }
+          },
+          {
+            "name": "readFileSync",
+            "nargs": 2,
+            "params": [
+              "filename",
+              "opts"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/fs.js",
+              "line": 14
+            }
+          },
+          {
+            "name": "readdirSync",
+            "nargs": 1,
+            "params": [
+              "path"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/fs.js",
+              "line": 26
+            }
+          },
+          {
+            "name": "rmdirSync",
+            "nargs": 1,
+            "params": [
+              "path"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/fs.js",
+              "line": 38
+            }
+          },
+          {
+            "name": "unlinkSync",
+            "nargs": 1,
+            "params": [
+              "filename"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/fs.js",
+              "line": 30
+            }
+          },
+          {
+            "name": "writeFileSync",
+            "nargs": 3,
+            "params": [
+              "filename",
+              "data",
+              "opts"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/fs.js",
+              "line": 3
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "fs",
+        "source": {
+          "file": "res/ecmascript/modules/fs.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "get",
+            "nargs": 3,
+            "params": [
+              "opts",
+              "callback",
+              "https"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/http.js",
+              "line": 67
+            }
+          },
+          {
+            "name": "request",
+            "nargs": 3,
+            "params": [
+              "opts",
+              "callback",
+              "https"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/http.js",
+              "line": 61
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "http",
+        "source": {
+          "file": "res/ecmascript/modules/http.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "get",
+            "nargs": 2,
+            "params": [
+              "opts",
+              "cb"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/https.js",
+              "line": 6
+            }
+          },
+          {
+            "name": "request",
+            "nargs": 2,
+            "params": [
+              "opts",
+              "cb"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/https.js",
+              "line": 3
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "https",
+        "source": {
+          "file": "res/ecmascript/modules/https.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "parse",
+            "nargs": 1,
+            "params": [
+              "html"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/html.js",
+              "line": 88
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/html",
+        "source": {
+          "file": "res/ecmascript/modules/movian/html.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "request",
+            "nargs": 3,
+            "params": [
+              "url",
+              "ctrl",
+              "callback"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/http.js",
+              "line": 75
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/http",
+        "source": {
+          "file": "res/ecmascript/modules/movian/http.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "create",
+            "nargs": 1,
+            "params": [
+              "conf"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/itemhook.js",
+              "line": 3
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/itemhook",
+        "source": {
+          "file": "res/ecmascript/modules/movian/itemhook.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "constructor": true,
+            "name": "Route",
+            "nargs": 2,
+            "params": [
+              "re",
+              "callback"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/page.js",
+              "line": 384
+            }
+          },
+          {
+            "constructor": true,
+            "name": "Searcher",
+            "nargs": 3,
+            "params": [
+              "title",
+              "icon",
+              "callback"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/page.js",
+              "line": 413
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/page",
+        "source": {
+          "file": "res/ecmascript/modules/movian/page.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "notify",
+            "source": {
+              "file": "res/ecmascript/modules/movian/popup.js",
+              "line": 3
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/popup",
+        "source": {
+          "file": "res/ecmascript/modules/movian/popup.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "createRoot",
+            "nargs": 1,
+            "params": [
+              "name"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/prop.js",
+              "line": 97
+            }
+          },
+          {
+            "name": "global",
+            "source": {
+              "file": "res/ecmascript/modules/movian/prop.js",
+              "line": 94
+            }
+          },
+          {
+            "name": "makeProp",
+            "source": {
+              "file": "res/ecmascript/modules/movian/prop.js",
+              "line": 95
+            }
+          },
+          {
+            "name": "subscribeValue",
+            "nargs": 3,
+            "params": [
+              "prop",
+              "callback",
+              "ctrl"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/prop.js",
+              "line": 101
+            }
+          }
+        ],
+        "inherits": "native/prop",
+        "kind": "commonjs",
+        "name": "movian/prop",
+        "source": {
+          "file": "res/ecmascript/modules/movian/prop.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "create",
+            "nargs": 5,
+            "params": [
+              "title",
+              "url",
+              "type",
+              "enabled",
+              "icon"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/service.js",
+              "line": 27
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/service",
+        "source": {
+          "file": "res/ecmascript/modules/movian/service.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "constructor": true,
+            "name": "globalSettings",
+            "nargs": 4,
+            "params": [
+              "id",
+              "title",
+              "icon",
+              "desc"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/settings.js",
+              "line": 266
+            }
+          },
+          {
+            "constructor": true,
+            "name": "kvstoreSettings",
+            "nargs": 3,
+            "params": [
+              "nodes",
+              "url",
+              "domain"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/settings.js",
+              "line": 309
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/settings",
+        "source": {
+          "file": "res/ecmascript/modules/movian/settings.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "constructor": true,
+            "name": "DB",
+            "nargs": 1,
+            "params": [
+              "dbname"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/sqlite.js",
+              "line": 4
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/sqlite",
+        "source": {
+          "file": "res/ecmascript/modules/movian/sqlite.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "create",
+            "nargs": 1,
+            "params": [
+              "name"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/store.js",
+              "line": 56
+            }
+          },
+          {
+            "name": "createFromPath",
+            "nargs": 1,
+            "params": [
+              "path"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/store.js",
+              "line": 33
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/store",
+        "source": {
+          "file": "res/ecmascript/modules/movian/store.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "addProvider",
+            "nargs": 1,
+            "params": [
+              "fn"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/subtitles.js",
+              "line": 4
+            }
+          },
+          {
+            "name": "getLanguages",
+            "source": {
+              "file": "res/ecmascript/modules/movian/subtitles.js",
+              "line": 17
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/subtitles",
+        "source": {
+          "file": "res/ecmascript/modules/movian/subtitles.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "constructor": true,
+            "name": "VideoScrobbler",
+            "nargs": 0,
+            "params": [],
+            "source": {
+              "file": "res/ecmascript/modules/movian/videoscrobbler.js",
+              "line": 4
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/videoscrobbler",
+        "source": {
+          "file": "res/ecmascript/modules/movian/videoscrobbler.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "htsmsg",
+            "nargs": 1,
+            "params": [
+              "x"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/xml.js",
+              "line": 74
+            }
+          },
+          {
+            "name": "parse",
+            "nargs": 1,
+            "params": [
+              "str"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/movian/xml.js",
+              "line": 69
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/xml",
+        "source": {
+          "file": "res/ecmascript/modules/movian/xml.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "call",
+            "nargs": 0,
+            "params": [],
+            "source": {
+              "file": "res/ecmascript/modules/movian/xmlrpc.js",
+              "line": 1
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "movian/xmlrpc",
+        "source": {
+          "file": "res/ecmascript/modules/movian/xmlrpc.js",
+          "line": 1
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "hashCreate",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_crypto.c",
+              "line": 156
+            },
+            "variadic": false
+          },
+          {
+            "name": "hashFinalize",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_crypto.c",
+              "line": 158
+            },
+            "variadic": false
+          },
+          {
+            "name": "hashUpdate",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_crypto.c",
+              "line": 157
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/crypto",
+        "source": {
+          "file": "src/ecmascript/es_crypto.c",
+          "line": 162
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "closeRespond",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 745
+            },
+            "variadic": false
+          },
+          {
+            "name": "openRespond",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 743
+            },
+            "variadic": false
+          },
+          {
+            "name": "readRespond",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 744
+            },
+            "variadic": false
+          },
+          {
+            "name": "redirectRespond",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 747
+            },
+            "variadic": false
+          },
+          {
+            "name": "register",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 742
+            },
+            "variadic": false
+          },
+          {
+            "name": "setSize",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 748
+            },
+            "variadic": false
+          },
+          {
+            "name": "statRespond",
+            "nargs": 5,
+            "source": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 746
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/faprovider",
+        "source": {
+          "file": "src/ecmascript/es_faprovider.c",
+          "line": 752
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "basename",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 481
+            },
+            "variadic": false
+          },
+          {
+            "name": "copyfile",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 482
+            },
+            "variadic": false
+          },
+          {
+            "name": "dirname",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 480
+            },
+            "variadic": false
+          },
+          {
+            "name": "fsize",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 472
+            },
+            "variadic": false
+          },
+          {
+            "name": "ftruncate",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 473
+            },
+            "variadic": false
+          },
+          {
+            "name": "ftrunctae",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 474
+            },
+            "variadic": false
+          },
+          {
+            "name": "mkdirs",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 476
+            },
+            "variadic": false
+          },
+          {
+            "name": "open",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 469
+            },
+            "variadic": false
+          },
+          {
+            "name": "read",
+            "nargs": 5,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 470
+            },
+            "variadic": false
+          },
+          {
+            "name": "readdir",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 479
+            },
+            "variadic": false
+          },
+          {
+            "name": "rename",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 475
+            },
+            "variadic": false
+          },
+          {
+            "name": "rmdir",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 478
+            },
+            "variadic": false
+          },
+          {
+            "name": "unlink",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 477
+            },
+            "variadic": false
+          },
+          {
+            "name": "write",
+            "nargs": 5,
+            "source": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 471
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/fs",
+        "source": {
+          "file": "src/ecmascript/es_fs.c",
+          "line": 486
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "findByClassName",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 415
+            },
+            "variadic": false
+          },
+          {
+            "name": "findById",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 413
+            },
+            "variadic": false
+          },
+          {
+            "name": "findByTagName",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 414
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeAttributes",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 411
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeChilds",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 410
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeName",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 409
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeTextContent",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 412
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeType",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 408
+            },
+            "variadic": false
+          },
+          {
+            "name": "parse",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 407
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/gumbo",
+        "source": {
+          "file": "src/ecmascript/es_gumbo.c",
+          "line": 419
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "register",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_hook.c",
+              "line": 152
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/hook",
+        "source": {
+          "file": "src/ecmascript/es_hook.c",
+          "line": 156
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "createFromXML",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 213
+            },
+            "variadic": false
+          },
+          {
+            "name": "enumerate",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 215
+            },
+            "variadic": false
+          },
+          {
+            "name": "get",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 214
+            },
+            "variadic": false
+          },
+          {
+            "name": "getName",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 217
+            },
+            "variadic": false
+          },
+          {
+            "name": "length",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 216
+            },
+            "variadic": false
+          },
+          {
+            "name": "print",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 218
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/htsmsg",
+        "source": {
+          "file": "src/ecmascript/es_htsmsg.c",
+          "line": 223
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "httpInspectorCreate",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_io.c",
+              "line": 919
+            },
+            "variadic": false
+          },
+          {
+            "name": "httpReq",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_io.c",
+              "line": 918
+            },
+            "variadic": false
+          },
+          {
+            "name": "probe",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_io.c",
+              "line": 920
+            },
+            "variadic": false
+          },
+          {
+            "name": "xmlrpc",
+            "nargs": -1,
+            "source": {
+              "file": "src/ecmascript/es_io.c",
+              "line": 921
+            },
+            "variadic": true
+          }
+        ],
+        "kind": "native",
+        "name": "native/io",
+        "source": {
+          "file": "src/ecmascript/es_io.c",
+          "line": 925
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "getBoolean",
+            "nargs": 4,
+            "source": {
+              "file": "src/ecmascript/es_kvstore.c",
+              "line": 124
+            },
+            "variadic": false
+          },
+          {
+            "name": "getInteger",
+            "nargs": 4,
+            "source": {
+              "file": "src/ecmascript/es_kvstore.c",
+              "line": 123
+            },
+            "variadic": false
+          },
+          {
+            "name": "getString",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_kvstore.c",
+              "line": 122
+            },
+            "variadic": false
+          },
+          {
+            "name": "set",
+            "nargs": 4,
+            "source": {
+              "file": "src/ecmascript/es_kvstore.c",
+              "line": 125
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/kvstore",
+        "source": {
+          "file": "src/ecmascript/es_kvstore.c",
+          "line": 129
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "bindPlayInfo",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_metadata.c",
+              "line": 121
+            },
+            "variadic": false
+          },
+          {
+            "name": "videoMetadataBind",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_metadata.c",
+              "line": 120
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/metadata",
+        "source": {
+          "file": "src/ecmascript/es_metadata.c",
+          "line": 125
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "cacheGet",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 314
+            },
+            "variadic": false
+          },
+          {
+            "name": "cachePut",
+            "nargs": 4,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 313
+            },
+            "variadic": false
+          },
+          {
+            "condition": "#if ENABLE_PLUGINS",
+            "name": "selectView",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 317
+            },
+            "variadic": false
+          },
+          {
+            "name": "systemIpAddress",
+            "nargs": 0,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 315
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/misc",
+        "source": {
+          "file": "src/ecmascript/es_misc.c",
+          "line": 322
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "getAuthCredentials",
+            "nargs": 5,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 328
+            },
+            "variadic": false
+          },
+          {
+            "name": "message",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 329
+            },
+            "variadic": false
+          },
+          {
+            "name": "notify",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 331
+            },
+            "variadic": false
+          },
+          {
+            "name": "textDialog",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 330
+            },
+            "variadic": false
+          },
+          {
+            "name": "webpopup",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 327
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/popup",
+        "source": {
+          "file": "src/ecmascript/es_misc.c",
+          "line": 335
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "atomicAdd",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1112
+            },
+            "variadic": false
+          },
+          {
+            "name": "create",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1091
+            },
+            "variadic": false
+          },
+          {
+            "name": "deleteChild",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1104
+            },
+            "variadic": false
+          },
+          {
+            "name": "deleteChilds",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1105
+            },
+            "variadic": false
+          },
+          {
+            "name": "destroy",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1106
+            },
+            "variadic": false
+          },
+          {
+            "name": "enumerate",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1102
+            },
+            "variadic": false
+          },
+          {
+            "name": "getChild",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1094
+            },
+            "variadic": false
+          },
+          {
+            "name": "getName",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1093
+            },
+            "variadic": false
+          },
+          {
+            "name": "getValue",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1092
+            },
+            "variadic": false
+          },
+          {
+            "name": "global",
+            "nargs": 0,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1101
+            },
+            "variadic": false
+          },
+          {
+            "name": "has",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1103
+            },
+            "variadic": false
+          },
+          {
+            "name": "haveMore",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1099
+            },
+            "variadic": false
+          },
+          {
+            "name": "isSame",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1113
+            },
+            "variadic": false
+          },
+          {
+            "name": "isValue",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1111
+            },
+            "variadic": false
+          },
+          {
+            "name": "isZombie",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1116
+            },
+            "variadic": false
+          },
+          {
+            "name": "link",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1108
+            },
+            "variadic": false
+          },
+          {
+            "name": "makeUrl",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1100
+            },
+            "variadic": false
+          },
+          {
+            "name": "moveBefore",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1114
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeFilterAddPred",
+            "nargs": 6,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1123
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeFilterCreate",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1122
+            },
+            "variadic": false
+          },
+          {
+            "name": "nodeFilterDelPred",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1124
+            },
+            "variadic": false
+          },
+          {
+            "name": "print",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1089
+            },
+            "variadic": false
+          },
+          {
+            "name": "release",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1090
+            },
+            "variadic": false
+          },
+          {
+            "name": "select",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1107
+            },
+            "variadic": false
+          },
+          {
+            "name": "sendEvent",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1110
+            },
+            "variadic": false
+          },
+          {
+            "name": "set",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1095
+            },
+            "variadic": false
+          },
+          {
+            "name": "setClipRange",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1117
+            },
+            "variadic": false
+          },
+          {
+            "name": "setParent",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1097
+            },
+            "variadic": false
+          },
+          {
+            "name": "setRichStr",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1096
+            },
+            "variadic": false
+          },
+          {
+            "name": "subscribe",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1098
+            },
+            "variadic": false
+          },
+          {
+            "name": "tagClear",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1119
+            },
+            "variadic": false
+          },
+          {
+            "name": "tagGet",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1120
+            },
+            "variadic": false
+          },
+          {
+            "name": "tagSet",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1118
+            },
+            "variadic": false
+          },
+          {
+            "name": "unlink",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1109
+            },
+            "variadic": false
+          },
+          {
+            "name": "unloadDestroy",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1115
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/prop",
+        "source": {
+          "file": "src/ecmascript/es_prop.c",
+          "line": 1131
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "backendOpen",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_route.c",
+              "line": 281
+            },
+            "variadic": false
+          },
+          {
+            "name": "create",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_route.c",
+              "line": 280
+            },
+            "variadic": false
+          },
+          {
+            "name": "test",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_route.c",
+              "line": 282
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/route",
+        "source": {
+          "file": "src/ecmascript/es_route.c",
+          "line": 286
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "create",
+            "nargs": 6,
+            "source": {
+              "file": "src/ecmascript/es_service.c",
+              "line": 170
+            },
+            "variadic": false
+          },
+          {
+            "name": "enable",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_service.c",
+              "line": 171
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/service",
+        "source": {
+          "file": "src/ecmascript/es_service.c",
+          "line": 175
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "changes",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 321
+            },
+            "variadic": false
+          },
+          {
+            "name": "create",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 319
+            },
+            "variadic": false
+          },
+          {
+            "name": "lastErrorCode",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 323
+            },
+            "variadic": false
+          },
+          {
+            "name": "lastErrorString",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 324
+            },
+            "variadic": false
+          },
+          {
+            "name": "lastRowId",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 325
+            },
+            "variadic": false
+          },
+          {
+            "name": "query",
+            "nargs": -1,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 320
+            },
+            "variadic": true
+          },
+          {
+            "name": "step",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 322
+            },
+            "variadic": false
+          },
+          {
+            "name": "upgradeSchema",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 326
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/sqlite",
+        "source": {
+          "file": "src/ecmascript/es_sqlite.c",
+          "line": 331
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "durationToString",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 384
+            },
+            "variadic": false
+          },
+          {
+            "name": "entityDecode",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 380
+            },
+            "variadic": false
+          },
+          {
+            "name": "isUtf8",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 378
+            },
+            "variadic": false
+          },
+          {
+            "name": "paramEscape",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 383
+            },
+            "variadic": false
+          },
+          {
+            "name": "parseTime",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 385
+            },
+            "variadic": false
+          },
+          {
+            "name": "parseURL",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 386
+            },
+            "variadic": false
+          },
+          {
+            "name": "pathEscape",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 382
+            },
+            "variadic": false
+          },
+          {
+            "name": "queryStringSplit",
+            "nargs": 1,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 381
+            },
+            "variadic": false
+          },
+          {
+            "name": "resolveURL",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 387
+            },
+            "variadic": false
+          },
+          {
+            "name": "utf8FromBytes",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 379
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/string",
+        "source": {
+          "file": "src/ecmascript/es_string.c",
+          "line": 391
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "addItem",
+            "nargs": 8,
+            "source": {
+              "file": "src/ecmascript/es_subtitles.c",
+              "line": 280
+            },
+            "variadic": false
+          },
+          {
+            "name": "addProvider",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_subtitles.c",
+              "line": 279
+            },
+            "variadic": false
+          },
+          {
+            "name": "getLanguages",
+            "nargs": 0,
+            "source": {
+              "file": "src/ecmascript/es_subtitles.c",
+              "line": 281
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/subtitle",
+        "source": {
+          "file": "src/ecmascript/es_subtitles.c",
+          "line": 285
+        }
+      },
+      {
+        "functions": [
+          {
+            "name": "clientCreate",
+            "nargs": 3,
+            "source": {
+              "file": "src/ecmascript/es_websocket.c",
+              "line": 1112
+            },
+            "variadic": false
+          },
+          {
+            "name": "clientSend",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_websocket.c",
+              "line": 1113
+            },
+            "variadic": false
+          },
+          {
+            "name": "serverCreate",
+            "nargs": 2,
+            "source": {
+              "file": "src/ecmascript/es_websocket.c",
+              "line": 1115
+            },
+            "variadic": false
+          }
+        ],
+        "kind": "native",
+        "name": "native/websocket",
+        "source": {
+          "file": "src/ecmascript/es_websocket.c",
+          "line": 1120
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "parse",
+            "source": {
+              "file": "res/ecmascript/modules/querystring.js",
+              "line": 3
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "querystring",
+        "source": {
+          "file": "res/ecmascript/modules/querystring.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "name": "format",
+            "nargs": 1,
+            "params": [
+              "d"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/url.js",
+              "line": 6
+            }
+          },
+          {
+            "name": "parse",
+            "source": {
+              "file": "res/ecmascript/modules/url.js",
+              "line": 35
+            }
+          },
+          {
+            "name": "resolve",
+            "source": {
+              "file": "res/ecmascript/modules/url.js",
+              "line": 37
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "url",
+        "source": {
+          "file": "res/ecmascript/modules/url.js",
+          "line": 1
+        }
+      },
+      {
+        "exports": [
+          {
+            "constructor": true,
+            "name": "w3cwebsocket",
+            "nargs": 2,
+            "params": [
+              "URL",
+              "protocol"
+            ],
+            "source": {
+              "file": "res/ecmascript/modules/websocket.js",
+              "line": 4
+            }
+          }
+        ],
+        "kind": "commonjs",
+        "name": "websocket",
+        "source": {
+          "file": "res/ecmascript/modules/websocket.js",
+          "line": 1
+        }
+      }
+    ],
+    "pluginManifest": [
+      {
+        "anchor": "htsmsg_get_u32_or_default(ctrl, \"apiversion\", 1)",
+        "key": "apiversion",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 712
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(pm, \"author\")",
+        "key": "author",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 445
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(pm, \"category\")",
+        "key": "category",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 416
+        }
+      },
+      {
+        "anchor": "htsmsg_get_u32_or_default(ctrl, \"debug\", 0)",
+        "key": "debug",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 715
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(pm, \"description\")",
+        "key": "description",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 437
+        }
+      },
+      {
+        "anchor": "htsmsg_get_map(ctrl, \"entitlements\")",
+        "key": "entitlements",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 718
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(ctrl, \"file\")",
+        "key": "file",
+        "mandatory": false,
+        "mandatoryWhen": [
+          "type=bitcode",
+          "type=ecmascript"
+        ],
+        "source": {
+          "file": "src/plugins.c",
+          "line": 704
+        }
+      },
+      {
+        "anchor": "htsmsg_get_list(ctrl, \"glwviews\")",
+        "key": "glwviews",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 751
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(pm, \"icon\")",
+        "key": "icon",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 415
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(ctrl, \"id\")",
+        "key": "id",
+        "mandatory": true,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 633
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(pm, \"synopsis\")",
+        "key": "synopsis",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 442
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(ctrl, \"title\")",
+        "key": "title",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 652
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(ctrl, \"type\")",
+        "key": "type",
+        "mandatory": true,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 632
+        }
+      },
+      {
+        "anchor": "htsmsg_get_str(ctrl, \"version\")",
+        "key": "version",
+        "mandatory": false,
+        "source": {
+          "file": "src/plugins.c",
+          "line": 634
+        }
+      }
+    ]
+  },
+  "movianRevision": "6de27fb0affdc090a0719a1ef0cae9df5c98437b",
+  "schemaVersion": 1
+}
