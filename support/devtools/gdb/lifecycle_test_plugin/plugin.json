@@ -1,0 +1,10 @@
+{
+  "type": "ecmascript",
+  "id": "devtools_lifecycle_test",
+  "title": "lifecycle test plugin (dev only, not packaged)",
+  "version": "1.0.0",
+  "category": "other",
+  "synopsis": "Minimal dev plugin for issue #145 lifecycle scenarios: creates a bounded set of destroyable resources (route, service, prop subscriptions, hook, timer) so the reload resource-balance proof has concrete create/destroy signal. Dev tool only; lives under support/, never shipped.",
+  "file": "lifecycle_test.js",
+  "apiversion": 2
+}
