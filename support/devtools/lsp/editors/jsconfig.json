@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "es5",
+    "module": "commonjs",
+    "typeRoots": ["./generated"]
+  },
+  "include": [
+    "**/*.js",
+    "generated/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "build.*"
+  ]
+}
