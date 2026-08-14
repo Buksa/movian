@@ -254,7 +254,7 @@ def generate_inventory(binary: Path, nm_records: dict[str, dict[str, Any]] | Non
     records = nm_records if nm_records is not None else _run_nm(binary, nm)
     entries: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
-    for contract in CONTRACTS:
+    for contract_order, contract in enumerate(CONTRACTS):
         symbol = contract["symbol"]
         record = records.get(symbol)
         if record is None:
@@ -273,6 +273,7 @@ def generate_inventory(binary: Path, nm_records: dict[str, dict[str, Any]] | Non
             "phase": contract["phase"],
             "event": contract["event"],
             "pairedWith": contract["pairedWith"],
+            "contractOrder": contract_order,
             "confidence": "binary-symbol-confirmed",
             "binaryEvidence": _evidence(record),
         }
@@ -281,8 +282,7 @@ def generate_inventory(binary: Path, nm_records: dict[str, dict[str, Any]] | Non
                 entry[key] = contract[key]
         entries.append(entry)
 
-    entries.sort(key=lambda item: (CATEGORY_ORDER.index(item["category"]),
-                                   item["symbol"]))
+    entries.sort(key=lambda item: item["contractOrder"])
     counts = Counter(entry["category"] for entry in entries)
     inventory = {
         "schemaVersion": SCHEMA_VERSION,
@@ -320,13 +320,15 @@ def validate_inventory(inventory: dict[str, Any]) -> None:
     ids: set[str] = set()
     symbols: set[str] = set()
     categories = set(inventory.get("categories", []))
+    order_values: set[int] = set()
     for entry in entries:
         ident = entry.get("id")
         symbol = entry.get("symbol")
         if not isinstance(ident, str) or ident in ids:
             raise ValueError("duplicate or invalid inventory id: %s" % ident)
-        if not isinstance(symbol, str) or symbol in symbols:
-            raise ValueError("duplicate or invalid inventory symbol: %s" % symbol)
+        order = entry.get("contractOrder")
+        if not isinstance(order, int) or order in order_values:
+            raise ValueError("duplicate or invalid contract order: %s" % order)
         if entry.get("category") not in categories:
             raise ValueError("entry category not declared: %s" % entry.get("category"))
         if entry.get("event") not in EVENTS:
@@ -338,7 +340,7 @@ def validate_inventory(inventory: dict[str, Any]) -> None:
         if any(part in symbol.lower() for part in FORBIDDEN_SYMBOL_PARTS):
             raise ValueError("forbidden inventory symbol: %s" % symbol)
         ids.add(ident)
-        symbols.add(symbol)
+        order_values.add(order)
     expected = {category: sum(entry["category"] == category
                               for entry in entries)
                 for category in CATEGORY_ORDER}

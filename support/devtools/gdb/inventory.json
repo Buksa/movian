@@ -46,17 +46,63 @@
   "entries": [
     {
       "binaryEvidence": {
+        "address": "0x261f40",
+        "size": 1513,
+        "type": "T"
+      },
+      "category": "core-init",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 0,
+      "event": "enter",
+      "id": "main_init",
+      "pairedWith": "main_fini",
+      "phase": "startup",
+      "symbol": "main_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x262f40",
+        "size": 528,
+        "type": "T"
+      },
+      "category": "core-init",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 1,
+      "event": "enter",
+      "id": "main_fini",
+      "pairedWith": "main_init",
+      "phase": "shutdown",
+      "symbol": "main_fini"
+    },
+    {
+      "binaryEvidence": {
         "address": "0x262ed0",
         "size": 111,
         "type": "T"
       },
       "category": "core-init",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 2,
       "event": "enter",
       "id": "app_shutdown",
       "pairedWith": null,
       "phase": "shutdown",
       "symbol": "app_shutdown"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x261bf0",
+        "size": 25,
+        "type": "t"
+      },
+      "category": "core-init",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 3,
+      "event": "enter",
+      "id": "shutdown_eject",
+      "pairedWith": null,
+      "phase": "shutdown",
+      "symbol": "shutdown_eject"
     },
     {
       "binaryEvidence": {
@@ -66,6 +112,7 @@
       },
       "category": "core-init",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 4,
       "event": "enter",
       "id": "arch_exit",
       "pairedWith": null,
@@ -80,53 +127,12 @@
       },
       "category": "core-init",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 5,
       "event": "enter",
       "id": "do_shutdown",
       "pairedWith": null,
       "phase": "shutdown",
       "symbol": "do_shutdown"
-    },
-    {
-      "binaryEvidence": {
-        "address": "0x262f40",
-        "size": 528,
-        "type": "T"
-      },
-      "category": "core-init",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "id": "main_fini",
-      "pairedWith": "main_init",
-      "phase": "shutdown",
-      "symbol": "main_fini"
-    },
-    {
-      "binaryEvidence": {
-        "address": "0x261f40",
-        "size": 1513,
-        "type": "T"
-      },
-      "category": "core-init",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "id": "main_init",
-      "pairedWith": "main_fini",
-      "phase": "startup",
-      "symbol": "main_init"
-    },
-    {
-      "binaryEvidence": {
-        "address": "0x261bf0",
-        "size": 25,
-        "type": "t"
-      },
-      "category": "core-init",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "id": "shutdown_eject",
-      "pairedWith": null,
-      "phase": "shutdown",
-      "symbol": "shutdown_eject"
     },
     {
       "binaryEvidence": {
@@ -136,6 +142,7 @@
       },
       "category": "shutdown-hook",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 6,
       "event": "enter",
       "id": "shutdown_hook_add",
       "pairedWith": "shutdown_hook_run",
@@ -150,25 +157,12 @@
       },
       "category": "shutdown-hook",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 7,
       "event": "enter",
       "id": "shutdown_hook_run",
       "pairedWith": "shutdown_hook_add",
       "phase": "shutdown",
       "symbol": "shutdown_hook_run"
-    },
-    {
-      "binaryEvidence": {
-        "address": "0x261ec0",
-        "size": 71,
-        "type": "T"
-      },
-      "category": "init-system",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "id": "fini_group",
-      "pairedWith": "init_group",
-      "phase": "shutdown",
-      "symbol": "fini_group"
     },
     {
       "binaryEvidence": {
@@ -178,11 +172,27 @@
       },
       "category": "init-system",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 8,
       "event": "enter",
       "id": "init_group",
       "pairedWith": "fini_group",
       "phase": "startup",
       "symbol": "init_group"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x261ec0",
+        "size": 71,
+        "type": "T"
+      },
+      "category": "init-system",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 9,
+      "event": "enter",
+      "id": "fini_group",
+      "pairedWith": "init_group",
+      "phase": "shutdown",
+      "symbol": "fini_group"
     },
     {
       "binaryEvidence": {
@@ -192,6 +202,7 @@
       },
       "category": "init-system",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 10,
       "event": "enter",
       "id": "inithelper_register",
       "pairedWith": null,
@@ -206,6 +217,7 @@
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 11,
       "event": "enter",
       "group": "INIT_GROUP_ASYNCIO",
       "id": "asyncio_http_init",
@@ -217,29 +229,13 @@
     },
     {
       "binaryEvidence": {
-        "address": "0x2129d0",
-        "size": 194,
-        "type": "t"
-      },
-      "category": "init-helper",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "finiFn": "ecmascript_fini",
-      "group": "INIT_GROUP_API",
-      "id": "ecmascript_fini",
-      "pairedWith": "ecmascript_init",
-      "phase": "shutdown",
-      "priority": 0,
-      "symbol": "ecmascript_fini"
-    },
-    {
-      "binaryEvidence": {
         "address": "0x212d50",
         "size": 129,
         "type": "t"
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 12,
       "event": "enter",
       "finiFn": "ecmascript_fini",
       "group": "INIT_GROUP_API",
@@ -252,12 +248,31 @@
     },
     {
       "binaryEvidence": {
+        "address": "0x2129d0",
+        "size": 194,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 13,
+      "event": "enter",
+      "finiFn": "ecmascript_fini",
+      "group": "INIT_GROUP_API",
+      "id": "ecmascript_fini",
+      "pairedWith": "ecmascript_init",
+      "phase": "shutdown",
+      "priority": 0,
+      "symbol": "ecmascript_fini"
+    },
+    {
+      "binaryEvidence": {
         "address": "0x2bdd50",
         "size": 1255,
         "type": "t"
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 14,
       "event": "enter",
       "group": "INIT_GROUP_GRAPHICS",
       "id": "fontstash_init",
@@ -275,6 +290,7 @@
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 15,
       "event": "enter",
       "group": "INIT_GROUP_GRAPHICS",
       "id": "freetype_init",
@@ -292,6 +308,7 @@
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 16,
       "event": "enter",
       "group": "INIT_GROUP_ASYNCIO",
       "id": "ftp_server_init",
@@ -303,29 +320,13 @@
     },
     {
       "binaryEvidence": {
-        "address": "0x28a3f0",
-        "size": 729,
-        "type": "t"
-      },
-      "category": "init-helper",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "finiFn": "http_server_fini",
-      "group": "INIT_GROUP_ASYNCIO",
-      "id": "http_server_fini",
-      "pairedWith": "http_server_init",
-      "phase": "shutdown",
-      "priority": 0,
-      "symbol": "http_server_fini"
-    },
-    {
-      "binaryEvidence": {
         "address": "0x289cb0",
         "size": 173,
         "type": "t"
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 17,
       "event": "enter",
       "finiFn": "http_server_fini",
       "group": "INIT_GROUP_ASYNCIO",
@@ -338,12 +339,31 @@
     },
     {
       "binaryEvidence": {
+        "address": "0x28a3f0",
+        "size": 729,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 18,
+      "event": "enter",
+      "finiFn": "http_server_fini",
+      "group": "INIT_GROUP_ASYNCIO",
+      "id": "http_server_fini",
+      "pairedWith": "http_server_init",
+      "phase": "shutdown",
+      "priority": 0,
+      "symbol": "http_server_fini"
+    },
+    {
+      "binaryEvidence": {
         "address": "0x1ddd80",
         "size": 414,
         "type": "t"
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 19,
       "event": "enter",
       "group": "INIT_GROUP_API",
       "id": "httpcontrol_init",
@@ -361,6 +381,7 @@
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 20,
       "event": "enter",
       "group": "INIT_GROUP_NET",
       "id": "net_refresh_network_status",
@@ -378,6 +399,7 @@
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 21,
       "event": "enter",
       "group": "INIT_GROUP_ASYNCIO",
       "id": "nmb_init",
@@ -395,6 +417,7 @@
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 22,
       "event": "enter",
       "group": "INIT_GROUP_NET",
       "id": "nmb_resolver_init",
@@ -412,6 +435,7 @@
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 23,
       "event": "enter",
       "group": "INIT_GROUP_API",
       "id": "prop_http_init",
@@ -429,6 +453,7 @@
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 24,
       "event": "enter",
       "group": "INIT_GROUP_ASYNCIO",
       "id": "routesocket_init",
@@ -446,6 +471,7 @@
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 25,
       "event": "enter",
       "group": "INIT_GROUP_API",
       "id": "screenshot_init",
@@ -463,6 +489,7 @@
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 26,
       "event": "enter",
       "finiFn": "ssdp_shutdown",
       "group": "INIT_GROUP_ASYNCIO",
@@ -474,29 +501,13 @@
     },
     {
       "binaryEvidence": {
-        "address": "0x1e3060",
-        "size": 186,
-        "type": "t"
-      },
-      "category": "init-helper",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "finiFn": "stpp_discover_fini",
-      "group": "INIT_GROUP_ASYNCIO",
-      "id": "stpp_discover_fini",
-      "pairedWith": "stpp_discover_init",
-      "phase": "shutdown",
-      "priority": 10,
-      "symbol": "stpp_discover_fini"
-    },
-    {
-      "binaryEvidence": {
         "address": "0x1e29a0",
         "size": 477,
         "type": "t"
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 27,
       "event": "enter",
       "finiFn": "stpp_discover_fini",
       "group": "INIT_GROUP_ASYNCIO",
@@ -509,12 +520,31 @@
     },
     {
       "binaryEvidence": {
+        "address": "0x1e3060",
+        "size": 186,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 28,
+      "event": "enter",
+      "finiFn": "stpp_discover_fini",
+      "group": "INIT_GROUP_ASYNCIO",
+      "id": "stpp_discover_fini",
+      "pairedWith": "stpp_discover_init",
+      "phase": "shutdown",
+      "priority": 10,
+      "symbol": "stpp_discover_fini"
+    },
+    {
+      "binaryEvidence": {
         "address": "0x312180",
         "size": 18,
         "type": "t"
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 29,
       "event": "enter",
       "group": "INIT_GROUP_NET",
       "id": "usage_early_init",
@@ -526,29 +556,13 @@
     },
     {
       "binaryEvidence": {
-        "address": "0x312500",
-        "size": 195,
-        "type": "t"
-      },
-      "category": "init-helper",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "finiFn": "usage_fini",
-      "group": "INIT_GROUP_API",
-      "id": "usage_fini",
-      "pairedWith": "usage_init",
-      "phase": "shutdown",
-      "priority": 0,
-      "symbol": "usage_fini"
-    },
-    {
-      "binaryEvidence": {
         "address": "0x312170",
         "size": 5,
         "type": "t"
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 30,
       "event": "enter",
       "finiFn": "usage_fini",
       "group": "INIT_GROUP_API",
@@ -561,12 +575,31 @@
     },
     {
       "binaryEvidence": {
+        "address": "0x312500",
+        "size": 195,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 31,
+      "event": "enter",
+      "finiFn": "usage_fini",
+      "group": "INIT_GROUP_API",
+      "id": "usage_fini",
+      "pairedWith": "usage_init",
+      "phase": "shutdown",
+      "priority": 0,
+      "symbol": "usage_fini"
+    },
+    {
+      "binaryEvidence": {
         "address": "0x1e0680",
         "size": 42,
         "type": "t"
       },
       "category": "init-helper",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 32,
       "event": "enter",
       "group": "INIT_GROUP_API",
       "id": "ws_init",
@@ -584,6 +617,7 @@
       },
       "category": "thread-create",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 33,
       "event": "create",
       "id": "hts_thread_create_detached",
       "pairedWith": null,
@@ -598,25 +632,12 @@
       },
       "category": "thread-create",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 34,
       "event": "create",
       "id": "hts_thread_create_joinable",
       "pairedWith": null,
       "phase": "runtime",
       "symbol": "hts_thread_create_joinable"
-    },
-    {
-      "binaryEvidence": {
-        "address": "0x293ca0",
-        "size": 175,
-        "type": "t"
-      },
-      "category": "plugin",
-      "confidence": "binary-symbol-confirmed",
-      "event": "destroy",
-      "id": "plugin_unload",
-      "pairedWith": "plugin_load",
-      "phase": "runtime",
-      "symbol": "plugin_unload"
     },
     {
       "binaryEvidence": {
@@ -626,11 +647,27 @@
       },
       "category": "plugin",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 35,
       "event": "enter",
       "id": "plugins_init",
       "pairedWith": null,
       "phase": "startup",
       "symbol": "plugins_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x293ca0",
+        "size": 175,
+        "type": "t"
+      },
+      "category": "plugin",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 37,
+      "event": "destroy",
+      "id": "plugin_unload",
+      "pairedWith": "plugin_load",
+      "phase": "runtime",
+      "symbol": "plugin_unload"
     },
     {
       "binaryEvidence": {
@@ -640,6 +677,7 @@
       },
       "category": "plugin",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 38,
       "event": "enter",
       "id": "plugins_reload_dev_plugin",
       "pairedWith": null,
@@ -654,6 +692,7 @@
       },
       "category": "es-plugin",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 39,
       "event": "create",
       "id": "ecmascript_plugin_load",
       "pairedWith": "ecmascript_plugin_unload",
@@ -668,6 +707,7 @@
       },
       "category": "es-plugin",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 40,
       "event": "destroy",
       "id": "ecmascript_plugin_unload",
       "pairedWith": "ecmascript_plugin_load",
@@ -682,25 +722,12 @@
       },
       "category": "es-context",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 41,
       "event": "enter",
       "id": "es_context_begin",
       "pairedWith": "es_context_end",
       "phase": "runtime",
       "symbol": "es_context_begin"
-    },
-    {
-      "binaryEvidence": {
-        "address": "0x211e80",
-        "size": 947,
-        "type": "t"
-      },
-      "category": "es-context",
-      "confidence": "binary-symbol-confirmed",
-      "event": "create",
-      "id": "es_context_create",
-      "pairedWith": "es_context_release",
-      "phase": "runtime",
-      "symbol": "es_context_create"
     },
     {
       "binaryEvidence": {
@@ -710,11 +737,27 @@
       },
       "category": "es-context",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 42,
       "event": "destroy",
       "id": "es_context_end",
       "pairedWith": "es_context_begin",
       "phase": "runtime",
       "symbol": "es_context_end"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x211e80",
+        "size": 947,
+        "type": "t"
+      },
+      "category": "es-context",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 43,
+      "event": "create",
+      "id": "es_context_create",
+      "pairedWith": "es_context_release",
+      "phase": "runtime",
+      "symbol": "es_context_create"
     },
     {
       "binaryEvidence": {
@@ -724,6 +767,7 @@
       },
       "category": "es-context",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 44,
       "event": "destroy",
       "id": "es_context_release",
       "pairedWith": "es_context_create",
@@ -738,6 +782,7 @@
       },
       "category": "es-resource",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 45,
       "event": "create",
       "id": "es_resource_create",
       "pairedWith": "es_resource_destroy",
@@ -752,6 +797,7 @@
       },
       "category": "es-resource",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 46,
       "event": "destroy",
       "id": "es_resource_destroy",
       "pairedWith": "es_resource_create",
@@ -766,6 +812,7 @@
       },
       "category": "es-resource",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 47,
       "event": "create",
       "id": "es_resource_link",
       "pairedWith": "es_resource_unlink",
@@ -780,25 +827,12 @@
       },
       "category": "es-resource",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 48,
       "event": "destroy",
       "id": "es_resource_unlink",
       "pairedWith": "es_resource_link",
       "phase": "runtime",
       "symbol": "es_resource_unlink"
-    },
-    {
-      "binaryEvidence": {
-        "address": "0x284a30",
-        "size": 96,
-        "type": "T"
-      },
-      "category": "navigator",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "id": "nav_fini",
-      "pairedWith": "nav_init",
-      "phase": "shutdown",
-      "symbol": "nav_fini"
     },
     {
       "binaryEvidence": {
@@ -808,11 +842,27 @@
       },
       "category": "navigator",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 49,
       "event": "enter",
       "id": "nav_init",
       "pairedWith": "nav_fini",
       "phase": "startup",
       "symbol": "nav_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x284a30",
+        "size": 96,
+        "type": "T"
+      },
+      "category": "navigator",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 50,
+      "event": "enter",
+      "id": "nav_fini",
+      "pairedWith": "nav_init",
+      "phase": "shutdown",
+      "symbol": "nav_fini"
     },
     {
       "binaryEvidence": {
@@ -822,25 +872,12 @@
       },
       "category": "navigator",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 51,
       "event": "enter",
       "id": "nav_open0",
       "pairedWith": null,
       "phase": "runtime",
       "symbol": "nav_open0"
-    },
-    {
-      "binaryEvidence": {
-        "address": "0x2c5c70",
-        "size": 69,
-        "type": "T"
-      },
-      "category": "glw",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "id": "glw_flush",
-      "pairedWith": null,
-      "phase": "shutdown",
-      "symbol": "glw_flush"
     },
     {
       "binaryEvidence": {
@@ -850,6 +887,7 @@
       },
       "category": "glw",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 53,
       "event": "enter",
       "id": "glw_init",
       "pairedWith": null,
@@ -864,6 +902,7 @@
       },
       "category": "glw",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 54,
       "event": "enter",
       "id": "glw_init2",
       "pairedWith": null,
@@ -878,11 +917,42 @@
       },
       "category": "glw",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 55,
       "event": "enter",
       "id": "glw_settings_init",
       "pairedWith": null,
       "phase": "startup",
       "symbol": "glw_settings_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2f1730",
+        "size": 568,
+        "type": "T"
+      },
+      "category": "glw",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 56,
+      "event": "create",
+      "id": "glw_view_create",
+      "pairedWith": null,
+      "phase": "runtime",
+      "symbol": "glw_view_create"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2c5c70",
+        "size": 69,
+        "type": "T"
+      },
+      "category": "glw",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 57,
+      "event": "enter",
+      "id": "glw_flush",
+      "pairedWith": null,
+      "phase": "shutdown",
+      "symbol": "glw_flush"
     },
     {
       "binaryEvidence": {
@@ -892,6 +962,7 @@
       },
       "category": "glw",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 58,
       "event": "enter",
       "id": "glw_unload_universe",
       "pairedWith": null,
@@ -906,39 +977,12 @@
       },
       "category": "glw",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 59,
       "event": "enter",
       "id": "glw_view_cache_flush",
       "pairedWith": null,
       "phase": "shutdown",
       "symbol": "glw_view_cache_flush"
-    },
-    {
-      "binaryEvidence": {
-        "address": "0x2f1730",
-        "size": 568,
-        "type": "T"
-      },
-      "category": "glw",
-      "confidence": "binary-symbol-confirmed",
-      "event": "create",
-      "id": "glw_view_create",
-      "pairedWith": null,
-      "phase": "runtime",
-      "symbol": "glw_view_create"
-    },
-    {
-      "binaryEvidence": {
-        "address": "0x1eecd0",
-        "size": 45,
-        "type": "T"
-      },
-      "category": "backend",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "id": "backend_fini",
-      "pairedWith": "backend_init",
-      "phase": "shutdown",
-      "symbol": "backend_fini"
     },
     {
       "binaryEvidence": {
@@ -948,11 +992,27 @@
       },
       "category": "backend",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 60,
       "event": "enter",
       "id": "backend_init",
       "pairedWith": "backend_fini",
       "phase": "startup",
       "symbol": "backend_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x1eecd0",
+        "size": 45,
+        "type": "T"
+      },
+      "category": "backend",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 61,
+      "event": "enter",
+      "id": "backend_fini",
+      "pairedWith": "backend_init",
+      "phase": "shutdown",
+      "symbol": "backend_fini"
     },
     {
       "binaryEvidence": {
@@ -962,11 +1022,27 @@
       },
       "category": "backend",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 62,
       "event": "enter",
       "id": "backend_register",
       "pairedWith": null,
       "phase": "registration",
       "symbol": "backend_register"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2b0900",
+        "size": 519,
+        "type": "T"
+      },
+      "category": "service",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 63,
+      "event": "enter",
+      "id": "service_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "symbol": "service_init"
     },
     {
       "binaryEvidence": {
@@ -976,6 +1052,7 @@
       },
       "category": "service",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 64,
       "event": "create",
       "id": "service_create",
       "pairedWith": "service_destroy",
@@ -990,25 +1067,12 @@
       },
       "category": "service",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 65,
       "event": "destroy",
       "id": "service_destroy",
       "pairedWith": "service_create",
       "phase": "runtime",
       "symbol": "service_destroy"
-    },
-    {
-      "binaryEvidence": {
-        "address": "0x2b0900",
-        "size": 519,
-        "type": "T"
-      },
-      "category": "service",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "id": "service_init",
-      "pairedWith": null,
-      "phase": "startup",
-      "symbol": "service_init"
     },
     {
       "binaryEvidence": {
@@ -1018,6 +1082,7 @@
       },
       "category": "prop-subscribe",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 68,
       "event": "create",
       "id": "prop_subscribe_ex",
       "pairedWith": "prop_unsubscribe",
@@ -1032,11 +1097,27 @@
       },
       "category": "prop-subscribe",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 69,
       "event": "destroy",
       "id": "prop_unsubscribe",
       "pairedWith": "prop_subscribe",
       "phase": "runtime",
       "symbol": "prop_unsubscribe"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x27a9c0",
+        "size": 106,
+        "type": "T"
+      },
+      "category": "callout",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 70,
+      "event": "enter",
+      "id": "callout_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "symbol": "callout_init"
     },
     {
       "binaryEvidence": {
@@ -1046,6 +1127,7 @@
       },
       "category": "callout",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 71,
       "event": "create",
       "id": "callout_arm0",
       "pairedWith": "callout_disarm",
@@ -1060,6 +1142,7 @@
       },
       "category": "callout",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 72,
       "event": "create",
       "id": "callout_arm_x",
       "pairedWith": "callout_disarm",
@@ -1074,53 +1157,12 @@
       },
       "category": "callout",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 73,
       "event": "destroy",
       "id": "callout_disarm",
       "pairedWith": "callout_arm0",
       "phase": "runtime",
       "symbol": "callout_disarm"
-    },
-    {
-      "binaryEvidence": {
-        "address": "0x27a9c0",
-        "size": 106,
-        "type": "T"
-      },
-      "category": "callout",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "id": "callout_init",
-      "pairedWith": null,
-      "phase": "startup",
-      "symbol": "callout_init"
-    },
-    {
-      "binaryEvidence": {
-        "address": "0x262eb0",
-        "size": 22,
-        "type": "T"
-      },
-      "category": "cache",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "id": "app_flush_caches",
-      "pairedWith": null,
-      "phase": "shutdown",
-      "symbol": "app_flush_caches"
-    },
-    {
-      "binaryEvidence": {
-        "address": "0x20e570",
-        "size": 65,
-        "type": "T"
-      },
-      "category": "cache",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "id": "blobcache_fini",
-      "pairedWith": "blobcache_init",
-      "phase": "shutdown",
-      "symbol": "blobcache_fini"
     },
     {
       "binaryEvidence": {
@@ -1130,6 +1172,7 @@
       },
       "category": "cache",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 74,
       "event": "enter",
       "id": "blobcache_init",
       "pairedWith": "blobcache_fini",
@@ -1138,31 +1181,18 @@
     },
     {
       "binaryEvidence": {
-        "address": "0x24a960",
-        "size": 126,
+        "address": "0x20e570",
+        "size": 65,
         "type": "T"
       },
       "category": "cache",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 75,
       "event": "enter",
-      "id": "htsmsg_store_flush",
-      "pairedWith": null,
+      "id": "blobcache_fini",
+      "pairedWith": "blobcache_init",
       "phase": "shutdown",
-      "symbol": "htsmsg_store_flush"
-    },
-    {
-      "binaryEvidence": {
-        "address": "0x2103d0",
-        "size": 16,
-        "type": "T"
-      },
-      "category": "cache",
-      "confidence": "binary-symbol-confirmed",
-      "event": "enter",
-      "id": "kvstore_fini",
-      "pairedWith": "kvstore_init",
-      "phase": "shutdown",
-      "symbol": "kvstore_fini"
+      "symbol": "blobcache_fini"
     },
     {
       "binaryEvidence": {
@@ -1172,6 +1202,7 @@
       },
       "category": "cache",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 76,
       "event": "enter",
       "id": "kvstore_init",
       "pairedWith": "kvstore_fini",
@@ -1180,17 +1211,18 @@
     },
     {
       "binaryEvidence": {
-        "address": "0x272610",
+        "address": "0x2103d0",
         "size": 16,
         "type": "T"
       },
       "category": "cache",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 77,
       "event": "enter",
-      "id": "metadb_fini",
-      "pairedWith": "metadb_init",
+      "id": "kvstore_fini",
+      "pairedWith": "kvstore_init",
       "phase": "shutdown",
-      "symbol": "metadb_fini"
+      "symbol": "kvstore_fini"
     },
     {
       "binaryEvidence": {
@@ -1200,11 +1232,57 @@
       },
       "category": "cache",
       "confidence": "binary-symbol-confirmed",
+      "contractOrder": 78,
       "event": "enter",
       "id": "metadb_init",
       "pairedWith": "metadb_fini",
       "phase": "startup",
       "symbol": "metadb_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x272610",
+        "size": 16,
+        "type": "T"
+      },
+      "category": "cache",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 79,
+      "event": "enter",
+      "id": "metadb_fini",
+      "pairedWith": "metadb_init",
+      "phase": "shutdown",
+      "symbol": "metadb_fini"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x262eb0",
+        "size": 22,
+        "type": "T"
+      },
+      "category": "cache",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 80,
+      "event": "enter",
+      "id": "app_flush_caches",
+      "pairedWith": null,
+      "phase": "shutdown",
+      "symbol": "app_flush_caches"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x24a960",
+        "size": 126,
+        "type": "T"
+      },
+      "category": "cache",
+      "confidence": "binary-symbol-confirmed",
+      "contractOrder": 81,
+      "event": "enter",
+      "id": "htsmsg_store_flush",
+      "pairedWith": null,
+      "phase": "shutdown",
+      "symbol": "htsmsg_store_flush"
     }
   ],
   "generator": "support/devtools/gdb/inventory.py",
