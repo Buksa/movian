@@ -1,0 +1,5442 @@
+{
+  "afterGlobalSettings": {
+    "movian/settings": {
+      "keys": {
+        "getvalue": {
+          "length": 2,
+          "type": "function"
+        },
+        "globalSettings": {
+          "length": 4,
+          "type": "function"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kvstoreSettings": {
+          "length": 3,
+          "type": "function"
+        },
+        "nodes": {
+          "type": "object"
+        },
+        "properties": {
+          "type": "object"
+        },
+        "setvalue": {
+          "length": 2,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {
+          "createAction": {
+            "length": 3,
+            "type": "function"
+          },
+          "createBool": {
+            "length": 5,
+            "type": "function"
+          },
+          "createDivider": {
+            "length": 1,
+            "type": "function"
+          },
+          "createInfo": {
+            "length": 3,
+            "type": "function"
+          },
+          "createInt": {
+            "length": 9,
+            "type": "function"
+          },
+          "createMultiOpt": {
+            "length": 5,
+            "type": "function"
+          },
+          "createString": {
+            "length": 5,
+            "type": "function"
+          },
+          "destroy": {
+            "length": 0,
+            "type": "function"
+          },
+          "dump": {
+            "length": 0,
+            "type": "function"
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "showtime/settings": {
+      "keys": {
+        "globalSettings": {
+          "length": 4,
+          "type": "function"
+        },
+        "kvstoreSettings": {
+          "length": 3,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    }
+  },
+  "before": {
+    "fs": {
+      "keys": {
+        "mkdirSync": {
+          "length": 1,
+          "type": "function"
+        },
+        "readFileSync": {
+          "length": 2,
+          "type": "function"
+        },
+        "readdirSync": {
+          "length": 1,
+          "type": "function"
+        },
+        "rmdirSync": {
+          "length": 1,
+          "type": "function"
+        },
+        "unlinkSync": {
+          "length": 1,
+          "type": "function"
+        },
+        "writeFileSync": {
+          "length": 3,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "http": {
+      "keys": {
+        "get": {
+          "length": 3,
+          "type": "function"
+        },
+        "request": {
+          "length": 3,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "https": {
+      "keys": {
+        "get": {
+          "length": 2,
+          "type": "function"
+        },
+        "request": {
+          "length": 2,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "movian/html": {
+      "keys": {
+        "parse": {
+          "length": 1,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "movian/http": {
+      "keys": {
+        "request": {
+          "length": 3,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "movian/itemhook": {
+      "keys": {
+        "create": {
+          "length": 1,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "movian/page": {
+      "keys": {
+        "Route": {
+          "length": 2,
+          "type": "function"
+        },
+        "Searcher": {
+          "length": 3,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "movian/popup": {
+      "keys": {
+        "notify": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "movian/prop": {
+      "keys": {
+        "createRoot": {
+          "length": 1,
+          "type": "function"
+        },
+        "global": {
+          "type": "object"
+        },
+        "makeProp": {
+          "length": 1,
+          "type": "function"
+        },
+        "subscribeValue": {
+          "length": 3,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {
+          "atomicAdd": {
+            "length": 0,
+            "type": "function"
+          },
+          "create": {
+            "length": 0,
+            "type": "function"
+          },
+          "deleteChild": {
+            "length": 0,
+            "type": "function"
+          },
+          "deleteChilds": {
+            "length": 0,
+            "type": "function"
+          },
+          "destroy": {
+            "length": 0,
+            "type": "function"
+          },
+          "enumerate": {
+            "length": 0,
+            "type": "function"
+          },
+          "getChild": {
+            "length": 0,
+            "type": "function"
+          },
+          "getName": {
+            "length": 0,
+            "type": "function"
+          },
+          "getValue": {
+            "length": 0,
+            "type": "function"
+          },
+          "global": {
+            "length": 0,
+            "type": "function"
+          },
+          "has": {
+            "length": 0,
+            "type": "function"
+          },
+          "haveMore": {
+            "length": 0,
+            "type": "function"
+          },
+          "isSame": {
+            "length": 0,
+            "type": "function"
+          },
+          "isValue": {
+            "length": 0,
+            "type": "function"
+          },
+          "isZombie": {
+            "length": 0,
+            "type": "function"
+          },
+          "link": {
+            "length": 0,
+            "type": "function"
+          },
+          "makeUrl": {
+            "length": 0,
+            "type": "function"
+          },
+          "moveBefore": {
+            "length": 0,
+            "type": "function"
+          },
+          "nodeFilterAddPred": {
+            "length": 0,
+            "type": "function"
+          },
+          "nodeFilterCreate": {
+            "length": 0,
+            "type": "function"
+          },
+          "nodeFilterDelPred": {
+            "length": 0,
+            "type": "function"
+          },
+          "print": {
+            "length": 0,
+            "type": "function"
+          },
+          "release": {
+            "length": 0,
+            "type": "function"
+          },
+          "select": {
+            "length": 0,
+            "type": "function"
+          },
+          "sendEvent": {
+            "length": 0,
+            "type": "function"
+          },
+          "set": {
+            "length": 0,
+            "type": "function"
+          },
+          "setClipRange": {
+            "length": 0,
+            "type": "function"
+          },
+          "setParent": {
+            "length": 0,
+            "type": "function"
+          },
+          "setRichStr": {
+            "length": 0,
+            "type": "function"
+          },
+          "subscribe": {
+            "length": 0,
+            "type": "function"
+          },
+          "tagClear": {
+            "length": 0,
+            "type": "function"
+          },
+          "tagGet": {
+            "length": 0,
+            "type": "function"
+          },
+          "tagSet": {
+            "length": 0,
+            "type": "function"
+          },
+          "unlink": {
+            "length": 0,
+            "type": "function"
+          },
+          "unloadDestroy": {
+            "length": 0,
+            "type": "function"
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "movian/service": {
+      "keys": {
+        "create": {
+          "length": 5,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "movian/settings": {
+      "keys": {
+        "globalSettings": {
+          "length": 4,
+          "type": "function"
+        },
+        "kvstoreSettings": {
+          "length": 3,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "movian/sqlite": {
+      "keys": {
+        "DB": {
+          "length": 1,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "movian/store": {
+      "keys": {
+        "create": {
+          "length": 1,
+          "type": "function"
+        },
+        "createFromPath": {
+          "length": 1,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "movian/subtitles": {
+      "keys": {
+        "addProvider": {
+          "length": 1,
+          "type": "function"
+        },
+        "getLanguages": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "movian/videoscrobbler": {
+      "keys": {
+        "VideoScrobbler": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "movian/xml": {
+      "keys": {
+        "htsmsg": {
+          "length": 1,
+          "type": "function"
+        },
+        "parse": {
+          "length": 1,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "movian/xmlrpc": {
+      "keys": {
+        "call": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/crypto": {
+      "keys": {
+        "hashCreate": {
+          "length": 0,
+          "type": "function"
+        },
+        "hashFinalize": {
+          "length": 0,
+          "type": "function"
+        },
+        "hashUpdate": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/faprovider": {
+      "keys": {
+        "closeRespond": {
+          "length": 0,
+          "type": "function"
+        },
+        "openRespond": {
+          "length": 0,
+          "type": "function"
+        },
+        "readRespond": {
+          "length": 0,
+          "type": "function"
+        },
+        "redirectRespond": {
+          "length": 0,
+          "type": "function"
+        },
+        "register": {
+          "length": 0,
+          "type": "function"
+        },
+        "setSize": {
+          "length": 0,
+          "type": "function"
+        },
+        "statRespond": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/fs": {
+      "keys": {
+        "basename": {
+          "length": 0,
+          "type": "function"
+        },
+        "copyfile": {
+          "length": 0,
+          "type": "function"
+        },
+        "dirname": {
+          "length": 0,
+          "type": "function"
+        },
+        "fsize": {
+          "length": 0,
+          "type": "function"
+        },
+        "ftruncate": {
+          "length": 0,
+          "type": "function"
+        },
+        "ftrunctae": {
+          "length": 0,
+          "type": "function"
+        },
+        "mkdirs": {
+          "length": 0,
+          "type": "function"
+        },
+        "open": {
+          "length": 0,
+          "type": "function"
+        },
+        "read": {
+          "length": 0,
+          "type": "function"
+        },
+        "readdir": {
+          "length": 0,
+          "type": "function"
+        },
+        "rename": {
+          "length": 0,
+          "type": "function"
+        },
+        "rmdir": {
+          "length": 0,
+          "type": "function"
+        },
+        "unlink": {
+          "length": 0,
+          "type": "function"
+        },
+        "write": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/gumbo": {
+      "keys": {
+        "findByClassName": {
+          "length": 0,
+          "type": "function"
+        },
+        "findById": {
+          "length": 0,
+          "type": "function"
+        },
+        "findByTagName": {
+          "length": 0,
+          "type": "function"
+        },
+        "nodeAttributes": {
+          "length": 0,
+          "type": "function"
+        },
+        "nodeChilds": {
+          "length": 0,
+          "type": "function"
+        },
+        "nodeName": {
+          "length": 0,
+          "type": "function"
+        },
+        "nodeTextContent": {
+          "length": 0,
+          "type": "function"
+        },
+        "nodeType": {
+          "length": 0,
+          "type": "function"
+        },
+        "parse": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/hook": {
+      "keys": {
+        "register": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/htsmsg": {
+      "keys": {
+        "createFromXML": {
+          "length": 0,
+          "type": "function"
+        },
+        "enumerate": {
+          "length": 0,
+          "type": "function"
+        },
+        "get": {
+          "length": 0,
+          "type": "function"
+        },
+        "getName": {
+          "length": 0,
+          "type": "function"
+        },
+        "length": {
+          "length": 0,
+          "type": "function"
+        },
+        "print": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/io": {
+      "keys": {
+        "httpInspectorCreate": {
+          "length": 0,
+          "type": "function"
+        },
+        "httpReq": {
+          "length": 0,
+          "type": "function"
+        },
+        "probe": {
+          "length": 0,
+          "type": "function"
+        },
+        "xmlrpc": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/kvstore": {
+      "keys": {
+        "getBoolean": {
+          "length": 0,
+          "type": "function"
+        },
+        "getInteger": {
+          "length": 0,
+          "type": "function"
+        },
+        "getString": {
+          "length": 0,
+          "type": "function"
+        },
+        "set": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/metadata": {
+      "keys": {
+        "bindPlayInfo": {
+          "length": 0,
+          "type": "function"
+        },
+        "videoMetadataBind": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/misc": {
+      "keys": {
+        "cacheGet": {
+          "length": 0,
+          "type": "function"
+        },
+        "cachePut": {
+          "length": 0,
+          "type": "function"
+        },
+        "selectView": {
+          "length": 0,
+          "type": "function"
+        },
+        "systemIpAddress": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/popup": {
+      "keys": {
+        "getAuthCredentials": {
+          "length": 0,
+          "type": "function"
+        },
+        "message": {
+          "length": 0,
+          "type": "function"
+        },
+        "notify": {
+          "length": 0,
+          "type": "function"
+        },
+        "textDialog": {
+          "length": 0,
+          "type": "function"
+        },
+        "webpopup": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/prop": {
+      "keys": {
+        "atomicAdd": {
+          "length": 0,
+          "type": "function"
+        },
+        "create": {
+          "length": 0,
+          "type": "function"
+        },
+        "deleteChild": {
+          "length": 0,
+          "type": "function"
+        },
+        "deleteChilds": {
+          "length": 0,
+          "type": "function"
+        },
+        "destroy": {
+          "length": 0,
+          "type": "function"
+        },
+        "enumerate": {
+          "length": 0,
+          "type": "function"
+        },
+        "getChild": {
+          "length": 0,
+          "type": "function"
+        },
+        "getName": {
+          "length": 0,
+          "type": "function"
+        },
+        "getValue": {
+          "length": 0,
+          "type": "function"
+        },
+        "global": {
+          "length": 0,
+          "type": "function"
+        },
+        "has": {
+          "length": 0,
+          "type": "function"
+        },
+        "haveMore": {
+          "length": 0,
+          "type": "function"
+        },
+        "isSame": {
+          "length": 0,
+          "type": "function"
+        },
+        "isValue": {
+          "length": 0,
+          "type": "function"
+        },
+        "isZombie": {
+          "length": 0,
+          "type": "function"
+        },
+        "link": {
+          "length": 0,
+          "type": "function"
+        },
+        "makeUrl": {
+          "length": 0,
+          "type": "function"
+        },
+        "moveBefore": {
+          "length": 0,
+          "type": "function"
+        },
+        "nodeFilterAddPred": {
+          "length": 0,
+          "type": "function"
+        },
+        "nodeFilterCreate": {
+          "length": 0,
+          "type": "function"
+        },
+        "nodeFilterDelPred": {
+          "length": 0,
+          "type": "function"
+        },
+        "print": {
+          "length": 0,
+          "type": "function"
+        },
+        "release": {
+          "length": 0,
+          "type": "function"
+        },
+        "select": {
+          "length": 0,
+          "type": "function"
+        },
+        "sendEvent": {
+          "length": 0,
+          "type": "function"
+        },
+        "set": {
+          "length": 0,
+          "type": "function"
+        },
+        "setClipRange": {
+          "length": 0,
+          "type": "function"
+        },
+        "setParent": {
+          "length": 0,
+          "type": "function"
+        },
+        "setRichStr": {
+          "length": 0,
+          "type": "function"
+        },
+        "subscribe": {
+          "length": 0,
+          "type": "function"
+        },
+        "tagClear": {
+          "length": 0,
+          "type": "function"
+        },
+        "tagGet": {
+          "length": 0,
+          "type": "function"
+        },
+        "tagSet": {
+          "length": 0,
+          "type": "function"
+        },
+        "unlink": {
+          "length": 0,
+          "type": "function"
+        },
+        "unloadDestroy": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/route": {
+      "keys": {
+        "backendOpen": {
+          "length": 0,
+          "type": "function"
+        },
+        "create": {
+          "length": 0,
+          "type": "function"
+        },
+        "test": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/service": {
+      "keys": {
+        "create": {
+          "length": 0,
+          "type": "function"
+        },
+        "enable": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/sqlite": {
+      "keys": {
+        "changes": {
+          "length": 0,
+          "type": "function"
+        },
+        "create": {
+          "length": 0,
+          "type": "function"
+        },
+        "lastErrorCode": {
+          "length": 0,
+          "type": "function"
+        },
+        "lastErrorString": {
+          "length": 0,
+          "type": "function"
+        },
+        "lastRowId": {
+          "length": 0,
+          "type": "function"
+        },
+        "query": {
+          "length": 0,
+          "type": "function"
+        },
+        "step": {
+          "length": 0,
+          "type": "function"
+        },
+        "upgradeSchema": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/string": {
+      "keys": {
+        "durationToString": {
+          "length": 0,
+          "type": "function"
+        },
+        "entityDecode": {
+          "length": 0,
+          "type": "function"
+        },
+        "isUtf8": {
+          "length": 0,
+          "type": "function"
+        },
+        "paramEscape": {
+          "length": 0,
+          "type": "function"
+        },
+        "parseTime": {
+          "length": 0,
+          "type": "function"
+        },
+        "parseURL": {
+          "length": 0,
+          "type": "function"
+        },
+        "pathEscape": {
+          "length": 0,
+          "type": "function"
+        },
+        "queryStringSplit": {
+          "length": 0,
+          "type": "function"
+        },
+        "resolveURL": {
+          "length": 0,
+          "type": "function"
+        },
+        "utf8FromBytes": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/subtitle": {
+      "keys": {
+        "addItem": {
+          "length": 0,
+          "type": "function"
+        },
+        "addProvider": {
+          "length": 0,
+          "type": "function"
+        },
+        "getLanguages": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "native/websocket": {
+      "keys": {
+        "clientCreate": {
+          "length": 0,
+          "type": "function"
+        },
+        "clientSend": {
+          "length": 0,
+          "type": "function"
+        },
+        "serverCreate": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "querystring": {
+      "keys": {
+        "parse": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "showtime/html": {
+      "keys": {
+        "parse": {
+          "length": 1,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "showtime/http": {
+      "keys": {
+        "request": {
+          "length": 3,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "showtime/itemhook": {
+      "keys": {
+        "create": {
+          "length": 1,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "showtime/page": {
+      "keys": {
+        "Route": {
+          "length": 2,
+          "type": "function"
+        },
+        "Searcher": {
+          "length": 3,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "showtime/popup": {
+      "keys": {
+        "notify": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "showtime/prop": {
+      "keys": {
+        "createRoot": {
+          "length": 1,
+          "type": "function"
+        },
+        "global": {
+          "type": "object"
+        },
+        "makeProp": {
+          "length": 1,
+          "type": "function"
+        },
+        "subscribeValue": {
+          "length": 3,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {
+          "atomicAdd": {
+            "length": 0,
+            "type": "function"
+          },
+          "create": {
+            "length": 0,
+            "type": "function"
+          },
+          "deleteChild": {
+            "length": 0,
+            "type": "function"
+          },
+          "deleteChilds": {
+            "length": 0,
+            "type": "function"
+          },
+          "destroy": {
+            "length": 0,
+            "type": "function"
+          },
+          "enumerate": {
+            "length": 0,
+            "type": "function"
+          },
+          "getChild": {
+            "length": 0,
+            "type": "function"
+          },
+          "getName": {
+            "length": 0,
+            "type": "function"
+          },
+          "getValue": {
+            "length": 0,
+            "type": "function"
+          },
+          "global": {
+            "length": 0,
+            "type": "function"
+          },
+          "has": {
+            "length": 0,
+            "type": "function"
+          },
+          "haveMore": {
+            "length": 0,
+            "type": "function"
+          },
+          "isSame": {
+            "length": 0,
+            "type": "function"
+          },
+          "isValue": {
+            "length": 0,
+            "type": "function"
+          },
+          "isZombie": {
+            "length": 0,
+            "type": "function"
+          },
+          "link": {
+            "length": 0,
+            "type": "function"
+          },
+          "makeUrl": {
+            "length": 0,
+            "type": "function"
+          },
+          "moveBefore": {
+            "length": 0,
+            "type": "function"
+          },
+          "nodeFilterAddPred": {
+            "length": 0,
+            "type": "function"
+          },
+          "nodeFilterCreate": {
+            "length": 0,
+            "type": "function"
+          },
+          "nodeFilterDelPred": {
+            "length": 0,
+            "type": "function"
+          },
+          "print": {
+            "length": 0,
+            "type": "function"
+          },
+          "release": {
+            "length": 0,
+            "type": "function"
+          },
+          "select": {
+            "length": 0,
+            "type": "function"
+          },
+          "sendEvent": {
+            "length": 0,
+            "type": "function"
+          },
+          "set": {
+            "length": 0,
+            "type": "function"
+          },
+          "setClipRange": {
+            "length": 0,
+            "type": "function"
+          },
+          "setParent": {
+            "length": 0,
+            "type": "function"
+          },
+          "setRichStr": {
+            "length": 0,
+            "type": "function"
+          },
+          "subscribe": {
+            "length": 0,
+            "type": "function"
+          },
+          "tagClear": {
+            "length": 0,
+            "type": "function"
+          },
+          "tagGet": {
+            "length": 0,
+            "type": "function"
+          },
+          "tagSet": {
+            "length": 0,
+            "type": "function"
+          },
+          "unlink": {
+            "length": 0,
+            "type": "function"
+          },
+          "unloadDestroy": {
+            "length": 0,
+            "type": "function"
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "showtime/service": {
+      "keys": {
+        "create": {
+          "length": 5,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "showtime/settings": {
+      "keys": {
+        "globalSettings": {
+          "length": 4,
+          "type": "function"
+        },
+        "kvstoreSettings": {
+          "length": 3,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "showtime/sqlite": {
+      "keys": {
+        "DB": {
+          "length": 1,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "showtime/store": {
+      "keys": {
+        "create": {
+          "length": 1,
+          "type": "function"
+        },
+        "createFromPath": {
+          "length": 1,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "showtime/subtitles": {
+      "keys": {
+        "addProvider": {
+          "length": 1,
+          "type": "function"
+        },
+        "getLanguages": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "showtime/videoscrobbler": {
+      "keys": {
+        "VideoScrobbler": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "showtime/xml": {
+      "keys": {
+        "htsmsg": {
+          "length": 1,
+          "type": "function"
+        },
+        "parse": {
+          "length": 1,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "showtime/xmlrpc": {
+      "keys": {
+        "call": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "url": {
+      "keys": {
+        "format": {
+          "length": 1,
+          "type": "function"
+        },
+        "parse": {
+          "length": 0,
+          "type": "function"
+        },
+        "resolve": {
+          "length": 0,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "websocket": {
+      "keys": {
+        "w3cwebsocket": {
+          "length": 2,
+          "type": "function"
+        }
+      },
+      "prototype": {
+        "keys": {},
+        "type": "object"
+      },
+      "type": "object"
+    }
+  },
+  "globalSettingsError": null,
+  "globals": {
+    "Core": {
+      "status": "observed",
+      "value": {
+        "keys": {
+          "compile": {
+            "length": 1,
+            "type": "function"
+          },
+          "currentVersionInt": {
+            "type": "number"
+          },
+          "currentVersionString": {
+            "type": "string"
+          },
+          "deviceId": {
+            "type": "string"
+          },
+          "loadPath": {
+            "type": "string"
+          },
+          "randomBytes": {
+            "length": 1,
+            "type": "function"
+          },
+          "resourceDestroy": {
+            "length": 1,
+            "type": "function"
+          },
+          "sleep": {
+            "length": 1,
+            "type": "function"
+          },
+          "storagePath": {
+            "type": "string"
+          },
+          "timestamp": {
+            "length": 0,
+            "type": "function"
+          }
+        },
+        "prototype": {
+          "keys": {},
+          "type": "object"
+        },
+        "type": "object"
+      }
+    },
+    "Duktape": {
+      "status": "observed",
+      "value": {
+        "keys": {
+          "modSearch": {
+            "length": 4,
+            "type": "function"
+          }
+        },
+        "prototype": {
+          "keys": {},
+          "type": "object"
+        },
+        "type": "object"
+      }
+    },
+    "Plugin": {
+      "status": "observed",
+      "value": {
+        "keys": {
+          "apiversion": {
+            "type": "number"
+          },
+          "id": {
+            "type": "string"
+          },
+          "manifest": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "prototype": {
+          "keys": {},
+          "type": "object"
+        },
+        "type": "object"
+      }
+    },
+    "console": {
+      "status": "observed",
+      "value": {
+        "keys": {
+          "error": {
+            "length": 0,
+            "type": "function"
+          },
+          "log": {
+            "length": 0,
+            "type": "function"
+          },
+          "warn": {
+            "length": 0,
+            "type": "function"
+          }
+        },
+        "prototype": {
+          "keys": {},
+          "type": "object"
+        },
+        "type": "object"
+      }
+    },
+    "plugin": {
+      "status": "observed",
+      "value": {
+        "keys": {
+          "addHTTPAuth": {
+            "length": 0,
+            "type": "function"
+          },
+          "addItemHook": {
+            "length": 1,
+            "type": "function"
+          },
+          "addSearcher": {
+            "length": 3,
+            "type": "function"
+          },
+          "addSubtitleProvider": {
+            "length": 1,
+            "type": "function"
+          },
+          "addURI": {
+            "length": 2,
+            "type": "function"
+          },
+          "cacheGet": {
+            "length": 2,
+            "type": "function"
+          },
+          "cachePut": {
+            "length": 4,
+            "type": "function"
+          },
+          "config": {
+            "type": "object"
+          },
+          "copyFile": {
+            "length": 0,
+            "type": "function"
+          },
+          "createService": {
+            "length": 5,
+            "type": "function"
+          },
+          "createSettings": {
+            "length": 3,
+            "type": "function"
+          },
+          "createStore": {
+            "length": 1,
+            "type": "function"
+          },
+          "getAuthCredentials": {
+            "length": 0,
+            "type": "function"
+          },
+          "getDescriptor": {
+            "length": 0,
+            "type": "function"
+          },
+          "path": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "object"
+          },
+          "selectView": {
+            "length": 0,
+            "type": "function"
+          }
+        },
+        "prototype": {
+          "keys": {},
+          "type": "object"
+        },
+        "type": "object"
+      }
+    },
+    "showtime": {
+      "status": "observed",
+      "value": {
+        "keys": {
+          "JSONDecode": {
+            "length": 2,
+            "type": "function"
+          },
+          "JSONEncode": {
+            "length": 3,
+            "type": "function"
+          },
+          "RichText": {
+            "length": 1,
+            "type": "function"
+          },
+          "basename": {
+            "length": 0,
+            "type": "function"
+          },
+          "currentVersionInt": {
+            "type": "number"
+          },
+          "currentVersionString": {
+            "type": "string"
+          },
+          "deviceId": {
+            "type": "string"
+          },
+          "durationToString": {
+            "length": 0,
+            "type": "function"
+          },
+          "entityDecode": {
+            "length": 0,
+            "type": "function"
+          },
+          "getSubtitleLanguages": {
+            "length": 0,
+            "type": "function"
+          },
+          "httpGet": {
+            "length": 4,
+            "type": "function"
+          },
+          "httpReq": {
+            "length": 3,
+            "type": "function"
+          },
+          "md5digest": {
+            "length": 1,
+            "type": "function"
+          },
+          "message": {
+            "length": 0,
+            "type": "function"
+          },
+          "notify": {
+            "length": 0,
+            "type": "function"
+          },
+          "paramEscape": {
+            "length": 0,
+            "type": "function"
+          },
+          "pathEscape": {
+            "length": 0,
+            "type": "function"
+          },
+          "print": {
+            "length": 0,
+            "type": "function"
+          },
+          "probe": {
+            "length": 0,
+            "type": "function"
+          },
+          "queryStringSplit": {
+            "length": 0,
+            "type": "function"
+          },
+          "sha1digest": {
+            "length": 1,
+            "type": "function"
+          },
+          "sleep": {
+            "length": 1,
+            "type": "function"
+          },
+          "systemIpAddress": {
+            "length": 0,
+            "type": "function"
+          },
+          "textDialog": {
+            "length": 0,
+            "type": "function"
+          },
+          "trace": {
+            "length": 0,
+            "type": "function"
+          },
+          "xmlrpc": {
+            "length": 0,
+            "type": "function"
+          }
+        },
+        "prototype": {
+          "keys": {},
+          "type": "object"
+        },
+        "type": "object"
+      }
+    }
+  },
+  "loadErrors": {},
+  "modules": [
+    "fs",
+    "http",
+    "https",
+    "movian/html",
+    "movian/http",
+    "movian/itemhook",
+    "movian/page",
+    "movian/popup",
+    "movian/prop",
+    "movian/service",
+    "movian/settings",
+    "movian/sqlite",
+    "movian/store",
+    "movian/subtitles",
+    "movian/videoscrobbler",
+    "movian/xml",
+    "movian/xmlrpc",
+    "native/crypto",
+    "native/faprovider",
+    "native/fs",
+    "native/gumbo",
+    "native/hook",
+    "native/htsmsg",
+    "native/io",
+    "native/kvstore",
+    "native/metadata",
+    "native/misc",
+    "native/popup",
+    "native/prop",
+    "native/route",
+    "native/service",
+    "native/sqlite",
+    "native/string",
+    "native/subtitle",
+    "native/websocket",
+    "querystring",
+    "url",
+    "websocket",
+    "showtime/html",
+    "showtime/http",
+    "showtime/itemhook",
+    "showtime/page",
+    "showtime/popup",
+    "showtime/prop",
+    "showtime/service",
+    "showtime/settings",
+    "showtime/sqlite",
+    "showtime/store",
+    "showtime/subtitles",
+    "showtime/videoscrobbler",
+    "showtime/xml",
+    "showtime/xmlrpc"
+  ],
+  "tier1": {
+    "fs": {
+      "functionExports": {
+        "mkdirSync": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "readFileSync": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "readdirSync": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "rmdirSync": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "unlinkSync": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "writeFileSync": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "http": {
+      "functionExports": {
+        "get": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "request": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "https": {
+      "functionExports": {
+        "get": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "request": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "movian/html": {
+      "functionExports": {
+        "parse": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "movian/http": {
+      "functionExports": {
+        "request": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "movian/itemhook": {
+      "functionExports": {
+        "create": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "movian/page": {
+      "functionExports": {
+        "Route": {
+          "prototype": {
+            "keys": {
+              "destroy": {
+                "length": 0,
+                "type": "function"
+              }
+            },
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "Searcher": {
+          "prototype": {
+            "keys": {
+              "destroy": {
+                "length": 0,
+                "type": "function"
+              }
+            },
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "movian/popup": {
+      "functionExports": {
+        "notify": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "movian/prop": {
+      "functionExports": {
+        "createRoot": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "makeProp": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "subscribeValue": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "movian/service": {
+      "functionExports": {
+        "create": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "movian/settings": {
+      "functionExports": {
+        "globalSettings": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "kvstoreSettings": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "movian/sqlite": {
+      "functionExports": {
+        "DB": {
+          "prototype": {
+            "keys": {
+              "close": {
+                "length": 0,
+                "type": "function"
+              },
+              "lastErrorCode": {
+                "get": {
+                  "length": 0,
+                  "type": "function"
+                },
+                "type": "accessor"
+              },
+              "lastErrorString": {
+                "get": {
+                  "length": 0,
+                  "type": "function"
+                },
+                "type": "accessor"
+              },
+              "lastRowId": {
+                "get": {
+                  "length": 0,
+                  "type": "function"
+                },
+                "type": "accessor"
+              },
+              "query": {
+                "length": 0,
+                "type": "function"
+              },
+              "step": {
+                "length": 0,
+                "type": "function"
+              },
+              "upgradeSchema": {
+                "length": 1,
+                "type": "function"
+              }
+            },
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "movian/store": {
+      "functionExports": {
+        "create": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "createFromPath": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "movian/subtitles": {
+      "functionExports": {
+        "addProvider": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "getLanguages": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "movian/videoscrobbler": {
+      "functionExports": {
+        "VideoScrobbler": {
+          "prototype": {
+            "keys": {
+              "destroy": {
+                "length": 0,
+                "type": "function"
+              }
+            },
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "movian/xml": {
+      "functionExports": {
+        "htsmsg": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "parse": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "movian/xmlrpc": {
+      "functionExports": {
+        "call": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/crypto": {
+      "functionExports": {
+        "hashCreate": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "hashFinalize": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "hashUpdate": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/faprovider": {
+      "functionExports": {
+        "closeRespond": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "openRespond": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "readRespond": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "redirectRespond": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "register": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "setSize": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "statRespond": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/fs": {
+      "functionExports": {
+        "basename": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "copyfile": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "dirname": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "fsize": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "ftruncate": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "ftrunctae": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "mkdirs": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "open": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "read": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "readdir": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "rename": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "rmdir": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "unlink": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "write": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/gumbo": {
+      "functionExports": {
+        "findByClassName": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "findById": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "findByTagName": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "nodeAttributes": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "nodeChilds": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "nodeName": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "nodeTextContent": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "nodeType": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "parse": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/hook": {
+      "functionExports": {
+        "register": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/htsmsg": {
+      "functionExports": {
+        "createFromXML": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "enumerate": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "get": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "getName": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "length": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "print": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/io": {
+      "functionExports": {
+        "httpInspectorCreate": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "httpReq": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "probe": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "xmlrpc": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/kvstore": {
+      "functionExports": {
+        "getBoolean": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "getInteger": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "getString": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "set": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/metadata": {
+      "functionExports": {
+        "bindPlayInfo": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "videoMetadataBind": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/misc": {
+      "functionExports": {
+        "cacheGet": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "cachePut": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "selectView": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "systemIpAddress": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/popup": {
+      "functionExports": {
+        "getAuthCredentials": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "message": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "notify": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "textDialog": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "webpopup": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/prop": {
+      "functionExports": {
+        "atomicAdd": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "create": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "deleteChild": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "deleteChilds": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "destroy": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "enumerate": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "getChild": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "getName": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "getValue": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "global": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "has": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "haveMore": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "isSame": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "isValue": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "isZombie": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "link": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "makeUrl": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "moveBefore": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "nodeFilterAddPred": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "nodeFilterCreate": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "nodeFilterDelPred": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "print": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "release": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "select": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "sendEvent": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "set": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "setClipRange": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "setParent": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "setRichStr": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "subscribe": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "tagClear": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "tagGet": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "tagSet": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "unlink": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "unloadDestroy": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/route": {
+      "functionExports": {
+        "backendOpen": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "create": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "test": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/service": {
+      "functionExports": {
+        "create": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "enable": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/sqlite": {
+      "functionExports": {
+        "changes": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "create": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "lastErrorCode": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "lastErrorString": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "lastRowId": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "query": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "step": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "upgradeSchema": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/string": {
+      "functionExports": {
+        "durationToString": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "entityDecode": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "isUtf8": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "paramEscape": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "parseTime": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "parseURL": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "pathEscape": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "queryStringSplit": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "resolveURL": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "utf8FromBytes": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/subtitle": {
+      "functionExports": {
+        "addItem": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "addProvider": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "getLanguages": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "native/websocket": {
+      "functionExports": {
+        "clientCreate": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "clientSend": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "serverCreate": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "querystring": {
+      "functionExports": {
+        "parse": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "showtime/html": {
+      "functionExports": {
+        "parse": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "showtime/http": {
+      "functionExports": {
+        "request": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "showtime/itemhook": {
+      "functionExports": {
+        "create": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "showtime/page": {
+      "functionExports": {
+        "Route": {
+          "prototype": {
+            "keys": {
+              "destroy": {
+                "length": 0,
+                "type": "function"
+              }
+            },
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "Searcher": {
+          "prototype": {
+            "keys": {
+              "destroy": {
+                "length": 0,
+                "type": "function"
+              }
+            },
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "showtime/popup": {
+      "functionExports": {
+        "notify": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "showtime/prop": {
+      "functionExports": {
+        "createRoot": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "makeProp": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "subscribeValue": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "showtime/service": {
+      "functionExports": {
+        "create": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "showtime/settings": {
+      "functionExports": {
+        "globalSettings": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "kvstoreSettings": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "showtime/sqlite": {
+      "functionExports": {
+        "DB": {
+          "prototype": {
+            "keys": {
+              "close": {
+                "length": 0,
+                "type": "function"
+              },
+              "lastErrorCode": {
+                "get": {
+                  "length": 0,
+                  "type": "function"
+                },
+                "type": "accessor"
+              },
+              "lastErrorString": {
+                "get": {
+                  "length": 0,
+                  "type": "function"
+                },
+                "type": "accessor"
+              },
+              "lastRowId": {
+                "get": {
+                  "length": 0,
+                  "type": "function"
+                },
+                "type": "accessor"
+              },
+              "query": {
+                "length": 0,
+                "type": "function"
+              },
+              "step": {
+                "length": 0,
+                "type": "function"
+              },
+              "upgradeSchema": {
+                "length": 1,
+                "type": "function"
+              }
+            },
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "showtime/store": {
+      "functionExports": {
+        "create": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "createFromPath": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "showtime/subtitles": {
+      "functionExports": {
+        "addProvider": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "getLanguages": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "showtime/videoscrobbler": {
+      "functionExports": {
+        "VideoScrobbler": {
+          "prototype": {
+            "keys": {
+              "destroy": {
+                "length": 0,
+                "type": "function"
+              }
+            },
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "showtime/xml": {
+      "functionExports": {
+        "htsmsg": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "parse": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "showtime/xmlrpc": {
+      "functionExports": {
+        "call": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "url": {
+      "functionExports": {
+        "format": {
+          "prototype": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        },
+        "parse": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        },
+        "resolve": {
+          "prototype": {
+            "keys": {},
+            "prototype": null,
+            "type": "undefined"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    },
+    "websocket": {
+      "functionExports": {
+        "w3cwebsocket": {
+          "prototype": {
+            "keys": {
+              "close": {
+                "length": 1,
+                "type": "function"
+              },
+              "send": {
+                "length": 1,
+                "type": "function"
+              }
+            },
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "status": "walked"
+        }
+      },
+      "status": "walked"
+    }
+  },
+  "tier2": {
+    "fs": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "fs",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "http": {
+      "reason": "HTTP construction is only reached by network I/O",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "Request",
+          "members": [
+            "url",
+            "headers",
+            "onResponse",
+            "onError"
+          ],
+          "reason": "The request factory starts network I/O"
+        },
+        {
+          "class": "Response",
+          "members": [
+            "statusCode",
+            "encoding",
+            "bytes",
+            "onData",
+            "onEnd"
+          ],
+          "reason": "Responses are created only by network I/O"
+        }
+      ]
+    },
+    "https": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "https",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "movian/html": {
+      "factory": "parse",
+      "result": {
+        "keys": {
+          "document": {
+            "type": "object"
+          },
+          "root": {
+            "type": "object"
+          }
+        },
+        "nested": {
+          "document": {
+            "keys": {
+              "_gumboNode": {
+                "type": "object"
+              }
+            },
+            "prototype": {
+              "keys": {
+                "attributes": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "children": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "nodeName": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "nodeType": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "textContent": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                }
+              },
+              "prototype": {
+                "keys": {
+                  "getElementByClassName": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementById": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementByTagName": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementsByClassName": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementsByTagName": {
+                    "length": 1,
+                    "type": "function"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "root": {
+            "keys": {
+              "_gumboNode": {
+                "type": "object"
+              }
+            },
+            "prototype": {
+              "keys": {
+                "attributes": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "children": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "nodeName": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "nodeType": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "textContent": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                }
+              },
+              "prototype": {
+                "keys": {
+                  "getElementByClassName": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementById": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementByTagName": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementsByClassName": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementsByTagName": {
+                    "length": 1,
+                    "type": "function"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "object"
+            },
+            "type": "object"
+          }
+        },
+        "prototype": {
+          "keys": {},
+          "prototype": null,
+          "type": "object"
+        },
+        "type": "object"
+      },
+      "status": "constructed",
+      "unreachable": []
+    },
+    "movian/http": {
+      "reason": "HTTP construction is only reached by network I/O",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "HttpResponse",
+          "members": [
+            "bytes",
+            "allheaders",
+            "headers",
+            "headers_lc",
+            "multiheaders",
+            "multiheaders_lc",
+            "statuscode",
+            "contenttype"
+          ],
+          "reason": "The request factory starts network I/O"
+        }
+      ]
+    },
+    "movian/itemhook": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "movian/itemhook",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "movian/page": {
+      "reason": "Page construction requires a live page and navigation state",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "Page",
+          "members": [
+            "options"
+          ],
+          "reason": "Page is created only from a live route or search callback",
+          "scope": "All Page instance members"
+        },
+        {
+          "class": "Route",
+          "members": [
+            "route"
+          ],
+          "reason": "Route construction registers a native route"
+        },
+        {
+          "class": "Searcher",
+          "members": [
+            "searcher"
+          ],
+          "reason": "Searcher construction registers a global hook"
+        }
+      ]
+    },
+    "movian/popup": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "movian/popup",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "movian/prop": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "movian/prop",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "movian/service": {
+      "reason": "Service construction mutates global service state",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "Service",
+          "members": [
+            "id",
+            "enabled"
+          ],
+          "reason": "The create factory calls native service.create"
+        }
+      ]
+    },
+    "movian/settings": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "movian/settings",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "movian/sqlite": {
+      "reason": "DB construction opens a filesystem-backed database",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "DB",
+          "members": [
+            "db"
+          ],
+          "reason": "The constructor calls native sqlite.create"
+        }
+      ]
+    },
+    "movian/store": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "movian/store",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "movian/subtitles": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "movian/subtitles",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "movian/videoscrobbler": {
+      "reason": "VideoScrobbler construction registers a global hook",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "VideoScrobbler",
+          "members": [
+            "paused",
+            "hook"
+          ],
+          "reason": "The constructor calls native hook.register"
+        }
+      ]
+    },
+    "movian/xml": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "movian/xml",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "movian/xmlrpc": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "movian/xmlrpc",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/crypto": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/crypto",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/faprovider": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/faprovider",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/fs": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/fs",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/gumbo": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/gumbo",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/hook": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/hook",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/htsmsg": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/htsmsg",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/io": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/io",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/kvstore": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/kvstore",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/metadata": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/metadata",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/misc": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/misc",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/popup": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/popup",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/prop": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/prop",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/route": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/route",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/service": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/service",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/sqlite": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/sqlite",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/string": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/string",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/subtitle": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/subtitle",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "native/websocket": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "native/websocket",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "querystring": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "querystring",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "showtime/html": {
+      "factory": "parse",
+      "result": {
+        "keys": {
+          "document": {
+            "type": "object"
+          },
+          "root": {
+            "type": "object"
+          }
+        },
+        "nested": {
+          "document": {
+            "keys": {
+              "_gumboNode": {
+                "type": "object"
+              }
+            },
+            "prototype": {
+              "keys": {
+                "attributes": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "children": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "nodeName": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "nodeType": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "textContent": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                }
+              },
+              "prototype": {
+                "keys": {
+                  "getElementByClassName": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementById": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementByTagName": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementsByClassName": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementsByTagName": {
+                    "length": 1,
+                    "type": "function"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "root": {
+            "keys": {
+              "_gumboNode": {
+                "type": "object"
+              }
+            },
+            "prototype": {
+              "keys": {
+                "attributes": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "children": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "nodeName": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "nodeType": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                },
+                "textContent": {
+                  "get": {
+                    "length": 0,
+                    "type": "function"
+                  },
+                  "type": "accessor"
+                }
+              },
+              "prototype": {
+                "keys": {
+                  "getElementByClassName": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementById": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementByTagName": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementsByClassName": {
+                    "length": 1,
+                    "type": "function"
+                  },
+                  "getElementsByTagName": {
+                    "length": 1,
+                    "type": "function"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "object"
+            },
+            "type": "object"
+          }
+        },
+        "prototype": {
+          "keys": {},
+          "prototype": null,
+          "type": "object"
+        },
+        "type": "object"
+      },
+      "status": "constructed",
+      "unreachable": []
+    },
+    "showtime/http": {
+      "reason": "HTTP construction is only reached by network I/O",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "HttpResponse",
+          "members": [
+            "bytes",
+            "allheaders",
+            "headers",
+            "headers_lc",
+            "multiheaders",
+            "multiheaders_lc",
+            "statuscode",
+            "contenttype"
+          ],
+          "reason": "The request factory starts network I/O"
+        }
+      ]
+    },
+    "showtime/itemhook": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "showtime/itemhook",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "showtime/page": {
+      "reason": "Page construction requires a live page and navigation state",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "Page",
+          "members": [
+            "options"
+          ],
+          "reason": "Page is created only from a live route or search callback",
+          "scope": "All Page instance members"
+        },
+        {
+          "class": "Route",
+          "members": [
+            "route"
+          ],
+          "reason": "Route construction registers a native route"
+        },
+        {
+          "class": "Searcher",
+          "members": [
+            "searcher"
+          ],
+          "reason": "Searcher construction registers a global hook"
+        }
+      ]
+    },
+    "showtime/popup": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "showtime/popup",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "showtime/prop": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "showtime/prop",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "showtime/service": {
+      "reason": "Service construction mutates global service state",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "Service",
+          "members": [
+            "id",
+            "enabled"
+          ],
+          "reason": "The create factory calls native service.create"
+        }
+      ]
+    },
+    "showtime/settings": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "showtime/settings",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "showtime/sqlite": {
+      "reason": "DB construction opens a filesystem-backed database",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "DB",
+          "members": [
+            "db"
+          ],
+          "reason": "The constructor calls native sqlite.create"
+        }
+      ]
+    },
+    "showtime/store": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "showtime/store",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "showtime/subtitles": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "showtime/subtitles",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "showtime/videoscrobbler": {
+      "reason": "VideoScrobbler construction registers a global hook",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "VideoScrobbler",
+          "members": [
+            "paused",
+            "hook"
+          ],
+          "reason": "The constructor calls native hook.register"
+        }
+      ]
+    },
+    "showtime/xml": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "showtime/xml",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "showtime/xmlrpc": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "showtime/xmlrpc",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "url": {
+      "reason": "No side-effect-free construction is configured",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "url",
+          "members": [],
+          "reason": "No safe factory was called for this module",
+          "scope": "Any constructor-created instance members"
+        }
+      ]
+    },
+    "websocket": {
+      "reason": "w3cwebsocket construction opens a socket",
+      "status": "skipped",
+      "unreachable": [
+        {
+          "class": "w3cwebsocket",
+          "members": [
+            "onopen",
+            "oninput",
+            "onclose",
+            "_sock"
+          ],
+          "reason": "The constructor calls native websocket clientCreate"
+        }
+      ]
+    }
+  },
+  "tier3": {
+    "items": {
+      "appendAction": {
+        "attempted": true,
+        "method": "appendAction",
+        "result": {
+          "keys": {
+            "eventhandlers": {
+              "type": "object"
+            }
+          },
+          "properties": {
+            "eventhandlers": {
+              "type": "object"
+            },
+            "page": {
+              "type": "object"
+            },
+            "root": {
+              "type": "object"
+            }
+          },
+          "prototype": {
+            "keys": {
+              "addOptAction": {
+                "length": 3,
+                "type": "function"
+              },
+              "addOptSeparator": {
+                "length": 1,
+                "type": "function"
+              },
+              "addOptURL": {
+                "length": 3,
+                "type": "function"
+              },
+              "bindVideoMetadata": {
+                "length": 1,
+                "type": "function"
+              },
+              "destroy": {
+                "length": 0,
+                "type": "function"
+              },
+              "destroyOption": {
+                "length": 1,
+                "type": "function"
+              },
+              "disable": {
+                "length": 0,
+                "type": "function"
+              },
+              "dump": {
+                "length": 0,
+                "type": "function"
+              },
+              "enable": {
+                "length": 0,
+                "type": "function"
+              },
+              "moveBefore": {
+                "length": 1,
+                "type": "function"
+              },
+              "onEvent": {
+                "length": 2,
+                "type": "function"
+              },
+              "toString": {
+                "length": 0,
+                "type": "function"
+              },
+              "unbindVideoMetadata": {
+                "length": 1,
+                "type": "function"
+              }
+            },
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "status": "constructed",
+        "unreachable": []
+      },
+      "appendItem": {
+        "attempted": true,
+        "method": "appendItem",
+        "result": {
+          "keys": {
+            "eventhandlers": {
+              "type": "object"
+            }
+          },
+          "properties": {
+            "eventhandlers": {
+              "type": "object"
+            },
+            "page": {
+              "type": "object"
+            },
+            "root": {
+              "type": "object"
+            }
+          },
+          "prototype": {
+            "keys": {
+              "addOptAction": {
+                "length": 3,
+                "type": "function"
+              },
+              "addOptSeparator": {
+                "length": 1,
+                "type": "function"
+              },
+              "addOptURL": {
+                "length": 3,
+                "type": "function"
+              },
+              "bindVideoMetadata": {
+                "length": 1,
+                "type": "function"
+              },
+              "destroy": {
+                "length": 0,
+                "type": "function"
+              },
+              "destroyOption": {
+                "length": 1,
+                "type": "function"
+              },
+              "disable": {
+                "length": 0,
+                "type": "function"
+              },
+              "dump": {
+                "length": 0,
+                "type": "function"
+              },
+              "enable": {
+                "length": 0,
+                "type": "function"
+              },
+              "moveBefore": {
+                "length": 1,
+                "type": "function"
+              },
+              "onEvent": {
+                "length": 2,
+                "type": "function"
+              },
+              "toString": {
+                "length": 0,
+                "type": "function"
+              },
+              "unbindVideoMetadata": {
+                "length": 1,
+                "type": "function"
+              }
+            },
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "status": "constructed",
+        "unreachable": []
+      },
+      "appendPassiveItem": {
+        "attempted": true,
+        "method": "appendPassiveItem",
+        "result": {
+          "keys": {
+            "eventhandlers": {
+              "type": "object"
+            }
+          },
+          "properties": {
+            "eventhandlers": {
+              "type": "object"
+            },
+            "page": {
+              "type": "object"
+            },
+            "root": {
+              "type": "object"
+            }
+          },
+          "prototype": {
+            "keys": {
+              "addOptAction": {
+                "length": 3,
+                "type": "function"
+              },
+              "addOptSeparator": {
+                "length": 1,
+                "type": "function"
+              },
+              "addOptURL": {
+                "length": 3,
+                "type": "function"
+              },
+              "bindVideoMetadata": {
+                "length": 1,
+                "type": "function"
+              },
+              "destroy": {
+                "length": 0,
+                "type": "function"
+              },
+              "destroyOption": {
+                "length": 1,
+                "type": "function"
+              },
+              "disable": {
+                "length": 0,
+                "type": "function"
+              },
+              "dump": {
+                "length": 0,
+                "type": "function"
+              },
+              "enable": {
+                "length": 0,
+                "type": "function"
+              },
+              "moveBefore": {
+                "length": 1,
+                "type": "function"
+              },
+              "onEvent": {
+                "length": 2,
+                "type": "function"
+              },
+              "toString": {
+                "length": 0,
+                "type": "function"
+              },
+              "unbindVideoMetadata": {
+                "length": 1,
+                "type": "function"
+              }
+            },
+            "prototype": {
+              "keys": {},
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "status": "constructed",
+        "unreachable": []
+      }
+    },
+    "page": {
+      "attempted": true,
+      "result": {
+        "keys": {
+          "eventhandlers": {
+            "type": "object"
+          },
+          "items": {
+            "type": "object"
+          },
+          "model": {
+            "type": "object"
+          },
+          "nodesub": {
+            "type": "object"
+          },
+          "options": {
+            "type": "object"
+          },
+          "root": {
+            "type": "object"
+          },
+          "sync": {
+            "type": "boolean"
+          }
+        },
+        "properties": {
+          "entries": {
+            "get": {
+              "length": 0,
+              "type": "function"
+            },
+            "set": {
+              "length": 1,
+              "type": "function"
+            },
+            "type": "accessor"
+          },
+          "eventhandlers": {
+            "type": "object"
+          },
+          "items": {
+            "type": "object"
+          },
+          "loading": {
+            "get": {
+              "length": 0,
+              "type": "function"
+            },
+            "set": {
+              "length": 1,
+              "type": "function"
+            },
+            "type": "accessor"
+          },
+          "metadata": {
+            "get": {
+              "length": 0,
+              "type": "function"
+            },
+            "type": "accessor"
+          },
+          "model": {
+            "type": "object"
+          },
+          "nodesub": {
+            "type": "object"
+          },
+          "options": {
+            "type": "object"
+          },
+          "paginator": {
+            "get": {
+              "length": 0,
+              "type": "function"
+            },
+            "set": {
+              "length": 1,
+              "type": "function"
+            },
+            "type": "accessor"
+          },
+          "root": {
+            "type": "object"
+          },
+          "source": {
+            "get": {
+              "length": 0,
+              "type": "function"
+            },
+            "set": {
+              "length": 1,
+              "type": "function"
+            },
+            "type": "accessor"
+          },
+          "sync": {
+            "type": "boolean"
+          },
+          "type": {
+            "get": {
+              "length": 0,
+              "type": "function"
+            },
+            "set": {
+              "length": 1,
+              "type": "function"
+            },
+            "type": "accessor"
+          }
+        },
+        "prototype": {
+          "keys": {
+            "appendAction": {
+              "length": 3,
+              "type": "function"
+            },
+            "appendItem": {
+              "length": 3,
+              "type": "function"
+            },
+            "appendPassiveItem": {
+              "length": 3,
+              "type": "function"
+            },
+            "dump": {
+              "length": 0,
+              "type": "function"
+            },
+            "error": {
+              "length": 1,
+              "type": "function"
+            },
+            "findItemByProp": {
+              "length": 1,
+              "type": "function"
+            },
+            "flush": {
+              "length": 0,
+              "type": "function"
+            },
+            "getItems": {
+              "length": 0,
+              "type": "function"
+            },
+            "haveMore": {
+              "length": 1,
+              "type": "function"
+            },
+            "onEvent": {
+              "length": 2,
+              "type": "function"
+            },
+            "redirect": {
+              "length": 1,
+              "type": "function"
+            }
+          },
+          "prototype": {
+            "keys": {},
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "type": "object"
+      },
+      "source": "route callback",
+      "status": "constructed",
+      "unreachable": []
+    },
+    "route": {
+      "attempted": true,
+      "result": {
+        "keys": {
+          "route": {
+            "type": "object"
+          }
+        },
+        "properties": {
+          "route": {
+            "type": "object"
+          }
+        },
+        "prototype": {
+          "keys": {
+            "destroy": {
+              "length": 0,
+              "type": "function"
+            }
+          },
+          "prototype": {
+            "keys": {},
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "type": "object"
+      },
+      "status": "constructed",
+      "unreachable": [],
+      "url": "introspect:page"
+    },
+    "websocket": {
+      "attempted": true,
+      "result": {
+        "keys": {
+          "_sock": {
+            "type": "object"
+          },
+          "onclose": {
+            "length": 0,
+            "type": "function"
+          },
+          "oninput": {
+            "length": 0,
+            "type": "function"
+          },
+          "onopen": {
+            "length": 0,
+            "type": "function"
+          }
+        },
+        "properties": {
+          "_sock": {
+            "type": "object"
+          },
+          "onclose": {
+            "length": 0,
+            "type": "function"
+          },
+          "oninput": {
+            "length": 0,
+            "type": "function"
+          },
+          "onopen": {
+            "length": 0,
+            "type": "function"
+          }
+        },
+        "prototype": {
+          "keys": {
+            "close": {
+              "length": 1,
+              "type": "function"
+            },
+            "send": {
+              "length": 1,
+              "type": "function"
+            }
+          },
+          "prototype": {
+            "keys": {},
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "type": "object"
+      },
+      "status": "constructed",
+      "unreachable": [],
+      "url": "ws://127.0.0.1:1/"
+    }
+  },
+  "tier3PageOpened": true,
+  "version": 2
+}
