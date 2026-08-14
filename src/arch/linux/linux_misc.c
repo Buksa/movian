@@ -150,11 +150,29 @@ get_device_id(void)
 
 
 /**
+ * Let the lifecycle harness attach GDB to an mdev-owned process when the
+ * kernel's Yama policy would otherwise reject a sibling debugger.  This is an
+ * explicit opt-in; ordinary Movian launches retain the system policy.
+ */
+static void
+allow_mdev_gdb(void)
+{
+  const char *value = getenv("MOVIAN_MDEV_ALLOW_GDB");
+  if(value == NULL || strcmp(value, "1"))
+    return;
+
+  if(prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0))
+    perror("Unable to enable mdev GDB capture");
+}
+
+
+/**
  *
  */
 void
 linux_init(void)
 {
+  allow_mdev_gdb();
   get_device_id();
   linux_trap_init();
   gconf.concurrency = get_system_concurrency();
