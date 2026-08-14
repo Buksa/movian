@@ -198,7 +198,7 @@ def event_evidence(events_path: str) -> tuple[set[str], list[int | None]]:
                 raise ValueError(
                     "%s:%d: malformed JSON: %s" %
                     (events_path, line_number, exc))
-            if event.get("event") == "enter" and event.get("symbol"):
+            if event.get("symbol"):
                 symbols.add(event["symbol"])
             if event.get("event") == "inferior-exited":
                 exit_codes.append(event.get("exitCode"))

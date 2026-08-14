@@ -46,13 +46,16 @@ def _iter_lines(source: str | Path | Iterable[str]) -> Iterable[tuple[int, str]]
 
 
 def parse_jsonl(source: str | Path | Iterable[str]) -> dict[str, Any]:
+    lines = list(_iter_lines(source))
     events: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     previous_seq = 0
     previous_time = -1
-    line_count = 0
-    for line_number, raw_line in _iter_lines(source):
-        line_count = line_number
+    line_count = lines[-1][0] if lines else 0
+    nonempty_lines = [line_number for line_number, raw_line in lines
+                      if raw_line.strip()]
+    last_nonempty_line = nonempty_lines[-1] if nonempty_lines else 0
+    for line_number, raw_line in lines:
         text = raw_line.strip()
         if not text:
             continue
@@ -61,7 +64,7 @@ def parse_jsonl(source: str | Path | Iterable[str]) -> dict[str, Any]:
         except json.JSONDecodeError as exc:
             errors.append({
                 "line": line_number,
-                "kind": "truncated-json" if line_number == line_count
+                "kind": "truncated-json" if line_number == last_nonempty_line
                 else "malformed-json",
                 "message": str(exc),
             })
