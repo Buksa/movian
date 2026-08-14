@@ -1,0 +1,79 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Movian View",
+  "scopeName": "source.movian-view",
+  "fileTypes": [
+    "view"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#preprocessor"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#numbers"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.movian-view",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.movian-view",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "preprocessor": {
+      "patterns": [
+        {
+          "name": "meta.preprocessor.movian-view",
+          "match": "^\\s*#\\s*(?:define|elif|else|endif|if|ifdef|ifndef|import|include)\\b.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.movian-view",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.movian-view",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.movian-view",
+          "match": "\\b(?:else|if|in|true|false|null)\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.movian-view",
+          "match": "\\b(?:0[xX][0-9A-Fa-f]+|[0-9]+(?:\\.[0-9]+)?)\\b"
+        }
+      ]
+    }
+  }
+}

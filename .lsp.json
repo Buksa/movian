@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "movian-lsp": {
+      "command": "python3",
+      "args": ["support/devtools/movian-lsp", "--stdio"],
+      "fileTypes": [".view"],
+      "rootMarkers": [".git"]
+    }
+  }
+}

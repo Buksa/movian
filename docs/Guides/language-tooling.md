@@ -1,0 +1,147 @@
+# Movian `.view` language tooling
+
+`movian-lsp` supplies diagnostics, hover information, document symbols, and
+`#include`/`#import` definitions for GLW `.view` files. It runs from a Movian
+checkout, so each configuration below assumes the editor and checkout share a
+Linux or WSL environment.
+
+## Prepare the checkout
+
+From the repository root, build the analyzer that the server delegates syntax
+and semantic checks to, then run the preflight:
+
+```sh
+./support/configure-linux-debug.sh
+make BUILD=debug -j$(nproc) movian-analyze
+./support/devtools/mdev lsp doctor
+```
+
+The doctor requires Python 3.10 or newer, confirms that
+`generated/movian-metadata.json` is fresh, and performs one framed stdio LSP
+`initialize`/`shutdown` exchange. Re-run it after changing the build or
+metadata inputs.
+
+## Oh My Pi (OMP)
+
+OMP v17 discovers a project-root `.lsp.json` before its lower-priority LSP
+locations. This checkout includes a ready-to-use template at
+[`/.lsp.json`](../../.lsp.json): keep it at the root of the Movian checkout,
+then open that checkout with `omp` and open a `.view` file. The relative server
+path is intentionally resolved from the project root.
+
+```json
+{
+  "servers": {
+    "movian-lsp": {
+      "command": "python3",
+      "args": ["support/devtools/movian-lsp", "--stdio"],
+      "fileTypes": [".view"],
+      "rootMarkers": [".git"]
+    }
+  }
+}
+```
+
+Use OMP and the checkout in the same WSL distribution; this template does not
+provide Windows-to-WSL URI mapping. OMP's current [LSP configuration
+guide](https://github.com/can1357/oh-my-pi/blob/0f9fceeea483caad531a32b050ac38558516cb5c/docs/lsp-config.md)
+documents the project config precedence and schema.
+
+## Optional — requires a third-party generic client (VS Code Remote WSL)
+
+VS Code does not attach an arbitrary stdio language server through settings
+alone, so this optional path uses the maintained third-party [Generic LSP
+Proxy](https://marketplace.visualstudio.com/items?itemName=mjmorales.generic-lsp-proxy)
+extension (`mjmorales.generic-lsp-proxy`). At the 2026-07-17 check it had a
+2026-06-28 v2.1.1 Marketplace publication and its public repository had no
+open issues. This is not a Movian extension; review that extension's current
+maintenance status before relying on it.
+
+1. Open this checkout with **Remote - WSL**, trust the workspace, and install
+   Generic LSP Proxy into the WSL remote extension host (not only the local
+   Windows host).
+2. From the repository root in WSL, run
+   `realpath support/devtools/movian-lsp`. Copy the resulting absolute WSL
+   path into the proxy configuration. The proxy does not set its server
+   process's working directory, so a relative script path is not portable.
+3. Create `.vscode/settings.json` with this settings snippet:
+
+   ```json
+   {
+     "genericLspProxy.configPath": ".vscode/lsp-proxy.json"
+   }
+   ```
+
+4. Create `.vscode/lsp-proxy.json` with the following object, substituting
+   your path from step 2:
+
+   ```json
+   {
+     "languageId": "movian-view",
+     "command": "python3",
+     "args": [
+       "/absolute/WSL/path/to/movian/support/devtools/movian-lsp",
+       "--stdio"
+     ],
+     "fileExtensions": [".view"],
+     "transport": "stdio"
+   }
+   ```
+
+The proxy starts this configuration by `.view` extension even if VS Code shows
+the file as Plain Text. Its [configuration documentation](https://github.com/mjmorales/vscode-generic-lsp-proxy#configuration)
+describes the workspace config file and fields. Movian does not ship or package
+a VS Code extension.
+
+## Neovim
+
+Add this to `init.lua` (or an equivalent Lua file). It registers `.view` and
+starts one `movian-lsp` client rooted at the checkout containing `.git`:
+
+```lua
+vim.filetype.add({ extension = { view = "movian-view" } })
+
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "movian-view",
+  callback = function(event)
+    local root = vim.fs.root(event.buf, { ".git" })
+    if not root then
+      return
+    end
+    vim.lsp.start({
+      name = "movian-lsp",
+      cmd = { "python3", root .. "/support/devtools/movian-lsp", "--stdio" },
+      root_dir = root,
+    }, { bufnr = event.buf })
+  end,
+})
+```
+
+This uses Neovim's built-in [`vim.lsp.start`](https://neovim.io/doc/user/lsp.html#vim.lsp.start())
+API; no Neovim LSP plugin is required.
+
+## Helix
+
+Create `.helix/languages.toml` in the checkout (or merge the same tables into
+your user `languages.toml`). First obtain the absolute path with
+`realpath support/devtools/movian-lsp`, then substitute it below:
+
+```toml
+[language-server.movian-lsp]
+command = "python3"
+args = ["/absolute/WSL/or/Linux/path/to/movian/support/devtools/movian-lsp", "--stdio"]
+
+[[language]]
+name = "movian-view"
+scope = "source.movian-view"
+file-types = ["view"]
+roots = [".git"]
+language-servers = ["movian-lsp"]
+comment-tokens = "//"
+block-comment-tokens = { start = "/*", end = "*/" }
+```
+
+Helix merges a project's `.helix/languages.toml` with user and built-in
+configuration; its [language configuration documentation](https://docs.helix-editor.com/languages.html)
+defines the `language-server`, `file-types`, `roots`, and `language-servers`
+fields used here.
