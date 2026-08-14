@@ -183,64 +183,194 @@ def derive_thread_lifecycle(inventory: dict[str, Any] | str | Path,
     if not creates and not exits:
         return _result("thread-lifecycle", STATUS_UNKNOWN,
                        NOT_REACHED, expected, [], created=0, exited=0)
-    created_tids = [event.get("thread", {}).get("osTid") for event in creates]
-    exited_tids = [event.get("thread", {}).get("osTid") for event in exits]
-    if len(created_tids) != len(exited_tids) \
-            or Counter(created_tids) != Counter(exited_tids):
-        complete = any(event.get("event") == "inferior-exited"
-                       for event in event_list)
-        return _result("thread-lifecycle", STATUS_FAIL if complete else STATUS_UNKNOWN,
-                       OBSERVED if complete else UNKNOWN, expected,
-                       [str(value) for value in created_tids],
-                       created=len(created_tids), exited=len(exited_tids),
-                       exitedThreads=exited_tids)
-    return _result("thread-lifecycle", STATUS_PASS, INFERRED, expected,
-                   [str(value) for value in created_tids],
-                   created=len(created_tids), exited=len(exited_tids))
+    created_count = len(creates)
+    exited_count = len(exits)
+    complete = any(event.get("event") == "inferior-exited"
+                   for event in event_list)
+    # A create breakpoint runs in the creator, not the new thread.  The
+    # creator TID therefore cannot be compared with thread-exit TIDs.
+    if created_count != exited_count:
+        return _result("thread-lifecycle", STATUS_UNKNOWN, UNKNOWN, expected,
+                       [], created=created_count, exited=exited_count,
+                       identityCorrelation="not-available",
+                       exitedThreads=[
+                           event.get("thread", {}).get("osTid")
+                           for event in exits],
+                       complete=complete)
+    return _result("thread-lifecycle", STATUS_PASS, INFERRED, expected, [],
+                   created=created_count, exited=exited_count,
+                   identityCorrelation="count-only", complete=complete)
+
+
+RELOAD_RESOURCE_PAIRS = {
+    "es-context": ({"es_context_create"}, {"es_context_end"}),
+    "es-resource": ({"es_resource_link"}, {"es_resource_unlink"}),
+    "service": ({"service_create"}, {"service_destroy"}),
+    "es-plugin": ({"ecmascript_plugin_load"}, {"ecmascript_plugin_unload"}),
+    "plugin": ({"plugin_load", "plugins_reload_dev_plugin"},
+               {"plugin_unload"}),
+}
+
+
+def _pointer_value(event: dict[str, Any], keys: Iterable[str]) -> str | None:
+    arguments = event.get("arguments") or {}
+    objects = event.get("objects") or {}
+    for key in keys:
+        value = objects.get(key, arguments.get(key))
+        if isinstance(value, str) and value.startswith("0x") and value != "0x0":
+            return value
+    return None
+
+
+def _reload_resource_window(events: list[dict[str, Any]],
+                            start: int, end: int) -> dict[str, Any]:
+    window = events[start:end]
+    counts: dict[str, dict[str, int]] = {
+        kind: {"created": 0, "destroyed": 0}
+        for kind in RELOAD_RESOURCE_PAIRS
+    }
+    seen_operations: set[tuple[str, str]] = set()
+    pointer_missing = False
+    for event in window:
+        symbol = event.get("symbol")
+        if symbol == "es_context_create":
+            counts["es-context"]["created"] = 1
+            continue
+        if symbol == "es_context_end":
+            counts["es-context"]["destroyed"] = 1
+            continue
+        for kind, (creates, destroys) in RELOAD_RESOURCE_PAIRS.items():
+            if symbol in creates or symbol in destroys:
+                operation = "create" if symbol in creates else "destroy"
+                if kind == "es-resource":
+                    pointer = _pointer_value(event, ("er", "resource"))
+                    if pointer is None:
+                        pointer_missing = True
+                    else:
+                        key = (operation, pointer)
+                        if key in seen_operations:
+                            continue
+                        seen_operations.add(key)
+                counts[kind]["created" if operation == "create"
+                              else "destroyed"] += 1
+                break
+    imbalances = []
+    indeterminate = []
+    balance: dict[str, dict[str, Any]] = {}
+    for kind, values in counts.items():
+        created = values["created"]
+        destroyed = values["destroyed"]
+        if created == 0 and destroyed == 0:
+            kind_status = "not-observed"
+        elif kind == "es-resource" and pointer_missing:
+            kind_status = "indeterminate"
+            indeterminate.append({
+                "kind": kind, "reason": "resource-pointer-not-captured",
+            })
+        elif created != destroyed:
+            kind_status = "imbalanced"
+            imbalances.append({
+                "kind": kind, "created": created,
+                "destroyed": destroyed, "delta": created - destroyed,
+            })
+        else:
+            kind_status = "balanced"
+        balance[kind] = {
+            "created": created, "destroyed": destroyed,
+            "delta": created - destroyed, "status": kind_status,
+        }
+    if indeterminate:
+        status, evidence = STATUS_UNKNOWN, UNKNOWN
+    elif imbalances:
+        status, evidence = STATUS_FAIL, OBSERVED
+    else:
+        status, evidence = STATUS_PASS, OBSERVED
+    return {
+        "status": status, "evidence": evidence, "balance": balance,
+        "imbalances": imbalances, "indeterminateReasons": indeterminate,
+        "startSeq": window[0].get("seq") if window else None,
+        "endSeq": window[-1].get("seq") if window else None,
+        "eventCount": len(window),
+    }
+
+
+def _generic_resource_balance(data: dict[str, Any],
+                              event_list: list[dict[str, Any]]) -> dict[str, Any]:
+    pairs = {
+        entry["symbol"]: entry["pairedWith"]
+        for entry in data.get("entries", [])
+        if entry.get("event") in {"create", "destroy"}
+        and entry.get("pairedWith")
+    }
+    creates = Counter(event.get("symbol") for event in event_list
+                      if event.get("event") == "create"
+                      and event.get("symbol") in pairs)
+    destroys = Counter(event.get("symbol") for event in event_list
+                       if event.get("event") == "destroy"
+                       and event.get("symbol") in pairs.values())
+    observations: list[dict[str, Any]] = []
+    for create_symbol, count in sorted(creates.items()):
+        destroy_symbol = pairs[create_symbol]
+        observations.append({
+            "create": create_symbol, "destroy": destroy_symbol,
+            "created": count, "destroyed": destroys.get(destroy_symbol, 0),
+        })
+    for destroy_symbol, count in sorted(destroys.items()):
+        if destroy_symbol not in pairs.values():
+            observations.append({
+                "create": None, "destroy": destroy_symbol,
+                "created": 0, "destroyed": count,
+            })
+    if not observations:
+        return _result("resource-balance", STATUS_UNKNOWN, NOT_INSTRUMENTED,
+                       [], [], resources=[], complete=False)
+    complete = any(event.get("event") == "inferior-exited"
+                   for event in event_list)
+    balanced = all(item["created"] == item["destroyed"]
+                   for item in observations)
+    status, evidence = ((STATUS_PASS, INFERRED) if balanced
+                        else (STATUS_UNKNOWN, UNKNOWN))
+    return _result(
+        "resource-balance", status, evidence, sorted(creates), sorted(destroys),
+        resources=observations, complete=complete,
+        indeterminateReasons=[] if balanced else [
+            "object-identity-not-captured-for-mismatched-pairs"])
 
 
 def derive_resource_balance(inventory: dict[str, Any] | str | Path,
                             events: Iterable[dict[str, Any]]) -> dict[str, Any]:
     data = _load_inventory(inventory)
     event_list = list(events)
-    creates = Counter(event.get("symbol") for event in event_list
-                      if event.get("event") == "create")
-    destroys = Counter(event.get("symbol") for event in event_list
-                       if event.get("event") == "destroy")
-    pairs: dict[str, str] = {}
-    for entry in data.get("entries", []):
-        pair = entry.get("pairedWith")
-        if pair:
-            pairs[entry["symbol"]] = pair
-    observations: list[dict[str, Any]] = []
-    imbalance = False
-    for create_symbol, count in sorted(creates.items()):
-        if not create_symbol:
-            continue
-        destroy_symbol = pairs.get(create_symbol)
-        destroyed = destroys.get(destroy_symbol, 0) if destroy_symbol else 0
-        observations.append({"create": create_symbol, "destroy": destroy_symbol,
-                             "created": count, "destroyed": destroyed})
-        imbalance |= count != destroyed
-    for destroy_symbol, count in sorted(destroys.items()):
-        if destroy_symbol not in pairs.values():
-            observations.append({"create": None, "destroy": destroy_symbol,
-                                 "created": 0, "destroyed": count})
-            imbalance = True
-    if not observations:
-        return _result("resource-balance", STATUS_UNKNOWN, NOT_INSTRUMENTED,
-                       [], [], resources=[])
-    complete = any(event.get("event") == "inferior-exited"
-                   for event in event_list)
-    if imbalance:
-        status = STATUS_FAIL if complete else STATUS_UNKNOWN
-        evidence = OBSERVED if complete else UNKNOWN
+    reload_indexes = [
+        index for index, event in enumerate(event_list)
+        if event.get("symbol") == "plugins_reload_dev_plugin"
+    ]
+    if not reload_indexes:
+        return _generic_resource_balance(data, event_list)
+    windows = []
+    for number, start in enumerate(reload_indexes):
+        end = reload_indexes[number + 1] if number + 1 < len(reload_indexes) \
+            else len(event_list)
+        for index in range(start + 1, end):
+            event = event_list[index]
+            if event.get("symbol") == "fini_group" \
+                    or event.get("event") == "inferior-exited":
+                end = index
+                break
+        windows.append(_reload_resource_window(event_list, start, end))
+    statuses = {window["status"] for window in windows}
+    if STATUS_FAIL in statuses:
+        status, evidence = STATUS_FAIL, OBSERVED
+    elif STATUS_UNKNOWN in statuses:
+        status, evidence = STATUS_UNKNOWN, UNKNOWN
     else:
-        status = STATUS_PASS
-        evidence = INFERRED
-    return _result("resource-balance", status, evidence,
-                   sorted(creates), sorted(destroys), resources=observations,
-                   complete=complete)
+        status, evidence = STATUS_PASS, OBSERVED
+    return _result(
+        "resource-balance", status, evidence,
+        sorted(RELOAD_RESOURCE_PAIRS), sorted(RELOAD_RESOURCE_PAIRS),
+        resources=windows, reloadWindows=windows,
+        complete=any(event.get("event") == "inferior-exited"
+                     for event in event_list))
 
 
 def _overall_status(results: list[dict[str, Any]], stream: dict[str, Any]) -> str:

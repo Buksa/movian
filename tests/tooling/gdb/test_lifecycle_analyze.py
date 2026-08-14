@@ -45,7 +45,8 @@ def inventory():
     }
 
 
-def event(seq, symbol, category="init-helper", kind="enter", tid=7):
+def event(seq, symbol, category="init-helper", kind="enter", tid=7,
+          arguments=None, objects=None, stack=None):
     return {
         "seq": seq,
         "monotonicNs": seq,
@@ -53,9 +54,9 @@ def event(seq, symbol, category="init-helper", kind="enter", tid=7):
         "event": kind,
         "symbol": symbol,
         "thread": {"gdbId": 1, "osTid": tid},
-        "arguments": {},
-        "objects": {},
-        "stack": [],
+        "arguments": arguments or {},
+        "objects": objects or {},
+        "stack": stack or [],
     }
 
 
@@ -75,6 +76,14 @@ class JsonlParsing(unittest.TestCase):
         self.assertTrue(any(error["kind"] == "sequence-order"
                             for error in result["errors"]))
 
+    def test_middle_malformed_line_is_not_truncated(self):
+        result = parse_jsonl("\n".join([
+            json.dumps(event(1, "init_a")),
+            "{",
+            json.dumps(event(2, "init_b")),
+        ]))
+        self.assertFalse(result["truncated"])
+        self.assertEqual(result["errors"][0]["kind"], "malformed-json")
 
 class Ordering(unittest.TestCase):
     def test_init_order_passes_and_reversal_fails(self):
@@ -106,7 +115,27 @@ class Balance(unittest.TestCase):
             event(2, None, "collector", "inferior-exited"),
         ]
         self.assertEqual(derive_resource_balance(inventory(), leaked)["status"],
-                         STATUS_FAIL)
+                         STATUS_UNKNOWN)
+
+    def test_reload_window_balances_pointer_pairs(self):
+        events = [
+            event(1, "plugins_reload_dev_plugin", "plugin"),
+            event(2, "plugin_unload", "plugin", "destroy"),
+            event(3, "ecmascript_plugin_unload", "es-plugin", "destroy"),
+            event(4, "es_context_create", "es-context", "create"),
+            event(5, "es_context_end", "es-context", "destroy"),
+            event(6, "es_resource_link", "es-resource", "create",
+                  objects={"er": "0x1"}),
+            event(7, "es_resource_unlink", "es-resource", "destroy",
+                  objects={"er": "0x1"}),
+            event(8, "ecmascript_plugin_load", "es-plugin", "create"),
+            event(9, None, "collector", "inferior-exited"),
+        ]
+        result = derive_resource_balance(inventory(), events)
+        self.assertEqual(result["status"], STATUS_PASS)
+        self.assertEqual(
+            result["reloadWindows"][0]["balance"]["es-resource"]["status"],
+            "balanced")
 
     def test_thread_balance_uses_observed_thread_ids(self):
         events = [

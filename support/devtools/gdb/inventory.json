@@ -1,9 +1,9 @@
 {
   "binary": {
-    "buildId": "ed729abba8abb35362bdc05137a74e9abc46e983",
+    "buildId": "f1b8084e54961d0b24d594eb7e9aed4310c38317",
     "definedSymbolCount": 24192,
     "name": "movian",
-    "sha256": "9c15c827bb7f88130756248416171ea24eb686d7b5a06e415f5d1303a3c84665"
+    "sha256": "ed58a8175a0143a19304eda43af2fe7003e4d8534e0764d8b1b359f278660246"
   },
   "categories": [
     "core-init",

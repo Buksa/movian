@@ -481,6 +481,7 @@ if _HAVE_GDB:
             self._pid_written = False
             self._errors = []
             self._closed = False
+            self._inferior_exited = False
             self._exit_hook = None
             self._thread_exit_hook = None
             self._install_exit_hook()
@@ -649,6 +650,7 @@ if _HAVE_GDB:
 
         def _install_exit_hook(self):
             def _on_exit(event):
+                self._inferior_exited = True
                 code = getattr(event, "exit_code", None)
                 self.emit({"category": "collector", "event": "inferior-exited",
                            "symbol": None, "exitCode": code,
@@ -753,11 +755,12 @@ if _HAVE_GDB:
                 except Exception:
                     pass
                 self._thread_exit_hook = None
-            for bp in self._armed:
-                try:
-                    bp.delete()
-                except Exception:
-                    pass
+            if not self._inferior_exited:
+                for bp in self._armed:
+                    try:
+                        bp.delete()
+                    except Exception:
+                        pass
             self._armed = []
             try:
                 self._fh.flush()
