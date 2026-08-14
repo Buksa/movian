@@ -1553,6 +1553,22 @@ def classify_run(summary, mode, leave_running):
             reasons.append("empty-jsonl")
         if j.get("bad"):
             reasons.append("jsonl-validation-errors:%d" % len(j["bad"]))
+    if not reasons:
+        summary["status"] = "PASS"
+    elif summary.get("wedge") or summary.get("wedgeClassification"):
+        summary["status"] = "WEDGE"
+    elif summary.get("timedOut") or any("timeout" in reason for reason in reasons):
+        summary["status"] = "TIMEOUT"
+    elif any(
+            reason.startswith(("jsonl-", "collector-"))
+            or reason in ("empty-jsonl", "collector-control-not-ready")
+            for reason in reasons):
+        summary["status"] = "COLLECTOR_ERROR"
+    elif any(reason in {"no-http-port", "http-not-ready", "no-inferior-pid"}
+             for reason in reasons):
+        summary["status"] = "INFRA_ERROR"
+    else:
+        summary["status"] = "FAIL"
     return (len(reasons) == 0), reasons
 
 
