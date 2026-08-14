@@ -1,0 +1,4 @@
+// Fixture (#103): only \n and \\ survive the runtime deescaper.
+widget(label, {
+  caption: "A\tB\"C\nD\\E";
+});

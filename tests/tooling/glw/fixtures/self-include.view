@@ -1,0 +1,2 @@
+// Fixture (#103): #include cycles must stop at --max-depth.
+#include "self-include.view"

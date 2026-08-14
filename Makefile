@@ -952,3 +952,53 @@ include support/mklicense.mk
 
 license: ${BUILDDIR}/LICENSE
 licensepdf: ${BUILDDIR}/LICENSE.pdf
+
+# ---------------------------------------------------------------------
+# movian-analyze: host CLI driving the real GLW lexer/preproc/parser.
+# The analyzer reuses this BUILD's core GLW and misc objects, then links
+# only the documented host shim and generated abort-only stubs.
+# ---------------------------------------------------------------------
+
+MOVIAN_ANALYZE_DIR = support/devtools/analyze
+MOVIAN_ANALYZE_BUILDDIR = ${BUILDDIR}/${MOVIAN_ANALYZE_DIR}
+MOVIAN_ANALYZE_BIN = ${BUILDDIR}/movian-analyze
+
+${MOVIAN_ANALYZE_BUILDDIR}/%.o : CFLAGS += -iquote${C}/src/ui/glw
+
+MOVIAN_ANALYZE_CORE_OBJS = \
+	${BUILDDIR}/src/ui/glw/glw_view_lexer.o \
+	${BUILDDIR}/src/ui/glw/glw_view_parser.o \
+	${BUILDDIR}/src/ui/glw/glw_view_preproc.o \
+	${BUILDDIR}/src/ui/glw/glw_view_support.o \
+	${BUILDDIR}/src/ui/glw/glw_view_attrib.o \
+	${BUILDDIR}/src/ui/glw/glw_view_eval.o \
+	${BUILDDIR}/src/misc/pool.o \
+	${BUILDDIR}/src/misc/rstr.o \
+	${BUILDDIR}/src/misc/buf.o
+
+MOVIAN_ANALYZE_OWN_OBJS = \
+	${MOVIAN_ANALYZE_BUILDDIR}/movian_analyze.o \
+	${MOVIAN_ANALYZE_BUILDDIR}/shim.o
+
+MOVIAN_ANALYZE_STUBS_C = ${MOVIAN_ANALYZE_BUILDDIR}/stubs-auto.c
+MOVIAN_ANALYZE_STUBS_O = ${MOVIAN_ANALYZE_BUILDDIR}/stubs-auto.o
+
+.PHONY: movian-analyze movian-analyze-corpus
+
+movian-analyze: ${MOVIAN_ANALYZE_BIN}
+
+${MOVIAN_ANALYZE_STUBS_C}: ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_OWN_OBJS} \
+    ${C}/${MOVIAN_ANALYZE_DIR}/gen-abort-stubs.sh
+	@mkdir -p $(dir $@)
+	PROBE_LDFLAGS='${LDFLAGS}' ${C}/${MOVIAN_ANALYZE_DIR}/gen-abort-stubs.sh $@ \
+	    ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_OWN_OBJS}
+
+${MOVIAN_ANALYZE_STUBS_O}: ${MOVIAN_ANALYZE_STUBS_C}
+	$(CC) -c -o $@ $<
+
+${MOVIAN_ANALYZE_BIN}: ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_OWN_OBJS} \
+    ${MOVIAN_ANALYZE_STUBS_O}
+	$(LINKER) -o $@ $^ -lm -lpthread
+
+movian-analyze-corpus: ${MOVIAN_ANALYZE_BIN}
+	${C}/tests/tooling/glw/run_corpus.sh ${MOVIAN_ANALYZE_BIN}

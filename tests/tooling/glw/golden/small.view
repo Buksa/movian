@@ -1,0 +1,8 @@
+// Fixture (#97): golden small view for --check/--tokens regression.
+widget(container_y, {
+  align: center;
+  widget(label, {
+    caption: "hello";
+    size: 1.5em;
+  });
+});

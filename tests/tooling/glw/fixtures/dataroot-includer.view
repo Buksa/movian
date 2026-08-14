@@ -1,0 +1,7 @@
+// Fixture (#97): dataroot:// include-resolution parity check.
+// dataroot:// must map to the repo root (SKIP_SUBMODULE_UPDATE aside,
+// this mirrors support/dataroot/wd.c's app_dataroot() == "./" for the
+// debug build -- see the shim.c fa_load() header comment).
+widget(container_z, {
+  #include "dataroot://tests/tooling/glw/fixtures/dataroot-target.view"
+});

@@ -1,0 +1,4 @@
+// Fixture (#97): dataroot:// include target.
+widget(label, {
+  caption: "included via dataroot://";
+});
