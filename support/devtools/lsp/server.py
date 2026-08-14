@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -97,6 +98,17 @@ def uri_to_path(uri: str) -> Path | None:
 def path_to_uri(path: Path) -> str:
     return path.resolve(strict=False).as_uri()
 
+
+
+def configured_path(value: str | None, default: Path, root: Path) -> Path:
+    """Resolve an explicit path relative to the selected repository root."""
+
+    if not value:
+        return default
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    return candidate.resolve(strict=False)
 
 def same_path(left: Path | None, right: Path | None) -> bool:
     if left is None or right is None:
@@ -233,6 +245,91 @@ class Metadata:
             record["name"]: record for record in js.get("modules", [])
             if isinstance(record, dict) and isinstance(record.get("name"), str)
         }
+        globals_data = js.get("globals", {})
+        self.js_global_functions = {
+            record["name"]: record
+            for record in globals_data.get("functions", [])
+            if isinstance(record, dict) and isinstance(record.get("name"), str)
+        }
+        self.js_global_objects = {
+            record["name"]: record
+            for record in globals_data.get("objects", [])
+            if isinstance(record, dict) and isinstance(record.get("name"), str)
+        }
+        self.js_legacy_globals = {
+            record["name"]: record
+            for record in js.get("legacyGlobals", [])
+            if isinstance(record, dict) and isinstance(record.get("name"), str)
+        }
+        self.js_shapes: dict[str, JSON] = {}
+        for module in self.modules.values():
+            for shape in module.get("shapes", []):
+                if isinstance(shape, dict) and isinstance(shape.get("name"), str):
+                    self.js_shapes[shape["name"]] = shape
+
+    @staticmethod
+    def _named_records(records: object) -> list[JSON]:
+        if not isinstance(records, list):
+            return []
+        return [record for record in records
+                if isinstance(record, dict)
+                and isinstance(record.get("name"), str)]
+
+    def javascript_root_items(self) -> list[JSON]:
+        return [
+            *self.js_global_functions.values(),
+            *self.js_global_objects.values(),
+            *self.js_legacy_globals.values(),
+        ]
+
+    def javascript_members(self, owner: str) -> list[JSON]:
+        object_record = self.js_global_objects.get(owner)
+        if object_record is not None:
+            return [
+                *self._named_records(object_record.get("functions")),
+                *self._named_records(object_record.get("properties")),
+            ]
+        legacy_record = self.js_legacy_globals.get(owner)
+        if legacy_record is not None:
+            return self._named_records(legacy_record.get("members"))
+        shape = self.js_shapes.get(owner)
+        if shape is not None:
+            return [
+                *self._named_records(shape.get("methods")),
+                *self._named_records(shape.get("properties")),
+            ]
+        module = self.modules.get(owner)
+        if module is not None:
+            return [
+                *self._named_records(module.get("exports")),
+                *self._named_records(module.get("functions")),
+            ]
+        return []
+
+    def javascript_module_export(self, module_name: str,
+                                 export_name: str) -> JSON | None:
+        module = self.modules.get(module_name)
+        if module is None:
+            return None
+        for record in self._named_records(module.get("exports")):
+            if record["name"] == export_name:
+                return record
+        return None
+
+    def javascript_receiver_members(self, record: JSON) -> list[JSON]:
+        members = self._named_records(record.get("receiverMembers"))
+        if members:
+            return members
+        shape_name = record.get("name")
+        if isinstance(shape_name, str) and shape_name in self.js_shapes:
+            return self.javascript_members(shape_name)
+        returns = record.get("returns")
+        if isinstance(returns, str):
+            return self.javascript_members(returns)
+        return []
+
+    def javascript_module_names(self) -> list[str]:
+        return sorted(self.modules, key=str.casefold)
 
     def hover(self, word: str) -> str | None:
         if word in self.functions:
@@ -307,14 +404,36 @@ class LspServer:
     """Own editor state while delegating parsing to ``movian-analyze``."""
 
     def __init__(self, input_stream: BinaryIO | None = None,
-                 output_stream: BinaryIO | None = None,
-                 *, debounce_ms: int = DEFAULT_DEBOUNCE_MS) -> None:
-        self.repo_root = Path(__file__).resolve().parents[3]
+                 output_stream: BinaryIO | None = None, *,
+                 debounce_ms: int = DEFAULT_DEBOUNCE_MS,
+                 repository_root: Path | None = None,
+                 analyzer_path: Path | None = None,
+                 skin_path: Path | None = None,
+                 metadata_path: Path | None = None) -> None:
+        script_root = Path(__file__).resolve().parents[3]
+        configured_root = repository_root
+        if configured_root is None:
+            raw_root = os.environ.get("MOVIAN_LSP_ROOT")
+            configured_root = (Path(raw_root) if raw_root else script_root)
+        if not configured_root.is_absolute():
+            configured_root = script_root / configured_root
+        self.repo_root = configured_root.resolve(strict=False)
         self.workspace_root = self.repo_root
-        self.analyzer = self.repo_root / "build.debug" / "movian-analyze"
-        self.skin_root = self.repo_root / "glwskins" / "flat"
-        self.metadata = Metadata(self.repo_root / "generated" /
-                                 "movian-metadata.json")
+        self.analyzer = configured_path(
+            str(analyzer_path) if analyzer_path is not None else
+            os.environ.get("MOVIAN_ANALYZER"),
+            self.repo_root / "build.debug" / "movian-analyze",
+            self.repo_root)
+        self.skin_root = configured_path(
+            str(skin_path) if skin_path is not None else
+            os.environ.get("MOVIAN_SKIN"),
+            self.repo_root / "glwskins" / "flat",
+            self.repo_root)
+        self.metadata = Metadata(configured_path(
+            str(metadata_path) if metadata_path is not None else
+            os.environ.get("MOVIAN_METADATA"),
+            self.repo_root / "generated" / "movian-metadata.json",
+            self.repo_root))
         self.debounce_seconds = debounce_ms / 1000.0
         self.input = input_stream if input_stream is not None else sys.stdin.buffer
         self.output = output_stream if output_stream is not None else sys.stdout.buffer
@@ -770,23 +889,42 @@ class LspServer:
 
     def _run_analyzer(self, mode: str, temporary_path: Path) -> tuple[JSON | None, str | None]:
         command = self._analyzer_command(mode, temporary_path)
+        process: subprocess.Popen[bytes] | None = None
         try:
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 command,
                 cwd=self.repo_root,
-                capture_output=True,
-                timeout=ANALYZER_TIMEOUT_SECONDS,
-                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
             )
+            stdout, _stderr = process.communicate(
+                timeout=ANALYZER_TIMEOUT_SECONDS)
         except FileNotFoundError:
             return None, "movian-analyze is not built at %s" % self.analyzer
         except subprocess.TimeoutExpired:
+            if process is not None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except (AttributeError, OSError):
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
+                try:
+                    process.communicate(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
+                    process.wait()
             return None, "movian-analyze timed out after 2 seconds"
         except OSError as exc:
             return None, "unable to run movian-analyze: %s" % exc
 
         try:
-            payload = json.loads(completed.stdout.decode("utf-8"))
+            payload = json.loads(stdout.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             return None, "movian-analyze emitted invalid JSON: %s" % exc
         if not isinstance(payload, dict):
@@ -1020,14 +1158,168 @@ class LspServer:
             }]
         return None
 
+    def _javascript_completion(self, document: Document,
+                               position: JSON) -> list[JSON]:
+        if not self._is_javascript_document(document):
+            return []
+        cursor = self._completion_cursor(document, position)
+        if cursor is None:
+            return []
+        _line_number, line_prefix, text_before_cursor = cursor
+
+        module_match = re.search(
+            r"\brequire[ \t]*\([ \t]*['\"](?P<prefix>[^'\"]*)$",
+            line_prefix)
+        if module_match is not None:
+            if javascript_offset_is_code(
+                    text_before_cursor,
+                    len(text_before_cursor) - len(line_prefix) +
+                    module_match.start()):
+                prefix = module_match.group("prefix")
+                return [
+                    self._javascript_completion_item(
+                        {"name": name}, COMPLETION_FILE,
+                        "JavaScript module metadata")
+                    for name in self.metadata.javascript_module_names()
+                    if name.startswith(prefix)
+                ]
+            return []
+
+        if not javascript_offset_is_code(text_before_cursor,
+                                         len(text_before_cursor)):
+            return []
+
+        member_match = re.search(
+            r"(?P<owner>[A-Za-z_$][A-Za-z0-9_$]*)\."
+            r"(?P<prefix>[A-Za-z_$][A-Za-z0-9_$]*)?$",
+            line_prefix)
+        direct_require_match = re.search(
+            r"\brequire[ \t]*\([ \t]*['\"](?P<module>[^'\"]+)['\"]"
+            r"[ \t]*\)\.(?P<prefix>[A-Za-z_$][A-Za-z0-9_$]*)?$",
+            line_prefix)
+        if direct_require_match is not None:
+            module_name = direct_require_match.group("module")
+            prefix = direct_require_match.group("prefix") or ""
+            return self._javascript_completion_items(
+                self.metadata.javascript_members(module_name), prefix)
+        if member_match is not None:
+            owner = member_match.group("owner")
+            prefix = member_match.group("prefix") or ""
+            owners = self._javascript_variable_owners(text_before_cursor)
+            records = self._javascript_owner_members(owner, owners)
+            return self._javascript_completion_items(records, prefix)
+
+        identifier_match = re.search(
+            r"(?P<prefix>[A-Za-z_$][A-Za-z0-9_$]*)?$", line_prefix)
+        if identifier_match is None:
+            return []
+        prefix = identifier_match.group("prefix") or ""
+        statement_prefix = line_prefix[:identifier_match.start("prefix")
+                                       if identifier_match.group("prefix")
+                                       else len(line_prefix)]
+        if not re.search(
+                r"(?:^|[=(:,;{}]|\b(?:var|let|const|return|new)\b)[ \t]*$",
+                statement_prefix):
+            return []
+        return self._javascript_completion_items(
+            self.metadata.javascript_root_items(), prefix)
+
+    def _javascript_completion_items(self, records: Iterable[JSON],
+                                     prefix: str) -> list[JSON]:
+        items: dict[str, JSON] = {}
+        for record in records:
+            name = record.get("name")
+            if not isinstance(name, str) or not name.startswith(prefix):
+                continue
+            callable_record = (
+                record.get("callable") is True
+                or isinstance(record.get("nargs"), int)
+                or record.get("kind") == "function"
+                or isinstance(record.get("params"), list)
+            )
+            kind = COMPLETION_FUNCTION if callable_record \
+                else COMPLETION_PROPERTY
+            if name not in items or kind == COMPLETION_FUNCTION:
+                items[name] = self._javascript_completion_item(
+                    record, kind, "JavaScript metadata")
+        return [items[name] for name in sorted(items, key=str.casefold)]
+
+    @staticmethod
+    def _javascript_completion_item(record: JSON, kind: int,
+                                    category: str) -> JSON:
+        name = str(record.get("name", ""))
+        nargs = record.get("nargs")
+        if kind == COMPLETION_FUNCTION and isinstance(nargs, int):
+            detail = "%s; nargs: %s" % (category, nargs)
+        else:
+            detail = category
+        return {"label": name, "kind": kind, "detail": detail}
+
+    def _javascript_variable_owners(
+            self, text: str) -> dict[str, tuple[str, JSON | str]]:
+        owners: dict[str, tuple[str, JSON | str]] = {}
+        require_pattern = re.compile(
+            r"\b(?:var|let|const)[ \t]+(?P<variable>[A-Za-z_$][A-Za-z0-9_$]*)"
+            r"[ \t]*=[ \t]*require[ \t]*\([ \t]*['\"]"
+            r"(?P<module>[^'\"]+)['\"][ \t]*\)")
+        for match in require_pattern.finditer(text):
+            owners[match.group("variable")] = ("module", match.group("module"))
+
+        export_pattern = re.compile(
+            r"\b(?:var|let|const)[ \t]+(?P<variable>[A-Za-z_$][A-Za-z0-9_$]*)"
+            r"[ \t]*=[ \t]*(?:new[ \t]+)?"
+            r"(?P<owner>[A-Za-z_$][A-Za-z0-9_$]*)"
+            r"\.(?P<export>[A-Za-z_$][A-Za-z0-9_$]*)[ \t]*\(")
+        direct_export_pattern = re.compile(
+            r"\b(?:var|let|const)[ \t]+(?P<variable>[A-Za-z_$][A-Za-z0-9_$]*)"
+            r"[ \t]*=[ \t]*require[ \t]*\([ \t]*['\"]"
+            r"(?P<module>[^'\"]+)['\"][ \t]*\)\."
+            r"(?P<export>[A-Za-z_$][A-Za-z0-9_$]*)[ \t]*\(")
+        for match in direct_export_pattern.finditer(text):
+            record = self.metadata.javascript_module_export(
+                match.group("module"), match.group("export"))
+            if record is not None:
+                owners[match.group("variable")] = ("record", record)
+
+        for _ in range(2):
+            changed = False
+            for match in export_pattern.finditer(text):
+                owner = owners.get(match.group("owner"))
+                if owner is None or owner[0] != "module":
+                    continue
+                record = self.metadata.javascript_module_export(
+                    str(owner[1]), match.group("export"))
+                if record is not None:
+                    value = ("record", record)
+                    if owners.get(match.group("variable")) != value:
+                        owners[match.group("variable")] = value
+                        changed = True
+            if not changed:
+                break
+        return owners
+
+    def _javascript_owner_members(
+            self, owner: str,
+            owners: dict[str, tuple[str, JSON | str]]) -> list[JSON]:
+        resolved = owners.get(owner)
+        if resolved is not None:
+            kind, value = resolved
+            if kind == "module":
+                return self.metadata.javascript_members(str(value))
+            if kind == "record" and isinstance(value, dict):
+                return self.metadata.javascript_receiver_members(value)
+        return self.metadata.javascript_members(owner)
+
     def _completion(self, params: JSON) -> list[JSON]:
         """Return only completions justified by GLW metadata or local tokens."""
 
         uri = params["textDocument"]["uri"]
         position = params["position"]
         document = self._document(uri)
-        if document is None or self._path_has_javascript_suffix(document.path):
+        if document is None:
             return []
+        if self._path_has_javascript_suffix(document.path):
+            return self._javascript_completion(document, position)
         self._ensure_analysis(document)
         cursor = self._completion_cursor(document, position)
         if cursor is None:

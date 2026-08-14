@@ -8,6 +8,7 @@ the same development environments as ``mdev``.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import os
 import sys
 
@@ -23,10 +24,23 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stdio", action="store_true",
                         help="serve Language Server Protocol over stdin/stdout")
+    parser.add_argument("--repository-root", type=Path,
+                        help="Movian checkout used for metadata and skin files")
+    parser.add_argument("--analyzer", type=Path,
+                        help="movian-analyze executable (or use MOVIAN_ANALYZER)")
+    parser.add_argument("--skin", type=Path,
+                        help="flat skin root (or use MOVIAN_SKIN)")
+    parser.add_argument("--metadata", type=Path,
+                        help="movian-metadata.json (or use MOVIAN_METADATA)")
     args = parser.parse_args()
     if not args.stdio:
         parser.error("--stdio is required")
-    return LspServer().run()
+    return LspServer(
+        repository_root=args.repository_root,
+        analyzer_path=args.analyzer,
+        skin_path=args.skin,
+        metadata_path=args.metadata,
+    ).run()
 
 
 if __name__ == "__main__":
