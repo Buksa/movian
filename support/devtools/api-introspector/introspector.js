@@ -57,6 +57,55 @@ var moduleNames = [
   'showtime/xml',
   'showtime/xmlrpc'
 ];
+var globalNames = ['Plugin', 'Core', 'Duktape', 'showtime', 'plugin', 'console'];
+
+function readGlobal(name) {
+  if(name == 'Plugin')
+    return typeof Plugin == 'undefined' ? undefined : Plugin;
+  if(name == 'Core')
+    return typeof Core == 'undefined' ? undefined : Core;
+  if(name == 'Duktape')
+    return typeof Duktape == 'undefined' ? undefined : Duktape;
+  if(name == 'showtime')
+    return typeof showtime == 'undefined' ? undefined : showtime;
+  if(name == 'plugin')
+    return typeof plugin == 'undefined' ? undefined : plugin;
+  if(name == 'console')
+    return typeof console == 'undefined' ? undefined : console;
+  return undefined;
+}
+
+function describeGlobals() {
+  var result = {};
+  var i;
+  var name;
+  var value;
+
+  for(i = 0; i < globalNames.length; i++) {
+    name = globalNames[i];
+    try {
+      value = readGlobal(name);
+      if(typeof value == 'undefined') {
+        result[name] = {
+          status: 'missing'
+        };
+      } else {
+        result[name] = {
+          status: 'observed',
+          value: describeModule(value)
+        };
+      }
+    } catch(e) {
+      result[name] = {
+        status: 'failed',
+        error: String(e)
+      };
+    }
+  }
+
+  return result;
+}
+
 
 function describeMember(value) {
   var type = typeof value;
@@ -836,6 +885,8 @@ var name;
 var settings;
 var routeRef = null;
 var tier3RouteUrl = 'introspect:page';
+var globals = describeGlobals();
+
 var globalSettingsError = null;
 var afterSettings = null;
 var afterLegacySettings = null;
@@ -1000,6 +1051,7 @@ function emitPayload(complete) {
       'movian/settings': afterSettings,
       'showtime/settings': afterLegacySettings
     },
+    globals: globals,
     loadErrors: loadErrors,
     globalSettingsError: globalSettingsError
   }));
