@@ -1,0 +1,4 @@
+// Intentional parse failure: missing attribute value.
+widget(label, {
+  caption =
+});

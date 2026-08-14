@@ -80,6 +80,7 @@
 #include <stdarg.h>
 #include <limits.h>
 #include <errno.h>
+#include <unistd.h>
 #include <sys/stat.h>
 
 #include "misc/buf.h"
@@ -412,6 +413,73 @@ resolve_dataroot(const char *url, char *buf, size_t bufsz)
  * symlinks then re-check)"). Applied only to #include/#import targets
  * (the only caller of this function is fa_load(), which the top-level
  * CLI-provided file never goes through -- see movian_analyze.c). */
+/* Lexically canonicalize a path when its final target does not exist yet.
+ * realpath() cannot validate that case, but confinement must reject a
+ * "../" escape before the open attempt reports a misleading ENOENT. */
+static int
+normalize_path(const char *path, char *out, size_t outlen)
+{
+  char input[PATH_MAX];
+  if(path[0] == '/') {
+    size_t len = strlen(path);
+    if(len >= sizeof(input))
+      return 0;
+    memcpy(input, path, len + 1);
+  } else {
+    char cwd[PATH_MAX];
+    if(getcwd(cwd, sizeof(cwd)) == NULL)
+      return 0;
+    size_t cwdlen = strlen(cwd);
+    size_t pathlen = strlen(path);
+    if(cwdlen + 1 + pathlen >= sizeof(input))
+      return 0;
+    memcpy(input, cwd, cwdlen);
+    input[cwdlen] = '/';
+    memcpy(input + cwdlen + 1, path, pathlen + 1);
+  }
+
+  char *parts[PATH_MAX / 2];
+  size_t count = 0;
+  char *p = input;
+  while(*p != 0) {
+    while(*p == '/')
+      p++;
+    if(*p == 0)
+      break;
+    char *part = p;
+    while(*p != 0 && *p != '/')
+      p++;
+    if(*p != 0)
+      *p++ = 0;
+    if(!strcmp(part, "."))
+      continue;
+    if(!strcmp(part, "..")) {
+      if(count > 0)
+        count--;
+      continue;
+    }
+    if(count >= sizeof(parts) / sizeof(parts[0]))
+      return 0;
+    parts[count++] = part;
+  }
+
+  size_t used = 0;
+  if(outlen < 2)
+    return 0;
+  out[used++] = '/';
+  for(size_t i = 0; i < count; i++) {
+    size_t len = strlen(parts[i]);
+    if(used + len + (i + 1 < count) >= outlen)
+      return 0;
+    memcpy(out + used, parts[i], len);
+    used += len;
+    if(i + 1 < count)
+      out[used++] = '/';
+  }
+  out[used] = 0;
+  return 1;
+}
+
 static int
 path_is_confined(const char *resolved)
 {
@@ -419,18 +487,19 @@ path_is_confined(const char *resolved)
     return 1; /* no policy configured: accept (tests / ad-hoc use) */
 
   char real[PATH_MAX];
-  if(realpath(resolved, real) == NULL) {
-    /* Target doesn't exist (or a component doesn't): nothing to escape
-     * to yet. Let the normal open-failure path report "not found". */
-    return 1;
-  }
+  char lexical[PATH_MAX];
+  const char *candidate = realpath(resolved, real) != NULL ? real :
+    (normalize_path(resolved, lexical, sizeof(lexical)) ? lexical : NULL);
+  if(candidate == NULL)
+    return 0;
+
   for(int i = 0; i < g_fa_policy.root_count; i++) {
     const char *root = g_fa_policy.roots[i];
     size_t plen = strlen(root);
     if(plen == 0)
       continue;
-    if(!strncmp(real, root, plen) &&
-       (real[plen] == '/' || real[plen] == 0))
+    if(!strncmp(candidate, root, plen) &&
+       (candidate[plen] == '/' || candidate[plen] == 0))
       return 1;
   }
   return 0;

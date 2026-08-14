@@ -1,0 +1,2 @@
+// Checked with --root fixtures: target escapes the allowed root.
+#include "../outside.view"

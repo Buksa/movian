@@ -1,0 +1,4 @@
+// Intentional parse failure: unbalanced function call.
+widget(label, {
+  caption: fn(1, 2;
+});
