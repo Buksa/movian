@@ -3,7 +3,7 @@
 ## Branch and protected refs
 
 - Branch: `devtools-lifecycle`
-- HEAD: `b612b2e607703633e01c10ae11cdcac7659bf6d7`
+- HEAD: verified locally with `git rev-parse HEAD` at final audit; no push performed.
 - Exact merge-base with `devtools-mdev`:
   `81a4ade8b2f9037d126685792521dfc792b464b0`
 - No merge or rebase was performed.
