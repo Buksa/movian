@@ -739,6 +739,10 @@ function describeTier3Page(page) {
   try {
     if(!page || typeof page != 'object')
       throw new Error('Route callback did not receive a Page object');
+    page.type = 'directory';
+    page.metadata.title = 'Movian API introspection';
+    page.loading = false;
+
 
     tier3.page = {
       status: 'constructed',
