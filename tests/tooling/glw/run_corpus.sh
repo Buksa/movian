@@ -42,11 +42,18 @@ crash=0
 n_flat=0
 n_other=0
 n_fixtures=0
+n_js=0
+n_js_fixtures=0
 
 check_one() {
-  # $1 = view path, $2 = 1 if this is a strict flat-corpus file
+  # $1 = view path
+  # $2 = 1 if --check must exit 0 with empty stderr (strict parse)
+  # $3 = 1 if --tokens must exit 0 with empty stderr (strict lex);
+  #      include-fragments keep this at 1: --tokens stops before macro
+  #      preprocessing, so a missing macro cannot excuse a lexer error.
   view=$1
   strict=$2
+  strict_tokens=$3
 
   out=$("$ANALYZE" --check "$view" 2>/tmp/movian-analyze-corpus.stderr)
   rc=$?
@@ -86,7 +93,7 @@ check_one() {
     echo "CRASH in --tokens (signal $((trc - 128))): $view" >&2
     crash=$((crash + 1))
     fail=1
-  elif [ "$strict" = 1 ]; then
+  elif [ "$strict_tokens" = 1 ]; then
     if [ "$trc" != 0 ]; then
       echo "FLAT CORPUS REGRESSION (--tokens exit $trc, expected 0): $view" >&2
       flat_fail=$((flat_fail + 1))
@@ -100,17 +107,36 @@ check_one() {
   fi
 }
 
-echo "== glwskins/flat (strict: must exit 0, empty stderr) =="
+# Include-fragments: files that are only ever #include/#import-ed into a
+# document that has already imported theme.view, so they call macros
+# (e.g. ListItemBevel from theme.view) that do not exist in a standalone
+# parse. The real runtime rejects a standalone parse of these the same
+# way, so a clean --check expectation would be FALSE parity; --check runs
+# in the loose lane (must not crash, well-formed error allowed) while
+# --tokens stays strict (lexing stops before macro preprocessing, so a
+# missing macro cannot excuse a lexer error). See issue #106.
+is_fragment() {
+  case "$1" in
+    glwskins/flat/menu/sidebar_common.view) return 0 ;;
+  esac
+  return 1
+}
+
+echo "== glwskins/flat (strict: must exit 0, empty stderr; fragments loose) =="
 for f in $(find glwskins/flat -name '*.view'); do
   n_flat=$((n_flat + 1))
-  check_one "$f" 1
+  if is_fragment "$f"; then
+    check_one "$f" 0 1
+  else
+    check_one "$f" 1 1
+  fi
 done
 
 echo "== glwskins/old (loose: must not crash) =="
 if [ -d glwskins/old ]; then
   for f in $(find glwskins/old -name '*.view'); do
     n_other=$((n_other + 1))
-    check_one "$f" 0
+    check_one "$f" 0 0
   done
 fi
 
@@ -126,14 +152,14 @@ for f in tests/tooling/glw/fixtures/*.view; do
       continue
       ;;
   esac
-  check_one "$f" 0
+  check_one "$f" 0 0
 done
 
 echo "== tests/tooling/glw/golden (strict: must exit 0, empty stderr) =="
 for f in tests/tooling/glw/golden/*.view; do
   [ -f "$f" ] || continue
   n_flat=$((n_flat + 1))
-  check_one "$f" 1
+  check_one "$f" 1 1
 done
 
 rm -f /tmp/movian-analyze-corpus.stderr /tmp/movian-analyze-corpus.tokens.stderr
@@ -232,8 +258,57 @@ rm -f /tmp/movian-analyze-corpus.golden.tokens \
   /tmp/movian-analyze-corpus.self-include.tokens \
   /tmp/movian-analyze-corpus.self-include.stderr
 
+echo "== JavaScript source and plugin fixtures (strict compile-only) =="
+for f in $(find res/ecmascript -name '*.js' | sort) \
+         tests/tooling/js/fixtures/valid-*.js; do
+  [ -f "$f" ] || continue
+  n_js=$((n_js + 1))
+  "$ANALYZE" --js "$f" \
+    > /tmp/movian-analyze-corpus.js \
+    2> /tmp/movian-analyze-corpus.js.stderr
+  js_rc=$?
+  if [ "$js_rc" != 0 ] || \
+     [ -s /tmp/movian-analyze-corpus.js.stderr ]; then
+    echo "JAVASCRIPT CORPUS REGRESSION (exit $js_rc): $f" >&2
+    sed 's/^/  stdout: /' /tmp/movian-analyze-corpus.js >&2
+    sed 's/^/  stderr: /' /tmp/movian-analyze-corpus.js.stderr >&2
+    fail=1
+  fi
+done
+
+echo "== JavaScript intentional failures (must reject cleanly) =="
+for f in tests/tooling/js/fixtures/*.js; do
+  [ -f "$f" ] || continue
+  case "$f" in
+    *"/valid-"*) continue ;;
+  esac
+  n_js_fixtures=$((n_js_fixtures + 1))
+  "$ANALYZE" --js "$f" \
+    > /tmp/movian-analyze-corpus.js \
+    2> /tmp/movian-analyze-corpus.js.stderr
+  js_rc=$?
+  if [ "$js_rc" != 1 ] || \
+     [ -s /tmp/movian-analyze-corpus.js.stderr ] || \
+     ! grep -q '^{"file":.*,"line":1,"error":".*"}$' \
+       /tmp/movian-analyze-corpus.js; then
+    echo "JAVASCRIPT FAILURE REGRESSION (exit $js_rc): $f" >&2
+    sed 's/^/  stdout: /' /tmp/movian-analyze-corpus.js >&2
+    sed 's/^/  stderr: /' /tmp/movian-analyze-corpus.js.stderr >&2
+    fail=1
+  fi
+done
+
+if [ "$n_js_fixtures" != 4 ]; then
+  echo "JAVASCRIPT FIXTURE REGRESSION: found $n_js_fixtures, expected 4" >&2
+  fail=1
+fi
+
+rm -f /tmp/movian-analyze-corpus.js \
+  /tmp/movian-analyze-corpus.js.stderr
+
 echo
 echo "flat+golden: $n_flat, glwskins/old: $n_other, fixtures: $n_fixtures, crashes: $crash, flat regressions: $flat_fail, golden mismatches: $golden_fail"
+echo "javascript: $n_js strict files, $n_js_fixtures intentional failures"
 
 if [ "$fail" != 0 ]; then
   echo "CORPUS GUARD FAILED" >&2

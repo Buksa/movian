@@ -8,6 +8,7 @@
  * Usage:
  *   movian-analyze --check  [options] <file.view>
  *   movian-analyze --tokens [options] <file.view>
+ *   movian-analyze --js     [options] <file.js>
  *
  * Options:
  *   --skin DIR       resolve skin:// against DIR
@@ -38,6 +39,12 @@
  *   are logged to stderr and skipped (the token stream is the TOLERANT
  *   layer -- see research pack Part L -- so one bad include must not
  *   blank the whole symbol/outline view of the file being edited).
+ *
+ * --js JSON:
+ *   success (exit 0):  {"ok":true,"file":"<path>"}
+ *   failure (exit 1):  {"file":"<path>","line":<n>,"error":"<msg>"}
+ *   Source is compiled, but never executed, by the same vendored
+ *   Duktape engine the runtime uses.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,6 +58,7 @@
 #include "glw_view.h"
 #include "misc/pool.h"
 #include "misc/buf.h"
+#include "duktape.h"
 
 #include "movian_analyze.h"
 
@@ -204,6 +212,63 @@ cmd_check(glw_root_t *gr, const char *path)
   json_string(stdout, ei.error);
   printf("}\n");
   return 1;
+}
+
+
+/* ------------------------------------------------------------------- */
+/* --js                                                                 */
+/* ------------------------------------------------------------------- */
+
+static int
+cmd_js(const char *path)
+{
+  const char *open_err;
+  char *src = read_top_file(path, g_fa_policy.max_file_size, &open_err);
+  if(src == NULL) {
+    printf("{\"file\":");
+    json_string(stdout, path);
+    printf(",\"line\":0,\"error\":");
+    char msg[512];
+    snprintf(msg, sizeof(msg), "Unable to open \"%s\" -- %s", path,
+             open_err);
+    json_string(stdout, msg);
+    printf("}\n");
+    return 1;
+  }
+
+  duk_context *ctx = duk_create_heap_default();
+  if(ctx == NULL) {
+    free(src);
+    printf("{\"file\":");
+    json_string(stdout, path);
+    printf(",\"line\":0,\"error\":\"Unable to create Duktape heap\"}\n");
+    return 1;
+  }
+
+  duk_push_lstring(ctx, src, strlen(src));
+  free(src);
+  duk_push_string(ctx, path);
+
+  if(duk_pcompile(ctx, 0)) {
+    duk_get_prop_string(ctx, -1, "lineNumber");
+    int line = duk_is_number(ctx, -1) ? duk_get_int(ctx, -1) : 0;
+    duk_pop(ctx);
+    const char *error = duk_safe_to_string(ctx, -1);
+
+    printf("{\"file\":");
+    json_string(stdout, path);
+    printf(",\"line\":%d,\"error\":", line);
+    json_string(stdout, error);
+    printf("}\n");
+    duk_destroy_heap(ctx);
+    return 1;
+  }
+
+  duk_destroy_heap(ctx);
+  printf("{\"ok\":true,\"file\":");
+  json_string(stdout, path);
+  printf("}\n");
+  return 0;
 }
 
 
@@ -497,8 +562,8 @@ static void
 usage(const char *prog)
 {
   fprintf(stderr,
-          "usage: %s --check|--tokens [--skin DIR] [--root DIR] "
-          "[--max-size BYTES] [--max-depth N] <file.view>\n", prog);
+          "usage: %s --check|--tokens|--js [--skin DIR] [--root DIR] "
+          "[--max-size BYTES] [--max-depth N] <file>\n", prog);
 }
 
 int
@@ -512,7 +577,8 @@ main(int argc, char **argv)
   int max_depth = MAX_IMPORT_DEPTH_DEFAULT;
 
   for(int i = 1; i < argc; i++) {
-    if(!strcmp(argv[i], "--check") || !strcmp(argv[i], "--tokens")) {
+    if(!strcmp(argv[i], "--check") || !strcmp(argv[i], "--tokens") ||
+       !strcmp(argv[i], "--js")) {
       mode = argv[i];
     } else if(!strcmp(argv[i], "--skin") && i + 1 < argc) {
       skin_opt = argv[++i];
@@ -560,6 +626,10 @@ main(int argc, char **argv)
    * is used verbatim: it's already an analyzer-only convenience with no
    * real-runtime equivalent to match. */
   snprintf(g_fa_policy.workspace_root, PATH_MAX, "%s", root_opt ? root_opt : ".");
+
+  if(!strcmp(mode, "--js"))
+    return cmd_js(file);
+
   add_root(root);
   add_root(skin);
 
