@@ -3,7 +3,7 @@
 ## Branch and protected refs
 
 - Branch: `devtools-lifecycle`
-- HEAD: `a5166791dfe695ab1cbaff86ce1c9080f872c710`
+- HEAD: `b612b2e607703633e01c10ae11cdcac7659bf6d7`
 - Exact merge-base with `devtools-mdev`:
   `81a4ade8b2f9037d126685792521dfc792b464b0`
 - No merge or rebase was performed.
@@ -11,7 +11,7 @@
 - Protected refs remain at the objects listed in
   `LIFECYCLE_RECONSTRUCTION_REPORT.md`.
 
-The tracked worktree is clean after the implementation commit. Pre-existing
+The tracked worktree is clean after the audit commit. Pre-existing
 untracked reports, build output, `.codegraph`, and other user files were not
 deleted or rewritten; they are outside this lifecycle cutover.
 
