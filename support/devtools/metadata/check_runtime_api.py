@@ -142,8 +142,24 @@ def compare_modules(metadata: dict[str, Any], oracle: dict[str, Any],
 
 def compare_settings(metadata: dict[str, Any], oracle: dict[str, Any],
                      result: dict[str, list[dict[str, str]]]) -> None:
-    static_settings = metadata.get("js", {}).get("settings", {})
-    static_names = set(static_settings.get("members", []))
+    settings_module = next(
+        (record for record in metadata.get("js", {}).get("modules", [])
+         if record.get("name") == "movian/settings"),
+        {},
+    )
+    static_names = static_member_names(
+        "movian/settings", static_module_map(metadata))
+    for export in settings_module.get("exports", []):
+        static_names.update(
+            member["name"] for member in export.get("receiverMembers", [])
+        )
+    for shape in settings_module.get("shapes", []):
+        static_names.update(
+            member["name"] for member in shape.get("methods", [])
+        )
+        static_names.update(
+            member["name"] for member in shape.get("properties", [])
+        )
     after = oracle.get("afterGlobalSettings") or {}
     settings = after.get("movian/settings") or {}
     for member in sorted(runtime_own_names(settings) |
