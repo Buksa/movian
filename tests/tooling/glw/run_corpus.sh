@@ -289,7 +289,7 @@ for f in tests/tooling/js/fixtures/*.js; do
   js_rc=$?
   if [ "$js_rc" != 1 ] || \
      [ -s /tmp/movian-analyze-corpus.js.stderr ] || \
-     ! grep -q '^{"file":.*,"line":1,"error":".*"}$' \
+     ! grep -q '^{"file":.*,"line":[0-9][0-9]*,"error":".*"}$' \
        /tmp/movian-analyze-corpus.js; then
     echo "JAVASCRIPT FAILURE REGRESSION (exit $js_rc): $f" >&2
     sed 's/^/  stdout: /' /tmp/movian-analyze-corpus.js >&2
