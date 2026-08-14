@@ -179,8 +179,8 @@ def run_fallback_session(server: Path) -> list[bytes]:
     """Prove lexer failure retains the previous successful token stream."""
 
     client = LspClient(server, REPOSITORY_ROOT)
-    fixture = REPOSITORY_ROOT / "tests" / "tooling" / "glw" / "fixtures" / \
-        "invalid-char.view"
+    fixture = REPOSITORY_ROOT / "tests" / "tooling" / "lsp" / "fixtures" / \
+        "diagnostics" / "invalid-syntax.view"
     uri = fixture.as_uri()
     broken = fixture.read_text(encoding="utf-8")
     clean = broken.replace("`", "0")

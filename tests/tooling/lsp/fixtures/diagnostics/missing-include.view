@@ -1,0 +1,4 @@
+widget(label, {
+  caption: "ok";
+});
+#include "does-not-exist.view"

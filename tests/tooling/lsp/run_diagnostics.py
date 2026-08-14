@@ -7,6 +7,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -17,7 +18,8 @@ from lsp_client import LspClient
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_SERVER = REPOSITORY_ROOT / "support" / "devtools" / "movian-lsp"
 ANALYZER = REPOSITORY_ROOT / "build.debug" / "movian-analyze"
-FIXTURES = REPOSITORY_ROOT / "tests" / "tooling" / "glw" / "fixtures"
+FIXTURES = REPOSITORY_ROOT / "tests" / "tooling" / "lsp" / "fixtures" / \
+    "diagnostics"
 
 
 def analyzer_result(fixture: Path) -> dict:
@@ -29,6 +31,59 @@ def analyzer_result(fixture: Path) -> dict:
         check=False,
     )
     return json.loads(completed.stdout.decode("utf-8"))
+
+
+def check_escape_root(server: Path) -> None:
+    fixture = FIXTURES / "escape-root.view"
+    client = LspClient(server, REPOSITORY_ROOT)
+    try:
+        with tempfile.TemporaryDirectory(prefix="movian-lsp-root-") as root_dir, \
+                tempfile.TemporaryDirectory(prefix="movian-lsp-outside-") as outside_dir:
+            root = Path(root_dir)
+            outside = Path(outside_dir) / "outside.view"
+            source = root / fixture.name
+            outside.write_text("widget(label, {});\n", encoding="utf-8")
+            source.write_text(fixture.read_text(encoding="utf-8"),
+                              encoding="utf-8")
+            client.request(11, "initialize", {"rootUri": root.as_uri()})
+            client.notify("initialized", {})
+            client.notify("textDocument/didOpen", {"textDocument": {
+                "uri": source.as_uri(),
+                "languageId": "glw",
+                "version": 1,
+                "text": source.read_text(encoding="utf-8"),
+            }})
+            published = client.wait_for_notification(
+                "textDocument/publishDiagnostics",
+                lambda params: params.get("uri") == source.as_uri()
+                and len(params.get("diagnostics", [])) == 1,
+            )
+            diagnostic = published["diagnostics"][0]
+            if diagnostic.get("source") != "movian-glw" \
+                    or "escapes workspace root" not in diagnostic.get(
+                        "message", ""):
+                raise AssertionError("escape-root diagnostic mismatch: %s" %
+                                     published)
+            client.notify("textDocument/didClose", {
+                "textDocument": {"uri": source.as_uri()},
+            })
+            client.wait_for_notification(
+                "textDocument/publishDiagnostics",
+                lambda params: params.get("uri") == source.as_uri()
+                and params.get("diagnostics") == [],
+            )
+            if client.request(12, "shutdown", {}) is not None:
+                raise AssertionError("shutdown must return null")
+            client.notify("exit", {})
+            exit_code, stderr = client.close_after_exit()
+            if exit_code != 0 or stderr:
+                raise AssertionError("escape server exit=%s stderr=%r" %
+                                     (exit_code, stderr))
+    except BaseException:
+        if client.process.poll() is None:
+            client.process.kill()
+            client.process.wait()
+        raise
 
 
 def main() -> int:
@@ -77,6 +132,8 @@ def main() -> int:
                 lambda published: published.get("uri") == uri
                 and published.get("diagnostics") == [],
             )
+        check_escape_root(args.server)
+        checked += 1
         if client.request(2, "shutdown", {}) is not None:
             raise AssertionError("shutdown must return null")
         client.notify("exit", {})

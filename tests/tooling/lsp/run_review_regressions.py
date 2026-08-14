@@ -325,7 +325,8 @@ def run_f5_definition_confinement() -> None:
 def run_f7_hidden_workspace_snapshot() -> None:
     """Workspace symbols must ignore transient dot-prefixed snapshots."""
 
-    fixture_directory = REPOSITORY_ROOT / "tests" / "tooling" / "glw" / "fixtures"
+    fixture_directory = REPOSITORY_ROOT / "tests" / "tooling" / "lsp" / \
+        "fixtures" / "diagnostics"
     snapshot = fixture_directory / ".movian-lsp-tmp.view"
     if snapshot.exists():
         raise AssertionError("refusing to overwrite existing fixture %s" % snapshot)

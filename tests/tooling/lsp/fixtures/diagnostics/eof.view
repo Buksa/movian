@@ -1,0 +1,3 @@
+// Parser error: truncated file.
+widget(label, {
+  caption: "ok";
