@@ -276,6 +276,7 @@ BUNDLES += res/fileaccess
 SRCS 			+= src/sd/sd.c
 SRCS-$(CONFIG_AVAHI) 	+= src/sd/avahi.c
 SRCS-$(CONFIG_BONJOUR) 	+= src/sd/bonjour.c
+SRCS-$(CONFIG_LIBSMB2) += src/sd/wsd.c
 
 ${BUILDDIR}/src/sd/avahi.o : CFLAGS = $(CFLAGS_AVAHI) -Wall -Werror  ${OPTFLAGS}
 
