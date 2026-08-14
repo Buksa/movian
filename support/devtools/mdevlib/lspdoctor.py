@@ -43,12 +43,30 @@ def _check_python() -> tuple[bool, str]:
     return True, "%d.%d.%d" % version[:3]
 
 
+def _analyzer_path() -> Path:
+    configured = os.environ.get("MOVIAN_ANALYZER")
+    if configured:
+        candidate = Path(configured).expanduser()
+        if not candidate.is_absolute():
+            candidate = REPOSITORY_ROOT / candidate
+        return candidate.resolve(strict=False)
+    return REPOSITORY_ROOT / "build.debug" / "movian-analyze"
+
+
 def _check_analyzer() -> tuple[bool, str]:
-    analyzer = REPOSITORY_ROOT / "build.debug" / "movian-analyze"
+    analyzer = _analyzer_path()
     if not analyzer.is_file() or not os.access(analyzer, os.X_OK):
-        return False, ("build.debug/movian-analyze is not an executable "
-                       "file; run ./support/configure-linux-debug.sh && "
-                       "make BUILD=debug -j$(nproc) movian-analyze")
+        return False, ("%s is not an executable movian-analyze; set "
+                       "MOVIAN_ANALYZER or build the sibling analyzer "
+                       "product" % analyzer)
+
+    # devtools-lsp intentionally does not carry the analyzer source or its
+    # Makefile target. In that topology the executable is the dependency
+    # product and there is no local freshness query to run.
+    if not (REPOSITORY_ROOT / "support" / "devtools" / "analyze").is_dir():
+        return True, ("%s is executable (sibling analyzer product; source "
+                      "is intentionally outside devtools-lsp)" % analyzer)
+
     try:
         completed = subprocess.run(
             ["make", "BUILD=debug", "-q", "movian-analyze"],
@@ -60,14 +78,14 @@ def _check_analyzer() -> tuple[bool, str]:
         )
     except (OSError, subprocess.TimeoutExpired):
         return False, ("make BUILD=debug -q movian-analyze could not run; "
-                       "run ./support/configure-linux-debug.sh")
+                       "refresh the sibling analyzer product")
     if completed.returncode == 1:
-        return False, ("build.debug/movian-analyze is stale; run make "
-                       "BUILD=debug -j$(nproc) movian-analyze")
+        return False, ("movian-analyze is stale; refresh the sibling analyzer "
+                       "product")
     if completed.returncode:
-        return False, ("make BUILD=debug -q movian-analyze failed; run "
-                       "./support/configure-linux-debug.sh")
-    return True, "build.debug/movian-analyze is executable and up to date"
+        return False, ("make BUILD=debug -q movian-analyze failed; check the "
+                       "analyzer checkout")
+    return True, "%s is executable and up to date" % analyzer
 
 
 def _check_metadata() -> tuple[bool, str]:

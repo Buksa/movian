@@ -17,7 +17,6 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_SERVER = REPOSITORY_ROOT / "support" / "devtools" / "movian-lsp"
 FLAT_SKIN = REPOSITORY_ROOT / "glwskins" / "flat"
 KNOWN_INCLUDE_FRAGMENT = FLAT_SKIN / "menu" / "sidebar_common.view"
-KNOWN_FRAGMENT_ERROR = "Unknown function: ListItemBevel"
 
 
 def main() -> int:
@@ -47,15 +46,9 @@ def main() -> int:
             diagnostics = published.get("diagnostics")
             if view == KNOWN_INCLUDE_FRAGMENT:
                 fragments += 1
-                if len(diagnostics) != 1:
-                    raise AssertionError("fragment must have one diagnostic: %s" %
-                                         published)
-                diagnostic = diagnostics[0]
-                if diagnostic.get("source") != "movian-glw" \
-                        or diagnostic.get("message") != KNOWN_FRAGMENT_ERROR \
-                        or diagnostic["range"]["start"]["line"] != 10:
-                    raise AssertionError("fragment diagnostic mismatch: %s" %
-                                         published)
+                if diagnostics != []:
+                    raise AssertionError("unexpected diagnostic in include "
+                                         "fragment: %s" % published)
             elif diagnostics != []:
                 raise AssertionError("false diagnostic in %s: %s" %
                                      (view, published))

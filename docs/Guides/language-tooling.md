@@ -2,26 +2,39 @@
 
 `movian-lsp` supplies diagnostics, hover information, document symbols, and
 `#include`/`#import` definitions for GLW `.view` files. It also supplies
-JavaScript syntax diagnostics and `require()` definitions for `.js` files. It
-runs from a Movian checkout, so each configuration below assumes the editor
-and checkout share a Linux or WSL environment.
+JavaScript syntax diagnostics, metadata-backed completion, and `require()`
+definitions for `.js` files. It runs from a Movian checkout, so each
+configuration below assumes the editor and checkout share a Linux or WSL
+environment.
 
 ## Prepare the checkout
 
-From the repository root, build the analyzer that the server delegates syntax
-and semantic checks to, then run the preflight:
+`movian-lsp` consumes the `movian-analyze` executable built by the sibling
+analyzer checkout; this branch intentionally does not copy the analyzer source.
+Build that product, then point the LSP checkout at it:
 
 ```sh
-./support/configure-linux-debug.sh
 make BUILD=debug -j$(nproc) movian-analyze
+export MOVIAN_ANALYZER=/path/to/analyzer/build.debug/movian-analyze
+```
+
+The default remains `build.debug/movian-analyze` under the LSP checkout for
+combined workspaces. `--analyzer`, `--metadata`, `--skin`, and
+`--repository-root` provide explicit launcher overrides; the corresponding
+`MOVIAN_ANALYZER`, `MOVIAN_METADATA`, `MOVIAN_SKIN`, and `MOVIAN_LSP_ROOT`
+environment variables are useful to editor configurations.
+
+Run the preflight from the operational `devtools-mdev` checkout:
+
+```sh
 ./support/devtools/mdev lsp doctor
 ```
 
-The doctor requires Python 3.10 or newer, confirms that
-`generated/movian-metadata.json` is fresh, performs a framed stdio LSP
-`initialize`/`shutdown` exchange, and probes JavaScript diagnostics plus a
-`require('movian/page')` definition. Re-run it after changing the build or
-metadata inputs.
+The doctor requires Python 3.10 or newer, confirms that the selected analyzer
+product is executable, confirms that `generated/movian-metadata.json` is fresh,
+performs a framed stdio LSP `initialize`/`shutdown` exchange, and probes
+JavaScript diagnostics plus a `require('movian/page')` definition. Re-run it
+after changing the build or metadata inputs.
 
 ## JavaScript support and limits
 
@@ -34,13 +47,19 @@ and labels that diagnostic source `duktape`. Its accepted JavaScript syntax is
 therefore the syntax supported by Movian's Duktape, not the syntax of a current
 browser or Node.js runtime.
 
+Completion is derived from the same committed `js` metadata artifact used by
+the plugin API tooling. It covers `Plugin`, `Core`, `showtime`, and `plugin`
+members, CommonJS and native module paths, module exports, settings receiver
+members, and metadata-declared prototype shapes. Labels are prefix-filtered;
+private or runtime-only facts are not synthesized. `generated/movian-api.d.ts`
+remains the declaration-file authority for TypeScript-aware editors.
+
 Definition works only when the cursor is on the quoted string literal of a
 direct `require('module')` call. Generated `js.modules` metadata resolves
 Movian IDs such as `movian/page` and `native/fs`; `./` and `../` targets resolve
 only to existing `.js` files that remain inside the workspace or skin root.
 Dynamic arguments, escaped string literals, package discovery, JavaScript AST
-features, completion, type declarations, and plugin-manifest validation are
-outside this server's scope.
+features, and plugin-manifest validation are outside this server's scope.
 
 The project `.lsp.json` associates `movian-lsp` with both `.view` and `.js`.
 For other editors, add JavaScript to the client-side file-type association if
