@@ -1,0 +1,1239 @@
+{
+  "binary": {
+    "buildId": "ed729abba8abb35362bdc05137a74e9abc46e983",
+    "definedSymbolCount": 24192,
+    "name": "movian",
+    "sha256": "9c15c827bb7f88130756248416171ea24eb686d7b5a06e415f5d1303a3c84665"
+  },
+  "categories": [
+    "core-init",
+    "shutdown-hook",
+    "init-system",
+    "init-helper",
+    "thread-create",
+    "plugin",
+    "es-plugin",
+    "es-context",
+    "es-resource",
+    "navigator",
+    "glw",
+    "backend",
+    "service",
+    "prop-subscribe",
+    "callout",
+    "cache"
+  ],
+  "categoryCounts": {
+    "backend": 3,
+    "cache": 8,
+    "callout": 4,
+    "core-init": 6,
+    "es-context": 4,
+    "es-plugin": 2,
+    "es-resource": 4,
+    "glw": 7,
+    "init-helper": 22,
+    "init-system": 3,
+    "navigator": 3,
+    "plugin": 3,
+    "prop-subscribe": 2,
+    "service": 3,
+    "shutdown-hook": 2,
+    "thread-create": 2
+  },
+  "count": 78,
+  "description": "Lifecycle contracts filtered and evidenced against one selected debug binary; missing symbols remain explicit and are never armed.",
+  "entries": [
+    {
+      "binaryEvidence": {
+        "address": "0x262ed0",
+        "size": 111,
+        "type": "T"
+      },
+      "category": "core-init",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "app_shutdown",
+      "pairedWith": null,
+      "phase": "shutdown",
+      "symbol": "app_shutdown"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x1e91a0",
+        "size": 21,
+        "type": "T"
+      },
+      "category": "core-init",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "arch_exit",
+      "pairedWith": null,
+      "phase": "shutdown",
+      "symbol": "arch_exit"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x263150",
+        "size": 127,
+        "type": "t"
+      },
+      "category": "core-init",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "do_shutdown",
+      "pairedWith": null,
+      "phase": "shutdown",
+      "symbol": "do_shutdown"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x262f40",
+        "size": 528,
+        "type": "T"
+      },
+      "category": "core-init",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "main_fini",
+      "pairedWith": "main_init",
+      "phase": "shutdown",
+      "symbol": "main_fini"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x261f40",
+        "size": 1513,
+        "type": "T"
+      },
+      "category": "core-init",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "main_init",
+      "pairedWith": "main_fini",
+      "phase": "startup",
+      "symbol": "main_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x261bf0",
+        "size": 25,
+        "type": "t"
+      },
+      "category": "core-init",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "shutdown_eject",
+      "pairedWith": null,
+      "phase": "shutdown",
+      "symbol": "shutdown_eject"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x262e10",
+        "size": 79,
+        "type": "T"
+      },
+      "category": "shutdown-hook",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "shutdown_hook_add",
+      "pairedWith": "shutdown_hook_run",
+      "phase": "registration",
+      "symbol": "shutdown_hook_add"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x262e60",
+        "size": 65,
+        "type": "T"
+      },
+      "category": "shutdown-hook",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "shutdown_hook_run",
+      "pairedWith": "shutdown_hook_add",
+      "phase": "shutdown",
+      "symbol": "shutdown_hook_run"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x261ec0",
+        "size": 71,
+        "type": "T"
+      },
+      "category": "init-system",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "fini_group",
+      "pairedWith": "init_group",
+      "phase": "shutdown",
+      "symbol": "fini_group"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x261e70",
+        "size": 71,
+        "type": "T"
+      },
+      "category": "init-system",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "init_group",
+      "pairedWith": "fini_group",
+      "phase": "startup",
+      "symbol": "init_group"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x261df0",
+        "size": 122,
+        "type": "T"
+      },
+      "category": "init-system",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "inithelper_register",
+      "pairedWith": null,
+      "phase": "registration",
+      "symbol": "inithelper_register"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x284e60",
+        "size": 45,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "group": "INIT_GROUP_ASYNCIO",
+      "id": "asyncio_http_init",
+      "initFn": "asyncio_http_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "asyncio_http_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2129d0",
+        "size": 194,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "finiFn": "ecmascript_fini",
+      "group": "INIT_GROUP_API",
+      "id": "ecmascript_fini",
+      "pairedWith": "ecmascript_init",
+      "phase": "shutdown",
+      "priority": 0,
+      "symbol": "ecmascript_fini"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x212d50",
+        "size": 129,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "finiFn": "ecmascript_fini",
+      "group": "INIT_GROUP_API",
+      "id": "ecmascript_init",
+      "initFn": "ecmascript_init",
+      "pairedWith": "ecmascript_fini",
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "ecmascript_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2bdd50",
+        "size": 1255,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "group": "INIT_GROUP_GRAPHICS",
+      "id": "fontstash_init",
+      "initFn": "fontstash_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "fontstash_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2c1320",
+        "size": 266,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "group": "INIT_GROUP_GRAPHICS",
+      "id": "freetype_init",
+      "initFn": "freetype_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "freetype_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x287d10",
+        "size": 423,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "group": "INIT_GROUP_ASYNCIO",
+      "id": "ftp_server_init",
+      "initFn": "ftp_server_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "ftp_server_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x28a3f0",
+        "size": 729,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "finiFn": "http_server_fini",
+      "group": "INIT_GROUP_ASYNCIO",
+      "id": "http_server_fini",
+      "pairedWith": "http_server_init",
+      "phase": "shutdown",
+      "priority": 0,
+      "symbol": "http_server_fini"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x289cb0",
+        "size": 173,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "finiFn": "http_server_fini",
+      "group": "INIT_GROUP_ASYNCIO",
+      "id": "http_server_init",
+      "initFn": "http_server_init",
+      "pairedWith": "http_server_fini",
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "http_server_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x1ddd80",
+        "size": 414,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "group": "INIT_GROUP_API",
+      "id": "httpcontrol_init",
+      "initFn": "httpcontrol_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "httpcontrol_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x28bc70",
+        "size": 598,
+        "type": "T"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "group": "INIT_GROUP_NET",
+      "id": "net_refresh_network_status",
+      "initFn": "net_refresh_network_status",
+      "pairedWith": null,
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "net_refresh_network_status"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2478f0",
+        "size": 130,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "group": "INIT_GROUP_ASYNCIO",
+      "id": "nmb_init",
+      "initFn": "nmb_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "nmb_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x247110",
+        "size": 56,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "group": "INIT_GROUP_NET",
+      "id": "nmb_resolver_init",
+      "initFn": "nmb_resolver_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "nmb_resolver_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2a5d40",
+        "size": 58,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "group": "INIT_GROUP_API",
+      "id": "prop_http_init",
+      "initFn": "prop_http_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "prop_http_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x28cbf0",
+        "size": 245,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "group": "INIT_GROUP_ASYNCIO",
+      "id": "routesocket_init",
+      "initFn": "routesocket_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "routesocket_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x1df750",
+        "size": 61,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "group": "INIT_GROUP_API",
+      "id": "screenshot_init",
+      "initFn": "screenshot_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "screenshot_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x28e4f0",
+        "size": 141,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "finiFn": "ssdp_shutdown",
+      "group": "INIT_GROUP_ASYNCIO",
+      "id": "ssdp_shutdown",
+      "pairedWith": null,
+      "phase": "shutdown",
+      "priority": 10,
+      "symbol": "ssdp_shutdown"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x1e3060",
+        "size": 186,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "finiFn": "stpp_discover_fini",
+      "group": "INIT_GROUP_ASYNCIO",
+      "id": "stpp_discover_fini",
+      "pairedWith": "stpp_discover_init",
+      "phase": "shutdown",
+      "priority": 10,
+      "symbol": "stpp_discover_fini"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x1e29a0",
+        "size": 477,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "finiFn": "stpp_discover_fini",
+      "group": "INIT_GROUP_ASYNCIO",
+      "id": "stpp_discover_init",
+      "initFn": "stpp_discover_init",
+      "pairedWith": "stpp_discover_fini",
+      "phase": "startup",
+      "priority": 10,
+      "symbol": "stpp_discover_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x312180",
+        "size": 18,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "group": "INIT_GROUP_NET",
+      "id": "usage_early_init",
+      "initFn": "usage_early_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "usage_early_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x312500",
+        "size": 195,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "finiFn": "usage_fini",
+      "group": "INIT_GROUP_API",
+      "id": "usage_fini",
+      "pairedWith": "usage_init",
+      "phase": "shutdown",
+      "priority": 0,
+      "symbol": "usage_fini"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x312170",
+        "size": 5,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "finiFn": "usage_fini",
+      "group": "INIT_GROUP_API",
+      "id": "usage_init",
+      "initFn": "usage_init",
+      "pairedWith": "usage_fini",
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "usage_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x1e0680",
+        "size": 42,
+        "type": "t"
+      },
+      "category": "init-helper",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "group": "INIT_GROUP_API",
+      "id": "ws_init",
+      "initFn": "ws_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "priority": 0,
+      "symbol": "ws_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x1ec1b0",
+        "size": 225,
+        "type": "T"
+      },
+      "category": "thread-create",
+      "confidence": "binary-symbol-confirmed",
+      "event": "create",
+      "id": "hts_thread_create_detached",
+      "pairedWith": null,
+      "phase": "runtime",
+      "symbol": "hts_thread_create_detached"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x1ec2a0",
+        "size": 303,
+        "type": "T"
+      },
+      "category": "thread-create",
+      "confidence": "binary-symbol-confirmed",
+      "event": "create",
+      "id": "hts_thread_create_joinable",
+      "pairedWith": null,
+      "phase": "runtime",
+      "symbol": "hts_thread_create_joinable"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x293ca0",
+        "size": 175,
+        "type": "t"
+      },
+      "category": "plugin",
+      "confidence": "binary-symbol-confirmed",
+      "event": "destroy",
+      "id": "plugin_unload",
+      "pairedWith": "plugin_load",
+      "phase": "runtime",
+      "symbol": "plugin_unload"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x297bf0",
+        "size": 2357,
+        "type": "T"
+      },
+      "category": "plugin",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "plugins_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "symbol": "plugins_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x298530",
+        "size": 278,
+        "type": "T"
+      },
+      "category": "plugin",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "plugins_reload_dev_plugin",
+      "pairedWith": null,
+      "phase": "runtime",
+      "symbol": "plugins_reload_dev_plugin"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x212e20",
+        "size": 866,
+        "type": "T"
+      },
+      "category": "es-plugin",
+      "confidence": "binary-symbol-confirmed",
+      "event": "create",
+      "id": "ecmascript_plugin_load",
+      "pairedWith": "ecmascript_plugin_unload",
+      "phase": "runtime",
+      "symbol": "ecmascript_plugin_load"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x213270",
+        "size": 251,
+        "type": "T"
+      },
+      "category": "es-plugin",
+      "confidence": "binary-symbol-confirmed",
+      "event": "destroy",
+      "id": "ecmascript_plugin_unload",
+      "pairedWith": "ecmascript_plugin_load",
+      "phase": "runtime",
+      "symbol": "ecmascript_plugin_unload"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2127a0",
+        "size": 123,
+        "type": "T"
+      },
+      "category": "es-context",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "es_context_begin",
+      "pairedWith": "es_context_end",
+      "phase": "runtime",
+      "symbol": "es_context_begin"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x211e80",
+        "size": 947,
+        "type": "t"
+      },
+      "category": "es-context",
+      "confidence": "binary-symbol-confirmed",
+      "event": "create",
+      "id": "es_context_create",
+      "pairedWith": "es_context_release",
+      "phase": "runtime",
+      "symbol": "es_context_create"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x212870",
+        "size": 339,
+        "type": "T"
+      },
+      "category": "es-context",
+      "confidence": "binary-symbol-confirmed",
+      "event": "destroy",
+      "id": "es_context_end",
+      "pairedWith": "es_context_begin",
+      "phase": "runtime",
+      "symbol": "es_context_end"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x212780",
+        "size": 21,
+        "type": "T"
+      },
+      "category": "es-context",
+      "confidence": "binary-symbol-confirmed",
+      "event": "destroy",
+      "id": "es_context_release",
+      "pairedWith": "es_context_create",
+      "phase": "runtime",
+      "symbol": "es_context_release"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x212680",
+        "size": 60,
+        "type": "T"
+      },
+      "category": "es-resource",
+      "confidence": "binary-symbol-confirmed",
+      "event": "create",
+      "id": "es_resource_create",
+      "pairedWith": "es_resource_destroy",
+      "phase": "runtime",
+      "symbol": "es_resource_create"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2126c0",
+        "size": 25,
+        "type": "T"
+      },
+      "category": "es-resource",
+      "confidence": "binary-symbol-confirmed",
+      "event": "destroy",
+      "id": "es_resource_destroy",
+      "pairedWith": "es_resource_create",
+      "phase": "runtime",
+      "symbol": "es_resource_destroy"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x212620",
+        "size": 85,
+        "type": "T"
+      },
+      "category": "es-resource",
+      "confidence": "binary-symbol-confirmed",
+      "event": "create",
+      "id": "es_resource_link",
+      "pairedWith": "es_resource_unlink",
+      "phase": "runtime",
+      "symbol": "es_resource_link"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2126e0",
+        "size": 32,
+        "type": "T"
+      },
+      "category": "es-resource",
+      "confidence": "binary-symbol-confirmed",
+      "event": "destroy",
+      "id": "es_resource_unlink",
+      "pairedWith": "es_resource_link",
+      "phase": "runtime",
+      "symbol": "es_resource_unlink"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x284a30",
+        "size": 96,
+        "type": "T"
+      },
+      "category": "navigator",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "nav_fini",
+      "pairedWith": "nav_init",
+      "phase": "shutdown",
+      "symbol": "nav_fini"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x284750",
+        "size": 728,
+        "type": "T"
+      },
+      "category": "navigator",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "nav_init",
+      "pairedWith": "nav_fini",
+      "phase": "startup",
+      "symbol": "nav_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x283b40",
+        "size": 452,
+        "type": "t"
+      },
+      "category": "navigator",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "nav_open0",
+      "pairedWith": null,
+      "phase": "runtime",
+      "symbol": "nav_open0"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2c5c70",
+        "size": 69,
+        "type": "T"
+      },
+      "category": "glw",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "glw_flush",
+      "pairedWith": null,
+      "phase": "shutdown",
+      "symbol": "glw_flush"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2c50e0",
+        "size": 34,
+        "type": "T"
+      },
+      "category": "glw",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "glw_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "symbol": "glw_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2c50b0",
+        "size": 46,
+        "type": "T"
+      },
+      "category": "glw",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "glw_init2",
+      "pairedWith": null,
+      "phase": "startup",
+      "symbol": "glw_init2"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2e19f0",
+        "size": 1231,
+        "type": "T"
+      },
+      "category": "glw",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "glw_settings_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "symbol": "glw_settings_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2c66a0",
+        "size": 85,
+        "type": "T"
+      },
+      "category": "glw",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "glw_unload_universe",
+      "pairedWith": null,
+      "phase": "shutdown",
+      "symbol": "glw_unload_universe"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2f1970",
+        "size": 72,
+        "type": "T"
+      },
+      "category": "glw",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "glw_view_cache_flush",
+      "pairedWith": null,
+      "phase": "shutdown",
+      "symbol": "glw_view_cache_flush"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2f1730",
+        "size": 568,
+        "type": "T"
+      },
+      "category": "glw",
+      "confidence": "binary-symbol-confirmed",
+      "event": "create",
+      "id": "glw_view_create",
+      "pairedWith": null,
+      "phase": "runtime",
+      "symbol": "glw_view_create"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x1eecd0",
+        "size": 45,
+        "type": "T"
+      },
+      "category": "backend",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "backend_fini",
+      "pairedWith": "backend_init",
+      "phase": "shutdown",
+      "symbol": "backend_fini"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x1eec50",
+        "size": 117,
+        "type": "T"
+      },
+      "category": "backend",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "backend_init",
+      "pairedWith": "backend_fini",
+      "phase": "startup",
+      "symbol": "backend_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x1eeb80",
+        "size": 42,
+        "type": "T"
+      },
+      "category": "backend",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "backend_register",
+      "pairedWith": null,
+      "phase": "registration",
+      "symbol": "backend_register"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2b0be0",
+        "size": 41,
+        "type": "T"
+      },
+      "category": "service",
+      "confidence": "binary-symbol-confirmed",
+      "event": "create",
+      "id": "service_create",
+      "pairedWith": "service_destroy",
+      "phase": "runtime",
+      "symbol": "service_create"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2b0b10",
+        "size": 198,
+        "type": "T"
+      },
+      "category": "service",
+      "confidence": "binary-symbol-confirmed",
+      "event": "destroy",
+      "id": "service_destroy",
+      "pairedWith": "service_create",
+      "phase": "runtime",
+      "symbol": "service_destroy"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2b0900",
+        "size": 519,
+        "type": "T"
+      },
+      "category": "service",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "service_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "symbol": "service_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x29ff70",
+        "size": 6776,
+        "type": "T"
+      },
+      "category": "prop-subscribe",
+      "confidence": "binary-symbol-confirmed",
+      "event": "create",
+      "id": "prop_subscribe_ex",
+      "pairedWith": "prop_unsubscribe",
+      "phase": "runtime",
+      "symbol": "prop_subscribe_ex"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2a1c30",
+        "size": 65,
+        "type": "T"
+      },
+      "category": "prop-subscribe",
+      "confidence": "binary-symbol-confirmed",
+      "event": "destroy",
+      "id": "prop_unsubscribe",
+      "pairedWith": "prop_subscribe",
+      "phase": "runtime",
+      "symbol": "prop_unsubscribe"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x27a280",
+        "size": 377,
+        "type": "t"
+      },
+      "category": "callout",
+      "confidence": "binary-symbol-confirmed",
+      "event": "create",
+      "id": "callout_arm0",
+      "pairedWith": "callout_disarm",
+      "phase": "runtime",
+      "symbol": "callout_arm0"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x27a5a0",
+        "size": 36,
+        "type": "T"
+      },
+      "category": "callout",
+      "confidence": "binary-symbol-confirmed",
+      "event": "create",
+      "id": "callout_arm_x",
+      "pairedWith": "callout_disarm",
+      "phase": "runtime",
+      "symbol": "callout_arm_x"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x27a6e0",
+        "size": 121,
+        "type": "T"
+      },
+      "category": "callout",
+      "confidence": "binary-symbol-confirmed",
+      "event": "destroy",
+      "id": "callout_disarm",
+      "pairedWith": "callout_arm0",
+      "phase": "runtime",
+      "symbol": "callout_disarm"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x27a9c0",
+        "size": 106,
+        "type": "T"
+      },
+      "category": "callout",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "callout_init",
+      "pairedWith": null,
+      "phase": "startup",
+      "symbol": "callout_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x262eb0",
+        "size": 22,
+        "type": "T"
+      },
+      "category": "cache",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "app_flush_caches",
+      "pairedWith": null,
+      "phase": "shutdown",
+      "symbol": "app_flush_caches"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x20e570",
+        "size": 65,
+        "type": "T"
+      },
+      "category": "cache",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "blobcache_fini",
+      "pairedWith": "blobcache_init",
+      "phase": "shutdown",
+      "symbol": "blobcache_fini"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x20e320",
+        "size": 584,
+        "type": "T"
+      },
+      "category": "cache",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "blobcache_init",
+      "pairedWith": "blobcache_fini",
+      "phase": "startup",
+      "symbol": "blobcache_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x24a960",
+        "size": 126,
+        "type": "T"
+      },
+      "category": "cache",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "htsmsg_store_flush",
+      "pairedWith": null,
+      "phase": "shutdown",
+      "symbol": "htsmsg_store_flush"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2103d0",
+        "size": 16,
+        "type": "T"
+      },
+      "category": "cache",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "kvstore_fini",
+      "pairedWith": "kvstore_init",
+      "phase": "shutdown",
+      "symbol": "kvstore_fini"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x2103e0",
+        "size": 306,
+        "type": "T"
+      },
+      "category": "cache",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "kvstore_init",
+      "pairedWith": "kvstore_fini",
+      "phase": "startup",
+      "symbol": "kvstore_init"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x272610",
+        "size": 16,
+        "type": "T"
+      },
+      "category": "cache",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "metadb_fini",
+      "pairedWith": "metadb_init",
+      "phase": "shutdown",
+      "symbol": "metadb_fini"
+    },
+    {
+      "binaryEvidence": {
+        "address": "0x272470",
+        "size": 412,
+        "type": "T"
+      },
+      "category": "cache",
+      "confidence": "binary-symbol-confirmed",
+      "event": "enter",
+      "id": "metadb_init",
+      "pairedWith": "metadb_fini",
+      "phase": "startup",
+      "symbol": "metadb_init"
+    }
+  ],
+  "generator": "support/devtools/gdb/inventory.py",
+  "initmeUseCount": 22,
+  "missingCandidates": [
+    {
+      "category": "navigator",
+      "id": "nav_reload_current",
+      "reason": "not-defined-in-selected-binary",
+      "symbol": "nav_reload_current"
+    },
+    {
+      "category": "plugin",
+      "id": "plugin_load",
+      "reason": "not-defined-in-selected-binary",
+      "symbol": "plugin_load"
+    },
+    {
+      "category": "prop-subscribe",
+      "id": "prop_courier_create",
+      "reason": "not-defined-in-selected-binary",
+      "symbol": "prop_courier_create"
+    },
+    {
+      "category": "prop-subscribe",
+      "id": "prop_subscribe",
+      "reason": "not-defined-in-selected-binary",
+      "symbol": "prop_subscribe"
+    }
+  ],
+  "schemaVersion": 1
+}
