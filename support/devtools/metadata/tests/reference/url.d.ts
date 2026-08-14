@@ -1,0 +1,90 @@
+/**
+ * Accepted calibration fixture for url.
+ *
+ * This is a generator test oracle, not a shipped declaration package.
+ * Source: res/ecmascript/modules/url.js, with native/string calls.
+ */
+declare module 'url' {
+    /**
+     * Source: exports.format builds a URL string from a URL object.
+     */
+    export function format(urlObj: UrlObject): string;
+
+    /**
+     * Source: exports.parse is an alias to native/string.parseURL.
+     * Native metadata provides the exact two-argument call shape.
+     */
+    export function parse(
+        urlString: string,
+        parseQueryString?: boolean
+    ): ParsedUrl;
+
+    /**
+     * Source: exports.resolve is an alias to native/string.resolveURL.
+     * Native metadata provides the exact two-argument call shape.
+     */
+    export function resolve(from: string, to: string): string;
+
+    /**
+     * Source: the object `exports.format` READS. url.js:6-32 consults
+     * protocol, slashes, host, hostname, port, auth, pathname, search, query
+     * and hash, falling back where a field is absent (`d.host || (d.hostname
+     * + ...)`), so everything except the two it dereferences unguarded is
+     * optional here. This is the input shape, and it is NOT the same set that
+     * `parse` produces -- see ParsedUrl.
+     *
+     * `port` is deliberately absent. The only branch that reads it is
+     *     var host = d.host || (d.hostname + (d.port ? (':' + port) : ''));
+     * which tests `d.port` and then concatenates the undeclared identifier
+     * `port`, so supplying a port without a host raises ReferenceError, and
+     * supplying one WITH a host is silently ignored. There is no input for
+     * which this option does anything useful, so the calibration type must
+     * not offer it. `ParsedUrl` still carries `port`, which parseURL really
+     * does produce.
+     *
+     * `path` is absent for the same reason: url.js never reads `d.path` -- it
+     * always builds the result from the required `pathname` -- so offering it
+     * as a format input would certify another option that cannot affect the
+     * output. It survives on `ParsedUrl`, which is where parseURL emits it.
+     *
+     * `query` values are deliberately `unknown`: url.js hands each one to
+     * native/string.paramEscape, whose es_escape reads it with
+     * duk_safe_to_string, so `{query: {page: 2}}` really does produce
+     * `page=2`. Restricting them to string would reject a supported path.
+     */
+    interface UrlObject {
+        protocol: string;
+        slashes?: boolean;
+        host?: string;
+        hostname?: string;
+        pathname: string;
+        search?: string;
+        query?: Record<string, unknown>;
+        hash?: string;
+        auth?: string;
+    }
+
+    /**
+     * Source: the object native/string.parseURL BUILDS
+     * (src/ecmascript/es_string.c, es_parseURL). `protocol`, `hostname`,
+     * `path` and `pathname` are put unconditionally; `auth` only `if(*auth)`,
+     * `port` only `if(port != -1)`, `hash` only `if(hash != NULL)`, and
+     * `search`/`query` only when a query string exists (and `query` only when
+     * the parseQueryString flag is set).
+     *
+     * Crucially it never produces `host` or `slashes` -- those are
+     * format-side inputs only -- so a single interface for both directions
+     * would let `url.parse(s).host` type-check and be undefined at runtime.
+     */
+    interface ParsedUrl {
+        protocol: string;
+        hostname: string;
+        path: string;
+        pathname: string;
+        auth?: string;
+        port?: number;
+        hash?: string;
+        search?: string;
+        query?: Record<string, string>;
+    }
+}

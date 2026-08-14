@@ -3516,7 +3516,12 @@ def cmd_generate(_args: argparse.Namespace) -> int:
     ARTIFACT_PATH.parent.mkdir(parents=True, exist_ok=True)
     ARTIFACT_PATH.write_text(dumps(artifact), encoding="utf-8")
     print("wrote %s" % rel(ARTIFACT_PATH))
+    DTS_PATH.write_text(render_dts(artifact), encoding="utf-8")
+    print("wrote %s" % rel(DTS_PATH))
+    V1_DTS_PATH.write_text(render_v1_dts(artifact), encoding="utf-8")
+    print("wrote %s" % rel(V1_DTS_PATH))
     return 0
+
 
 
 
@@ -3529,24 +3534,45 @@ def cmd_check(args: argparse.Namespace) -> int:
               % ARTIFACT_PATH, file=sys.stderr)
         return 1
     committed = json.loads(ARTIFACT_PATH.read_text(encoding="utf-8"))
-    fresh_norm = _strip_revision(fresh)
-    committed_norm = _strip_revision(committed)
-    if fresh_norm == committed_norm:
+    metadata_ok = (_strip_revision(fresh) == _strip_revision(committed))
+    dts_ok = False
+    v1_ok = False
+    if DTS_PATH.is_file():
+        dts_ok = (_strip_dts_revision(render_dts(fresh))
+                  == _strip_dts_revision(
+                      DTS_PATH.read_text(encoding="utf-8")))
+    if V1_DTS_PATH.is_file():
+        v1_ok = (_strip_dts_revision(render_v1_dts(fresh))
+                 == _strip_dts_revision(
+                     V1_DTS_PATH.read_text(encoding="utf-8")))
+    if metadata_ok and dts_ok and v1_ok:
         if args.json:
-            print(json.dumps({"metadata": "ok"}, indent=2))
+            print(json.dumps({"metadata": "ok", "dts": "ok",
+                              "dtsV1": "ok"}, indent=2))
         else:
             print("METADATA OK (movianRevision: committed=%s current=%s)"
                   % (committed.get("movianRevision"),
                      fresh.get("movianRevision")))
+            print("DTS OK")
+            print("DTS V1 OK")
         return 0
 
-    diff = diff_artifacts(committed_norm, fresh_norm)
+    result: dict[str, Any] = {
+        "metadata": "ok" if metadata_ok else "drift",
+        "dts": "ok" if dts_ok else "drift",
+        "dtsV1": "ok" if v1_ok else "drift",
+    }
+    if not metadata_ok:
+        result["diff"] = diff_artifacts(
+            _strip_revision(committed), _strip_revision(fresh))
     if args.json:
-        print(json.dumps({"metadata": "drift", "diff": diff},
-                         ensure_ascii=False, indent=2, sort_keys=True))
+        print(json.dumps(result, ensure_ascii=False, indent=2,
+                         sort_keys=True))
     else:
-        print("METADATA DRIFT")
-        for line in format_diff(diff):
+        for key, value in result.items():
+            if key != "diff" and value != "ok":
+                print("%s DRIFT" % key.upper())
+        for line in format_diff(result.get("diff", {})):
             print(line)
     return 1
 def _without_line(record: dict[str, Any]) -> dict[str, Any]:
