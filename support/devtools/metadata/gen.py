@@ -1120,15 +1120,16 @@ def _returned_shape(region: str) -> str | dict[str, Any] | None:
     # to be a mapped array of the same element: a method answering an array on
     # one path and a bare node on another has no single type, and guessing one
     # is how a declaration starts inventing errors.
+    returns = _own_returns(region)
     elements = set()
     mapped = 0
-    for statement in _own_returns(region):
+    for statement in returns:
         element = _mapped_element_shape(statement)
         if element is not None:
             mapped += 1
             elements.add(element)
     if mapped:
-        if shapes or len(elements) != 1 or mapped != len(_own_returns(region)):
+        if shapes or len(elements) != 1 or mapped != len(returns):
             return None
         return {"kind": "array", "element": next(iter(elements))}
 

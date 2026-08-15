@@ -91,6 +91,13 @@ void unguardedLoad; void unguardedStorage;
 // plugin_examples/02-intermediate/02-html-parser called `getAttribute` through
 // exactly this path at four sites, type-checked clean, and rendered an
 // `openerror` until it was fixed by hand (#179).
+//
+// TS2551 rather than TS2339 because `Node` declares `attributes`, which is
+// within tsc's spelling-suggestion distance of `getAttribute`. That coupling is
+// the point -- the same suggestion is what makes the diagnostic useful to a
+// plugin author -- but it means renaming `attributes` turns these two pins into
+// TS2339 and fails an otherwise-correct tree. Repin, do not delete: the pin is
+// then telling the truth about a real change to the surface.
 const viaSelector = htmlneg.parse('<a/>').root
     .getElementsByTagName('a')[0].getAttribute('href');  // EXPECT_TS2551
 // The alias resolves to the same method and must inherit the return type.
