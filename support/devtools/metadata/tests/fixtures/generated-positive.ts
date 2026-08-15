@@ -204,3 +204,18 @@ void loadPath; void storagePath; void pluginPath;
 
 void kvstore; void settingsId; void settingsNodes; void rows; void syncBody;
 void scrobbler;
+
+// The other half of the #179 pin in the negative fixture: giving a selector a
+// real element type must not reject what the runtime allows. `Node[]` has to
+// behave as an array -- length, indexing, and the iteration a scraping plugin
+// actually writes -- or the declaration trades a silent hole for invented
+// errors.
+import htmlpos = require('movian/html');
+const anchors = htmlpos.parse('<a href="x">y</a>').root.getElementsByTagName('a');
+const anchorCount: number = anchors.length;
+const firstAnchor = anchors[0];
+const nestedAnchors = firstAnchor.getElementsByClassName('c');
+anchors.forEach(function (anchor) { void anchor.textContent; });
+const anchorTexts = anchors.map(function (anchor) { return anchor.textContent; });
+
+void anchorCount; void firstAnchor; void nestedAnchors; void anchorTexts;
