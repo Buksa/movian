@@ -743,7 +743,12 @@ def _uses_arguments(region: str) -> bool:
     return ARGUMENTS_RE.search(_own_body(region)) is not None
 
 
-RETURN_KW_RE = re.compile(r"\breturn\b")
+# The statement keyword, never a property of that name. `\b` alone matches the
+# `return` in `iterator.return()`, which would be collected as a return
+# statement and, being last and unguarded, would satisfy `_always_returns` for a
+# function that plainly falls through.
+RETURN_KW_RE = re.compile(r"(?<![.\w$])return\b")
+VALUELESS_RETURN_RE = re.compile(r"return\s*\Z")
 
 
 def _statement_end(text: str, start: int) -> int:
@@ -791,7 +796,18 @@ def _returns_after(text: str, open_brace: int) -> list[str]:
     `return` to the outer function. So track which function each `return`
     belongs to, and keep the text.
     """
-    statements: list[str] = []
+    return [text[start:end]
+            for start, end in _scan_returns(text, open_brace)[0]]
+
+
+def _scan_returns(text: str, open_brace: int) -> tuple[list[tuple[int, int]], int]:
+    """`(spans of the block's own returns, index of its closing brace)`.
+
+    Offsets rather than text, because two questions need them: what each return
+    says, and where it sits relative to everything else in the body.
+    """
+    spans: list[tuple[int, int]] = []
+    close = len(text)
     depth = 0
     nested_at: int | None = None
     index = open_brace
@@ -802,6 +818,7 @@ def _returns_after(text: str, open_brace: int) -> list[str]:
         elif char == "}":
             depth -= 1
             if depth == 0:
+                close = index
                 break
             if nested_at is not None and depth <= nested_at:
                 nested_at = None
@@ -809,24 +826,103 @@ def _returns_after(text: str, open_brace: int) -> list[str]:
             nested_at = depth
         elif nested_at is None and RETURN_KW_RE.match(text, index):
             end = _statement_end(text, index)
-            statements.append(text[index:end])
+            spans.append((index, end))
             # Resume ON the terminator, not past it: a statement that ended at
             # the block's `}` still has to close the depth it was found in.
             index = end
             continue
         index += 1
-    return statements
+    return spans, close
+
+
+GUARD_KW_RE = re.compile(
+    r"\b(?:if|else|for|while|do|switch|case|default|try|catch|finally)\b")
+
+
+def _always_returns(text: str, open_brace: int) -> bool:
+    """Whether the block at `open_brace` must reach a `return <value>`.
+
+    The question `_returned_shape` was not asking. It read every return in a
+    body and required them to agree, which says nothing about the path that
+    returns *nothing*: `function (n) { if (n) return new Node(n); }` has one
+    return, it agrees with itself, and a falsey `n` yields `undefined` anyway
+    (movian#190).
+
+    Approximated, deliberately, by two textual facts about the LAST own return:
+
+    * nothing but whitespace and `;` separates it from the block's closing
+      brace -- so it is the final statement, and a `return` nested inside an
+      `if { ... }` block fails here because the block's own `}` intervenes;
+    * nothing but whitespace separates it from the previous statement boundary
+      (`;`, `{` or `}`) -- so an unbraced `if (n) return ...;` fails, which the
+      first test cannot see because such a return has no closing brace of its
+      own.
+
+    An approximation is correct here only because it errs toward `any`, which
+    is what every other rule in this file already does when the evidence is not
+    plain. `if (a) return X; else return X;` is refused although it is sound;
+    nothing in `res/ecmascript/modules/**` is written that way, and the answer
+    when one is would be `any` until this gets smarter -- never a wrong type.
+    """
+    spans, close = _scan_returns(text, open_brace)
+    if not spans:
+        return False
+    start, end = spans[-1]
+    # A bare `return;` as the last statement IS reached and yields `undefined`,
+    # so a body ending in one has no value type however well its other returns
+    # agree -- and the scalar scan below reads `return new Item(this)` right
+    # past it.
+    if VALUELESS_RETURN_RE.match(text[start:end].strip()):
+        return False
+    if text[end:close].replace(";", "").strip():
+        return False
+    return GUARD_KW_RE.search(text[_statement_start(text, start, open_brace):start]) is None
+
+
+def _statement_start(text: str, index: int, floor: int) -> int:
+    """Where the statement containing `index` begins: just past the previous
+    `;`, `{` or `}` at this nesting level.
+
+    Parenthesised groups are stepped over whole, because a control header
+    carries its own semicolons -- `for (var i = 0; i < n; i++) return x;` would
+    otherwise stop the scan inside the header, hiding the `for` that makes the
+    return conditional.
+    """
+    cursor = index - 1
+    while cursor > floor:
+        char = text[cursor]
+        if char == ")":
+            depth = 0
+            while cursor > floor:
+                if text[cursor] == ")":
+                    depth += 1
+                elif text[cursor] == "(":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                cursor -= 1
+            cursor -= 1
+            continue
+        if char in ";{}":
+            break
+        cursor -= 1
+    return cursor + 1
+
+
+def _own_block(region: str) -> int | None:
+    """The offset of the opening brace of the function assigned at the head of
+    `region`, or `None` when `region` does not open with one."""
+    match = COMMONJS_FUNCTION_RE.search(region)
+    if match is None:
+        return None
+    open_brace = region.find("{", match.end())
+    return None if open_brace < 0 else open_brace
 
 
 def _own_returns(region: str) -> list[str]:
     """`_returns_after` for the function assigned at the head of `region`."""
-    match = COMMONJS_FUNCTION_RE.search(region)
-    if match is None:
-        return []
-    open_brace = region.find("{", match.end())
-    if open_brace < 0:
-        return []
-    return _returns_after(region, open_brace)
+    open_brace = _own_block(region)
+    return [] if open_brace is None else _returns_after(region, open_brace)
 
 
 def _callback_shape_index(
@@ -1033,6 +1129,11 @@ def _mapped_element_shape(statement: str) -> str | None:
     the same reason: a wrong element type invents errors a plugin does not
     have.
 
+    The callback must also always reach one of those returns. A conditional
+    `function (n) { if (n) return new Node(n); }` produces `undefined` elements
+    on the other path, and `Node[]` would then permit unchecked member access
+    on them -- the failure #179 exists to prevent, one level in (movian#190).
+
     Deliberately narrow. Only `.map` with a literal `function` callback, whose
     result is returned directly. `.filter(...).map(...)` still works because
     only the last `.map` in the statement is read, but a mapped array stored in
@@ -1049,8 +1150,11 @@ def _mapped_element_shape(statement: str) -> str | None:
     tail = statement[_statement_end(statement, match.end() - 1) + 1:]
     if tail.strip():
         return None
+    callback_brace = match.end() - 1
+    if not _always_returns(statement, callback_brace):
+        return None
     shapes = set()
-    for returned in _returns_after(statement, match.end() - 1):
+    for returned in _returns_after(statement, callback_brace):
         constructed = re.match(
             r"return\s+new\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", returned)
         if constructed is None:
@@ -1099,19 +1203,26 @@ def _returned_shape(region: str) -> str | dict[str, Any] | None:
 
     "Every value-returning path" is exact, and narrower than it sounds: a path
     that returns NO value is not consulted. `function (n) { if (n) return new
-    Node(n); }` answers `Node`, though a falsey `n` falls through to
-    `undefined`. That looseness is the scalar form's, inherited here rather than
-    introduced -- `function (t) { if (t) return new Item(this); }` has answered
-    `Item` since #178 -- and tightening one branch without the other would put
-    the array and scalar paths on different rules. Nothing in
-    `res/ecmascript/modules/**` returns conditionally from a `.map` callback, so
-    no artifact is wrong today; the fix is a reachability check applied to both
-    branches, which is #134's general-rule question.
+    "Every value-returning path" is exact, and it used to be the whole test,
+    which left a path that returns NO value unexamined: `function (n) { if (n)
+    return new Node(n); }` answered `Node`, and `function (t) { if (t) return
+    new Item(this); }` answered `Item` from #178 onward, both yielding
+    `undefined` on the other branch. `_always_returns` now gates both forms
+    (movian#190). It cost nothing: all eleven members that carry a return type
+    end their body with an unconditional `return`, measured before the change.
 
     Returns a shape name, or `{"kind": "array", "element": name}`.
     """
     body = _own_body(region)
     if not body:
+        return None
+    # Before reading what the returns say, ask whether one is always reached.
+    # Everything below compares return VALUES and requires them to agree, which
+    # is silent about the path that returns nothing at all -- and a function
+    # that can fall out of its body yields `undefined` no matter how well its
+    # explicit returns agree (movian#190).
+    open_brace = _own_block(region)
+    if open_brace is None or not _always_returns(region, open_brace):
         return None
     direct = set(re.findall(
         r"\breturn\s+new\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", body))

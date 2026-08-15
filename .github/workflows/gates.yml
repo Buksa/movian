@@ -73,6 +73,19 @@ jobs:
       - name: gen.py --check
         run: python3 support/devtools/metadata/gen.py --check
 
+      # Rules whose effect is invisible in the artifact. `gen.py --check` above
+      # compares the emitted files, so a rule that only ever REFUSES to emit
+      # something changes nothing it can see -- movian#190 tightened return-type
+      # inference and the artifact came out byte-identical. Without this step
+      # the guard could be deleted and every gate would stay green.
+      #
+      # stdlib `unittest`, so no pip install and no new pinned dependency.
+      # Scoped to `tests/tooling/metadata` on purpose: the gdb, mdev and lsp
+      # suites beside it drive a built Movian, and this workflow deliberately
+      # does not build.
+      - name: metadata rule tests
+        run: python3 -m unittest discover -s tests/tooling/metadata -v
+
   hygiene:
     name: whitespace and merge markers
     runs-on: ubuntu-latest
