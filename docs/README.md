@@ -96,6 +96,15 @@ runtime smoke patterns, use:
 - `Guides/PUBLIC_WORK_PATTERNS.md`
 - `Guides/CODEX_PROJECT_KNOWLEDGE_WORKFLOW.md`
 
+## History
+
+Round retrospectives for issues #129–#152, explaining why parts of
+`support/devtools/` are shaped the way they are:
+
+- `history/mimo-rounds/`
+
+These are a record, not instructions — see that directory's `README.md`.
+
 ## Bundled Modules
 
 Use the bundled module update plan before changing submodule pointers or
