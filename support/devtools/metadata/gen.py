@@ -1097,6 +1097,17 @@ def _returned_shape(region: str) -> str | dict[str, Any] | None:
     shape mixed with a plain value, or an array mixed with a scalar, keeps
     `any`, because a wrong return type invents errors a plugin does not have.
 
+    "Every value-returning path" is exact, and narrower than it sounds: a path
+    that returns NO value is not consulted. `function (n) { if (n) return new
+    Node(n); }` answers `Node`, though a falsey `n` falls through to
+    `undefined`. That looseness is the scalar form's, inherited here rather than
+    introduced -- `function (t) { if (t) return new Item(this); }` has answered
+    `Item` since #178 -- and tightening one branch without the other would put
+    the array and scalar paths on different rules. Nothing in
+    `res/ecmascript/modules/**` returns conditionally from a `.map` callback, so
+    no artifact is wrong today; the fix is a reachability check applied to both
+    branches, which is #134's general-rule question.
+
     Returns a shape name, or `{"kind": "array", "element": name}`.
     """
     body = _own_body(region)
