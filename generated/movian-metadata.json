@@ -4371,6 +4371,10 @@
                 "params": [
                   "cls"
                 ],
+                "returns": {
+                  "element": "Node",
+                  "kind": "array"
+                },
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
                   "line": 59
@@ -4393,6 +4397,10 @@
                 "params": [
                   "tag"
                 ],
+                "returns": {
+                  "element": "Node",
+                  "kind": "array"
+                },
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
                   "line": 68
@@ -4405,6 +4413,10 @@
                 "params": [
                   "cls"
                 ],
+                "returns": {
+                  "element": "Node",
+                  "kind": "array"
+                },
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
                   "line": 65
@@ -4417,6 +4429,10 @@
                 "params": [
                   "tag"
                 ],
+                "returns": {
+                  "element": "Node",
+                  "kind": "array"
+                },
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
                   "line": 74
@@ -7515,6 +7531,6 @@
       }
     ]
   },
-  "movianRevision": "a4dae4ec68cafc385aa0db144e4c327873b8e00a",
+  "movianRevision": "f6308294c3463c6deeb8b7e07b5ac70607bc1a67",
   "schemaVersion": 1
 }

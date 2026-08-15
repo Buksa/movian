@@ -743,6 +743,92 @@ def _uses_arguments(region: str) -> bool:
     return ARGUMENTS_RE.search(_own_body(region)) is not None
 
 
+RETURN_KW_RE = re.compile(r"\breturn\b")
+
+
+def _statement_end(text: str, start: int) -> int:
+    """The index one past the end of the statement beginning at `start`.
+
+    Ends at the `;` that closes it, or at the `}` that closes the enclosing
+    block for a final `return x }` with no semicolon. Brackets are counted so
+    that a callback, an object literal or a call argument list inside the
+    statement does not terminate it early. Comments and string literals are
+    masked by `_masked_js_text` before any of this runs, so a `;` found here is
+    always real.
+    """
+    depth = 0
+    index = start
+    while index < len(text):
+        char = text[index]
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            if depth == 0:
+                return index
+            depth -= 1
+        elif char == ";" and depth == 0:
+            return index
+        index += 1
+    return len(text)
+
+
+def _returns_after(text: str, open_brace: int) -> list[str]:
+    """The `return` statements of the block opening at `open_brace`, verbatim,
+    excluding the returns of functions nested inside it.
+
+    The same walk as `_own_body`, asking the other question. `_own_body` needs
+    callbacks *gone* -- whether a function reads `arguments`, or has a bare
+    `return;`, must not be answered by somebody else's body. One question needs
+    them kept: in
+
+        return gumbo.findByTagName(this._gumboNode, tag).map(function (n) {
+          return new Node(n);
+        });
+
+    the only evidence of the element type is inside the callback, while the
+    statement that owns it belongs to the outer function. Deleting nested
+    bodies loses the evidence; ignoring nesting misattributes the callback's
+    `return` to the outer function. So track which function each `return`
+    belongs to, and keep the text.
+    """
+    statements: list[str] = []
+    depth = 0
+    nested_at: int | None = None
+    index = open_brace
+    while index < len(text):
+        char = text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                break
+            if nested_at is not None and depth <= nested_at:
+                nested_at = None
+        elif nested_at is None and NESTED_FUNCTION_RE.match(text, index):
+            nested_at = depth
+        elif nested_at is None and RETURN_KW_RE.match(text, index):
+            end = _statement_end(text, index)
+            statements.append(text[index:end])
+            # Resume ON the terminator, not past it: a statement that ended at
+            # the block's `}` still has to close the depth it was found in.
+            index = end
+            continue
+        index += 1
+    return statements
+
+
+def _own_returns(region: str) -> list[str]:
+    """`_returns_after` for the function assigned at the head of `region`."""
+    match = COMMONJS_FUNCTION_RE.search(region)
+    if match is None:
+        return []
+    open_brace = region.find("{", match.end())
+    if open_brace < 0:
+        return []
+    return _returns_after(region, open_brace)
+
+
 def _callback_shape_index(
         region: str, param: str, shapes: list[str]) -> tuple[int | None, bool]:
     """Which argument of `param`'s invocation carries a `new <shape>(...)`.
@@ -934,11 +1020,54 @@ def _shape_method(
     return record
 
 
-def _returned_shape(region: str) -> str | None:
+MAP_CALLBACK_RE = re.compile(
+    r"\.\s*map\s*\(\s*function\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\([^)]*\)\s*\{")
+
+
+def _mapped_element_shape(statement: str) -> str | None:
+    """The element shape of `return <expr>.map(function (x) { ... })`.
+
+    Answers only when the callback's own returns are all `new X(...)` for one
+    X. A callback that returns two shapes, or a shape on one path and a plain
+    value on another, gets nothing -- the same rule as the scalar forms, for
+    the same reason: a wrong element type invents errors a plugin does not
+    have.
+
+    Deliberately narrow. Only `.map` with a literal `function` callback, whose
+    result is returned directly. `.filter(...).map(...)` still works because
+    only the last `.map` in the statement is read, but a mapped array stored in
+    a local and returned later is not this pattern and keeps `any`.
+    """
+    match = None
+    for match in MAP_CALLBACK_RE.finditer(statement):
+        pass
+    if match is None:
+        return None
+    # The whole `.map(...)` call must BE the returned value. `return {list:
+    # xs.map(...)}` returns an object, and `return xs.map(...).length` a
+    # number; both would otherwise be read as the array.
+    tail = statement[_statement_end(statement, match.end() - 1) + 1:]
+    if tail.strip():
+        return None
+    shapes = set()
+    for returned in _returns_after(statement, match.end() - 1):
+        constructed = re.match(
+            r"return\s+new\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", returned)
+        if constructed is None:
+            return None
+        shapes.add(constructed.group(1))
+    if len(shapes) != 1:
+        return None
+    return next(iter(shapes))
+
+
+def _returned_shape(region: str) -> str | dict[str, Any] | None:
     """The shape a method returns, when it plainly returns one.
 
-    Two forms, and the second is the one that mattered: `return new Item(...)`
-    directly, and the construct-then-return that `movian/page` actually uses --
+    Three forms. `return new Item(...)` directly; the construct-then-return
+    that `movian/page` actually uses; and an array built by mapping a
+    constructor over a native result, which is how every `movian/html`
+    selector answers --
 
         Page.prototype.appendItem = function(url, type, metadata) {
           var item = new Item(this);
@@ -946,15 +1075,29 @@ def _returned_shape(region: str) -> str | None:
           return item;
         }
 
+        NodeProto.prototype.getElementByTagName = function(tag) {
+          return gumbo.findByTagName(this._gumboNode, tag).map(function(n) {
+            return new Node(n);
+          });
+        }
+
     Module exports were already scanned for the first form; prototype methods
     were scanned for neither and emitted `: any` unconditionally. That is the
     hole `Item.onSelect` lived in: with the receiver typed `any`, a plugin
-    could assign any member name and every gate stayed green (#177).
+    could assign any member name and every gate stayed green (#177). The array
+    form is the same hole one level out (#179): `interface Node` carries all
+    eleven members, so a phantom directly on a Node is caught, but every
+    selector that reaches one returned `any` and discarded the type --
+    `plugin_examples/02-intermediate/02-html-parser` called `getAttribute`
+    through exactly that path at four sites, type-checked clean, and rendered
+    an `openerror` at runtime until it was fixed by hand (`5706c66cf`).
 
     Answers only when the evidence is unambiguous -- one shape, and every
-    value-returning path agreeing. A method returning two different things, or
-    a shape mixed with a plain value, keeps `any`, because a wrong return type
-    invents errors a plugin does not have.
+    value-returning path agreeing. A method returning two different things, a
+    shape mixed with a plain value, or an array mixed with a scalar, keeps
+    `any`, because a wrong return type invents errors a plugin does not have.
+
+    Returns a shape name, or `{"kind": "array", "element": name}`.
     """
     body = _own_body(region)
     if not body:
@@ -971,6 +1114,24 @@ def _returned_shape(region: str) -> str | None:
             # `return someArgument;` or a value built another way -- no claim.
             return None
         shapes.update(constructed)
+
+    # Read from the unstripped statements, since the construction sits inside
+    # the callback that `_own_body` removed. Every return of the function has
+    # to be a mapped array of the same element: a method answering an array on
+    # one path and a bare node on another has no single type, and guessing one
+    # is how a declaration starts inventing errors.
+    elements = set()
+    mapped = 0
+    for statement in _own_returns(region):
+        element = _mapped_element_shape(statement)
+        if element is not None:
+            mapped += 1
+            elements.add(element)
+    if mapped:
+        if shapes or len(elements) != 1 or mapped != len(_own_returns(region)):
+            return None
+        return {"kind": "array", "element": next(iter(elements))}
+
     if len(shapes) != 1:
         return None
     return next(iter(shapes))
@@ -3196,6 +3357,14 @@ def render_dts(artifact: dict[str, Any]) -> str:
             returned: Any, shape_names: set[str]) -> str:
         if isinstance(returned, str):
             return returned if returned in shape_names else "any"
+        if isinstance(returned, dict) and returned.get("kind") == "array":
+            element = returned.get("element")
+            # Same rule as every other shape reference here: a name the
+            # emitted file does not declare becomes `any`, never a dangling
+            # `Foo[]` that makes the artifact itself fail to compile.
+            if isinstance(element, str) and element in shape_names:
+                return "%s[]" % element
+            return "any"
         if not isinstance(returned, dict) or \
                 returned.get("kind") != "object":
             return "any"

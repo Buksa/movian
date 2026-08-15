@@ -10,6 +10,7 @@ import xmlrpc = require('movian/xmlrpc');
 import http = require('movian/http');
 import settings = require('movian/settings');
 import page = require('movian/page');
+import htmlneg = require('movian/html');
 
 // A module the loader does not have. If this ever stops erroring, the
 // declarations have grown a wildcard and TS2307 detection is dead.
@@ -82,3 +83,18 @@ new page.Route('items:(.*)', (p) => {
 });
 
 void unguardedLoad; void unguardedStorage;
+
+// An array-returning selector must carry its element type. While these were
+// `any`, `interface Node` had all eleven members and caught a phantom written
+// directly on a node -- but every selector that REACHED a node discarded the
+// type, so the same typo one level out was silent. That is not hypothetical:
+// plugin_examples/02-intermediate/02-html-parser called `getAttribute` through
+// exactly this path at four sites, type-checked clean, and rendered an
+// `openerror` until it was fixed by hand (#179).
+const viaSelector = htmlneg.parse('<a/>').root
+    .getElementsByTagName('a')[0].getAttribute('href');  // EXPECT_TS2551
+// The alias resolves to the same method and must inherit the return type.
+const viaAlias = htmlneg.parse('<a/>').root
+    .getElementsByClassName('c')[0].getAttribute('href');  // EXPECT_TS2551
+
+void viaSelector; void viaAlias;
