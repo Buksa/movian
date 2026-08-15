@@ -105,6 +105,24 @@ Round retrospectives for issues #129–#152, explaining why parts of
 
 These are a record, not instructions — see that directory's `README.md`.
 
+## Protocol Subsystem Specifications
+
+Functional specification plus lifecycle architecture, one pair per subsystem.
+They document what the code does today, not what it should do:
+
+- `Guides/SMB_SERVER_SPECIFICATION.md` · `Guides/SMB_SERVER_LIFECYCLE_ARCHITECTURE.md`
+  — the built-in SMB2/SMB3 server
+- `Guides/SMB_NATIVE_SPECIFICATION.md` · `Guides/SMB_NATIVE_LIFECYCLE_ARCHITECTURE.md`
+  — the native SMB1/CIFS client (`src/fileaccess/smb/fa_nativesmb.c`)
+- `Guides/FTP_CLIENT_SPECIFICATION.md` · `Guides/FTP_CLIENT_LIFECYCLE_ARCHITECTURE.md`
+  — the read-only FTP client (`src/fileaccess/fa_ftp.c`)
+- `Guides/FTP_SERVER_SPECIFICATION.md` · `Guides/FTP_SERVER_LIFECYCLE_ARCHITECTURE.md`
+  — the FTP server (`src/networking/ftp_server.c`), disabled by default,
+  default port `2121`
+
+Each carries a provenance note naming the source file and commit it was checked
+against. Correct them there when the code moves.
+
 ## Bundled Modules
 
 Use the bundled module update plan before changing submodule pointers or
