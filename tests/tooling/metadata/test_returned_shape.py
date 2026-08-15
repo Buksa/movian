@@ -69,6 +69,12 @@ ANSWERED = [
      "= function(u,c,cb){ if(cb){ io.httpReq(u, c, function(e,r){}); return; }"
      " var res = io.httpReq(u,c); return new HttpResponse(res); }",
      "HttpResponse"),
+    # The paren-skipping backward scan must not swallow an ordinary call that
+    # happens to sit before the return: `foo(a, b);` ends in `)` too, and a
+    # scan that stepped over it would keep walking into whatever precedes it.
+    ("a plain call before the final return",
+     "= function(u){ var i = new Item(this); foo(a, b); return i; }",
+     "Item"),
 ]
 
 REFUSED = [
@@ -82,6 +88,14 @@ REFUSED = [
      "= function(t){ if (t) { x(); } else return new Item(this); }"),
     ("a return inside a loop",
      "= function(t){ for(var i=0;i<n;i++){ return new Item(this); } }"),
+    ("a return inside an unbraced loop -- the header carries its own `;`",
+     "= function(t){ for (var i = 0; i < n; i++) return new Item(this); }"),
+    ("the same for `while`",
+     "= function(t){ while (n--) return new Item(this); }"),
+    ("a bare `return;` as the final statement",
+     "= function(t){ if (t) return new Item(this); return; }"),
+    ("a property named `return`, which is not a return statement",
+     "= function(t){ if (t) return new Item(this); iterator.return(); }"),
     ("a body that constructs but never returns",
      "= function(t){ var i = new Item(this); }"),
     # Sound, and refused anyway. The approximation errs toward `any`, which is

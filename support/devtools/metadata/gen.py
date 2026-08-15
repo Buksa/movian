@@ -743,7 +743,12 @@ def _uses_arguments(region: str) -> bool:
     return ARGUMENTS_RE.search(_own_body(region)) is not None
 
 
-RETURN_KW_RE = re.compile(r"\breturn\b")
+# The statement keyword, never a property of that name. `\b` alone matches the
+# `return` in `iterator.return()`, which would be collected as a return
+# statement and, being last and unguarded, would satisfy `_always_returns` for a
+# function that plainly falls through.
+RETURN_KW_RE = re.compile(r"(?<![.\w$])return\b")
+VALUELESS_RETURN_RE = re.compile(r"return\s*\Z")
 
 
 def _statement_end(text: str, start: int) -> int:
@@ -863,12 +868,45 @@ def _always_returns(text: str, open_brace: int) -> bool:
     if not spans:
         return False
     start, end = spans[-1]
+    # A bare `return;` as the last statement IS reached and yields `undefined`,
+    # so a body ending in one has no value type however well its other returns
+    # agree -- and the scalar scan below reads `return new Item(this)` right
+    # past it.
+    if VALUELESS_RETURN_RE.match(text[start:end].strip()):
+        return False
     if text[end:close].replace(";", "").strip():
         return False
-    boundary = start - 1
-    while boundary > open_brace and text[boundary] not in ";{}":
-        boundary -= 1
-    return GUARD_KW_RE.search(text[boundary + 1:start]) is None
+    return GUARD_KW_RE.search(text[_statement_start(text, start, open_brace):start]) is None
+
+
+def _statement_start(text: str, index: int, floor: int) -> int:
+    """Where the statement containing `index` begins: just past the previous
+    `;`, `{` or `}` at this nesting level.
+
+    Parenthesised groups are stepped over whole, because a control header
+    carries its own semicolons -- `for (var i = 0; i < n; i++) return x;` would
+    otherwise stop the scan inside the header, hiding the `for` that makes the
+    return conditional.
+    """
+    cursor = index - 1
+    while cursor > floor:
+        char = text[cursor]
+        if char == ")":
+            depth = 0
+            while cursor > floor:
+                if text[cursor] == ")":
+                    depth += 1
+                elif text[cursor] == "(":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                cursor -= 1
+            cursor -= 1
+            continue
+        if char in ";{}":
+            break
+        cursor -= 1
+    return cursor + 1
 
 
 def _own_block(region: str) -> int | None:
