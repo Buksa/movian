@@ -60,6 +60,7 @@ git format-patch cf2f66900..feature/rtmp
 | `feature/html-parser` | 2 | `639371a02` | DOM-style aliases for the bundled HTML parser |
 | `feature/wsl2-glx` | 1 | `275c334a1` | GLX context creation under WSL2 |
 | `feature/steam-launch` | 1 | `f3f316fbd` | Skips the X11 fullscreen override path when launched from Steam |
+| `feature/plugin-examples` | 3 | `4f8796552` | Twelve worked apiversion-2 plugin examples, run against a live instance |
 
 ### Two branches are stacked
 
