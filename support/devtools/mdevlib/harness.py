@@ -11,6 +11,7 @@ import os
 import re
 import signal
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -41,6 +42,19 @@ VIEW_ERROR_RE = re.compile(r"GLW\s+\[ERROR\]:\s*Error (.+?):(\d+): (.*)$")
 # support/devtools/viewpreview/viewpreview.js); its non-error status line
 # ("viewpreview: showing ...") deliberately does not match this.
 VIEWPREVIEW_ERROR_RE = re.compile(r"viewpreview:\s*ERROR:")
+
+# `mdev reload --js` (issue #93): action ReloadData -> plugins_reload_dev_plugin()
+# (src/plugins.c:1453) logs one of these two lines per `-p` dev plugin.
+RELOAD_JS_OK_RE = re.compile(r"Reloaded dev plugin (\S+)")
+RELOAD_JS_FAIL_RE = re.compile(r"Unable to reload development plugin: (\S+)")
+
+# Compile-error fallback (issue #93 spike finding): plugin_load()
+# (src/plugins.c:611) unconditionally returns 0 for an "ecmascript" plugin
+# even when ecmascript_plugin_load() fails to compile the JS -- so
+# "Reloaded dev plugin <path>" can appear ALONGSIDE this compile-error
+# trace for the very same failed reload. Treat this line as authoritative
+# over a same-tick "Reloaded" line for the same plugin.
+RELOAD_JS_COMPILE_ERROR_RE = re.compile(r"Unable to compile (\S+) -- (.*)$")
 
 # Error-signal set ported from movian_agent.py SIGNALS["errors"],
 # extended with the GLW view error shape.
@@ -133,8 +147,9 @@ class Instance:
 # Process guard
 # ---------------------------------------------------------------------------
 
-def movian_pids() -> list[int]:
-    """All live pids whose command line invokes a movian binary.
+def movian_procs() -> list[tuple[int, str]]:
+    """All live (pid, cmdline) pairs whose command line invokes a movian
+    binary. `cmdline` is the raw `pgrep -fa` argv string (space-joined).
 
     Uses `pgrep -fa movian` and keeps only processes where some argv token's
     basename is exactly "movian" (avoids matching unrelated processes whose
@@ -147,7 +162,7 @@ def movian_pids() -> list[int]:
         ).stdout
     except OSError as error:
         raise MdevError("pgrep failed: %s" % error)
-    pids = []
+    procs = []
     for line in out.splitlines():
         try:
             pid_str, cmdline = line.split(" ", 1)
@@ -155,9 +170,51 @@ def movian_pids() -> list[int]:
             continue
         for token in cmdline.split():
             if os.path.basename(token) == "movian":
-                pids.append(int(pid_str))
+                procs.append((int(pid_str), cmdline))
                 break
-    return [p for p in pids if p != os.getpid()]
+    return [(p, c) for p, c in procs if p != os.getpid()]
+
+
+def movian_pids() -> list[int]:
+    """All live pids whose command line invokes a movian binary. See
+    `movian_procs()` for the (pid, cmdline) form used by the coexistence
+    guard."""
+    return [p for p, _ in movian_procs()]
+
+
+def classify_foreign(
+    inst: "Instance", own_pid: int | None
+) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
+    """Split live movian pids (excluding `own_pid`) into (coexistable
+    foreign, same-dir collisions) (issue #94).
+
+    A "collision" is a live movian pid whose cmdline references this
+    instance's own `--persistent` path -- i.e. something is running against
+    our state dir that `state.json` did not confirm as `own_pid` (stale/
+    corrupted state.json, or a race). That case still refuses (exit 2):
+    coexistence is only safe for genuinely separate instances/profiles.
+    Every other live movian pid is a "foreign" instance -- isolated profile,
+    dynamic port, no state.json overlap -- safe to warn-and-coexist with.
+    """
+    persistent_str = str(inst.persistent)
+    foreign: list[tuple[int, str]] = []
+    collisions: list[tuple[int, str]] = []
+    for pid, cmdline in movian_procs():
+        if pid == own_pid:
+            continue
+        if persistent_str in cmdline:
+            collisions.append((pid, cmdline))
+        else:
+            foreign.append((pid, cmdline))
+    return foreign, collisions
+
+
+def coexist_warning(foreign: list[tuple[int, str]]) -> str:
+    """One-line coexistence warning naming each foreign pid + cmdline
+    (issue #94 contract)."""
+    return "coexisting with foreign movian: " + "; ".join(
+        "pid %d (%s)" % (pid, cmdline) for pid, cmdline in foreign
+    )
 
 
 def pid_is_movian(pid: int) -> bool:
@@ -293,8 +350,10 @@ def ensure_running(name: str, plugins: list[str]) -> Instance:
     """Return a live Instance named `name`, launching one with `plugins`
     if it is not already up. Reuses an already-running instance as-is
     (its existing plugin/skin selection wins -- this does not restart
-    it even if `plugins` differs). Same foreign-pid guard as `mdev run`:
-    never touches a movian process this state dir doesn't own.
+    it even if `plugins` differs). Same coexistence guard as `mdev run`
+    (issue #94): warns and proceeds next to a foreign movian instance;
+    never touches a movian process this state dir doesn't own, and still
+    refuses (exit 2) on a same-dir collision (see `classify_foreign()`).
 
     Used by `mdev preview` (issue #87) to auto-start the viewpreview
     instance on first use. Passes the existing core CLI flag
@@ -309,17 +368,20 @@ def ensure_running(name: str, plugins: list[str]) -> Instance:
     if inst.live_pid() is not None:
         return inst
 
-    foreign = movian_pids()
-    if foreign:
+    foreign, collisions = classify_foreign(inst, None)
+    if collisions:
         raise MdevError(
-            "refusing to start: live movian process(es) not owned by "
-            "instance %r: pid %s (their state is not in %s). "
-            "Stop them from their own instance; mdev preview never "
-            "kills foreign pids." % (
-                name, ", ".join(str(p) for p in foreign), inst.state_path,
+            "refusing to start: live movian pid(s) using %s are not "
+            "confirmed as instance %r's own process by state.json: %s -- "
+            "this instance's state may be corrupted; investigate before "
+            "retrying." % (
+                inst.persistent, name,
+                ", ".join("%d (%s)" % (p, c) for p, c in collisions),
             ),
             exit_code=2,
         )
+    if foreign:
+        print(coexist_warning(foreign), file=sys.stderr)
 
     inst.ensure_dirs()
     argv = build_argv(inst, plugins, None, False, None,
@@ -477,6 +539,20 @@ def viewpreview_error_lines(text: str) -> list[str]:
             if VIEWPREVIEW_ERROR_RE.search(line)]
 
 
+def reload_js_ok_lines(text: str) -> list[str]:
+    return [line for line in text.splitlines() if RELOAD_JS_OK_RE.search(line)]
+
+
+def reload_js_fail_lines(text: str) -> list[str]:
+    """"Unable to reload development plugin" (the errbuf-reported failure
+    path) plus the duktape compile-error fallback (see
+    RELOAD_JS_COMPILE_ERROR_RE's docstring) -- either is a failure."""
+    return [
+        line for line in text.splitlines()
+        if RELOAD_JS_FAIL_RE.search(line) or RELOAD_JS_COMPILE_ERROR_RE.search(line)
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Reload / screenshot flows
 # ---------------------------------------------------------------------------
@@ -503,6 +579,99 @@ def do_reload(inst: Instance, settle: float = 2.0) -> tuple[bool, list[str]]:
             break
         time.sleep(0.2)
     return (not errors, errors)
+
+
+def plugin_dirs_from_argv(argv: list[str]) -> list[str]:
+    """Extract every `-p`/`--plugin` value from a recorded launch argv
+    (see `state.json`'s "argv"; `build_argv()` always stores an
+    `os.path.abspath()`'d value there)."""
+    dirs = []
+    i = 0
+    while i < len(argv):
+        if argv[i] in ("-p", "--plugin") and i + 1 < len(argv):
+            dirs.append(argv[i + 1])
+            i += 2
+        else:
+            i += 1
+    return dirs
+
+
+def do_reload_js(inst: Instance, settle: float = 2.0) -> tuple[bool, list[dict]]:
+    """POST ReloadData (issue #93) and grep the log delta for the
+    per-dev-plugin reload result reported by `plugins_reload_dev_plugin()`
+    (src/plugins.c:1453).
+
+    Exit criteria: ok only when every `-p` dev plugin recorded for this
+    instance reports "Reloaded dev plugin ..." AND no
+    "Unable to reload development plugin"/duktape compile-error line
+    matches that plugin's path -- see RELOAD_JS_COMPILE_ERROR_RE's
+    docstring for why the compile-error line must win over a same-tick
+    "Reloaded" line for the same plugin.
+
+    Returns (ok, per_plugin) where per_plugin is a list of
+    {"plugin": <dir or None>, "ok": bool, "detail": <matched log line>}
+    (one entry per `-p` dir, plus a trailing entry for any failure line
+    that couldn't be attributed to a specific plugin dir).
+    """
+    state = inst.load_state() or {}
+    plugin_dirs = plugin_dirs_from_argv(state.get("argv") or [])
+    if not plugin_dirs:
+        raise MdevError(
+            "instance %r has no dev plugins (-p) to reload with --js"
+            % inst.name
+        )
+
+    base = inst.base_url()
+    offset = log_size(inst)
+    result = http_request(base, "/api/input/action/ReloadData",
+                          timeout=5.0, method="POST")
+    if not result.get("ok"):
+        raise MdevError(
+            "POST /api/input/action/ReloadData failed: %s"
+            % (result.get("error") or result.get("status"))
+        )
+
+    deadline = time.monotonic() + settle
+    ok_lines: list[str] = []
+    fail_lines: list[str] = []
+    while time.monotonic() < deadline:
+        delta = read_log_delta(inst, offset)
+        ok_lines = reload_js_ok_lines(delta)
+        fail_lines = reload_js_fail_lines(delta)
+        accounted = sum(
+            1 for d in plugin_dirs
+            if any(d in line for line in ok_lines + fail_lines)
+        )
+        if accounted >= len(plugin_dirs):
+            break
+        time.sleep(0.15)
+
+    per_plugin: list[dict] = []
+    for plugin_dir in plugin_dirs:
+        matched_fail = [line for line in fail_lines if plugin_dir in line]
+        matched_ok = [line for line in ok_lines if plugin_dir in line]
+        ok = bool(matched_ok) and not matched_fail
+        per_plugin.append({
+            "plugin": plugin_dir,
+            "ok": ok,
+            "detail": matched_fail[0] if matched_fail else (
+                matched_ok[0] if matched_ok else "no reload result seen"
+            ),
+        })
+
+    # A failure line that names no known plugin dir still fails the
+    # overall reload (belt-and-suspenders; observed to always be
+    # attributable in practice -- see RELOAD_JS_COMPILE_ERROR_RE).
+    unattributed = [
+        line for line in fail_lines
+        if not any(d in line for d in plugin_dirs)
+    ]
+    if unattributed:
+        per_plugin.append({"plugin": None, "ok": False,
+                           "detail": unattributed[0]})
+
+    overall_ok = all(p["ok"] for p in per_plugin)
+    return overall_ok, per_plugin
 
 
 def sniff_image(body: bytes) -> str | None:
