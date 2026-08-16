@@ -299,10 +299,10 @@ if _HAVE_GDB:
     def _monotonic_ns():
         return time.monotonic_ns()
 
-    def _thread_info(thread=None):
+    def _thread_info():
         info = {"gdbId": None, "name": None, "osTid": None}
         try:
-            thr = thread if thread is not None else gdb.selected_thread()
+            thr = gdb.selected_thread()
             if thr is not None:
                 info["gdbId"] = thr.global_num
                 ptid = tuple(thr.ptid)
@@ -324,18 +324,6 @@ if _HAVE_GDB:
                     except OSError:
                         name = None
                 info["name"] = name
-        except Exception:
-            pass
-        return info
-
-    def _inferior_info():
-        info = {"number": None, "pid": None}
-        try:
-            inferior = gdb.selected_inferior()
-            if inferior is not None:
-                info["number"] = getattr(inferior, "num", None)
-                pid = getattr(inferior, "pid", None)
-                info["pid"] = int(pid) if pid else None
         except Exception:
             pass
         return info
@@ -438,15 +426,11 @@ if _HAVE_GDB:
     class LifecycleBP(gdb.Breakpoint):  # type: ignore[misc]
         """Internal, auto-continuing breakpoint on one lifecycle probe."""
 
-        def __init__(self, spec, category, symbol, arg_exprs=None,
-                     event="enter"):
+        def __init__(self, spec, category, symbol, arg_exprs=None):
             super().__init__(spec, internal=True)
             self.silent = True
             self.category = category
             self.symbol = symbol
-            self.event = event if event in ("enter", "create", "destroy") \
-                else "enter"
-            self.observation = "call-entry"
             self.arg_exprs = arg_exprs or []
             try:
                 self.bound = bool(self.locations)
@@ -481,11 +465,8 @@ if _HAVE_GDB:
             self._pid_written = False
             self._errors = []
             self._closed = False
-            self._inferior_exited = False
             self._exit_hook = None
-            self._thread_exit_hook = None
             self._install_exit_hook()
-            self._install_thread_exit_hook()
             self._eject_tracker = EmergencyEjectTracker()
 
         def _cap_for(self, cat):
@@ -605,11 +586,9 @@ if _HAVE_GDB:
                        and v != "0x0"}
             event_data = {
                 "category": cat,
-                "event": bp.event,
+                "event": "enter",
                 "symbol": bp.symbol,
-                "observation": bp.observation,
                 "thread": _thread_info(),
-                "inferior": _inferior_info(),
                 "arguments": arguments,
                 "objects": objects,
                 "stack": _capture_stack(6),
@@ -650,39 +629,17 @@ if _HAVE_GDB:
 
         def _install_exit_hook(self):
             def _on_exit(event):
-                self._inferior_exited = True
                 code = getattr(event, "exit_code", None)
                 self.emit({"category": "collector", "event": "inferior-exited",
                            "symbol": None, "exitCode": code,
-                           "thread": _thread_info(),
-                           "inferior": _inferior_info(),
-                           "arguments": {}, "objects": {}, "stack": []})
+                           "thread": _thread_info(), "arguments": {},
+                           "objects": {}, "stack": []})
                 self.close()
             self._exit_hook = _on_exit
             try:
                 gdb.events.exited.connect(_on_exit)
             except Exception:
                 self._exit_hook = None
-
-        def _install_thread_exit_hook(self):
-            def _on_thread_exit(event):
-                thread = getattr(event, "inferior_thread", None)
-                self.emit({
-                    "category": "thread",
-                    "event": "thread-exit",
-                    "symbol": None,
-                    "observation": "gdb-thread-event",
-                    "thread": _thread_info(thread),
-                    "inferior": _inferior_info(),
-                    "arguments": {},
-                    "objects": {},
-                    "stack": [],
-                })
-            self._thread_exit_hook = _on_thread_exit
-            try:
-                gdb.events.thread_exited.connect(_on_thread_exit)
-            except Exception:
-                self._thread_exit_hook = None
 
         def arm_from_inventory(self, inventory, categories, arg_exprs_by_symbol):
             sel = set(categories) if categories else None
@@ -695,9 +652,7 @@ if _HAVE_GDB:
                 spec = entry["symbol"]
                 arg_exprs = arg_exprs_by_symbol.get(entry["symbol"])
                 try:
-                    bp = LifecycleBP(
-                        spec, cat, entry["symbol"], arg_exprs,
-                        entry.get("event", "enter"))
+                    bp = LifecycleBP(spec, cat, entry["symbol"], arg_exprs)
                     if bp.bound:
                         self._armed.append(bp)
                     else:
@@ -735,11 +690,8 @@ if _HAVE_GDB:
                            "suppressed": self._suppressed,
                            "errors": self._errors,
                            "emergencyEject": self._eject_tracker.snapshot(),
-                           "thread": _thread_info(),
-                           "inferior": _inferior_info(),
-                           "arguments": {},
-                           "objects": {},
-                           "stack": []})
+                           "thread": _thread_info(), "arguments": {},
+                           "objects": {}, "stack": []})
             except Exception:
                 pass
             self._closed = True
@@ -749,18 +701,11 @@ if _HAVE_GDB:
                 except Exception:
                     pass
                 self._exit_hook = None
-            if self._thread_exit_hook is not None:
+            for bp in self._armed:
                 try:
-                    gdb.events.thread_exited.disconnect(self._thread_exit_hook)
+                    bp.delete()
                 except Exception:
                     pass
-                self._thread_exit_hook = None
-            if not self._inferior_exited:
-                for bp in self._armed:
-                    try:
-                        bp.delete()
-                    except Exception:
-                        pass
             self._armed = []
             try:
                 self._fh.flush()
@@ -1556,22 +1501,6 @@ def classify_run(summary, mode, leave_running):
             reasons.append("empty-jsonl")
         if j.get("bad"):
             reasons.append("jsonl-validation-errors:%d" % len(j["bad"]))
-    if not reasons:
-        summary["status"] = "PASS"
-    elif summary.get("wedge") or summary.get("wedgeClassification"):
-        summary["status"] = "WEDGE"
-    elif summary.get("timedOut") or any("timeout" in reason for reason in reasons):
-        summary["status"] = "TIMEOUT"
-    elif any(
-            reason.startswith(("jsonl-", "collector-"))
-            or reason in ("empty-jsonl", "collector-control-not-ready")
-            for reason in reasons):
-        summary["status"] = "COLLECTOR_ERROR"
-    elif any(reason in {"no-http-port", "http-not-ready", "no-inferior-pid"}
-             for reason in reasons):
-        summary["status"] = "INFRA_ERROR"
-    else:
-        summary["status"] = "FAIL"
     return (len(reasons) == 0), reasons
 
 

@@ -31,12 +31,10 @@ from mdevlib.harness import (  # noqa: E402
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(SCRIPT_DIR, "../../.."))
 COLLECTOR = os.path.join(SCRIPT_DIR, "movian_lifecycle.py")
-BINARY = os.environ.get("MOVIAN_LIFECYCLE_BINARY",
-                         os.path.join(REPO, "build.debug/movian"))
-PLUGIN = os.environ.get("MOVIAN_LIFECYCLE_PLUGIN",
-                        os.path.join(SCRIPT_DIR, "lifecycle_test_plugin"))
-INVENTORY = os.environ.get("MOVIAN_LIFECYCLE_INVENTORY",
-                           os.path.join(SCRIPT_DIR, "inventory.json"))
+BINARY = os.path.join(REPO, "build.debug/movian")
+PLUGIN = os.path.join(SCRIPT_DIR, "lifecycle_test_plugin")
+INVENTORY = os.path.join(SCRIPT_DIR, "inventory.json")
+STATE_ROOT = "/tmp/mdev"
 ARCHIVE_ROOT = "/tmp/movian-lifecycle"
 SCENARIO_CATEGORIES = (
     "core-init,shutdown-hook,init-system,init-helper,thread-create,"
@@ -184,7 +182,7 @@ def _event_evidence(events_path: str) -> tuple[set[str], list[int | None]]:
                 raise ValueError(
                     "%s:%d: malformed JSON: %s" %
                     (events_path, line_number, exc))
-            if event.get("symbol"):
+            if event.get("event") == "enter" and event.get("symbol"):
                 symbols.add(event["symbol"])
             if event.get("event") == "inferior-exited":
                 exit_codes.append(event.get("exitCode"))
@@ -289,8 +287,8 @@ def run_scenario(name: str, action_url: str, extra_movian_args: list[str],
         sys.executable, os.path.join(SCRIPT_DIR, "movian_lifecycle.py"),
         "launch", "--name", name, "--duration", "60",
         "--expect-natural-exit", "--categories", SCENARIO_CATEGORIES,
-        "--binary", BINARY, "--inventory", INVENTORY,
     ]
+    launch_args.extend(_forward_launch_args(extra_movian_args))
 
     env = dict(os.environ)
     env["DISPLAY"] = ":0"
