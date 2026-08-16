@@ -199,6 +199,9 @@ smberr_write(char *errbuf, size_t errlen, int code)
   case 0xc0000034:
     r = _("Object name not found");
     break;
+  case 0xc000000d:
+    r = _("Invalid parameters");
+    break;
   default:
     snprintf(errbuf, errlen, "NTStatus: 0x%08x", code);
     return;
@@ -723,6 +726,7 @@ smb_setup_andX(cifs_connection_t *cc, char *errbuf, size_t errlen,
   req->capabilities = htole_32(CLIENT_CAP_LARGE_READX | CLIENT_CAP_UNICODE | CLIENT_CAP_LARGE_FILES | CLIENT_CAP_NT_SMBS | CLIENT_CAP_STATUS32);
 
 
+  req->ascii_password_length = 0;
   req->wide_password_length = htole_16(password_len);
   req->bytecount = htole_16(bytecount);
 
