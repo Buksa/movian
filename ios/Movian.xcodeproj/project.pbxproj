@@ -130,6 +130,7 @@
 		6A35C1FD1C1041C000D8EA86 /* fa_vfs.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCDE61B30165D0099FB5A /* fa_vfs.c */; };
 		6A35C1FE1C1041C000D8EA86 /* fa_video.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCDE81B30165D0099FB5A /* fa_video.c */; };
 		6A35C1FF1C1041C000D8EA86 /* fa_zip.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCDEB1B30165D0099FB5A /* fa_zip.c */; };
+		19B34AAC23A928225CB1D618 /* fa_zip_path.c in Sources */ = {isa = PBXBuildFile; fileRef = 19B34AAC23A928225CB1D616 /* fa_zip_path.c */; };
 		6A35C2001C1041C000D8EA86 /* fa_zlib.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCDEC1B30165D0099FB5A /* fa_zlib.c */; };
 		6A35C2011C1041C000D8EA86 /* fileaccess.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCDEE1B30165E0099FB5A /* fileaccess.c */; };
 		6A35C2021C1041C000D8EA86 /* ftpparse.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCDF11B30165E0099FB5A /* ftpparse.c */; };
@@ -478,6 +479,7 @@
 		6ADCCE141B30165E0099FB5A /* fa_vfs.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCDE61B30165D0099FB5A /* fa_vfs.c */; };
 		6ADCCE151B30165E0099FB5A /* fa_video.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCDE81B30165D0099FB5A /* fa_video.c */; };
 		6ADCCE171B30165E0099FB5A /* fa_zip.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCDEB1B30165D0099FB5A /* fa_zip.c */; };
+		19B34AAC23A928225CB1D619 /* fa_zip_path.c in Sources */ = {isa = PBXBuildFile; fileRef = 19B34AAC23A928225CB1D616 /* fa_zip_path.c */; };
 		6ADCCE181B30165E0099FB5A /* fa_zlib.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCDEC1B30165D0099FB5A /* fa_zlib.c */; };
 		6ADCCE191B30165E0099FB5A /* fileaccess.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCDEE1B30165E0099FB5A /* fileaccess.c */; };
 		6ADCCE1A1B30165E0099FB5A /* ftpparse.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCDF11B30165E0099FB5A /* ftpparse.c */; };
@@ -962,6 +964,8 @@
 		6ADCCDE81B30165D0099FB5A /* fa_video.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = fa_video.c; sourceTree = "<group>"; };
 		6ADCCDE91B30165D0099FB5A /* fa_video.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = fa_video.h; sourceTree = "<group>"; };
 		6ADCCDEB1B30165D0099FB5A /* fa_zip.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = fa_zip.c; sourceTree = "<group>"; };
+		19B34AAC23A928225CB1D616 /* fa_zip_path.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = fa_zip_path.c; sourceTree = "<group>"; };
+		19B34AAC23A928225CB1D617 /* fa_zip_path.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = fa_zip_path.h; sourceTree = "<group>"; };
 		6ADCCDEC1B30165D0099FB5A /* fa_zlib.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = fa_zlib.c; sourceTree = "<group>"; };
 		6ADCCDED1B30165E0099FB5A /* fa_zlib.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = fa_zlib.h; sourceTree = "<group>"; };
 		6ADCCDEE1B30165E0099FB5A /* fileaccess.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = fileaccess.c; sourceTree = "<group>"; };
@@ -1659,6 +1663,8 @@
 				6ADCCDE81B30165D0099FB5A /* fa_video.c */,
 				6ADCCDE91B30165D0099FB5A /* fa_video.h */,
 				6ADCCDEB1B30165D0099FB5A /* fa_zip.c */,
+				19B34AAC23A928225CB1D616 /* fa_zip_path.c */,
+				19B34AAC23A928225CB1D617 /* fa_zip_path.h */,
 				6ADCCDEC1B30165D0099FB5A /* fa_zlib.c */,
 				6ADCCDED1B30165E0099FB5A /* fa_zlib.h */,
 				6ADCCDEE1B30165E0099FB5A /* fileaccess.c */,
@@ -2251,6 +2257,7 @@
 				6ADCCE071B30165E0099FB5A /* fa_http.c in Sources */,
 				6ADCD0031B30785D0099FB5A /* glw_view.c in Sources */,
 				6ADCCE171B30165E0099FB5A /* fa_zip.c in Sources */,
+				19B34AAC23A928225CB1D619 /* fa_zip_path.c in Sources */,
 				6ADCCCB11B3000CC0099FB5A /* rstr.c in Sources */,
 				6ADCCD641B30154E0099FB5A /* es_hook.c in Sources */,
 				6ADCCFE31B30785D0099FB5A /* glw_rotator.c in Sources */,
@@ -2625,6 +2632,7 @@
 				6A35C1EE1C1041C000D8EA86 /* fa_bundle.c in Sources */,
 				6A35C2861C10427C00D8EA86 /* prop_nodefilter.c in Sources */,
 				6A35C1FF1C1041C000D8EA86 /* fa_zip.c in Sources */,
+				19B34AAC23A928225CB1D618 /* fa_zip_path.c in Sources */,
 				6AD574EF1C15FDC600FCA17D /* main.m in Sources */,
 				6A35C22C1C1041FC00D8EA86 /* glw_throbber.c in Sources */,
 				6A35C1F21C1041C000D8EA86 /* fa_fs.c in Sources */,
