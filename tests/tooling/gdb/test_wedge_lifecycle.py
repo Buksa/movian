@@ -1048,14 +1048,27 @@ class CaptureDetailPreservationTest(unittest.TestCase):
 
                 # _COLLECTOR must be None so we get a fresh tracker snapshot
                 mod._COLLECTOR = None
+
+                # Force a schema validation error to test detail appending
+                original_validate = mod.validate_wedge_event
+                mod.validate_wedge_event = lambda event: ["forced schema error"]
+
                 response = mod._capture_wedge_request(
                     req_path, resp_path, "test-session", request)
 
+                # Restore original validator
+                mod.validate_wedge_event = original_validate
+
                 # Fix 2a: threadCount must be set from _all_thread_info()
                 self.assertEqual(response["threadCount"], 3)
-                # The original GDB error must be preserved in detail
+                # Response must have error status due to forced schema error
+                self.assertEqual(response["status"], "error")
+                # The final detail must contain both the original GDB error
+                # and the appended schema note
                 self.assertIn("PC register is not available", response["detail"])
                 self.assertIn("thread apply all bt failed", response["detail"])
+                self.assertIn("wedge event schema:", response["detail"])
+                self.assertIn("forced schema error", response["detail"])
         finally:
             if orig is not None:
                 sys.modules["gdb"] = orig
