@@ -1,0 +1,9 @@
+{
+  "type": "ecmascript",
+  "id": "examples.http-api",
+  "file": "main.js",
+  "title": "HTTP API Example",
+  "version": "1.0.0",
+  "apiversion": 2,
+  "category": "video"
+}

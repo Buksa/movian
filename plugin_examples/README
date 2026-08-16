@@ -3,6 +3,23 @@
 These examples are small development plugins. Run them from a debug build with
 an isolated profile so the examples do not modify your normal Movian settings.
 
+## Layout
+
+- `01-basic/`, `02-intermediate/`, `03-advanced/` -- twelve examples written
+  against **apiversion 2**, each declaring it explicitly in `plugin.json`.
+  Start at `01-basic/01-hello-world`.
+- The directories at this level are the older set. They carry no `apiversion`,
+  and `src/plugins.c:712` defaults that to **1**, so they load `api-v1.js` and
+  get the legacy `showtime` global. They are kept because the runtime still
+  supports that path, not as a style to copy.
+
+Every plugin here is type-checked on each run of
+`support/devtools/metadata/check_reference_dts.py`, against the declarations
+its own apiversion gets: `generated/movian-api.d.ts` for all of them, plus
+`generated/movian-api-v1.d.ts` for the version-1 set. An example that stops
+compiling against the API it demonstrates fails the build, which is the whole
+reason the corpus is worth having.
+
 Build Movian first:
 
 ```sh

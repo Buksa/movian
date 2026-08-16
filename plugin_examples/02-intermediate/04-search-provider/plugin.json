@@ -1,0 +1,9 @@
+{
+  "type": "ecmascript",
+  "id": "examples.search-provider",
+  "file": "main.js",
+  "title": "Search Provider Example",
+  "version": "1.0.0",
+  "apiversion": 2,
+  "category": "video"
+}

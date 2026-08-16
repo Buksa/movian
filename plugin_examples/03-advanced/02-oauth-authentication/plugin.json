@@ -1,0 +1,9 @@
+{
+  "type": "ecmascript",
+  "id": "examples.oauth",
+  "file": "main.js",
+  "title": "OAuth Authentication",
+  "version": "1.0.0",
+  "apiversion": 2,
+  "category": "video"
+}

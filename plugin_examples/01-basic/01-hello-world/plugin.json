@@ -1,0 +1,10 @@
+{
+  "type": "ecmascript",
+  "id": "examples.hello-world",
+  "file": "main.js",
+  "title": "Hello World",
+  "version": "1.0.0",
+  "apiversion": 2,
+  "category": "other",
+  "description": "Minimal working plugin example"
+}

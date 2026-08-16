@@ -1,0 +1,9 @@
+{
+  "type": "ecmascript",
+  "id": "examples.simple-video",
+  "file": "main.js",
+  "title": "Simple Video Example",
+  "version": "1.0.0",
+  "apiversion": 2,
+  "category": "video"
+}
