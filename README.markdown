@@ -52,8 +52,14 @@ git format-patch cf2f66900..feature/rtmp
 | `devtools-lifecycle` | 20 | `clean-base-2026-08` | GDB-backed startup/shutdown lifecycle inventory |
 | `plugin-api` | 9 | `clean-base-2026-08` | Generated TypeScript declarations for the plugin API |
 | `plugin-runtime-api` | 2 | `clean-base-2026-08` | Filesystem helpers and per-handle ACLs for plugin JS |
-| `feature/rtmp` | 11 | `cf2f66900` | RTMP/RTMPS over FFmpeg: fileaccess backend, smoke helpers, Linux and Flatpak wiring |
 | `feature/core-http-prop` | 12 | `08a5f0601` | Core HTTP and property surface: non-creating lookups, indexed `prop_findv`, keypress semantics, raw screenshot API |
+| `feature/rtmp` | 11 | `cf2f66900` | RTMP/RTMPS over FFmpeg: fileaccess backend, smoke helpers, Linux and Flatpak wiring |
+| `feature/flatpak-steamos` | 5 | `9137bc64c` | SteamOS Flatpak packaging, Avahi discovery, Steam Deck remote testing guide |
+| `feature/glw-recorder` | 4 | `622291d52` | GLW recorder: output cleanup, Flatpak opt-out, release policy |
+| `feature/ffmpeg-backend` | 3 | `50d5955ce` | Bundled media backend moved to FFmpeg 4.4.7 with `libav` option names kept |
+| `feature/html-parser` | 2 | `639371a02` | DOM-style aliases for the bundled HTML parser |
+| `feature/wsl2-glx` | 1 | `275c334a1` | GLX context creation under WSL2 |
+| `feature/steam-launch` | 1 | `f3f316fbd` | Skips the X11 fullscreen override path when launched from Steam |
 
 ### Two branches are stacked
 
