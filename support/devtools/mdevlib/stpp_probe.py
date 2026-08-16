@@ -81,9 +81,17 @@ def connect(host, port, path="/api/stpp"):
         "Sec-WebSocket-Version: 13\r\n\r\n"
     ) % (path, host, port, key)
     sock.sendall(request.encode("ascii"))
+    # Byte-wise read up to the end of the handshake headers: a block read
+    # could consume the start of the first WebSocket frame along with the
+    # headers and silently drop it, desyncing every recv_frame() after.
+    # The handshake response is ~150 bytes, so recv(1) costs nothing.
     response = b""
     while b"\r\n\r\n" not in response:
-        response += sock.recv(4096)
+        chunk = sock.recv(1)
+        if not chunk:
+            raise RuntimeError(
+                "connection closed during WebSocket handshake")
+        response += chunk
     status = response.split(b"\r\n", 1)[0].decode("ascii", "replace")
     if " 101 " not in status:
         raise RuntimeError("WebSocket handshake failed: " + status)
