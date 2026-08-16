@@ -76,7 +76,8 @@
 | `smb_scandir` | `SMB_TRANS2` (0x32) / `TRANS2_FIND_FIRST2` (1), `TRANS2_FIND_NEXT2` (2) | |
 | `smb_unlink` | `SMB_DELETE_FILE` (0x06) | |
 | `smb_rmdir` | `SMB_DELETE_DIR` (0x01) | |
-| `smb_set_xattr` / `smb_get_xattr` | `SMB_TRANS2` (0x32) / `TRANS2_SET_PATH_INFORMATION` (6) | |
+| `smb_set_xattr` | `SMB_TRANS2` (0x32) / `TRANS2_SET_PATH_INFORMATION` (6) | `:2604` |
+| `smb_get_xattr` | `SMB_TRANS2` (0x32) / `TRANS2_QUERY_PATH_INFORMATION` (5) | `:2677` |
 | `smb_enum_servers` | `SMB_TRANSACTION` (0x25), RAP NetServerEnum2, код функции 104 | `:2773-2799` |
 | поддержание сессии | `SMB_ECHO` (0x2b) | См. раздел 5 |
 
@@ -135,5 +136,8 @@ if(errcode) {
 черты (`backslashify`, `:2267`).
 
 Согласованные с сервером пределы — `cc_max_buffer_size` и `cc_max_mpx_count`
-(`:124-125`); второй ограничивает число одновременных запросов в полёте, чем и
-пользуется асинхронное чтение.
+(`:124-125`). **`cc_max_mpx_count` нигде не соблюдается**: он сохраняется при
+согласовании и копируется в заявку сессии, но цикл чтения
+(`:2375-2399`) ставит в очередь по запросу на каждый кусок в 57 344 байта, ни
+разу его не проверяя. Крупное чтение может превысить согласованный с сервером
+предел. Задача #202.
