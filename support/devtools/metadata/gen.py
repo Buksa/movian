@@ -23,9 +23,9 @@ committed metadata artifact for the GLW view language, grown from
 - glw.scopes      -- curated, `curated_scopes.json` next to this file.
 - js.modules      -- native `ES_MODULE` registrations from
                      src/ecmascript/es_*.c (function names and arities), plus
-                     statically scanned CommonJS exports from
-                     res/ecmascript/modules/**/*.js.
-- js.pluginManifest -- curated plugin.json keys and mandatory status,
+                     statically scanned CommonJS exports and prototype/shared
+                     object shapes from res/ecmascript/modules/**/*.js.
+- js.pluginManifest -- curated `plugin.json` keys and mandatory status,
                        anchored to the loader in src/plugins.c.
 
 Every record carries `source: {file, line}` pointing at the defining line
@@ -636,6 +636,637 @@ def _mask_js_strings(line: str) -> str:
     return "".join(chars)
 
 
+# `exports.request = function(url, ctrl, callback)` -- the parameter names are
+# in the source, so v1's bare `const request: any` threw away information the
+# generator already had in hand. Anchored at the assignment so a nested
+# function literal further down the export's region cannot be mistaken for it.
+COMMONJS_FUNCTION_RE = re.compile(
+    r"=\s*function\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\(([^)]*)\)", re.S)
+
+
+def _parse_params(raw: str) -> list[str] | None:
+    raw = raw.strip()
+    if not raw:
+        return []
+    params = []
+    for part in raw.split(","):
+        name = part.strip()
+        if not IDENT_RE.fullmatch(name):
+            # Destructuring or a default value: ES5.1 has neither, so this is
+            # a source we do not understand -- report nothing rather than a
+            # guess.
+            return None
+        params.append(name)
+    return params
+
+
+def _function_params(region: str) -> list[str] | None:
+    """Parameter names of the function assigned at the head of `region`,
+    or None when the export is not assigned a function literal."""
+    match = COMMONJS_FUNCTION_RE.search(region)
+    if match is None:
+        return None
+    return _parse_params(match.group(1))
+
+
+IDENT_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
+
+
+PROTOTYPE_FUNCTION_RE = re.compile(
+    r"^\s*((?:exports\.)?[A-Za-z_$][A-Za-z0-9_$]*)\.prototype\."
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*function\s*"
+    r"(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\(([^)]*)\)", re.M)
+PROTOTYPE_ALIAS_RE = re.compile(
+    r"^\s*((?:exports\.)?[A-Za-z_$][A-Za-z0-9_$]*)\.prototype\."
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
+    r"((?:exports\.)?[A-Za-z_$][A-Za-z0-9_$]*)\.prototype\."
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*;", re.M)
+OBJECT_FUNCTION_RE = re.compile(
+    r"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)"
+    r"\s*=\s*function\s*"
+    r"(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\(([^)]*)\)", re.M)
+SHARED_OBJECT_DECL_RE = re.compile(
+    r"^\s*(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*="
+    r"\s*\{\s*\}\s*;?", re.M)
+THIS_PROTO_ASSIGN_RE = re.compile(
+    r"\bthis\.__proto__\s*=\s*([A-Za-z_$][A-Za-z0-9_$]*)\b")
+RECEIVER_FUNCTION_RE = re.compile(
+    r"^\s*this\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*function\s*"
+    r"(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\(([^)]*)\)", re.M)
+RECEIVER_ASSIGN_RE = re.compile(
+    r"^\s*this\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)", re.M)
+RETURN_OBJECT_RE = re.compile(r"\breturn\s*\{")
+FUNCTION_HEAD_RE = re.compile(
+    r"^\s*(?:(?P<assigned>(?:exports\.)?[A-Za-z_$][A-Za-z0-9_$]*)"
+    r"\s*=\s*)?function\s*"
+    r"(?P<declared>[A-Za-z_$][A-Za-z0-9_$]*)?\s*"
+    r"\([^)]*\)\s*\{", re.M)
+DEFINE_PROPERTIES_RE = re.compile(
+    r"Object\.defineProperties\(\s*"
+    r"((?:this|exports\.[A-Za-z_$][A-Za-z0-9_$]*|"
+    r"[A-Za-z_$][A-Za-z0-9_$]*)(?:\.prototype)?)\s*,\s*\{")
+DEFINE_PROPERTY_RE = re.compile(
+    r"Object\.defineProperty\(\s*"
+    r"((?:this|exports\.[A-Za-z_$][A-Za-z0-9_$]*|"
+    r"[A-Za-z_$][A-Za-z0-9_$]*)(?:\.prototype)?)\s*,\s*"
+    r"(['\"])([^'\"]+)\2\s*,\s*\{")
+THIS_ASSIGN_RE = re.compile(
+    r"\bthis\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
+DEFINE_PROPERTIES_CALL_RE = re.compile(
+    r"Object\.defineProperties\(\s*([^,]+?)\s*,\s*\{")
+DEFINE_PROPERTY_CALL_RE = re.compile(
+    r"Object\.defineProperty\(\s*([^,]+?)\s*,\s*([^,]+?)\s*,\s*\{")
+def _masked_js_text(path: Path, mask_strings: bool = True) -> str:
+    raw_lines = path.read_text(encoding="utf-8").splitlines()
+    masked_lines: list[str] = []
+    in_block_comment = False
+    for raw_line in raw_lines:
+        line, in_block_comment = _mask_js_comments(
+            raw_line, in_block_comment)
+        masked_lines.append(
+            _mask_js_strings(line) if mask_strings else line)
+    return "\n".join(masked_lines)
+
+
+def _source_line(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+def _top_level_matches(
+        text: str, pattern: re.Pattern[str]) -> list[re.Match[str]]:
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return []
+    depths = [0] * (len(text) + 1)
+    depth = 0
+    for index, char in enumerate(text):
+        depths[index] = depth
+        if char == "{":
+            depth += 1
+        elif char == "}" and depth:
+            depth -= 1
+    depths[len(text)] = depth
+    return [
+        match for match in matches
+        if depths[match.start(1)] == 0
+    ]
+
+
+def _shape_owner(receiver: str, text: str) -> str:
+    owner = receiver.rsplit(".", 1)[-1]
+    if owner.endswith("Proto"):
+        candidate = owner[:-5]
+        if re.search(
+                r"^\s*function\s+%s\s*\(" % re.escape(candidate),
+                text, re.M):
+            return candidate
+    return owner
+
+
+def _member_record(
+        name: str, params: list[str] | None, path: Path, line: int,
+        kind: str | None = None,
+        alias_of: str | None = None) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "name": name,
+        "source": {"file": rel(path), "line": line},
+    }
+    if kind is not None:
+        record["kind"] = kind
+    if params is not None:
+        record["params"] = params
+        record["nargs"] = len(params)
+    if alias_of is not None:
+        record["aliasOf"] = alias_of
+    return record
+
+
+def _shape_method(
+        name: str, raw_params: str, path: Path, line: int,
+        alias_of: str | None = None) -> dict[str, Any]:
+    return _member_record(
+        name, _parse_params(raw_params), path, line, alias_of=alias_of)
+
+def _split_js_fields(text: str) -> list[str]:
+    fields: list[str] = []
+    start = 0
+
+    depths = {"(": 0, "[": 0, "{": 0}
+    closing = {")": "(", "]": "[", "}": "{"}
+    quote: str | None = None
+    escaped = False
+    for index, char in enumerate(text):
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in ("'", '"'):
+            quote = char
+        elif char in depths:
+            depths[char] += 1
+        elif char in closing:
+            depths[closing[char]] = max(
+                0, depths[closing[char]] - 1)
+        elif char == "," and not any(depths.values()):
+            fields.append(text[start:index])
+            start = index + 1
+    fields.append(text[start:])
+    return fields
+
+
+def _function_regions(
+        text: str
+) -> list[tuple[str, int, int]]:
+    regions: list[tuple[str, int, int]] = []
+    for match in FUNCTION_HEAD_RE.finditer(text):
+        owner = match.group("assigned") or match.group("declared")
+        if owner is None:
+            continue
+        end = _balanced_end(text, match.end() - 1)
+        if end is not None:
+            regions.append((owner, match.end(), end - 1))
+    return regions
+
+
+def _shape_receiver_for_owner(
+        owner: str, receivers: set[str]
+) -> str | None:
+    if owner in receivers:
+        return owner
+    owner_base = owner.rsplit(".", 1)[-1]
+    for receiver in sorted(receivers):
+        receiver_base = receiver.rsplit(".", 1)[-1]
+        if receiver_base == owner_base + "Proto":
+            return receiver
+    return None
+
+
+def _property_names(
+        body: str, path: Path, text: str, offset: int
+) -> list[tuple[str, int]]:
+    names: list[tuple[str, int]] = []
+    cursor = 0
+    for field in _split_js_fields(body):
+        entry = re.match(
+            r"\s*(?:([A-Za-z_$][A-Za-z0-9_$]*)|"
+            r"(['\"])([^'\"]+)\2)\s*:", field, re.S)
+        if entry is None:
+            if field.strip():
+                _shape_diagnostic(
+                    path, text, offset + cursor,
+                    "ignored unsupported defineProperties key")
+            cursor += len(field) + 1
+            continue
+        names.append((
+            entry.group(1) or entry.group(3),
+            offset + cursor + field.find(entry.group(0).lstrip())))
+        cursor += len(field) + 1
+    return names
+
+
+def _add_property(
+        properties: dict[str, dict[str, dict[str, Any]]],
+        receiver: str, name: str, path: Path, text: str, offset: int
+) -> None:
+    properties.setdefault(receiver, {})[name] = _member_record(
+        name, None, path, _source_line(text, offset), kind="property")
+
+
+def _shape_diagnostic(path: Path, text: str, offset: int, message: str) -> None:
+    print(
+        "gen.py: %s:%d: warning: %s" %
+        (rel(path), _source_line(text, offset), message),
+        file=sys.stderr)
+def _scan_shape_properties(
+        path: Path, text: str, receivers: set[str],
+        shared_receivers: set[str]
+) -> dict[str, dict[str, dict[str, Any]]]:
+    comment_text = _masked_js_text(path, mask_strings=False)
+    properties: dict[str, dict[str, dict[str, Any]]] = {}
+    handled_calls: set[int] = set()
+
+    def add_call_properties(
+            source: str, match: re.Match[str], receiver: str,
+            base_offset: int
+    ) -> None:
+        open_index = match.end() - 1
+        end = _balanced_end(source, open_index)
+        if end is None:
+            _shape_diagnostic(
+                path, comment_text, base_offset + match.start(1),
+                "ignored unterminated Object.defineProperties call")
+            return
+        body_start = base_offset + open_index + 1
+        for name, offset in _property_names(
+                source[open_index + 1:end - 1],
+                path, comment_text, body_start):
+            _add_property(properties, receiver, name,
+                          path, comment_text, offset)
+
+    def add_property_call(
+            source: str, match: re.Match[str], receiver: str,
+            base_offset: int
+    ) -> None:
+        name = match.group(3)
+        _add_property(
+            properties, receiver, name, path, comment_text,
+            base_offset + match.start(3))
+
+    def target_receiver(target: str) -> str | None:
+        if target.endswith(".prototype"):
+            return target[:-len(".prototype")]
+        return None
+
+    def scan_body(
+            body: str, owner_receiver: str, base_offset: int
+    ) -> None:
+        for assignment in _top_level_matches(body, THIS_ASSIGN_RE):
+            name = assignment.group(1)
+            if name != "__proto__":
+                _add_property(
+                    properties, owner_receiver, name, path, comment_text,
+                    base_offset + assignment.start(1))
+
+        for match in _top_level_matches(body, DEFINE_PROPERTIES_RE):
+            target = match.group(1)
+            receiver = owner_receiver if target == "this" \
+                else target_receiver(target)
+            if receiver not in receivers and receiver not in shared_receivers:
+                _shape_diagnostic(
+                    path, comment_text, base_offset + match.start(1),
+                    "ignored unsupported Object.defineProperties target %s" %
+                    target)
+                handled_calls.add(base_offset + match.start(1))
+                continue
+            add_call_properties(body, match, receiver, base_offset)
+            handled_calls.add(base_offset + match.start(1))
+
+        for match in _top_level_matches(body, DEFINE_PROPERTY_RE):
+            target = match.group(1)
+            receiver = owner_receiver if target == "this" \
+                else target_receiver(target)
+            if receiver not in receivers and receiver not in shared_receivers:
+                _shape_diagnostic(
+                    path, comment_text, base_offset + match.start(1),
+                    "ignored unsupported Object.defineProperty target %s" %
+                    target)
+                handled_calls.add(base_offset + match.start(1))
+                continue
+            add_property_call(body, match, receiver, base_offset)
+            handled_calls.add(base_offset + match.start(1))
+
+    for match in _top_level_matches(comment_text, DEFINE_PROPERTIES_RE):
+        target = match.group(1)
+        receiver = target_receiver(target)
+        if receiver not in receivers:
+            _shape_diagnostic(
+                path, comment_text, match.start(1),
+                "ignored unsupported Object.defineProperties target %s" %
+                target)
+            handled_calls.add(match.start(1))
+            continue
+        add_call_properties(comment_text, match, receiver, 0)
+        handled_calls.add(match.start(1))
+
+    for match in _top_level_matches(comment_text, DEFINE_PROPERTY_RE):
+        target = match.group(1)
+        receiver = target_receiver(target)
+        if receiver not in receivers:
+            _shape_diagnostic(
+                path, comment_text, match.start(1),
+                "ignored unsupported Object.defineProperty target %s" %
+                target)
+            handled_calls.add(match.start(1))
+            continue
+        add_property_call(comment_text, match, receiver, 0)
+        handled_calls.add(match.start(1))
+
+    for owner, body_start, body_end in _function_regions(text):
+        receiver = _shape_receiver_for_owner(owner, receivers)
+        if receiver is not None:
+            scan_body(
+                comment_text[body_start:body_end],
+                receiver, body_start)
+
+    for match in OBJECT_FUNCTION_RE.finditer(text):
+        receiver = match.group(1)
+        if receiver not in shared_receivers:
+            continue
+        open_index = text.find("{", match.end())
+        end = _balanced_end(text, open_index)
+        if open_index < 0 or end is None:
+            continue
+        scan_body(
+            comment_text[open_index + 1:end - 1],
+            receiver, open_index + 1)
+
+    for match in DEFINE_PROPERTIES_CALL_RE.finditer(comment_text):
+        if match.start(1) not in handled_calls:
+            _shape_diagnostic(
+                path, comment_text, match.start(1),
+                "ignored unsupported Object.defineProperties target %s" %
+                match.group(1).strip())
+    for match in DEFINE_PROPERTY_CALL_RE.finditer(comment_text):
+        if match.start(1) not in handled_calls:
+            _shape_diagnostic(
+                path, comment_text, match.start(1),
+                "ignored unsupported Object.defineProperty target %s" %
+                match.group(1).strip())
+    return properties
+
+def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
+    """Scan top-level prototype and shared-object assignments."""
+    text = _masked_js_text(path)
+    by_receiver: dict[str, dict[str, dict[str, Any]]] = {}
+    prototype_matches = _top_level_matches(text, PROTOTYPE_FUNCTION_RE)
+    top_prototype_starts = {
+        match.start(1) for match in prototype_matches
+    }
+    properties_by_receiver: dict[str, dict[str, dict[str, Any]]] = {}
+    for match in PROTOTYPE_FUNCTION_RE.finditer(text):
+        if match.start(1) not in top_prototype_starts:
+            _shape_diagnostic(
+                path, text, match.start(1),
+                "ignored conditional/non-top-level prototype member %s.%s" %
+                (match.group(1), match.group(2)))
+            continue
+        receiver = match.group(1)
+        methods = by_receiver.setdefault(receiver, {})
+        methods[match.group(2)] = _shape_method(
+            match.group(2), match.group(3), path,
+            _source_line(text, match.start(1)))
+
+    unresolved_aliases: list[tuple[str, str, str, int]] = []
+    alias_matches = list(PROTOTYPE_ALIAS_RE.finditer(text))
+    top_alias_starts = {
+        match.start(1) for match in _top_level_matches(text, PROTOTYPE_ALIAS_RE)
+    }
+    for match in alias_matches:
+        receiver, name, target_receiver, target = match.groups()
+        line = _source_line(text, match.start(1))
+        if match.start(1) not in top_alias_starts:
+            _shape_diagnostic(
+                path, text, match.start(1),
+                "ignored conditional/non-top-level prototype alias %s.%s" %
+                (receiver, name))
+        elif receiver != target_receiver:
+            _shape_diagnostic(
+                path, text, match.start(1),
+                "ignored cross-receiver prototype alias %s.%s = %s.%s" %
+                (receiver, name, target_receiver, target))
+        else:
+            unresolved_aliases.append((receiver, name, target, line))
+
+    while unresolved_aliases:
+        remaining: list[tuple[str, str, str, int]] = []
+        progress = False
+        for receiver, name, target, line in unresolved_aliases:
+            methods = by_receiver.setdefault(receiver, {})
+            if target in methods:
+                method = dict(methods[target])
+                method["name"] = name
+                method["source"] = {"file": rel(path), "line": line}
+                method["aliasOf"] = target
+                methods[name] = method
+                progress = True
+            else:
+                remaining.append((receiver, name, target, line))
+        if not progress:
+            break
+        unresolved_aliases = remaining
+
+    for receiver, name, target, line in unresolved_aliases:
+        print(
+            "gen.py: %s:%d: warning: unresolved prototype alias %s.%s -> %s" %
+            (rel(path), line, receiver, name, target),
+            file=sys.stderr)
+
+    shared_names = {
+        match.group(1)
+        for match in _top_level_matches(text, SHARED_OBJECT_DECL_RE)
+    }
+    consumed_shared_names = (
+        set(THIS_PROTO_ASSIGN_RE.findall(text)) & shared_names)
+    object_matches = list(OBJECT_FUNCTION_RE.finditer(text))
+    top_object_starts = {
+        match.start(1) for match in _top_level_matches(text, OBJECT_FUNCTION_RE)
+    }
+    for match in object_matches:
+        receiver, name = match.group(1), match.group(2)
+        if receiver not in consumed_shared_names:
+            continue
+        if match.start(1) not in top_object_starts:
+            _shape_diagnostic(
+                path, text, match.start(1),
+                "ignored conditional/non-top-level shared member %s.%s" %
+                (receiver, name))
+            continue
+        methods = by_receiver.setdefault(receiver, {})
+        methods[name] = _shape_method(
+            name, match.group(3), path,
+            _source_line(text, match.start(1)))
+    properties_by_receiver = _scan_shape_properties(
+        path, text, set(by_receiver), consumed_shared_names)
+
+    shapes: list[dict[str, Any]] = []
+    for receiver in sorted(
+            set(by_receiver) | set(properties_by_receiver)):
+        methods = by_receiver.get(receiver, {})
+        properties = properties_by_receiver.get(receiver, {})
+        if not methods and not properties:
+            continue
+        is_shared = receiver in consumed_shared_names
+        shape = {
+            "kind": "shared" if is_shared else "prototype",
+            "methods": [methods[name] for name in sorted(methods)],
+            "name": receiver if is_shared else _shape_owner(receiver, text),
+            "receiver": receiver,
+            "source": {
+                "file": rel(path),
+                "line": min(
+                    [method["source"]["line"]
+                     for method in methods.values()] +
+                    [prop["source"]["line"]
+                     for prop in properties.values()]),
+            },
+        }
+        if properties:
+            shape["properties"] = [
+                properties[name] for name in sorted(properties)]
+        shapes.append(shape)
+    return shapes
+
+
+def _anonymous_return_shape(region: str) -> dict[str, Any] | None:
+    matches = list(RETURN_OBJECT_RE.finditer(region))
+    if not matches:
+        return None
+
+    depths = [0] * (len(region) + 1)
+    depth = 0
+    for index, char in enumerate(region):
+        depths[index] = depth
+        if char == "{":
+            depth += 1
+        elif char == "}" and depth:
+            depth -= 1
+    direct_returns = [
+        match for match in matches
+        if depths[match.start()] == 1
+    ]
+    if len(direct_returns) != 1:
+        return None
+
+    match = direct_returns[0]
+    open_index = match.end() - 1
+    depth = 0
+    close_index = None
+    for index in range(open_index, len(region)):
+        if region[index] == "{":
+            depth += 1
+        elif region[index] == "}":
+            depth -= 1
+            if depth == 0:
+                close_index = index
+                break
+    if close_index is None:
+        return None
+
+    fields: list[dict[str, str]] = []
+    for field in split_fields(region[open_index + 1:close_index]):
+        entry = re.fullmatch(
+            r"\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*(.*?)\s*",
+            field, re.S)
+        if entry is None:
+            return None
+        constructor = re.fullmatch(
+            r"new\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(.*\)",
+            entry.group(2), re.S)
+        if constructor is None:
+            return None
+        fields.append({
+            "name": entry.group(1),
+            "type": constructor.group(1),
+        })
+    return {"kind": "object", "fields": fields} if fields else None
+
+
+def _receiver_members(
+        region: str, path: Path, line_index: int
+) -> list[dict[str, Any]]:
+    functions: dict[str, dict[str, Any]] = {}
+    for match in RECEIVER_FUNCTION_RE.finditer(region):
+        functions[match.group(1)] = _member_record(
+            match.group(1),
+            _parse_params(match.group(2)),
+            path,
+            line_index + 1 + region.count(
+                "\n", 0, match.start(1)),
+            kind="function")
+
+    members: dict[str, dict[str, Any]] = dict(functions)
+    for match in RECEIVER_ASSIGN_RE.finditer(region):
+        name = match.group(1)
+        if name == "__proto__" or name in functions:
+            continue
+        members[name] = _member_record(
+            name,
+            None,
+            path,
+            line_index + 1 + region.count(
+                "\n", 0, match.start(1)),
+            kind="value")
+    return [members[name] for name in sorted(members)]
+
+
+def _merge_receiver_members(
+        members: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for member in members:
+        name = member["name"]
+        previous = merged.get(name)
+        if previous is None:
+            merged[name] = member
+            continue
+        if previous["kind"] != member["kind"]:
+            continue
+        if member["kind"] == "function":
+            old_params = previous.get("params") or []
+            new_params = member.get("params") or []
+            if len(new_params) > len(old_params):
+                merged[name] = member
+    return [merged[name] for name in sorted(merged)]
+def _balanced_end(text: str, open_index: int) -> int | None:
+    depth = 0
+    for index in range(open_index, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}" and depth:
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return None
+
+
+def _export_region(
+        masked_lines: list[str], line_index: int, next_line: int
+) -> str:
+    region = "\n".join(
+        _mask_js_strings(line)
+        for line in masked_lines[line_index:next_line])
+    function = COMMONJS_FUNCTION_RE.search(region)
+    if function is None:
+        return region
+    open_index = region.find("{", function.end())
+    if open_index < 0:
+        return region
+    end = _balanced_end(region, open_index)
+    return region[:end] if end is not None else region
+
 def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
     raw_lines = path.read_text(encoding="utf-8").splitlines()
     masked_lines: list[str] = []
@@ -660,19 +1291,67 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
         next_line = (candidates[candidate_index + 1][0]
                      if candidate_index + 1 < len(candidates)
                      else len(masked_lines))
-        region = "\n".join(
-            _mask_js_strings(line)
-            for line in masked_lines[line_index:next_line])
+        region = _export_region(masked_lines, line_index, next_line)
         record = {
             "name": export_name,
             "source": {"file": rel(path), "line": line_index + 1},
         }
-        if re.search(r"\bthis\b", region):
+        params = _function_params(region)
+        if params is not None:
+            record["params"] = params
+            record["nargs"] = len(params)
+        if re.search(r"this\.__proto__\s*=", region):
+            # These functions mutate the receiver's prototype when called as
+            # an exported function; they are not constructors in the public
+            # module surface.
+            record["receiverMutation"] = True
+        elif re.search(r"\bthis\b", region):
             record["constructor"] = True
+        returned = set(re.findall(
+            r"\breturn\s+new\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", region))
+        if len(returned) == 1:
+            record["returns"] = next(iter(returned))
+        anonymous = _anonymous_return_shape(region)
+        if anonymous is not None:
+            record["returns"] = anonymous
+        if record.get("receiverMutation"):
+            record["receiverMembers"] = _receiver_members(
+                region, path, line_index)
+        callback_shapes = sorted(set(re.findall(
+            r"\bnew\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", region)))
+        callback_params = [
+            name for name in (params or [])
+            if re.search(
+                r"\b%s\s*(?:\.apply\s*\(|\()" %
+                re.escape(name), region)
+        ]
+        if callback_shapes and len(callback_params) == 1:
+            record["callbackShapes"] = callback_shapes
+            record["callbackParam"] = callback_params[0]
         exports.append(record)
     exports.sort(key=lambda r: r["name"])
     return exports
 
+
+PROTO_EXPORT_RE = re.compile(
+    r"^\s*(?:module\.)?exports\.__proto__\s*=\s*"
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*;", re.M)
+
+
+def _proto_parent(path: Path) -> str | None:
+    """`exports.__proto__ = np;` where `np = require('native/prop')` makes the
+    module inherit that module's whole surface at load time. Static and
+    resolvable, unlike the per-instance receiver-prototype assignment idiom
+    inside constructors, which only a runtime probe can see."""
+    text = path.read_text(encoding="utf-8")
+    match = PROTO_EXPORT_RE.search(text)
+    if match is None:
+        return None
+    ident = match.group(1)
+    require = re.search(
+        r"\b(?:var|let|const)\s+%s\s*=\s*require\(\s*['\"]([^'\"]+)['\"]"
+        % re.escape(ident), text)
+    return require.group(1) if require is not None else None
 
 def build_commonjs_modules() -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
@@ -682,14 +1361,108 @@ def build_commonjs_modules() -> list[dict[str, Any]]:
         if module_name in seen:
             raise GenError("duplicate CommonJS module name: %s" % module_name)
         seen.add(module_name)
-        records.append({
+        exports = [e for e in scan_commonjs_exports(path)
+                   if e["name"] != "__proto__"]
+        shapes = scan_commonjs_shapes(path)
+        shape_names = {shape["name"] for shape in shapes}
+        receiver_members: list[dict[str, Any]] = []
+        for export in exports:
+            receiver_members.extend(export.pop("receiverMembers", []))
+            returned = export.get("returns")
+            if isinstance(returned, str) and returned not in shape_names:
+                export.pop("returns", None)
+            callback_param = export.pop("callbackParam", None)
+            callback_shapes = [
+                shape for shape in export.pop("callbackShapes", [])
+                if shape in shape_names
+            ]
+            if len(callback_shapes) == 1 and callback_param is not None:
+                export["callbackShape"] = callback_shapes[0]
+                export["callbackParam"] = callback_param
+        receiver_members = _merge_receiver_members(receiver_members)
+        record = {
             "name": module_name,
             "kind": "commonjs",
-            "exports": scan_commonjs_exports(path),
+            "exports": exports,
             "source": {"file": rel(path), "line": 1},
-        })
+        }
+        if receiver_members:
+            record["receiverMembers"] = receiver_members
+        if shapes:
+            record["shapes"] = shapes
+        parent = _proto_parent(path)
+        if parent is not None:
+            record["inherits"] = parent
+        records.append(record)
     records.sort(key=lambda r: r["name"])
     return records
+
+def _source_shape_inventory() -> set[tuple[str, str, str, str]]:
+    inventory: set[tuple[str, str, str, str]] = set()
+    for path in sorted(COMMONJS_DIR.rglob("*.js")):
+        module_name = path.relative_to(COMMONJS_DIR).with_suffix("").as_posix()
+        for shape in scan_commonjs_shapes(path):
+            receiver = shape.get("receiver", shape["name"])
+            for method in shape["methods"]:
+                inventory.add((
+                    module_name, shape["kind"], receiver, method["name"]))
+            for prop in shape.get("properties", []):
+                inventory.add((
+                    module_name, "property", receiver, prop["name"]))
+        for export in scan_commonjs_exports(path):
+            for member in export.get("receiverMembers", []):
+                inventory.add((
+                    module_name, "receiver", "module", member["name"]))
+    return inventory
+
+
+def _artifact_shape_inventory(
+        artifact: dict[str, Any]) -> set[tuple[str, str, str, str]]:
+    inventory: set[tuple[str, str, str, str]] = set()
+    for module in artifact.get("js", {}).get("modules", []):
+        module_name = module["name"]
+        for shape in module.get("shapes", []):
+            receiver = shape.get("receiver", shape["name"])
+            for method in shape["methods"]:
+                inventory.add((
+                    module_name, shape["kind"], receiver, method["name"]))
+            for prop in shape.get("properties", []):
+                inventory.add((
+                    module_name, "property", receiver, prop["name"]))
+        for member in module.get("receiverMembers", []):
+            inventory.add((
+                module_name, "receiver", "module", member["name"]))
+    return inventory
+
+
+def _format_shape_member(
+        member: tuple[str, str, str, str]) -> str:
+    module, kind, receiver, name = member
+    return "%s:%s:%s.%s" % (module, kind, receiver, name)
+
+
+def _check_commonjs_shape_coverage(
+        artifact: dict[str, Any]) -> tuple[bool, str]:
+    source = _source_shape_inventory()
+    emitted = _artifact_shape_inventory(artifact)
+    missing = sorted(source - emitted)
+    phantom = sorted(emitted - source)
+    if not missing and not phantom:
+        return True, (
+            "COMMONJS shape coverage OK "
+            "(source %d, artifact %d, missing 0, phantom 0)" %
+            (len(source), len(emitted)))
+
+    lines = ["COMMONJS SHAPE COVERAGE DRIFT"]
+    if missing:
+        lines.append("missing (source, artifact):")
+        lines.extend("  " + _format_shape_member(member)
+                     for member in missing)
+    if phantom:
+        lines.append("phantom (artifact, source):")
+        lines.extend("  " + _format_shape_member(member)
+                     for member in phantom)
+    return False, "\n".join(lines)
 
 
 def build_modules() -> list[dict[str, Any]]:
@@ -811,8 +1584,7 @@ def dumps(artifact: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 def render_dts(artifact: dict[str, Any]) -> str:
-    """Render a .d.ts file from js.modules data.  All types are ``any`` in
-    v1; the honest signal is exact arity encoded via ``@arity`` JSDoc."""
+    """Render a .d.ts file from js.modules data."""
     modules = artifact.get("js", {}).get("modules", [])
     rev = artifact.get("movianRevision", "unknown")
     lines: list[str] = []
@@ -820,6 +1592,50 @@ def render_dts(artifact: dict[str, Any]) -> str:
     lines.append("// movianRevision: %s" % rev)
     lines.append("// Duktape ES5.1 -- no ES6+ in plugin code.")
     lines.append("")
+
+    def params_signature(
+            params: list[str] | None, export: dict[str, Any] | None = None,
+            shape_names: set[str] | None = None
+    ) -> str:
+        if params is None:
+            return "...args: any[]"
+        parts = []
+        for name in params:
+            annotation = "any"
+            if export is not None and name == export.get("callbackParam"):
+                callback_shape = export.get("callbackShape")
+                if callback_shape and shape_names and \
+                        callback_shape in shape_names:
+                    annotation = (
+                        "(value: %s, ...args: any[]) => any" %
+                        callback_shape)
+            parts.append("%s?: %s" % (name, annotation))
+        return ", ".join(parts)
+
+
+    def render_return_type(
+            returned: Any, shape_names: set[str]) -> str:
+        if isinstance(returned, str):
+            return returned if returned in shape_names else "any"
+        if not isinstance(returned, dict) or \
+                returned.get("kind") != "object":
+            return "any"
+        fields = returned.get("fields")
+        if not isinstance(fields, list) or not fields:
+            return "any"
+        rendered: list[str] = []
+        for field in fields:
+            if not isinstance(field, dict):
+                return "any"
+            field_name = field.get("name")
+            field_type = field.get("type")
+            if not isinstance(field_name, str):
+                return "any"
+            if not isinstance(field_type, str) or field_type not in shape_names:
+                field_type = "any"
+            rendered.append("%s: %s;" % (field_name, field_type))
+        return "{ %s }" % " ".join(rendered)
+
 
     for mod in modules:
         name = mod["name"]
@@ -846,22 +1662,127 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     "  function %s(...args: any[]): any;" % fname)
         elif kind == "commonjs":
             exports = mod.get("exports", [])
-            if not exports:
+            shapes = mod.get("shapes", [])
+            receiver_members = mod.get("receiverMembers", [])
+            if (not exports and not mod.get("inherits") and not shapes
+                    and not receiver_members):
                 lines.append("}")
                 lines.append("")
                 continue
-            lines.append("  // CommonJS exports")
+            inherits = mod.get("inherits")
+            if inherits:
+                lines.append("  // exports.__proto__ = require('%s') --"
+                             " inherits its whole surface" % inherits)
+                lines.append("  export * from '%s';" % inherits)
+
+            prototype_shapes = [
+                shape for shape in shapes
+                if shape.get("kind") == "prototype"
+            ]
+            shared_shapes = [
+                shape for shape in shapes
+                if shape.get("kind") == "shared"
+            ]
+            if prototype_shapes:
+                lines.append("  // CommonJS prototype shapes")
+                for shape in prototype_shapes:
+                    lines.append("  interface %s {" % shape["name"])
+                    for method in shape["methods"]:
+                        params = method.get("params")
+                        if params is not None:
+                            lines.append("    /** @arity %d */"
+                                         % len(params))
+                        lines.append(
+                            "    %s(%s): any;" %
+                            (method["name"], params_signature(params)))
+                    for prop in shape.get("properties", []):
+                        lines.append("    %s: any;" % prop["name"])
+                    lines.append("  }")
+                lines.append("")
+
+            if shared_shapes:
+                lines.append(
+                    "  // CommonJS receiver-mutated shared object shapes")
+                for shape in shared_shapes:
+                    for method in shape["methods"]:
+                        params = method.get("params")
+                        if params is not None:
+                            lines.append("  /** @arity %d */"
+                                         % len(params))
+                        lines.append(
+                            "  function %s(%s): any;" %
+                            (method["name"], params_signature(params)))
+                    for prop in shape.get("properties", []):
+                        lines.append("  var %s: any;" % prop["name"])
+                lines.append("")
+            if receiver_members:
+                lines.append(
+                    "  // CommonJS receiver-mutated module exports")
+                for member in receiver_members:
+                    if member["kind"] == "function":
+                        params = member.get("params")
+                        if params is not None:
+                            lines.append("  /** @arity %d */"
+                                         % len(params))
+                        lines.append(
+                            "  function %s(%s): any;" %
+                            (member["name"], params_signature(params)))
+                    else:
+                        lines.append("  var %s: any;" % member["name"])
+                lines.append("")
+
+            if exports:
+                lines.append("  // CommonJS exports")
+            shape_names = {
+                shape["name"] for shape in prototype_shapes
+            }
             for exp in exports:
                 ename = exp["name"]
+                params = exp.get("params")
+                # Parameters are emitted OPTIONAL on purpose. The names are
+                # source-derived fact and give editors signature help; the
+                # count is not a contract -- Duktape enforces no arity, and
+                # Movian's own modules are routinely called with fewer
+                # arguments than they declare. Requiring them would generate
+                # errors the runtime does not have. The honest count stays in
+                # @arity.
+                sig = params_signature(params, exp, shape_names)
                 if exp.get("constructor"):
+                    if params is not None:
+                        lines.append("  /** @arity %d */" % len(params))
+                    result_type = ename if ename in shape_names else "any"
                     lines.append("  const %s: {" % ename)
-                    lines.append("    new (...args: any[]): any;")
+                    lines.append("    new (%s): %s;" %
+                                 (sig, result_type))
                     lines.append("  };")
+                elif params is not None:
+                    lines.append("  /** @arity %d */" % len(params))
+                    return_type = render_return_type(
+                        exp.get("returns", "any"), shape_names)
+                    lines.append("  function %s(%s): %s;" %
+                                 (ename, sig, return_type))
                 else:
                     lines.append("  const %s: any;" % ename)
 
         lines.append("}")
         lines.append("")
+
+    # `require('showtime/x')` is rewritten to `movian/x` by the loader
+    # (src/ecmascript/ecmascript.c, mystrbegins(id, "showtime/")), so the
+    # legacy names resolve at runtime. Without them here every legacy-style
+    # plugin gets a false "Cannot find module" from tsc.
+    aliases = sorted(mod["name"] for mod in modules
+                     if mod["name"].startswith("movian/"))
+    if aliases:
+        lines.append("// Legacy aliases: the loader rewrites showtime/* to"
+                     " movian/* at require time.")
+        lines.append("")
+        for name in aliases:
+            legacy = "showtime/" + name.split("/", 1)[1]
+            lines.append("declare module '%s' {" % legacy)
+            lines.append("  export * from '%s';" % name)
+            lines.append("}")
+            lines.append("")
 
     return "\n".join(lines)
 
@@ -946,23 +1867,27 @@ def cmd_check(args: argparse.Namespace) -> int:
     # so a CommonJS module added to the metadata artifact without a fixture, or
     # a fixture deleted, failed nothing until somebody typed the flag by hand.
     coverage_ok, coverage_output = _run_reference_dts_check(("--commonjs",))
+    shape_coverage_ok, shape_coverage_output = (
+        _check_commonjs_shape_coverage(committed))
     reference_dts_ok = reference_dts_ok and coverage_ok
     if coverage_output:
         reference_dts_output = "\n".join(
             part for part in (reference_dts_output, coverage_output) if part)
 
-    if metadata_ok and dts_ok and reference_dts_ok:
+    if metadata_ok and dts_ok and reference_dts_ok and shape_coverage_ok:
         if args.json:
             print(json.dumps({
                 "metadata": "ok",
                 "dts": "ok",
                 "referenceDts": "ok",
+                "shapeCoverage": "ok",
             }, indent=2))
         else:
             print("METADATA OK (movianRevision: committed=%s current=%s)"
                   % (committed.get("movianRevision"),
                      fresh.get("movianRevision")))
             print("DTS OK")
+            print(shape_coverage_output)
             if reference_dts_output:
                 print(reference_dts_output)
         return 0
@@ -976,11 +1901,14 @@ def cmd_check(args: argparse.Namespace) -> int:
             "metadata": "ok" if metadata_ok else "drift",
             "dts": "ok" if dts_ok else "drift",
             "referenceDts": "ok" if reference_dts_ok else "failed",
+            "shapeCoverage": "ok" if shape_coverage_ok else "failed",
         }
         if diff is not None:
             result["diff"] = diff
         if not reference_dts_ok and reference_dts_output:
             result["referenceDtsOutput"] = reference_dts_output
+        if not shape_coverage_ok:
+            result["shapeCoverageOutput"] = shape_coverage_output
         print(json.dumps(result, ensure_ascii=False, indent=2,
                          sort_keys=True))
     else:
@@ -990,6 +1918,8 @@ def cmd_check(args: argparse.Namespace) -> int:
                 print(line)
         if not dts_ok:
             print("DTS DRIFT")
+        if not shape_coverage_ok:
+            print(shape_coverage_output)
         if not reference_dts_ok:
             print(reference_dts_output or "reference-dts: checker failed")
     return 1
