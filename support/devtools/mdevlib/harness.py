@@ -6,6 +6,8 @@ Python 3 stdlib only.
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import json
 import os
 import re
@@ -121,11 +123,28 @@ class Instance:
         except (OSError, ValueError):
             return None
 
-    def save_state(self, state: dict[str, Any]) -> None:
-        self.ensure_dirs()
-        self.state_path.write_text(
+    def _write_state(self, state: dict[str, Any]) -> None:
+        temporary = self.state_path.with_suffix(".json.tmp")
+        temporary.write_text(
             json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
+        temporary.replace(self.state_path)
+
+    def save_state(self, state: dict[str, Any]) -> None:
+        self.ensure_dirs()
+        with (self.dir / "state.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            self._write_state(state)
+
+    def record_shot_hash(self, sha256_hex: str, shot_path: Path) -> None:
+        """Atomically merge screenshot metadata into current process state."""
+        self.ensure_dirs()
+        with (self.dir / "state.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            state = self.load_state() or {}
+            state["last_shot_hash"] = sha256_hex
+            state["last_shot_path"] = str(shot_path.resolve())
+            self._write_state(state)
 
     def live_pid(self) -> int | None:
         """Pid from state.json if it is alive and still THIS instance's
@@ -267,35 +286,27 @@ def pid_is_movian(pid: int) -> bool:
     return comm == "movian"
 
 
-def kill_owned_pid(inst: "Instance", pid: int, timeout: float = 5.0) -> str:
+def kill_owned_pid(inst: "Instance", pid: int, timeout: float = 5.0) -> None:
     """Terminate a pid this instance owns per state.json.  Refuses to
     signal anything whose comm+cmdline do not prove it is this instance's
     own movian (stale-pid safety: a recycled pid -- even one recycled by
-    another movian -- is hands-off).
-
-    Returns the stop outcome: ``"stopped-clean"`` (SIGTERM was sufficient
-    or the pid was already gone), ``"killed-after-timeout"`` (SIGKILL
-    escalation was needed), or ``"still-alive"`` (the owned pid still
-    appeared live after SIGKILL)."""
+    another movian -- is hands-off)."""
     if not inst.owns_pid(pid):
-        return "stopped-clean"  # already gone or pid recycled: hands off
+        return  # already gone or pid recycled: hands off
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
-        return "stopped-clean"
+        return
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if not inst.owns_pid(pid):
-            return "stopped-clean"
+            return
         time.sleep(0.1)
     try:
         os.kill(pid, signal.SIGKILL)
     except ProcessLookupError:
-        return "killed-after-timeout"
+        pass
     time.sleep(0.2)
-    if inst.owns_pid(pid):
-        return "still-alive"
-    return "killed-after-timeout"
 
 
 # ---------------------------------------------------------------------------
@@ -787,8 +798,18 @@ def sniff_image(body: bytes) -> str | None:
     return None
 
 
-def take_shot(inst: Instance, out: str | None = None,
-              timeout: float = 15.0) -> Path:
+def take_shot(
+    inst: Instance,
+    out: str | None = None,
+    timeout: float = 15.0,
+    if_changed_hash: str | None = None,
+) -> tuple[Path | None, str]:
+    """Capture a screenshot and return (path, sha256_hex).
+
+    The SHA-256 is computed from the raw response bytes before writing.
+    When ``if_changed_hash`` matches, return ``None`` as the path without
+    creating, overwriting, or deleting a file.
+    """
     base = inst.base_url()
     result = http_request(base, "/api/screenshot/raw", timeout=timeout)
     if not result.get("ok"):
@@ -799,11 +820,14 @@ def take_shot(inst: Instance, out: str | None = None,
     body = result["body"]
     if not body:
         raise MdevError("screenshot is empty")
+    sha256_hex = hashlib.sha256(body).hexdigest()
     ext = sniff_image(body)
     if ext is None:
         raise MdevError(
             "screenshot has unknown magic bytes: %s" % body[:8].hex()
         )
+    if if_changed_hash == sha256_hex:
+        return None, sha256_hex
     if out:
         path = Path(out)
     else:
@@ -811,4 +835,4 @@ def take_shot(inst: Instance, out: str | None = None,
         path = inst.shots / (time.strftime("%Y%m%d-%H%M%S") + "." + ext)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(body)
-    return path
+    return path, sha256_hex

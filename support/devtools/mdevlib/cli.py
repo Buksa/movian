@@ -52,16 +52,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 "use --force to restart it" % (args.name, own_pid),
                 exit_code=2,
             )
-        outcome = harness.kill_owned_pid(inst, own_pid)
-        if outcome == "still-alive":
-            raise MdevError(
-                "pid %d still alive after SIGKILL; refusing forced restart"
-                % own_pid,
-                exit_code=2,
-            )
-        if outcome == "killed-after-timeout":
-            print("forced restart stopped %s (pid %d) [%s]"
-                  % (args.name, own_pid, outcome), file=sys.stderr)
+        harness.kill_owned_pid(inst, own_pid)
 
     # Foreign movian instances (not ours, not a same-dir collision) are
     # safe to coexist with: isolated profile + dynamic port, no state.json
@@ -96,16 +87,15 @@ def cmd_stop(args: argparse.Namespace) -> int:
                     "reason": "not running"},
              "instance %r is not running" % args.name)
         return 0
-    outcome = harness.kill_owned_pid(inst, pid)
-    if outcome == "still-alive":
+    harness.kill_owned_pid(inst, pid)
+    if inst.owns_pid(pid):
         raise MdevError("pid %d still alive after SIGKILL" % pid)
     state = inst.load_state() or {}
     state.pop("pid", None)
     state.pop("port", None)
     inst.save_state(state)
-    emit(args, {"name": args.name, "stopped": True, "pid": pid,
-                "stop_outcome": outcome},
-         "stopped %s (pid %d) [%s]" % (args.name, pid, outcome))
+    emit(args, {"name": args.name, "stopped": True, "pid": pid},
+         "stopped %s (pid %d)" % (args.name, pid))
     return 0
 
 
@@ -128,9 +118,30 @@ def cmd_open(args: argparse.Namespace) -> int:
 
 def cmd_shot(args: argparse.Namespace) -> int:
     inst = Instance(args.name)
-    path = harness.take_shot(inst, args.out)
-    emit(args, {"path": str(path), "bytes": path.stat().st_size},
-         str(path))
+    state = inst.load_state() or {}
+    previous_hash = state.get("last_shot_hash") if args.if_changed else None
+    path, sha256_hex = harness.take_shot(
+        inst, args.out, if_changed_hash=previous_hash)
+
+    if path is None:
+        previous_path = state.get("last_shot_path")
+        emit(args, {
+            "path": previous_path,
+            "sha256": sha256_hex,
+            "unchanged": True,
+        }, "unchanged%s sha256=%s" % (
+            (" " + previous_path) if previous_path else "",
+            sha256_hex,
+        ))
+        return 3
+
+    inst.record_shot_hash(sha256_hex, path)
+    emit(args, {
+        "path": str(path),
+        "bytes": path.stat().st_size,
+        "sha256": sha256_hex,
+        "unchanged": False,
+    }, "%s sha256=%s" % (path, sha256_hex))
     return 0
 
 
@@ -218,7 +229,11 @@ def _maybe_shot(args: argparse.Namespace) -> str | None:
     """Screenshot path when --shot was passed, else None (shared by every
     shot-on-success reporter)."""
     if getattr(args, "shot", False):
-        return str(harness.take_shot(Instance(args.name)))
+        inst = Instance(args.name)
+        path, sha256_hex = harness.take_shot(inst)
+        assert path is not None
+        inst.record_shot_hash(sha256_hex, path)
+        return str(path)
     return None
 
 
@@ -351,7 +366,10 @@ def _watch_tick(args: argparse.Namespace, inst: Instance, stamp: str,
         if ok:
             line = "[%s] JS %s: RELOAD JS OK" % (stamp, ", ".join(changed_js))
             if args.shot and not changed_view:
-                line += " shot=%s" % harness.take_shot(inst)
+                path, sha256_hex = harness.take_shot(inst)
+                assert path is not None
+                inst.record_shot_hash(sha256_hex, path)
+                line += " shot=%s" % path
         else:
             failed = next(p for p in per_plugin if not p["ok"])
             line = "[%s] JS %s: FAILED: %s" % (
@@ -367,7 +385,10 @@ def _watch_tick(args: argparse.Namespace, inst: Instance, stamp: str,
     if ok:
         line = "[%s] %s: RELOAD OK" % (stamp, ", ".join(changed_view))
         if args.shot:
-            line += " shot=%s" % harness.take_shot(inst)
+            path, sha256_hex = harness.take_shot(inst)
+            assert path is not None
+            inst.record_shot_hash(sha256_hex, path)
+            line += " shot=%s" % path
     else:
         line = "[%s] %s: %d error(s): %s" % (
             stamp, ", ".join(changed_view), len(errors), errors[0])
@@ -511,7 +532,10 @@ def cmd_preview(args: argparse.Namespace) -> int:
         # blend visually finishes. A short settle avoids a screenshot
         # that still shows the previous preview mid-transition.
         time.sleep(0.3)
-        shot_path = str(harness.take_shot(inst))
+        shot_path_raw, sha256_hex = harness.take_shot(inst)
+        assert shot_path_raw is not None
+        inst.record_shot_hash(sha256_hex, shot_path_raw)
+        shot_path = str(shot_path_raw)
 
     emit(args,
          {**result, "shot": shot_path},
@@ -667,6 +691,8 @@ def build_parser() -> argparse.ArgumentParser:
                           help="take a screenshot via /api/screenshot/raw")
     shot.add_argument("--out", metavar="PATH",
                       help="output file (default: shots/<ts>.<ext>)")
+    shot.add_argument("--if-changed", action="store_true",
+                      help="skip write and exit 3 if hash unchanged")
     shot.set_defaults(func=cmd_shot)
 
     props = sub.add_parser("props", parents=[common],
