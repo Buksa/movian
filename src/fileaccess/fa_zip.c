@@ -31,6 +31,7 @@
 #include "main.h"
 #include "fileaccess.h"
 #include "fa_zlib.h"
+#include "fa_zip_path.h"
 #include "main.h"
 #include "usage.h"
 
@@ -486,6 +487,8 @@ zip_archive_find(const char *url, const char **rp)
 }
 
 
+
+
 /**
  *
  */
@@ -498,7 +501,23 @@ zip_file_find(const char *url)
   if(za == NULL)
     return NULL;
 
-  rf = *r ? zip_archive_find_file(za, za->za_root, r, 0) : za->za_root;
+  /*
+   * Only the member suffix is normalized, and only after zip_archive_find()
+   * has fixed which archive we are in. The part of the URL that names the
+   * archive belongs to the outer filesystem and may legitimately contain dot
+   * segments of its own; collapsing those here would resolve a different
+   * archive than the caller asked for.
+   */
+  char *allocated;
+  const char *member = fa_zip_resolve_member_path(r, &allocated);
+  if(member == NULL) {
+    zip_archive_unref(za);
+    return NULL;
+  }
+
+  rf = *member ?
+    zip_archive_find_file(za, za->za_root, member, 0) : za->za_root;
+  free(allocated);
 
   if(rf == NULL)
     zip_archive_unref(za);
