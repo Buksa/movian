@@ -2,8 +2,9 @@
 """movian-metadata generator (issue #98).
 
 Generates `generated/movian-metadata.json` (schema v1): the single
-committed metadata artifact for the GLW view language, grown from
-`support/devtools/mdevlib/viewdoc.py` (issue #88). Sections:
+committed metadata artifact for the GLW view language, grown from the
+`viewdoc` drift detector (issue #88, since moved to movian-plugin-sdk
+along with the reference docs it validates). Sections:
 
 - glw.functions   -- `token_func_t funcvec[]`, src/ui/glw/glw_view_eval.c
                       (name, nargs/variadic, ctor/dtor/preproc presence).
@@ -63,7 +64,18 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 METADATA_DIR = Path(__file__).resolve().parent
 ARTIFACT_PATH = REPO_ROOT / "generated" / "movian-metadata.json"
 DTS_PATH = REPO_ROOT / "generated" / "movian-api.d.ts"
+# apiversion-1 plugins only: ecmascript.c:913 loads api-v1.js for them
+# and for nobody else, so its `showtime` global is emitted to a file a
+# v2 plugin never includes. Folding it into the main bundle would
+# silently bless `showtime` in modern plugins, where it does not exist.
+V1_DTS_PATH = REPO_ROOT / "generated" / "movian-api-v1.d.ts"
+LEGACY_API_V1 = (
+    REPO_ROOT / "res" / "ecmascript" / "legacy" / "api-v1.js")
 REFERENCE_DTS_CHECKER = METADATA_DIR / "check_reference_dts.py"
+RUNTIME_ORACLE_PATH = (
+    REPO_ROOT / "support" / "devtools" / "api-introspector"
+    / "runtime-api.json")
+RUNTIME_ORACLE_VERSION = 2
 
 ATTRIB_C = REPO_ROOT / "src" / "ui" / "glw" / "glw_view_attrib.c"
 EVAL_C = REPO_ROOT / "src" / "ui" / "glw" / "glw_view_eval.c"
@@ -74,6 +86,8 @@ COMMONJS_DIR = REPO_ROOT / "res" / "ecmascript" / "modules"
 CURATED_OPERATORS = METADATA_DIR / "curated_operators.json"
 CURATED_SCOPES = METADATA_DIR / "curated_scopes.json"
 CURATED_PLUGIN_MANIFEST = METADATA_DIR / "curated_plugin_manifest.json"
+CURATED_INTERPRETER_GLOBALS = (
+    METADATA_DIR / "curated_interpreter_globals.json")
 
 SCHEMA_VERSION = 1
 GENERATED_BY = "support/devtools/metadata/gen.py"
@@ -669,6 +683,117 @@ def _function_params(region: str) -> list[str] | None:
     return _parse_params(match.group(1))
 
 
+NESTED_FUNCTION_RE = re.compile(r"\bfunction\b")
+ARGUMENTS_RE = re.compile(r"\barguments\b")
+BARE_RETURN_RE = re.compile(r"\breturn\s*;")
+
+
+def _own_body(region: str) -> str:
+    """The body of the function assigned at the head of `region`, with the
+    bodies of nested function literals removed.
+
+    Every question asked of a function body -- does it read `arguments`, does
+    it `return;` without a value -- has to exclude nested callbacks, whose
+    `arguments` and returns belong to them. Scoping also matters at the other
+    end: an export's region runs to the next `exports.NAME =` assignment,
+    which `exports.DB.prototype.query =` is not, so `movian/sqlite`'s region
+    for `DB` swallows every prototype method below it. Without this, a plain
+    search reported the constructor as variadic because a *method* reads
+    `arguments`. Comments and string literals are already masked by the
+    caller, so brace counting here is safe.
+
+    Returns the empty string when `region` does not open with a function
+    literal, which reads as "no evidence" at every call site.
+    """
+    match = COMMONJS_FUNCTION_RE.search(region)
+    if match is None:
+        return ""
+    open_brace = region.find("{", match.end())
+    if open_brace < 0:
+        return ""
+    kept: list[str] = []
+    depth = 0
+    # Depth of the innermost enclosing nested function literal, or None while
+    # the scan is in the outer function's own body.
+    nested_at: int | None = None
+    index = open_brace
+    while index < len(region):
+        char = region[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                break
+            if nested_at is not None and depth <= nested_at:
+                nested_at = None
+        elif nested_at is None and NESTED_FUNCTION_RE.match(region, index):
+            # The nested body opens one level down and closes when depth
+            # comes back to here.
+            nested_at = depth
+        if nested_at is None:
+            kept.append(char)
+        index += 1
+    return "".join(kept)
+
+
+def _uses_arguments(region: str) -> bool:
+    """Whether the function at the head of `region` reads its own
+    `arguments`."""
+    return ARGUMENTS_RE.search(_own_body(region)) is not None
+
+
+def _callback_shape_index(
+        region: str, param: str, shapes: list[str]) -> tuple[int | None, bool]:
+    """Which argument of `param`'s invocation carries a `new <shape>(...)`.
+
+    Assuming position 0 typed the wrong parameter: `movian/http`'s `request`
+    calls `callback(null, new HttpResponse(res))` on success and
+    `callback(err, null)` on failure, so annotating the first argument made
+    `http.request(url, {}, res => res.toString())` compile and then
+    dereference `null`. Searched over the whole region on purpose -- the
+    invocation usually sits inside a nested callback, which is the one place
+    `_own_body` deliberately does not look.
+
+    `None` when no invocation carries a construction, which leaves the
+    annotation off rather than guessing a position.
+    """
+    call_re = re.compile(r"\b%s\s*\(" % re.escape(param))
+    new_res = [re.compile(r"\bnew\s+%s\s*\(" % re.escape(shape))
+               for shape in shapes]
+    index = None
+    calls = []
+    for call in call_re.finditer(region):
+        end = _balanced_call_end(region, call.end() - 1)
+        if end is None:
+            continue
+        args = _split_js_fields(region[call.end():end - 1])
+        calls.append(args)
+        if index is None:
+            for position, arg in enumerate(args):
+                if any(pattern.search(arg) for pattern in new_res):
+                    index = position
+                    break
+    if index is None:
+        return None, False
+    # `callback(err, null)` on the failure path means the shape argument is
+    # not always a value. The hand-written canon already had
+    # `HttpResponse | null`; emitting it non-null let the new positive fixture
+    # dereference it unguarded, which is exactly the runtime crash the
+    # declaration is supposed to prevent.
+    nullable = any(
+        len(args) > index and args[index].strip() == "null"
+        for args in calls)
+    return index, nullable
+
+
+def _returns_without_value(region: str) -> bool:
+    """Whether the function at the head of `region` has a bare `return;` of
+    its own -- an early exit that yields `undefined` regardless of what the
+    function returns on its other paths."""
+    return BARE_RETURN_RE.search(_own_body(region)) is not None
+
+
 IDENT_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 
 
@@ -712,6 +837,13 @@ DEFINE_PROPERTY_RE = re.compile(
     r"(['\"])([^'\"]+)\2\s*,\s*\{")
 THIS_ASSIGN_RE = re.compile(
     r"\bthis\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
+
+THIS_ALIAS_RE = re.compile(
+    r"\b(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*this\b")
+ALIAS_MEMBER_ASSIGN_RE = re.compile(
+    r"\b([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
+NESTED_FUNCTION_HEAD_RE = re.compile(
+    r"\bfunction\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\([^)]*\)\s*\{")
 DEFINE_PROPERTIES_CALL_RE = re.compile(
     r"Object\.defineProperties\(\s*([^,]+?)\s*,\s*\{")
 DEFINE_PROPERTY_CALL_RE = re.compile(
@@ -783,9 +915,19 @@ def _member_record(
 
 def _shape_method(
         name: str, raw_params: str, path: Path, line: int,
-        alias_of: str | None = None) -> dict[str, Any]:
-    return _member_record(
+        alias_of: str | None = None,
+        region: str | None = None) -> dict[str, Any]:
+    record = _member_record(
         name, _parse_params(raw_params), path, line, alias_of=alias_of)
+    # Same rule the module exports get: a method that reads its own
+    # `arguments` takes more than it declares. `movian/sqlite`'s
+    # `DB.prototype.query` names no parameter and forwards every value in
+    # `arguments`, so a zero-argument declaration rejected every real
+    # `db.query('SELECT ...', value)`. `region` starts at the assignment, so
+    # `_uses_arguments` brace-matches this method's own body.
+    if region is not None and "params" in record and _uses_arguments(region):
+        record["variadic"] = True
+    return record
 
 def _split_js_fields(text: str) -> list[str]:
     fields: list[str] = []
@@ -831,6 +973,19 @@ def _function_regions(
             regions.append((owner, match.end(), end - 1))
     return regions
 
+def _mask_nested_function_bodies(text: str) -> str:
+    """Keep constructor control flow while hiding nested callback bodies."""
+    chars = list(text)
+    for match in NESTED_FUNCTION_HEAD_RE.finditer(text):
+        open_index = text.find("{", match.end() - 1)
+        end = _balanced_end(text, open_index)
+        if open_index < 0 or end is None:
+            continue
+        for index in range(open_index + 1, end - 1):
+            if chars[index] != "\n":
+                chars[index] = " "
+    return "".join(chars)
+
 
 def _shape_receiver_for_owner(
         owner: str, receivers: set[str]
@@ -847,8 +1002,8 @@ def _shape_receiver_for_owner(
 
 def _property_names(
         body: str, path: Path, text: str, offset: int
-) -> list[tuple[str, int]]:
-    names: list[tuple[str, int]] = []
+) -> list[tuple[str, int, str]]:
+    names: list[tuple[str, int, str]] = []
     cursor = 0
     for field in _split_js_fields(body):
         entry = re.match(
@@ -861,19 +1016,49 @@ def _property_names(
                     "ignored unsupported defineProperties key")
             cursor += len(field) + 1
             continue
+        descriptor = field[entry.end():]
+        kind = ("accessor"
+                if re.search(r"\b(?:get|set)\s*:", descriptor)
+                else "value")
         names.append((
             entry.group(1) or entry.group(3),
-            offset + cursor + field.find(entry.group(0).lstrip())))
+            offset + cursor + field.find(entry.group(0).lstrip()),
+            kind))
         cursor += len(field) + 1
     return names
 
 
 def _add_property(
         properties: dict[str, dict[str, dict[str, Any]]],
-        receiver: str, name: str, path: Path, text: str, offset: int
+        receiver: str, name: str, path: Path, text: str, offset: int,
+        kind: str = "value", optional: bool = False
 ) -> None:
-    properties.setdefault(receiver, {})[name] = _member_record(
-        name, None, path, _source_line(text, offset), kind="property")
+    members = properties.setdefault(receiver, {})
+    if optional and name in members:
+        # A slot the module both guards and assigns is not optional; the
+        # assignment is the stronger fact and already recorded it.
+        return
+    record = _member_record(
+        name, None, path, _source_line(text, offset), kind=kind)
+    if optional:
+        record["optional"] = True
+    members[name] = record
+
+
+# `if(typeof this.asyncPaginator == 'function')` is the module DECLARING an
+# optional slot: it tests the member precisely because a plugin is expected to
+# assign it, and the module never assigns it itself. Nothing else in the source
+# records those members, so narrowing a callback parameter to the interface
+# turned every documented assignment into TS2339 -- `plugin_examples/
+# async_page_load/async_page_load.js:27` and `plugin_examples/videoscrobbling/
+# videoscrobbling_example.js:53-70` both stopped compiling. Seven such hooks
+# exist in the whole corpus, on `Page` (3) and `VideoScrobbler` (4).
+#
+# Matched against text whose string literals are intact -- the default mask
+# replaces `'function'` and the guard becomes invisible.
+THIS_HOOK_GUARD_RE = re.compile(
+    r"\btypeof\s*\(?\s*this\.([A-Za-z_$][A-Za-z0-9_$]*)\s*\)?"
+    r"\s*[=!]==?\s*['\"]function['\"]")
 
 
 def _shape_diagnostic(path: Path, text: str, offset: int, message: str) -> None:
@@ -901,11 +1086,11 @@ def _scan_shape_properties(
                 "ignored unterminated Object.defineProperties call")
             return
         body_start = base_offset + open_index + 1
-        for name, offset in _property_names(
+        for name, offset, kind in _property_names(
                 source[open_index + 1:end - 1],
                 path, comment_text, body_start):
             _add_property(properties, receiver, name,
-                          path, comment_text, offset)
+                          path, comment_text, offset, kind)
 
     def add_property_call(
             source: str, match: re.Match[str], receiver: str,
@@ -924,12 +1109,47 @@ def _scan_shape_properties(
     def scan_body(
             body: str, owner_receiver: str, base_offset: int
     ) -> None:
-        for assignment in _top_level_matches(body, THIS_ASSIGN_RE):
+        scan_text = _mask_nested_function_bodies(body)
+        aliases = set(THIS_ALIAS_RE.findall(scan_text))
+
+        def assignment_kind(
+                assignment: re.Match[str]) -> str:
+            return ("function"
+                    if re.match(
+                        r"\s*function\b", scan_text[assignment.end():])
+                    else "value")
+
+        for assignment in THIS_ASSIGN_RE.finditer(scan_text):
             name = assignment.group(1)
             if name != "__proto__":
+                # An assignment nested inside a block is conditional, so the
+                # member is not always present. `movian/page` sets
+                # `this.options` only under `if(!flat)` (page.js:195-200) and
+                # `Searcher` builds flat pages, so declaring it required made
+                # `page.options` look guaranteed on a path that does not have
+                # it. Exactly one member in the corpus is assigned this way.
+                before = scan_text[:assignment.start()]
+                conditional = before.count("{") > before.count("}")
                 _add_property(
                     properties, owner_receiver, name, path, comment_text,
-                    base_offset + assignment.start(1))
+                    base_offset + assignment.start(1),
+                    kind=assignment_kind(assignment),
+                    optional=conditional)
+        # Deliberately over `body` rather than `scan_text`: every one of these
+        # guards sits inside a `.bind(this)` callback, where `this` is still
+        # the shape, and masking nested bodies loses all seven.
+        for guard in THIS_HOOK_GUARD_RE.finditer(body):
+            _add_property(
+                properties, owner_receiver, guard.group(1), path,
+                comment_text, base_offset + guard.start(1),
+                kind="function", optional=True)
+        for assignment in ALIAS_MEMBER_ASSIGN_RE.finditer(scan_text):
+            alias, name = assignment.groups()
+            if alias in aliases and name != "__proto__":
+                _add_property(
+                    properties, owner_receiver, name, path, comment_text,
+                    base_offset + assignment.start(2),
+                    kind=assignment_kind(assignment))
 
         for match in _top_level_matches(body, DEFINE_PROPERTIES_RE):
             target = match.group(1)
@@ -1038,7 +1258,8 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
         methods = by_receiver.setdefault(receiver, {})
         methods[match.group(2)] = _shape_method(
             match.group(2), match.group(3), path,
-            _source_line(text, match.start(1)))
+            _source_line(text, match.start(1)),
+            region=text[match.start(1):])
 
     unresolved_aliases: list[tuple[str, str, str, int]] = []
     alias_matches = list(PROTOTYPE_ALIAS_RE.finditer(text))
@@ -1108,7 +1329,8 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
         methods = by_receiver.setdefault(receiver, {})
         methods[name] = _shape_method(
             name, match.group(3), path,
-            _source_line(text, match.start(1)))
+            _source_line(text, match.start(1)),
+            region=text[match.start(1):])
     properties_by_receiver = _scan_shape_properties(
         path, text, set(by_receiver), consumed_shared_names)
 
@@ -1240,6 +1462,26 @@ def _merge_receiver_members(
             if len(new_params) > len(old_params):
                 merged[name] = member
     return [merged[name] for name in sorted(merged)]
+def _balanced_call_end(text: str, open_index: int) -> int | None:
+    """Index just past the `)` closing the call whose `(` is at `open_index`.
+
+    `_balanced_end` below matches BRACES, and calling it for a parenthesised
+    argument list silently runs to the next unbalanced `{` -- which made the
+    callback-argument split return the whole rest of the function as one
+    argument. The right index came out anyway on `movian/http`, by luck, which
+    is the worst way for this to be wrong.
+    """
+    depth = 0
+    for index in range(open_index, len(text)):
+        if text[index] == "(":
+            depth += 1
+        elif text[index] == ")" and depth:
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return None
+
+
 def _balanced_end(text: str, open_index: int) -> int | None:
     depth = 0
     for index in range(open_index, len(text)):
@@ -1300,6 +1542,14 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
         if params is not None:
             record["params"] = params
             record["nargs"] = len(params)
+            # A function that reads `arguments` takes more than it declares --
+            # `movian/xmlrpc`'s `call` declares none and uses arguments[0],
+            # arguments[1] and the tail from index 2. Emitting the formal list
+            # as the whole signature made tsc reject every real call site, so
+            # the formal count is not the arity here: keep the names for
+            # signature help and let a rest parameter carry what is unnamed.
+            if _uses_arguments(region):
+                record["variadic"] = True
         if re.search(r"this\.__proto__\s*=", region):
             # These functions mutate the receiver's prototype when called as
             # an exported function; they are not constructors in the public
@@ -1328,6 +1578,22 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
         if callback_shapes and len(callback_params) == 1:
             record["callbackShapes"] = callback_shapes
             record["callbackParam"] = callback_params[0]
+            index, nullable = _callback_shape_index(
+                region, callback_params[0], callback_shapes)
+            if index is not None:
+                record["callbackShapeIndex"] = index
+                if nullable:
+                    record["callbackShapeNullable"] = True
+            # `movian/http`'s `request` returns `new HttpResponse(res)` on the
+            # synchronous path, but when a callback is supplied it dispatches
+            # and falls out through a bare `return;`. Promising the value type
+            # unconditionally let `http.request(url, {}, cb).toString()` type
+            # -check and then dereference `undefined`, so the callback form is
+            # emitted as a separate overload returning `void`. Recorded only
+            # when the callback parameter is unambiguous, above.
+            if record.get("returns") is not None and \
+                    _returns_without_value(region):
+                record["voidWhen"] = callback_params[0]
         exports.append(record)
     exports.sort(key=lambda r: r["name"])
     return exports
@@ -1353,6 +1619,437 @@ def _proto_parent(path: Path) -> str | None:
         % re.escape(ident), text)
     return require.group(1) if require is not None else None
 
+# ---------------------------------------------------------------------------
+# js.globals -- the environment es_create_env() builds on the global object
+# ---------------------------------------------------------------------------
+
+# The two C functions that populate the global object. `es_create_env`
+# builds the environment every context gets; `ecmascript_plugin_load` adds
+# `Plugin`, which only a loaded plugin sees. Same shape, so one scan reads
+# both rather than a second special-cased reader.
+ENV_FUNCTION_MARKERS = (
+    "es_create_env(es_context_t *ec",
+    "ecmascript_plugin_load(const char *id",
+)
+# `duk_put_function_list(ctx, -1, es_fnlist_timer)` puts a whole table on
+# whatever is at -1. Inside es_create_env that is either the global object
+# itself or an object just pushed, which the following put_prop_string names.
+PUT_FUNCTION_LIST_RE = re.compile(
+    r"duk_put_function_list\s*\(\s*ctx\s*,\s*(-?\d+|\w*obj_idx)\s*,"
+    r"\s*([A-Za-z_]\w*)\s*\)")
+PUT_PROP_STRING_RE = re.compile(
+    r'duk_put_prop_string\s*\(\s*ctx\s*,\s*(-?\d+|\w*obj_idx)\s*,\s*"([^"]+)"\s*\)')
+PUSH_OBJECT_RE = re.compile(r"duk_push_object\s*\(\s*ctx\s*\)")
+PUSH_VALUE_RE = re.compile(r"duk_push_(int|string|number|boolean)\s*\(")
+# One alternation so the scan sees the calls in source order; a separate
+# finditer per pattern would lose the ordering the C depends on.
+ENV_STATEMENT_RE = re.compile(
+    "|".join("(?:%s)" % pattern.pattern for pattern in (
+        PUSH_OBJECT_RE, PUSH_VALUE_RE,
+        PUT_FUNCTION_LIST_RE, PUT_PROP_STRING_RE)))
+
+
+def _table_functions(table: str) -> list[dict[str, Any]]:
+    """Names and nargs from a `duk_function_list_entry` table, wherever it
+    lives -- the env tables sit in ecmascript.c and es_*.c alike."""
+    for path in sorted(ECMASCRIPT_DIR.glob("*.c")):
+        try:
+            entries = scan_array_block(
+                path, "duk_function_list_entry %s[] = {" % table)
+        except GenError:
+            continue
+        functions = []
+        for entry_text, entry_line in entries:
+            fields = split_fields(entry_text)
+            if not fields or fields[0] == "NULL":
+                continue
+            nargs = (-1 if fields[2] == "DUK_VARARGS" else int(fields[2]))
+            functions.append({
+                "name": unquote(fields[0]),
+                "nargs": nargs,
+                "variadic": nargs == -1,
+                "source": {"file": rel(path), "line": entry_line},
+            })
+        return sorted(functions, key=lambda f: f["name"])
+    raise GenError("global function table not found: %s" % table)
+
+
+def build_globals() -> dict[str, Any]:
+    """The global surface, scanned out of `es_create_env()`.
+
+    Nothing in `generated/movian-api.d.ts` described it, so every plugin using
+    `console.log` or `setTimeout` -- both real globals installed here -- got a
+    false "cannot find name". The table names are read from the C rather than
+    listed here: `es_create_env` is the one function that builds the
+    environment, and it says which table lands where.
+
+    Read as a sequence, because that is what the C is: a `duk_push_object`
+    opens an object, function lists and value properties land on whatever is
+    open, and the `duk_put_prop_string(ctx, -2, "name")` that follows names
+    and closes it. A function list arriving with nothing open goes on the
+    global object itself, which is how the timer family is installed.
+    """
+    path = ECMASCRIPT_DIR / "ecmascript.c"
+    text = path.read_text(encoding="utf-8")
+    functions: list[dict[str, Any]] = []
+    objects: list[dict[str, Any]] = []
+    for marker in ENV_FUNCTION_MARKERS:
+        found, found_objects = _scan_global_env(path, text, marker)
+        functions.extend(found)
+        objects.extend(found_objects)
+    # Duktape installs globals of its own before Movian's C runs, and
+    # `es_create_env` never mentions them -- so the scanner above cannot see
+    # them and nothing declared them. `print` is the expensive case: the
+    # plugin_examples audit (#169) counted its 16 uses as example rot on the
+    # reasoning that only `native/prop.print` exists. It is a real global, and
+    # this repo's own api-introspector plugin calls it to emit the capture
+    # `gen.py --check` diffs against. Curated rather than scanned, because the
+    # evidence is a builtins table plus two config macros rather than a call
+    # sequence -- each entry carries both, and the audit below re-checks them.
+    functions.extend(build_interpreter_globals())
+    return {
+        "functions": sorted(functions, key=lambda f: f["name"]),
+        "objects": sorted(objects, key=lambda entry: entry["name"]),
+    }
+
+
+def render_v1_dts(artifact: dict[str, Any]) -> str:
+    """`generated/movian-api-v1.d.ts` -- the apiversion-1 `showtime` global.
+
+    A separate file, not a section of the main bundle, because the runtime
+    rule is a branch: `ecmascript.c:913` loads api-v1.js only when the
+    plugin's apiversion is 1. Declaring `showtime` unconditionally would make
+    tsc accept it in a v2 plugin, where the name genuinely does not exist --
+    a false accept on the exact legacy API this file documents.
+    """
+    record = artifact.get("js", {}).get("legacyGlobals", {})
+    members = record.get("members", [])
+    source = record.get("source", {})
+    lines = [
+        "// Generated by support/devtools/metadata/gen.py -- do not edit.",
+        "// movianRevision: %s" % artifact.get("movianRevision", "unknown"),
+        "//",
+        "// apiversion 1 ONLY. src/plugins.c:712 defaults a plugin.json with",
+        "// no `apiversion` to 1, and src/ecmascript/ecmascript.c:913 loads",
+        "// %s for those plugins alone." % source.get("file", "api-v1.js"),
+        "// Include this file ALONGSIDE movian-api.d.ts when checking such a",
+        "// plugin, and never for an apiversion 2 one.",
+        "",
+        "declare const showtime: {",
+    ]
+    for member in members:
+        if member.get("callable"):
+            params = list(member.get("params") or [])
+            rendered = ", ".join("%s?: any" % name for name in params)
+            if member.get("variadic"):
+                rendered = ", ".join(
+                    part for part in (rendered, "...args: any[]") if part)
+            lines.append("  /** @arity %d */"
+                         % (-1 if member.get("variadic") and not params
+                            else len(params)))
+            lines.append("  %s(%s): any;" % (member["name"], rendered))
+        else:
+            # An alias for a value or function defined elsewhere. The scan
+            # records that the member exists, not what it aliases.
+            lines.append("  %s: any;" % member["name"])
+    lines.append("};")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def build_legacy_globals() -> dict[str, Any]:
+    """The `showtime` global, scanned out of `res/ecmascript/legacy/api-v1.js`.
+
+    `src/plugins.c:712` -- the JavaScript branch; the identical read at :688
+    is the bitcode one, inside `#if ENABLE_VMIR` -- defaults a plugin's
+    apiversion to **1** when plugin.json omits it, and `ecmascript.c:913`
+    loads api-v1.js for exactly those plugins. So `showtime` is real for them and absent for everyone
+    else -- the plugin_examples audit (#169) counted its 7 uses as example rot
+    on the strength of "no such global exists", which is true only of
+    apiversion 2.
+    """
+    text = _masked_js_text(LEGACY_API_V1, mask_strings=True)
+    marker = "showtime = {"
+    start = text.find(marker)
+    if start < 0:
+        raise GenError("%s does not assign a showtime global"
+                       % rel(LEGACY_API_V1))
+    open_brace = start + len(marker) - 1
+    end = _balanced_end(text, open_brace)
+    if end is None:
+        raise GenError("showtime literal not terminated in %s"
+                       % rel(LEGACY_API_V1))
+    body = text[open_brace + 1:end]
+    members: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    depth = 0
+    for match in re.finditer(
+            r"[{}]|([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*(function\s*\(([^)]*)\))?",
+            body):
+        token = match.group(0)
+        if token == "{":
+            depth += 1
+            continue
+        if token == "}":
+            depth -= 1
+            continue
+        # Only the literal's own keys. Nested object literals and the object
+        # literals built inside its methods sit at depth > 0.
+        if depth != 0 or not match.group(1):
+            continue
+        name = match.group(1)
+        if name in seen:
+            # `print: print` appears twice in the file; the surface is a set.
+            continue
+        seen.add(name)
+        record: dict[str, Any] = {
+            "name": name,
+            "line": _source_line(text, open_brace + 1 + match.start()),
+        }
+        if match.group(2) is not None:
+            params = [part.strip() for part in match.group(3).split(",")
+                      if part.strip()]
+            record["params"] = params
+            record["callable"] = True
+            # `xmlrpc` declares no formal parameters and reads the tail out of
+            # `arguments`, the same idiom movian/xmlrpc.call uses. Without this
+            # the emission would reject every real call.
+            # `_own_body` (through COMMONJS_FUNCTION_RE) recognises a
+            # function literal only after an `=`, and an object literal member
+            # is introduced by `:`. Handing it the assignment shape it expects
+            # reuses the nested-function stripping instead of re-implementing
+            # it -- without this the helper returns "" and reports "no
+            # evidence", which reads as non-variadic and silently rejects
+            # every real showtime.xmlrpc call.
+            if _uses_arguments("= " + body[match.start(2):]):
+                record["variadic"] = True
+        else:
+            # An alias for something else (`print: print`,
+            # `JSONDecode: JSON.parse`, `deviceId: Core.deviceId`). The value
+            # kind is whatever it aliases, which this scan does not resolve.
+            record["callable"] = False
+        members.append(record)
+    if not members:
+        raise GenError("showtime literal in %s scanned to nothing"
+                       % rel(LEGACY_API_V1))
+    # Two independent derivations of the same set, required to agree. The
+    # brace-depth scan above cannot see a regex literal: `_masked_js_text`
+    # masks comments and strings but not `/.../`, so a `/}/` inside a member
+    # function drops the depth to zero and promotes the next `name:` to a
+    # top-level member -- demonstrated, it invented a 27th. Indentation alone
+    # is just as fragile in the other direction. Neither is trusted; a
+    # disagreement is raised rather than resolved, because the correct answer
+    # is unknown at exactly that point.
+    # A quoted or computed key is missed by BOTH derivations -- they agree,
+    # and agree wrongly -- so it cannot be caught by the cross-check below.
+    # The emitter has no way to render one either, so the honest response is
+    # to refuse rather than to emit a surface with a hole in it.
+    # ...and the key is checked on the MASKED text, where a quoted key has
+    # already lost its quotes along with its contents -- `"k": 2` arrives as
+    # `      : 2`. The first version of this looked for the quotes and found
+    # nothing, passing the very input it was written to reject. So: take
+    # whatever precedes the colon at the literal's own indentation and
+    # require it to be a plain identifier; blank and bracketed keys both
+    # fail, which is the point.
+    exotic = [
+        match.group(1) for match in re.finditer(r"^  ([^:\n]*):", body, re.M)
+        if not re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*",
+                            match.group(1).strip())
+    ]
+    if exotic:
+        raise GenError(
+            "showtime literal in %s uses keys this scan cannot read (%s) -- "
+            "quoted or computed; the emission cannot render them either"
+            % (rel(LEGACY_API_V1),
+               ", ".join(repr(key.strip()) for key in exotic)))
+    indented = {match.group(1) for match in re.finditer(
+        r"^  ([A-Za-z_$][A-Za-z0-9_$]*)\s*:", body, re.M)}
+    scanned = {member["name"] for member in members}
+    if scanned != indented:
+        raise GenError(
+            "showtime literal in %s: brace-depth scan and indentation "
+            "disagree (depth-only %s, indent-only %s) -- one of them is "
+            "misreading the file"
+            % (rel(LEGACY_API_V1), sorted(scanned - indented),
+               sorted(indented - scanned)))
+    return {
+        "name": "showtime",
+        "apiversion": 1,
+        "source": {"file": rel(LEGACY_API_V1),
+                   "line": _source_line(text, start)},
+        "members": sorted(members, key=lambda entry: entry["name"]),
+    }
+
+
+def build_interpreter_globals() -> list[dict[str, Any]]:
+    """Globals the interpreter installs, with their evidence re-checked.
+
+    A curated list is a place for a name to survive after the thing it
+    describes is gone, so the anchors are not decoration: each is looked up in
+    the file it names, and a missing one fails the build.
+    """
+    entries = load_curated(
+        CURATED_INTERPRETER_GLOBALS,
+        {"name", "nargs", "anchor", "source", "enabledBy", "why"})
+    records: list[dict[str, Any]] = []
+    for entry in entries:
+        _require_anchor(entry["source"]["file"], entry["anchor"],
+                        "interpreter global %s" % entry["name"])
+        for macro in entry["enabledBy"]:
+            _require_anchor(macro["source"]["file"],
+                            "#define %s" % macro["macro"],
+                            "interpreter global %s" % entry["name"])
+        nargs = entry["nargs"]
+        records.append({
+            "name": entry["name"],
+            "nargs": nargs,
+            "provider": "duktape",
+            "source": entry["source"],
+            # -1 is how the native scanner spells DUK_VARARGS (line 549).
+            "variadic": nargs == -1,
+        })
+    return records
+
+
+def _require_anchor(relative_path: str, anchor: str, what: str) -> None:
+    """Fail unless `anchor` appears in live C -- not in a comment.
+
+    A raw substring search accepted `// #define DUK_USE_FILE_IO`, so an
+    anchor could survive being commented out and go on vouching for a global
+    that is no longer installed. Comments are stripped before the search;
+    conditional compilation is not resolved, and the entry's `enabledBy`
+    field records which macros the claim depends on so a reader can check
+    what this cannot.
+    """
+    path = REPO_ROOT / relative_path
+    if not path.is_file():
+        raise GenError("%s: %s does not exist" % (what, relative_path))
+    text = _strip_c_comments(path.read_text(encoding="utf-8",
+                                            errors="replace"))
+    if anchor not in text:
+        raise GenError(
+            "%s: anchor %r no longer appears in live code in %s"
+            % (what, anchor, relative_path))
+
+
+def _strip_c_comments(text: str) -> str:
+    """Blank C comments, keeping every other character in place."""
+    out = list(text)
+    index = 0
+    length = len(out)
+    while index < length - 1:
+        pair = text[index:index + 2]
+        if pair == "//":
+            end = text.find("\n", index)
+            end = length if end < 0 else end
+            for position in range(index, end):
+                out[position] = " "
+            index = end
+        elif pair == "/*":
+            end = text.find("*/", index + 2)
+            end = length if end < 0 else end + 2
+            for position in range(index, end):
+                if out[position] != "\n":
+                    out[position] = " "
+            index = end
+        else:
+            index += 1
+    return "".join(out)
+
+
+def _scan_global_env(
+        path: Path, text: str, marker: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    start = text.find(marker)
+    if start < 0:
+        raise GenError("%s not found in %s" % (marker, rel(path)))
+    open_brace = text.find("{", start)
+    end = _balanced_end(text, open_brace)
+    if end is None:
+        raise GenError("%s body not terminated in %s" % (marker, rel(path)))
+    # Everything before `duk_push_global_object` belongs to the global STASH,
+    # which is runtime bookkeeping and not plugin surface -- scanning from the
+    # top of the function picked up its `roots` object as a global.
+    global_object = text.find("duk_push_global_object", open_brace)
+    if global_object < 0 or global_object > end:
+        raise GenError(
+            "%s does not push the global object in %s" % (marker, rel(path)))
+    body = text[global_object:end]
+    base_line = text[:global_object].count("\n") + 1
+
+    def line_of(offset: int) -> int:
+        return base_line + body[:offset].count("\n")
+
+    functions: list[dict[str, Any]] = []
+    objects: list[dict[str, Any]] = []
+    # The object currently open, plus the pending value property whose
+    # duk_push_* has been seen but whose duk_put_prop_string has not.
+    open_object: dict[str, Any] | None = None
+    pending_value: tuple[str, bool] | None = None
+
+    for match in ENV_STATEMENT_RE.finditer(body):
+        text_at = match.group(0)
+        if PUSH_OBJECT_RE.match(text_at):
+            # `duk_get_prop_string(ctx, -1, "Duktape")` also opens a scope,
+            # but it reopens an EXISTING object rather than creating one, so
+            # it is deliberately not matched here -- modSearch is Duktape
+            # internals, not plugin surface.
+            open_object = {
+                "name": None,
+                "functions": [],
+                "properties": [],
+                "source": {"file": rel(path), "line": line_of(match.start())},
+            }
+            continue
+        push_value = PUSH_VALUE_RE.match(text_at)
+        if push_value is not None:
+            # `if(loaddir != NULL) {` guards two of Core's properties, so
+            # they are not always present. Same optional rule the plugin hooks
+            # get, for the same reason: requiring them would invent errors.
+            guarded = body[:match.start()].rstrip().endswith("{")
+            pending_value = (
+                {"int": "number", "number": "number",
+                 "string": "string", "boolean": "boolean"}[push_value.group(1)],
+                guarded)
+            continue
+        function_list = PUT_FUNCTION_LIST_RE.match(text_at)
+        if function_list is not None:
+            entries = _table_functions(function_list.group(2))
+            if open_object is not None:
+                open_object["functions"].extend(entries)
+            else:
+                functions.extend(entries)
+            continue
+        prop = PUT_PROP_STRING_RE.match(text_at)
+        if prop is None:
+            continue
+        name = prop.group(2)
+        if pending_value is not None and open_object is not None:
+            kind, guarded = pending_value
+            open_object["properties"].append({
+                "name": name,
+                "kind": kind,
+                "optional": guarded,
+                "source": {"file": rel(path), "line": line_of(match.start())},
+            })
+            pending_value = None
+            continue
+        pending_value = None
+        if open_object is not None:
+            open_object["name"] = name
+            open_object["functions"].sort(key=lambda f: f["name"])
+            open_object["properties"].sort(key=lambda entry: entry["name"])
+            objects.append(open_object)
+            open_object = None
+
+    if open_object is not None:
+        raise GenError(
+            "%s leaves an object unnamed at %s:%d"
+            % (marker, rel(path), open_object["source"]["line"]))
+
+    return functions, objects
+
+
 def build_commonjs_modules() -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -1367,10 +2064,22 @@ def build_commonjs_modules() -> list[dict[str, Any]]:
         shape_names = {shape["name"] for shape in shapes}
         receiver_members: list[dict[str, Any]] = []
         for export in exports:
-            receiver_members.extend(export.pop("receiverMembers", []))
+            # Kept per-export as well as merged. The two `movian/settings`
+            # initializers install DIFFERENT surfaces -- globalSettings adds
+            # id and properties, kvstoreSettings does not -- so one merged
+            # instance type made `kvstoreSettings(...).properties` compile and
+            # then read undefined. The hand-written canon
+            # (tests/reference/movian-settings.d.ts) models them separately;
+            # this follows it, which is what #160's calibration section asks
+            # for when the canon and the generator disagree.
+            receiver_members.extend(export.get("receiverMembers", []))
             returned = export.get("returns")
             if isinstance(returned, str) and returned not in shape_names:
                 export.pop("returns", None)
+                # The overload split only says something once there is a
+                # value type to contrast `void` with; without one both forms
+                # render identically and the extra signature is noise.
+                export.pop("voidWhen", None)
             callback_param = export.pop("callbackParam", None)
             callback_shapes = [
                 shape for shape in export.pop("callbackShapes", [])
@@ -1379,6 +2088,9 @@ def build_commonjs_modules() -> list[dict[str, Any]]:
             if len(callback_shapes) == 1 and callback_param is not None:
                 export["callbackShape"] = callback_shapes[0]
                 export["callbackParam"] = callback_param
+            else:
+                export.pop("callbackShapeIndex", None)
+                export.pop("callbackShapeNullable", None)
         receiver_members = _merge_receiver_members(receiver_members)
         record = {
             "name": module_name,
@@ -1463,6 +2175,722 @@ def _check_commonjs_shape_coverage(
         lines.extend("  " + _format_shape_member(member)
                      for member in phantom)
     return False, "\n".join(lines)
+
+
+def _runtime_member_kind(record: Any) -> str | None:
+    if not isinstance(record, dict):
+        return None
+    record_type = record.get("type")
+    if record_type == "function":
+        return "function"
+    if record_type == "accessor":
+        return "accessor"
+    if record_type in {
+            "object", "string", "number", "boolean", "undefined", "null"}:
+        return "value"
+    return None
+
+
+def _runtime_prototype_levels(
+        prototype: Any) -> list[dict[str, str]]:
+    levels: list[dict[str, str]] = []
+    current = prototype
+    while isinstance(current, dict):
+        members: dict[str, str] = {}
+        for name, record in (current.get("keys") or {}).items():
+            kind = _runtime_member_kind(record)
+            if kind is not None:
+                members[name] = kind
+        levels.append(members)
+        current = current.get("prototype")
+    return levels
+
+
+def _runtime_stage_reason(
+        stage: Any, fallback: str,
+        owner: str | None = None) -> str:
+    if not isinstance(stage, dict):
+        return fallback
+    parts: list[str] = []
+    status = stage.get("status")
+    if isinstance(status, str):
+        parts.append("status=%s" % status)
+    for key in ("reason", "error"):
+        value = stage.get(key)
+        if isinstance(value, str) and value not in parts:
+            parts.append(value)
+    for entry in stage.get("unreachable", []):
+        if not isinstance(entry, dict):
+            continue
+        entry_owner = entry.get("class")
+        if owner is not None and entry_owner not in (owner, None):
+            continue
+        value = entry.get("reason")
+        if isinstance(value, str) and value not in parts:
+            parts.append(value)
+    return "; ".join(parts) or fallback
+
+
+def _resolve_required_module(path: Path, spec: str) -> str | None:
+    if not (spec.startswith("./") or spec.startswith("../")):
+        return spec
+    target = (path.parent / spec).resolve()
+    if target.suffix != ".js":
+        target = target.with_suffix(".js")
+    try:
+        return target.relative_to(COMMONJS_DIR).with_suffix("").as_posix()
+    except ValueError:
+        return None
+
+
+def _required_aliases(path: Path) -> dict[str, str]:
+    text = path.read_text(encoding="utf-8")
+    aliases: dict[str, str] = {}
+    for match in re.finditer(
+            r"\b(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*="
+            r"\s*require\(\s*['\"]([^'\"]+)['\"]\s*\)", text):
+        module_name = _resolve_required_module(path, match.group(2))
+        if module_name is not None:
+            aliases[match.group(1)] = module_name
+    return aliases
+
+
+def _static_export_kind(
+        module_name: str, export_name: str,
+        modules: dict[str, dict[str, Any]],
+        cache: dict[tuple[str, str], str],
+        visiting: set[tuple[str, str]]) -> str:
+    key = (module_name, export_name)
+    if key in cache:
+        return cache[key]
+    if key in visiting:
+        return "value"
+    visiting.add(key)
+
+    module = modules.get(module_name)
+    if module is None:
+        result = "value"
+    elif module.get("kind") == "native":
+        result = ("function"
+                 if any(f.get("name") == export_name
+                        for f in module.get("functions", []))
+                 else "value")
+    else:
+        export = next(
+            (entry for entry in module.get("exports", [])
+             if entry.get("name") == export_name),
+            None)
+        if export is None:
+            result = "value"
+        elif "params" in export or export.get("constructor"):
+            result = "function"
+        else:
+            source = REPO_ROOT / export["source"]["file"]
+            lines = source.read_text(encoding="utf-8").splitlines()
+            line_number = export["source"]["line"]
+            line = lines[line_number - 1] if line_number <= len(lines) else ""
+            assignment = re.search(r"=\s*(.*?)\s*;?\s*$", line)
+            rhs = assignment.group(1).strip() if assignment else ""
+            if re.match(r"function\b", rhs):
+                result = "function"
+            elif re.fullmatch(
+                    r"[A-Za-z_$][A-Za-z0-9_$]*", rhs):
+                function_declared = re.search(
+                    r"\bfunction\s+%s\s*\(" % re.escape(rhs),
+                    source.read_text(encoding="utf-8")) is not None
+                result = "function" if function_declared else "value"
+            else:
+                dotted = re.fullmatch(
+                    r"([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$]"
+                    r"[A-Za-z0-9_$]*)", rhs)
+                if dotted is None:
+                    result = "value"
+                else:
+                    target = _required_aliases(source).get(dotted.group(1))
+                    result = (
+                        _static_export_kind(
+                            target, dotted.group(2), modules,
+                            cache, visiting)
+                        if target is not None else "value")
+    visiting.remove(key)
+    cache[key] = result
+    return result
+
+
+def _format_runtime_member(
+        record: dict[str, Any]) -> str:
+    text = (
+        "module=%s shape=%s member=%s"
+        % (record["module"], record["shape"], record["member"]))
+    if record.get("kind") is not None:
+        text += " kind=%s" % record["kind"]
+    if record.get("missing") == "artifact":
+        text += " missing-from=artifact"
+    elif record.get("missing") == "oracle":
+        text += " missing-from=oracle"
+    elif record.get("missing") == "kind":
+        text += (
+            " missing-from=neither kind-mismatch=%s/%s"
+            % (record.get("artifactKind"), record.get("oracleKind")))
+    if record.get("reason"):
+        text += " reason=%s" % record["reason"]
+    return text
+
+
+def _format_runtime_oracle_report(
+        report: dict[str, Any]) -> str:
+    status = report.get("status")
+    if status == "failed":
+        lines = ["RUNTIME ORACLE CROSS-CHECK FAILED"]
+        lines.append(
+            "counts: match %d, drift %d, oracle-unreachable %d"
+            % (report.get("match", 0), report.get("drift", 0),
+               report.get("oracleUnreachable", 0)))
+        if report.get("error"):
+            lines.append("error: %s" % report["error"])
+        return "\n".join(lines)
+
+    missing_modules = report.get("missingModules", [])
+    state = "OK" if report.get("drift", 0) == 0 and not missing_modules \
+        else "DRIFT"
+    lines = [
+        "RUNTIME ORACLE CROSS-CHECK %s" % state,
+        "counts: match %d, drift %d, missing-modules %d, plugin-supplied %d,"
+        " oracle-unreachable %d" %
+        (report["match"], report["drift"], len(missing_modules),
+         report.get("pluginSupplied", 0),
+         report["oracleUnreachable"]),
+    ]
+    if missing_modules:
+        lines.append(
+            "modules the runtime has and the artifact dropped entirely:")
+        lines.extend("  " + name for name in missing_modules)
+    drift = report.get("driftMembers", [])
+    if drift:
+        lines.append("drift members:")
+        lines.extend("  " + _format_runtime_member(entry)
+                     for entry in drift)
+    supplied = report.get("pluginSuppliedMembers", [])
+    if supplied:
+        lines.append("plugin-supplied members (declared optional, unset):")
+        lines.extend("  " + _format_runtime_member(entry)
+                     for entry in supplied)
+    lines.append("oracle-unreachable members:")
+    unreachable = report.get("unreachableMembers", [])
+    if unreachable:
+        lines.extend("  " + _format_runtime_member(entry)
+                     for entry in unreachable)
+    else:
+        lines.append("  none")
+    return "\n".join(lines)
+
+
+def _check_runtime_oracle(
+        artifact: dict[str, Any],
+        oracle: Any) -> tuple[bool, str, dict[str, Any]]:
+    if not isinstance(oracle, dict):
+        report = {
+            "status": "failed",
+            "match": 0,
+            "drift": 0,
+            "oracleUnreachable": 0,
+            "error": "runtime oracle is not a JSON object",
+        }
+        return False, _format_runtime_oracle_report(report), report
+    if oracle.get("version") != RUNTIME_ORACLE_VERSION:
+        report = {
+            "status": "failed",
+            "match": 0,
+            "drift": 0,
+            "oracleUnreachable": 0,
+            "error": (
+                "runtime oracle version %r, expected %d"
+                % (oracle.get("version"), RUNTIME_ORACLE_VERSION)),
+        }
+        return False, _format_runtime_oracle_report(report), report
+    # The introspector emits twice per run and only the post-route payload is
+    # complete. Absent means the capture predates the marker split; an
+    # explicit false means someone committed the load-time payload, whose
+    # tier3 members are unattempted rather than absent.
+    if oracle.get("tier3PageOpened") is False:
+        report = {
+            "status": "failed",
+            "match": 0,
+            "drift": 0,
+            "oracleUnreachable": 0,
+            "error": (
+                "runtime oracle is the partial load-time payload "
+                "(tier3PageOpened false); capture the payload emitted after "
+                "opening the introspect:page route"),
+        }
+        return False, _format_runtime_oracle_report(report), report
+
+    modules = {
+        module["name"]: module
+        for module in artifact.get("js", {}).get("modules", [])
+        if isinstance(module, dict) and isinstance(module.get("name"), str)
+    }
+    scopes: dict[
+            tuple[str, str, str], tuple[dict[str, str], bool, str]] = {}
+    reasons: dict[tuple[str, str, str], str] = {}
+
+    def add_reason(key: tuple[str, str, str], reason: str) -> None:
+        if reason:
+            reasons.setdefault(key, reason)
+
+    def add_scope(
+            key: tuple[str, str, str],
+            members: dict[str, str],
+            complete: bool,
+            reason: str) -> None:
+        known = {name: kind for name, kind in members.items()
+                 if kind is not None}
+        previous = scopes.get(key)
+        if previous is None:
+            scopes[key] = (known, complete, reason)
+            return
+        merged = dict(previous[0])
+        merged.update(known)
+        scopes[key] = (
+            merged, previous[1] and complete, previous[2] or reason)
+
+    def stage_members(stage: Any, field: str) -> tuple[dict[str, str], bool]:
+        members: dict[str, str] = {}
+        complete = isinstance(stage, dict)
+        for name, record in (stage.get(field) or {}).items() \
+                if isinstance(stage, dict) else []:
+            kind = _runtime_member_kind(record)
+            if kind is None:
+                complete = False
+            else:
+                members[name] = kind
+        return members, complete
+
+    before_all = oracle.get("before")
+    tier1_all = oracle.get("tier1")
+    tier2_all = oracle.get("tier2")
+    if not isinstance(before_all, dict):
+        before_all = {}
+    if not isinstance(tier1_all, dict):
+        tier1_all = {}
+    if not isinstance(tier2_all, dict):
+        tier2_all = {}
+
+    # Every comparison below walks the ARTIFACT's modules, so a module the
+    # runtime observed and the artifact no longer declares was invisible:
+    # dropping a whole module from the scanner made this leg GREENER (fewer
+    # members to disagree about) instead of redder. Only modules the capture
+    # actually reached count -- one that failed to load then must not invent
+    # drift now.
+    # `showtime/x` has no module record of its own: the bundle emits it as an
+    # `export * from 'movian/x'` alias block, so it is covered exactly when
+    # its canonical module is. Resolving the name here keeps the check honest
+    # in both directions -- dropping `movian/prop` reports `showtime/prop`
+    # missing too, because the alias block goes with it.
+    oracle_modules = {
+        name for name, stage in before_all.items()
+        if isinstance(stage, dict) and stage.get("keys")
+    }
+    missing_modules = sorted(
+        name for name in oracle_modules
+        if ("movian/" + name.split("/", 1)[1]
+            if name.startswith("showtime/") else name) not in modules)
+
+    for module_name, module in modules.items():
+        before = before_all.get(module_name)
+        members, complete = stage_members(before, "keys")
+        if members or complete:
+            add_scope(
+                (module_name, "module", "own"), members, complete,
+                "runtime-api.json before module walk")
+        else:
+            add_reason(
+                (module_name, "module", "own"),
+                _runtime_stage_reason(
+                    before,
+                    "runtime oracle did not reach module %s" % module_name))
+
+    after_settings = oracle.get("afterGlobalSettings")
+    if not isinstance(after_settings, dict):
+        after_settings = {}
+    for module_name, module in modules.items():
+        if not module.get("receiverMembers"):
+            continue
+        after = after_settings.get(module_name)
+        members, complete = stage_members(after, "keys")
+        if members or complete:
+            add_scope(
+                (module_name, "module", "own"), members, complete,
+                "runtime-api.json afterGlobalSettings")
+        else:
+            add_reason(
+                (module_name, "module", "own"),
+                _runtime_stage_reason(
+                    after,
+                    "runtime oracle did not reach mutated module %s"
+                    % module_name))
+
+    for module_name, module in modules.items():
+        tier1 = tier1_all.get(module_name)
+        function_exports = (
+            tier1.get("functionExports", {})
+            if isinstance(tier1, dict) else {})
+        for shape in module.get("shapes", []):
+            receiver = shape.get("receiver", "")
+            if not isinstance(receiver, str) or \
+                    not receiver.startswith("exports."):
+                continue
+            export_name = receiver.split(".", 1)[1]
+            function_export = function_exports.get(export_name)
+            prototype = (
+                function_export.get("prototype")
+                if isinstance(function_export, dict) else None)
+            if isinstance(function_export, dict) and \
+                    function_export.get("status") == "walked" and \
+                    isinstance(prototype, dict):
+                levels = _runtime_prototype_levels(prototype)
+                for index, level in enumerate(levels[:2]):
+                    add_scope(
+                        (module_name, shape["name"],
+                         "prototype" if index == 0 else "prototype2"),
+                        level, True,
+                        "runtime-api.json tier1 %s" % export_name)
+            else:
+                reason_stage = (
+                    tier1 if function_export is not None
+                    else tier2_all.get(module_name))
+                add_reason(
+                    (module_name, shape["name"], "prototype"),
+                    _runtime_stage_reason(
+                        function_export if function_export is not None
+                        else reason_stage,
+                        _runtime_stage_reason(
+                            reason_stage,
+                            "runtime oracle did not reach shape %s"
+                            % shape["name"]),
+                        export_name))
+
+    # A tier2 result's nested objects are named by the `returns` facts that
+    # the generator already emits. No constructor or arity assumptions enter
+    # this comparison.
+    for module_name, module in modules.items():
+        stage = tier2_all.get(module_name)
+        if not isinstance(stage, dict) or \
+                stage.get("status") != "constructed":
+            continue
+        result = stage.get("result")
+        nested = result.get("nested", {}) if isinstance(result, dict) else {}
+        for export in module.get("exports", []):
+            returned = export.get("returns")
+            targets: list[tuple[str, str]] = []
+            if isinstance(returned, dict):
+                for field in returned.get("fields", []):
+                    if isinstance(field, dict) and \
+                            field.get("name") in nested and \
+                            isinstance(field.get("type"), str):
+                        targets.append((field["name"], field["type"]))
+            elif isinstance(returned, str):
+                targets = [(name, returned) for name in nested]
+            for nested_name, shape_name in targets:
+                child = nested.get(nested_name)
+                if not isinstance(child, dict):
+                    continue
+                members, complete = stage_members(child, "keys")
+                add_scope(
+                    (module_name, shape_name, "own"),
+                    members, complete,
+                    "runtime-api.json tier2 %s" % nested_name)
+                levels = _runtime_prototype_levels(child.get("prototype"))
+                for index, level in enumerate(levels[:2]):
+                    add_scope(
+                        (module_name, shape_name,
+                         "prototype" if index == 0 else "prototype2"),
+                        level, True,
+                        "runtime-api.json tier2 %s" % nested_name)
+
+    # A shared shape is installed as a module prototype by the runtime call.
+    # Its constructor-created fields remain unreachable because tier2 records
+    # that no side-effect-free construction was performed.
+    for module_name, module in modules.items():
+        shared_shapes = [
+            shape for shape in module.get("shapes", [])
+            if shape.get("kind") == "shared"
+        ]
+        if not shared_shapes:
+            continue
+        after = after_settings.get(module_name)
+        if not isinstance(after, dict):
+            for shape in shared_shapes:
+                add_reason(
+                    (module_name, shape["name"], "prototype"),
+                    _runtime_stage_reason(
+                        after,
+                        "runtime oracle did not reach shared shape %s"
+                        % shape["name"]))
+            continue
+        prototype = after.get("prototype")
+        levels = _runtime_prototype_levels(prototype)
+        for index, level in enumerate(levels[:2]):
+            for shape in shared_shapes:
+                add_scope(
+                    (module_name, shape["name"],
+                     "prototype" if index == 0 else "prototype2"),
+                    level, True,
+                    "runtime-api.json afterGlobalSettings")
+        module_names = {
+            entry.get("name") for entry in module.get("exports", [])
+        } | {
+            entry.get("name") for entry in module.get("receiverMembers", [])
+        }
+        own, _ = stage_members(after, "keys")
+        own = {name: kind for name, kind in own.items()
+               if name not in module_names}
+        for shape in shared_shapes:
+            add_scope(
+                (module_name, shape["name"], "own"), own, False,
+                "runtime-api.json tier2 status=skipped: "
+                "shared receiver instance was not safely constructed")
+
+    tier3 = oracle.get("tier3")
+    if not isinstance(tier3, dict):
+        tier3 = {}
+
+    def tier3_candidates(key: str) -> list[tuple[str, dict[str, Any]]]:
+        candidates: list[tuple[str, dict[str, Any]]] = []
+        if key == "items":
+            for module_name, module in modules.items():
+                for shape in module.get("shapes", []):
+                    if str(shape.get("name", "")).lower() == "item":
+                        candidates.append((module_name, shape))
+        else:
+            for module_name, module in modules.items():
+                for shape in module.get("shapes", []):
+                    if str(shape.get("name", "")).lower() == key.lower():
+                        candidates.append((module_name, shape))
+            if not candidates and key in modules:
+                module = modules[key]
+                candidates = [
+                    (key, shape) for shape in module.get("shapes", [])
+                    if any(
+                        entry.get("constructor") and
+                        entry.get("name") == shape.get("receiver", "")[8:]
+                        for entry in module.get("exports", [])
+                    )
+                ]
+            if not candidates:
+                for module_name, module in modules.items():
+                    for shape in module.get("shapes", []):
+                        receiver = str(shape.get("receiver", ""))
+                        if receiver.lower() == "exports." + key.lower():
+                            candidates.append((module_name, shape))
+        return candidates if len(candidates) == 1 else []
+
+    def add_tier3_result(
+            key: str, value: Any,
+            entry_name: str | None = None) -> None:
+        candidates = tier3_candidates(key)
+        if len(candidates) != 1:
+            return
+        module_name, shape = candidates[0]
+        shape_name = shape["name"]
+        result = value.get("result") if isinstance(value, dict) else None
+        constructed = (
+            isinstance(value, dict) and value.get("status") == "constructed"
+            and isinstance(result, dict))
+        if not constructed:
+            add_reason(
+                (module_name, shape_name, "own"),
+                _runtime_stage_reason(
+                    value,
+                    "runtime oracle did not reach tier3 shape %s"
+                    % shape_name,
+                    shape_name))
+            add_reason(
+                (module_name, shape_name, "prototype"),
+                _runtime_stage_reason(
+                    value,
+                    "runtime oracle did not reach tier3 shape %s"
+                    % shape_name,
+                    shape_name))
+            return
+        members, complete = stage_members(
+            result, "properties" if "properties" in result else "keys")
+        label = "runtime-api.json tier3 %s" % key
+        if entry_name is not None:
+            label += ".%s" % entry_name
+        add_scope(
+            (module_name, shape_name, "own"), members, complete, label)
+        levels = _runtime_prototype_levels(result.get("prototype"))
+        for index, level in enumerate(levels[:2]):
+            add_scope(
+                (module_name, shape_name,
+                 "prototype" if index == 0 else "prototype2"),
+                level, True, label)
+
+    for key, value in tier3.items():
+        if key == "items" and isinstance(value, dict):
+            for entry_name, entry in value.items():
+                add_tier3_result(key, entry, entry_name)
+        else:
+            add_tier3_result(key, value)
+
+    static_kind_cache: dict[tuple[str, str], str] = {}
+    # The trailing flag marks a member the module only guards with
+    # `typeof this.X === 'function'` -- a slot a PLUGIN fills. Absent from
+    # a capture where no plugin filled it, which is the expected state, not
+    # drift. Kept as its own bucket rather than folded into `match`, so the
+    # set stays visible and cannot quietly absorb a real disagreement.
+    expected: list[tuple[str, str, str, str, str, bool]] = []
+    for module_name, module in modules.items():
+        for function in module.get("functions", []):
+            expected.append(
+                (module_name, "module", function["name"], "function",
+                 "own", False))
+        for export in module.get("exports", []):
+            kind = _static_export_kind(
+                module_name, export["name"], modules,
+                static_kind_cache, set())
+            expected.append(
+                (module_name, "module", export["name"], kind, "own",
+                 False))
+        for member in module.get("receiverMembers", []):
+            expected.append(
+                (module_name, "module", member["name"],
+                 member["kind"], "own", False))
+        for shape in module.get("shapes", []):
+            shape_name = shape["name"]
+            receiver = str(shape.get("receiver", ""))
+            method_scope = (
+                "prototype2" if receiver.endswith("Proto")
+                else "prototype")
+            for method in shape.get("methods", []):
+                expected.append(
+                    (module_name, shape_name, method["name"],
+                     "function", method_scope, False))
+            for prop in shape.get("properties", []):
+                candidates = [
+                    scope_name for scope_name in
+                    ("own", "prototype", "prototype2")
+                    if (module_name, shape_name, scope_name) in scopes
+                    and prop["name"] in scopes[
+                        (module_name, shape_name, scope_name)][0]
+                ]
+                if len(candidates) == 1:
+                    prop_scope = candidates[0]
+                else:
+                    prop_scope = (
+                        "prototype" if receiver.endswith("Proto")
+                        else "own")
+                expected.append(
+                    (module_name, shape_name, prop["name"],
+                     prop.get("kind", "value"), prop_scope,
+                     bool(prop.get("optional"))))
+
+    matches = 0
+    drift: list[dict[str, Any]] = []
+    unreachable: list[dict[str, Any]] = []
+    plugin_supplied: list[dict[str, Any]] = []
+    expected_keys = {(module, shape, name)
+                     for module, shape, name, _kind, _scope, _opt
+                     in expected}
+    for module_name, shape_name, name, kind, scope_name, optional \
+            in expected:
+        scope_key = (module_name, shape_name, scope_name)
+        scope = scopes.get(scope_key)
+        if scope is None:
+            unreachable.append({
+                "module": module_name,
+                "shape": shape_name,
+                "member": name,
+                "kind": kind,
+                "reason": reasons.get(
+                    scope_key,
+                    _runtime_stage_reason(
+                        tier2_all.get(module_name),
+                        "runtime oracle did not reach shape %s"
+                        % shape_name,
+                        shape_name)),
+            })
+            continue
+        observed = scope[0].get(name)
+        if observed is None:
+            if not scope[1]:
+                unreachable.append({
+                    "module": module_name,
+                    "shape": shape_name,
+                    "member": name,
+                    "kind": kind,
+                    "reason": scope[2] or
+                    "runtime oracle did not complete this scope",
+                })
+            elif optional:
+                # The scope was constructed and the member is genuinely not
+                # there -- which is what an unfilled plugin hook looks like.
+                plugin_supplied.append({
+                    "module": module_name,
+                    "shape": shape_name,
+                    "member": name,
+                    "kind": kind,
+                    "reason": "declared by a typeof-guard; no plugin"
+                              " assigned it in this capture",
+                })
+            else:
+                drift.append({
+                    "module": module_name,
+                    "shape": shape_name,
+                    "member": name,
+                    "artifactKind": kind,
+                    "oracleKind": None,
+                    "missing": "oracle",
+                })
+        elif observed != kind:
+            drift.append({
+                "module": module_name,
+                "shape": shape_name,
+                "member": name,
+                "artifactKind": kind,
+                "oracleKind": observed,
+                "missing": "kind",
+            })
+        else:
+            matches += 1
+
+    reported_extras: set[tuple[str, str, str]] = set()
+    for (module_name, shape_name, _scope_name), (
+            members, _complete, _reason) in scopes.items():
+        for name, kind in members.items():
+            key = (module_name, shape_name, name)
+            if key in expected_keys or key in reported_extras:
+                continue
+            reported_extras.add(key)
+            drift.append({
+                "module": module_name,
+                "shape": shape_name,
+                "member": name,
+                "artifactKind": None,
+                "oracleKind": kind,
+                "missing": "artifact",
+            })
+
+    drift.sort(key=lambda entry: (
+        entry["module"], entry["shape"], entry["member"]))
+    unreachable.sort(key=lambda entry: (
+        entry["module"], entry["shape"], entry["member"]))
+    agreed = not drift and not missing_modules
+    report = {
+        "status": "ok" if agreed else "drift",
+        "match": matches,
+        "drift": len(drift),
+        "pluginSupplied": len(plugin_supplied),
+        "pluginSuppliedMembers": sorted(
+            plugin_supplied,
+            key=lambda e: (e["module"], e["shape"], e["member"])),
+        "oracleUnreachable": len(unreachable),
+        "driftMembers": drift,
+        "missingModules": missing_modules,
+        "unreachableMembers": unreachable,
+    }
+    return agreed, _format_runtime_oracle_report(report), report
 
 
 def build_modules() -> list[dict[str, Any]]:
@@ -1568,6 +2996,8 @@ def build_artifact() -> dict[str, Any]:
             "scopes": build_scopes(),
         },
         "js": {
+            "globals": build_globals(),
+            "legacyGlobals": build_legacy_globals(),
             "modules": build_modules(),
             "pluginManifest": build_plugin_manifest(),
         },
@@ -1586,12 +3016,58 @@ def dumps(artifact: dict[str, Any]) -> str:
 def render_dts(artifact: dict[str, Any]) -> str:
     """Render a .d.ts file from js.modules data."""
     modules = artifact.get("js", {}).get("modules", [])
+    globals_record = artifact.get("js", {}).get("globals", {})
     rev = artifact.get("movianRevision", "unknown")
     lines: list[str] = []
     lines.append("// Generated by %s -- do not edit." % GENERATED_BY)
     lines.append("// movianRevision: %s" % rev)
     lines.append("// Duktape ES5.1 -- no ES6+ in plugin code.")
+    # The globals below collide with lib.dom, which tsc includes by default:
+    # lib.dom declares both `console` and a DOM `Plugin`, so a plugin author
+    # running plain `tsc` gets two TS2451 "cannot redeclare" errors on a
+    # correct bundle. Reproduced on this tree. The gate compiles with
+    # `--lib ES2015` and so never saw it; saying so in the file is what
+    # reaches the author, who has no reason to read the checker.
+    lines.append("// Compile with --lib ES2015 (or any lib set WITHOUT dom):")
+    lines.append("// lib.dom declares `console` and `Plugin` too, and the")
+    lines.append("// collision reports as TS2451 against this file.")
     lines.append("")
+
+    # The C tables give a name and an nargs, never parameter names, so every
+    # global function is emitted variadic. `@arity` above it is the nargs as
+    # documentation -- tsc cannot enforce it through a rest parameter, and
+    # probing confirms `setTimeout()` and `Core.sleep(1, 2, 3)` both compile.
+    GLOBAL_SIGNATURE = "...args: any[]"
+
+    global_functions = globals_record.get("functions", [])
+    global_objects = globals_record.get("objects", [])
+    if global_functions or global_objects:
+        lines.append("// Globals on the global object -- not modules, so no")
+        lines.append("// require(). Most are installed by")
+        lines.append("// src/ecmascript/ecmascript.c; `print` and `require`")
+        lines.append("// are Duktape builtins (see")
+        lines.append("// support/devtools/metadata/"
+                     "curated_interpreter_globals.json).")
+        lines.append("")
+        for function in global_functions:
+            lines.append("/** @arity %s */" % function["nargs"])
+            lines.append("declare function %s(%s): any;"
+                         % (function["name"], GLOBAL_SIGNATURE))
+        if global_functions:
+            lines.append("")
+        for record in global_objects:
+            lines.append("declare const %s: {" % record["name"])
+            for function in record["functions"]:
+                lines.append("  /** @arity %s */" % function["nargs"])
+                lines.append("  %s(%s): any;"
+                             % (function["name"], GLOBAL_SIGNATURE))
+            for prop in record["properties"]:
+                lines.append("  %s%s: %s;" % (
+                    prop["name"],
+                    "?" if prop.get("optional") else "",
+                    prop["kind"]))
+            lines.append("};")
+            lines.append("")
 
     def params_signature(
             params: list[str] | None, export: dict[str, Any] | None = None,
@@ -1606,12 +3082,51 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 callback_shape = export.get("callbackShape")
                 if callback_shape and shape_names and \
                         callback_shape in shape_names:
+                    # The shape does not necessarily arrive first. `movian/
+                    # http` calls `callback(null, new HttpResponse(res))`, so
+                    # typing argument 0 as the response made an error-first
+                    # callback look like a response-first one. The positions
+                    # ahead of it are named `argN` rather than `err`: their
+                    # position is measured from the call site, their meaning
+                    # is not, and TypeScript requires some name.
+                    index = export.get("callbackShapeIndex", 0)
+                    shape_type = callback_shape
+                    if export.get("callbackShapeNullable"):
+                        shape_type += " | null"
+                    callback_params = [
+                        "arg%d: any" % position for position in range(index)
+                    ] + ["value: %s" % shape_type, "...args: any[]"]
                     annotation = (
-                        "(value: %s, ...args: any[]) => any" %
-                        callback_shape)
+                        "(%s) => any" % ", ".join(callback_params))
             parts.append("%s?: %s" % (name, annotation))
         return ", ".join(parts)
 
+    def member_signature(
+            member: dict[str, Any],
+            export: dict[str, Any] | None = None,
+            shape_names: set[str] | None = None
+    ) -> tuple[str | None, str]:
+        """`@arity` text and parameter list for one callable member.
+
+        Shared by every emission site -- module exports, prototype methods,
+        shared-object methods and receiver members -- so the variadic rule
+        cannot hold in one of them and not the others. Returns `None` for the
+        arity when the parameter list did not parse, which is the caller's
+        signal to omit the annotation.
+        """
+        params = member.get("params")
+        variadic = member.get("variadic", False)
+        signature = params_signature(params, export, shape_names)
+        if variadic:
+            # `params_signature(None)` is already `...args: any[]`, and
+            # `variadic` is only recorded when the formal list parsed, so the
+            # rest parameter is never appended twice.
+            signature = ", ".join([signature, "...args: any[]"]) \
+                if signature else "...args: any[]"
+        if params is None:
+            return None, signature
+        return ("%d+" % len(params) if variadic else str(len(params)),
+                signature)
 
     def render_return_type(
             returned: Any, shape_names: set[str]) -> str:
@@ -1674,6 +3189,14 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 lines.append("  // exports.__proto__ = require('%s') --"
                              " inherits its whole surface" % inherits)
                 lines.append("  export * from '%s';" % inherits)
+            # An ambient module block auto-exports its declarations only while
+            # it carries no explicit export; the `export *` above flips that,
+            # and unmarked locals stop being visible to importers. They also
+            # have to be marked to shadow an inherited name of the same
+            # spelling -- `movian/prop` sets `exports.global` to a proxied
+            # object over `native/prop`'s `global` function, and the own
+            # property is what a plugin gets at runtime.
+            decl = "export " if inherits else ""
 
             prototype_shapes = [
                 shape for shape in shapes
@@ -1688,15 +3211,20 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 for shape in prototype_shapes:
                     lines.append("  interface %s {" % shape["name"])
                     for method in shape["methods"]:
-                        params = method.get("params")
-                        if params is not None:
-                            lines.append("    /** @arity %d */"
-                                         % len(params))
+                        arity, signature = member_signature(method)
+                        if arity is not None:
+                            lines.append("    /** @arity %s */" % arity)
                         lines.append(
                             "    %s(%s): any;" %
-                            (method["name"], params_signature(params)))
+                            (method["name"], signature))
                     for prop in shape.get("properties", []):
-                        lines.append("    %s: any;" % prop["name"])
+                        # A plugin-supplied hook the module only guards is
+                        # optional: requiring it would produce errors the
+                        # runtime does not have, since nothing forces a plugin
+                        # to set it.
+                        lines.append("    %s%s: any;" % (
+                            prop["name"],
+                            "?" if prop.get("optional") else ""))
                     lines.append("  }")
                 lines.append("")
 
@@ -1705,28 +3233,77 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     "  // CommonJS receiver-mutated shared object shapes")
                 for shape in shared_shapes:
                     for method in shape["methods"]:
-                        params = method.get("params")
-                        if params is not None:
-                            lines.append("  /** @arity %d */"
-                                         % len(params))
+                        arity, signature = member_signature(method)
+                        if arity is not None:
+                            lines.append("  /** @arity %s */" % arity)
                         lines.append(
                             "  function %s(%s): any;" %
-                            (method["name"], params_signature(params)))
+                            (method["name"], signature))
                     for prop in shape.get("properties", []):
                         lines.append("  var %s: any;" % prop["name"])
+                lines.append("")
+                # The hoisted members above describe a PLAIN call, which
+                # mutates the module receiver -- and that is what the shipped
+                # plugins do: movian-plugin-HDRezka/service.js:83,
+                # movian-plugin-trakt/trakt.js:51 and
+                # m7-jellyfin/src/settings.js:27 all call globalSettings
+                # plainly and then use settings.createString/createBool on the
+                # module. The in-repo callers construct instead
+                # (res/ecmascript/legacy/api-v1.js:140,
+                # res/ecmascript/modules/movian/page.js:197), and
+                # `this.__proto__ = sp` serves both, so the shared surface has
+                # to be reachable as an instance type as well.
+                #
+                # One interface PER INITIALIZER, not one shared: globalSettings
+                # assigns id and properties, kvstoreSettings does not, so a
+                # single merged type let `kvstoreSettings(...).properties`
+                # compile and then read undefined. Named after the export, the
+                # way the hand-written canon does it -- a value and a type of
+                # the same name occupy different declaration spaces.
+                for shape in shared_shapes:
+                    lines.append("  interface %s {" % shape["name"])
+                    for method in shape["methods"]:
+                        arity, signature = member_signature(method)
+                        if arity is not None:
+                            lines.append("    /** @arity %s */" % arity)
+                        lines.append(
+                            "    %s(%s): any;" %
+                            (method["name"], signature))
+                    for prop in shape.get("properties", []):
+                        lines.append("    %s%s: any;" % (
+                            prop["name"],
+                            "?" if prop.get("optional") else ""))
+                    lines.append("  }")
+                for export in exports:
+                    if not export.get("receiverMutation"):
+                        continue
+                    own = export.get("receiverMembers", [])
+                    bases = " extends %s" % ", ".join(
+                        shape["name"] for shape in shared_shapes)
+                    lines.append("  interface %s%s {" % (export["name"], bases))
+                    for member in own:
+                        if member["kind"] == "function":
+                            arity, signature = member_signature(member)
+                            if arity is not None:
+                                lines.append("    /** @arity %s */" % arity)
+                            lines.append(
+                                "    %s(%s): any;" %
+                                (member["name"], signature))
+                        else:
+                            lines.append("    %s: any;" % member["name"])
+                    lines.append("  }")
                 lines.append("")
             if receiver_members:
                 lines.append(
                     "  // CommonJS receiver-mutated module exports")
                 for member in receiver_members:
                     if member["kind"] == "function":
-                        params = member.get("params")
-                        if params is not None:
-                            lines.append("  /** @arity %d */"
-                                         % len(params))
+                        arity, signature = member_signature(member)
+                        if arity is not None:
+                            lines.append("  /** @arity %s */" % arity)
                         lines.append(
                             "  function %s(%s): any;" %
-                            (member["name"], params_signature(params)))
+                            (member["name"], signature))
                     else:
                         lines.append("  var %s: any;" % member["name"])
                 lines.append("")
@@ -1736,6 +3313,17 @@ def render_dts(artifact: dict[str, Any]) -> str:
             shape_names = {
                 shape["name"] for shape in prototype_shapes
             }
+            # The instance type a receiver-mutating initializer produces.
+            # Only unambiguous with exactly one shared shape in the module;
+            # with none or several there is nothing to name, and the
+            # construct signature falls back to `any` rather than guessing.
+            # Each initializer now has its own instance interface, named
+            # after the export, so the construct result is that -- not the
+            # shared base every initializer happens to share.
+            receiver_shapes = {
+                export["name"] for export in exports
+                if export.get("receiverMutation")
+            } if shared_shapes else set()
             for exp in exports:
                 ename = exp["name"]
                 params = exp.get("params")
@@ -1746,23 +3334,58 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 # arguments than they declare. Requiring them would generate
                 # errors the runtime does not have. The honest count stays in
                 # @arity.
-                sig = params_signature(params, exp, shape_names)
-                if exp.get("constructor"):
-                    if params is not None:
-                        lines.append("  /** @arity %d */" % len(params))
+                arity, sig = member_signature(exp, exp, shape_names)
+                if exp.get("receiverMutation"):
+                    # `this.__proto__ = sp` does not choose between the two
+                    # call forms: constructed, `this` is the new instance;
+                    # called plainly, it is the module receiver (which is why
+                    # the members are hoisted above). Emitting only the plain
+                    # form cost `new settings.globalSettings(...)` its
+                    # construct signature and produced TS7009 for both of the
+                    # in-repo callers, so both signatures are declared. The
+                    # plain form returns `void`: the initializers end by
+                    # assigning to `this` and never return a value.
+                    if arity is not None:
+                        lines.append("  /** @arity %s */" % arity)
+                    lines.append("  %sconst %s: {" % (decl, ename))
+                    lines.append("    new (%s): %s;"
+                                 % (sig, ename if ename in receiver_shapes
+                                    else "any"))
+                    lines.append("    (%s): void;" % sig)
+                    lines.append("  };")
+                elif exp.get("constructor"):
+                    if arity is not None:
+                        lines.append("  /** @arity %s */" % arity)
                     result_type = ename if ename in shape_names else "any"
-                    lines.append("  const %s: {" % ename)
+                    lines.append("  %sconst %s: {" % (decl, ename))
                     lines.append("    new (%s): %s;" %
                                  (sig, result_type))
                     lines.append("  };")
                 elif params is not None:
-                    lines.append("  /** @arity %d */" % len(params))
+                    lines.append("  /** @arity %s */" % arity)
                     return_type = render_return_type(
                         exp.get("returns", "any"), shape_names)
-                    lines.append("  function %s(%s): %s;" %
-                                 (ename, sig, return_type))
+                    void_when = exp.get("voidWhen")
+                    if void_when is not None and void_when in params:
+                        # Two forms, split at the callback parameter: without
+                        # it the function returns its value, with it it
+                        # dispatches and returns nothing. The synchronous
+                        # overload is emitted first so it wins for calls that
+                        # supply neither form's optional tail.
+                        head = params[:params.index(void_when)]
+                        head_member = dict(exp)
+                        head_member["params"] = head
+                        _, head_sig = member_signature(
+                            head_member, exp, shape_names)
+                        lines.append("  %sfunction %s(%s): %s;" %
+                                     (decl, ename, head_sig, return_type))
+                        lines.append("  %sfunction %s(%s): void;" %
+                                     (decl, ename, sig))
+                    else:
+                        lines.append("  %sfunction %s(%s): %s;" %
+                                     (decl, ename, sig, return_type))
                 else:
-                    lines.append("  const %s: any;" % ename)
+                    lines.append("  %sconst %s: any;" % (decl, ename))
 
         lines.append("}")
         lines.append("")
@@ -1814,6 +3437,9 @@ def cmd_generate(_args: argparse.Namespace) -> int:
     dts_text = render_dts(artifact)
     DTS_PATH.write_text(dts_text, encoding="utf-8")
     print("wrote %s" % rel(DTS_PATH))
+    v1_text = render_v1_dts(artifact)
+    V1_DTS_PATH.write_text(v1_text, encoding="utf-8")
+    print("wrote %s" % rel(V1_DTS_PATH))
     return 0
 
 
@@ -1848,6 +3474,23 @@ def cmd_check(args: argparse.Namespace) -> int:
               % ARTIFACT_PATH, file=sys.stderr)
         return 1
     committed = json.loads(ARTIFACT_PATH.read_text(encoding="utf-8"))
+    try:
+        runtime_oracle = json.loads(
+            RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        runtime_oracle_report = {
+            "status": "failed",
+            "match": 0,
+            "drift": 0,
+            "oracleUnreachable": 0,
+            "error": "could not load %s: %s" % (RUNTIME_ORACLE_PATH, error),
+        }
+        runtime_oracle_ok = False
+        runtime_oracle_output = _format_runtime_oracle_report(
+            runtime_oracle_report)
+    else:
+        runtime_oracle_ok, runtime_oracle_output, runtime_oracle_report = (
+            _check_runtime_oracle(committed, runtime_oracle))
 
     fresh_norm = _strip_revision(fresh)
     committed_norm = _strip_revision(committed)
@@ -1860,6 +3503,16 @@ def cmd_check(args: argparse.Namespace) -> int:
         committed_dts = DTS_PATH.read_text(encoding="utf-8")
         dts_ok = (_strip_dts_revision(fresh_dts)
                   == _strip_dts_revision(committed_dts))
+    # The v1 file is written by the same run and must be checked by it. A
+    # generated artifact that no gate compares is one nobody notices going
+    # stale -- the whole reason the main bundle grew fixtures.
+    fresh_v1_dts = render_v1_dts(fresh)
+    v1_dts_ok = False
+    if V1_DTS_PATH.is_file():
+        committed_v1 = V1_DTS_PATH.read_text(encoding="utf-8")
+        v1_dts_ok = (_strip_dts_revision(fresh_v1_dts)
+                     == _strip_dts_revision(committed_v1))
+    dts_ok = dts_ok and v1_dts_ok
     reference_dts_ok, reference_dts_output = _run_reference_dts_check()
     # The default invocation carries the source-shape, member and alias
     # enforcement; `--commonjs` is the separate inventory audit. Running only
@@ -1874,13 +3527,15 @@ def cmd_check(args: argparse.Namespace) -> int:
         reference_dts_output = "\n".join(
             part for part in (reference_dts_output, coverage_output) if part)
 
-    if metadata_ok and dts_ok and reference_dts_ok and shape_coverage_ok:
+    if (metadata_ok and dts_ok and reference_dts_ok
+            and shape_coverage_ok and runtime_oracle_ok):
         if args.json:
             print(json.dumps({
                 "metadata": "ok",
                 "dts": "ok",
                 "referenceDts": "ok",
                 "shapeCoverage": "ok",
+                "runtimeOracle": runtime_oracle_report["status"],
             }, indent=2))
         else:
             print("METADATA OK (movianRevision: committed=%s current=%s)"
@@ -1888,6 +3543,7 @@ def cmd_check(args: argparse.Namespace) -> int:
                      fresh.get("movianRevision")))
             print("DTS OK")
             print(shape_coverage_output)
+            print(runtime_oracle_output)
             if reference_dts_output:
                 print(reference_dts_output)
         return 0
@@ -1902,6 +3558,7 @@ def cmd_check(args: argparse.Namespace) -> int:
             "dts": "ok" if dts_ok else "drift",
             "referenceDts": "ok" if reference_dts_ok else "failed",
             "shapeCoverage": "ok" if shape_coverage_ok else "failed",
+            "runtimeOracle": runtime_oracle_report["status"],
         }
         if diff is not None:
             result["diff"] = diff
@@ -1909,6 +3566,8 @@ def cmd_check(args: argparse.Namespace) -> int:
             result["referenceDtsOutput"] = reference_dts_output
         if not shape_coverage_ok:
             result["shapeCoverageOutput"] = shape_coverage_output
+        if not runtime_oracle_ok:
+            result["runtimeOracleOutput"] = runtime_oracle_report
         print(json.dumps(result, ensure_ascii=False, indent=2,
                          sort_keys=True))
     else:
@@ -1918,6 +3577,8 @@ def cmd_check(args: argparse.Namespace) -> int:
                 print(line)
         if not dts_ok:
             print("DTS DRIFT")
+        if not runtime_oracle_ok:
+            print(runtime_oracle_output)
         if not shape_coverage_ok:
             print(shape_coverage_output)
         if not reference_dts_ok:

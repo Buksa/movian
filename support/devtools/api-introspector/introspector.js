@@ -782,7 +782,7 @@ function describeTier3Page(page) {
     }
   ]);
   tier3.websocket = describeTier3Websocket();
-  emitPayload();
+  emitPayload(true);
 }
 
 function describeModule(value) {
@@ -975,9 +975,18 @@ tier3 = {
   }
 };
 
-function emitPayload() {
-  print('MOVIAN_API_INTROSPECTOR_JSON=' + JSON.stringify({
+// Two payloads are emitted per run and only the second is complete: at load
+// time the tier3 page has not been opened, so its members are unattempted.
+// They carried the SAME marker, which made "extract the unique marker" a
+// coin flip -- and the documented procedure (run, then read the log without
+// opening the route) reached only the partial one. The complete payload owns
+// the documented marker; the partial one is labelled as what it is.
+function emitPayload(complete) {
+  print((complete ? 'MOVIAN_API_INTROSPECTOR_JSON='
+                  : 'MOVIAN_API_INTROSPECTOR_PARTIAL_JSON=') +
+        JSON.stringify({
     version: 2,
+    tier3PageOpened: !!complete,
     modules: moduleNames,
     before: before,
     tier1: tier1,
@@ -1022,4 +1031,7 @@ try {
   };
 }
 
-emitPayload();
+// Partial by construction: the tier3 page members stay unattempted until the
+// route above is opened. Emitted anyway so a run that never reaches the route
+// still leaves evidence in the log.
+emitPayload(false);
