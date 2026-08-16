@@ -487,6 +487,71 @@ zip_archive_find(const char *url, const char **rp)
 
 
 /**
+ * Remove . and .. segments from a zip member path.
+ *
+ * The tree walk in zip_archive_find_file() compares each segment against the
+ * names actually stored in the archive, so a literal ".." is looked up as a
+ * child called ".." and never found. That makes a parent-relative reference
+ * resolve on a development plugin -- where the same path reaches the native
+ * filesystem, which collapses it -- and fail once the plugin is installed and
+ * the path arrives here instead (movian#185).
+ *
+ * Returns a malloc'ed copy, or NULL when the path climbs above the archive
+ * root. Escaping is a lookup failure, not a clamp to the root: a member path
+ * that walks out of its archive is asking for something the archive cannot
+ * contain.
+ *
+ * A trailing separator is preserved, because zip_archive_find_file() reads it
+ * as "this must be a directory".
+ */
+static char *
+zip_normalize_member(const char *in)
+{
+  size_t len = strlen(in);
+  char *out = malloc(len + 1);
+  if(out == NULL)
+    return NULL;
+
+  const int trailing_sep = len > 0 &&
+    (in[len - 1] == '/' || in[len - 1] == '\\');
+  const char *s = in;
+  char *w = out;
+
+  while(*s) {
+    const char *seg = s;
+    while(*s != 0 && *s != '/' && *s != '\\')
+      s++;
+    const size_t seglen = s - seg;
+    if(*s)
+      s++;
+
+    if(seglen == 0 || (seglen == 1 && seg[0] == '.'))
+      continue;
+
+    if(seglen == 2 && seg[0] == '.' && seg[1] == '.') {
+      if(w == out) {
+        free(out);
+        return NULL;
+      }
+      w--;                                /* the separator just written */
+      while(w > out && w[-1] != '/')
+        w--;
+      continue;
+    }
+
+    memcpy(w, seg, seglen);
+    w += seglen;
+    *w++ = '/';
+  }
+
+  if(w > out && !trailing_sep)
+    w--;
+  *w = 0;
+  return out;
+}
+
+
+/**
  *
  */
 static zip_file_t *
@@ -498,7 +563,22 @@ zip_file_find(const char *url)
   if(za == NULL)
     return NULL;
 
-  rf = *r ? zip_archive_find_file(za, za->za_root, r, 0) : za->za_root;
+  /*
+   * Only the member suffix is normalized, and only after zip_archive_find()
+   * has fixed which archive we are in. The part of the URL that names the
+   * archive belongs to the outer filesystem and may legitimately contain dot
+   * segments of its own; collapsing those here would resolve a different
+   * archive than the caller asked for.
+   */
+  char *normalized = zip_normalize_member(r);
+  if(normalized == NULL) {
+    zip_archive_unref(za);
+    return NULL;
+  }
+
+  rf = *normalized ?
+    zip_archive_find_file(za, za->za_root, normalized, 0) : za->za_root;
+  free(normalized);
 
   if(rf == NULL)
     zip_archive_unref(za);
