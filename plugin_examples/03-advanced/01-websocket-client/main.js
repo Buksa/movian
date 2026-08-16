@@ -31,9 +31,10 @@ new page.Route("example:websocket:", function(page) {
     title: "WebSocket Status: " + (connected ? "Connected" : "Disconnected")
   });
 
-  page.appendItem("", "directory", {
-    title: ws ? "Disconnect" : "Connect to Server"
-  }).onSelect = function() {
+  // `appendAction`, not an item with a handler: an Item has no `onSelect`,
+  // and assigning one is accepted and never called (page.js:299-315 is the
+  // real "row that runs a function").
+  page.appendAction(ws ? "Disconnect" : "Connect to Server", function() {
     if (ws) {
       ws.close();
       ws = null;
@@ -63,16 +64,14 @@ new page.Route("example:websocket:", function(page) {
       };
     }
     page.redirect("example:websocket:");
-  };
+  });
 
   if (ws) {
-    page.appendItem("", "directory", {
-      title: "Send Test Message"
-    }).onSelect = function() {
+    page.appendAction("Send Test Message", function() {
       if (connected) {
         ws.send("Hello from Movian plugin!");
       }
-    };
+    });
   }
 
   page.loading = false;
