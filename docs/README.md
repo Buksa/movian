@@ -121,7 +121,7 @@ behavioural claim:
   — the read-only FTP client, passive mode only
 - `Guides/FTP_SERVER_SPECIFICATION.md` · `Guides/FTP_SERVER_LIFECYCLE_ARCHITECTURE.md`
   — the FTP server, disabled by default, port `2121`, **and it accepts any
-  credentials while its username setting is blank** (#197)
+  credentials while its username setting is blank**
 
 When the code moves, correct the document and its provenance line together.
 
