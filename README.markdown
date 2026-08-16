@@ -45,7 +45,9 @@ git format-patch cf2f66900..feature/rtmp
 | `feature/smb` | 12 | `clean-base-2026-08` | SMB2 client: libsmb2 backend, pooled sessions, name resolution |
 | `feature/smb-server` | 21 | `clean-base-2026-08` | Built-in SMB2 server — **includes `feature/smb`** |
 | `feature/wsd-discovery` | 14 | `clean-base-2026-08` | WS-Discovery client for Windows hosts — **includes `feature/smb`** |
+| `feature/smb-discovery` | 17 | `clean-base-2026-08` | NetBIOS host discovery with an SMB2 confirm probe — **includes `feature/smb`** |
 | `fix/glw-shutdown` | 1 | `clean-base-2026-08` | Removes a duplicate GLW thread spawn at shutdown |
+| `fix/nativesmb-session` | 1 | `clean-base-2026-08` | Names an NTSTATUS the native SMB session setup reported as unknown |
 | `devtools-mdev` | 7 | `clean-base-2026-08` | `mdev` harness: isolated launch, routes, screenshots, props |
 | `devtools-lsp` | 30 | `clean-base-2026-08` | JavaScript language server for plugin authoring |
 | `devtools-analyze` | 6 | `clean-base-2026-08` | `movian-analyze` static checker for views and plugin JS |
@@ -62,14 +64,23 @@ git format-patch cf2f66900..feature/rtmp
 | `feature/steam-launch` | 1 | `f3f316fbd` | Skips the X11 fullscreen override path when launched from Steam |
 | `feature/plugin-examples` | 3 | `4f8796552` | Twelve worked apiversion-2 plugin examples, run against a live instance |
 
-### Two branches are stacked
+### Three branches are stacked
 
-`feature/smb-server` and `feature/wsd-discovery` both contain the whole of
-`feature/smb` — the server and the discovery client are built on the SMB2
-client and do not stand alone. Taking either one brings the client with it.
-If you only want the client, take `feature/smb`.
+`feature/smb-server`, `feature/wsd-discovery` and `feature/smb-discovery` each
+contain the whole of `feature/smb` — the server and both discovery clients are
+built on the SMB2 client and do not stand alone. Taking any one brings the
+client with it. If you only want the client, take `feature/smb`.
 
 Everything else in the table is independent and can be taken on its own.
+
+### One branch ships a known defect
+
+`feature/smb-discovery` finds hosts that WS-Discovery does not — a Samba or
+NAS host answers a NetBIOS name query but not a `pub:Computer` probe. Run
+alongside `feature/wsd-discovery` it also produces a second entry for any host
+both find, because `service_create_managed` never looks up the id it is given.
+That is [issue #195](https://github.com/Buksa/movian/issues/195), open, and it
+is a fix in `service.c` rather than a reason to drop either mechanism.
 
 ### Taking part of a series
 
