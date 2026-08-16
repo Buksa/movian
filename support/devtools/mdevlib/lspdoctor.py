@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -22,6 +23,16 @@ def _one_line(value: object) -> str:
 def _fail(check: str, reason: str) -> int:
     print("FAIL %s: %s" % (check, _one_line(reason)))
     return 1
+
+
+def _completion_labels(result: Any) -> list[str]:
+    if not isinstance(result, list):
+        raise RuntimeError("completion returned a non-list result")
+    if any(not isinstance(item, dict)
+           or not isinstance(item.get("label"), str)
+           for item in result):
+        raise RuntimeError("completion returned a malformed item")
+    return [item["label"] for item in result]
 
 
 def _check_python() -> tuple[bool, str]:
@@ -137,6 +148,69 @@ def _check_lsp_initialize() -> tuple[bool, str]:
                 pass
 
 
+def _check_lsp_completion() -> tuple[bool, str]:
+    """Probe artifact-exact widget completion using this checkout's server."""
+
+    server = REPOSITORY_ROOT / "support" / "devtools" / "movian-lsp"
+    fixture = REPOSITORY_ROOT / "tests" / "tooling" / "lsp" / "fixtures" / \
+        "completion" / "widget.view"
+    metadata = REPOSITORY_ROOT / "generated" / "movian-metadata.json"
+    client: Any | None = None
+    try:
+        resolved_server = server.resolve(strict=True)
+        resolved_server.relative_to(REPOSITORY_ROOT.resolve(strict=True))
+        if not fixture.is_file():
+            raise RuntimeError("completion fixture is missing: %s" % fixture)
+        artifact = json.loads(metadata.read_text(encoding="utf-8"))
+        expected = sorted(
+            {name for record in artifact["glw"]["widgets"]
+             if record.get("registered") is True
+             for name in [record["name"], *record.get("aliases", [])]})
+        text = fixture.read_text(encoding="utf-8")
+        client = _load_lsp_client()(resolved_server, REPOSITORY_ROOT)
+        initialized = client.request(
+            21, "initialize", {"rootUri": REPOSITORY_ROOT.as_uri()})
+        triggers = initialized.get("capabilities", {}).get(
+            "completionProvider", {}).get("triggerCharacters")
+        if triggers != [".", "$", "/"]:
+            raise RuntimeError("initialize advertised wrong completion triggers")
+        client.notify("initialized", {})
+        client.notify("textDocument/didOpen", {"textDocument": {
+            "uri": fixture.as_uri(),
+            "languageId": "glw",
+            "version": 1,
+            "text": text,
+        }})
+        result = client.request(22, "textDocument/completion", {
+            "textDocument": {"uri": fixture.as_uri()},
+            "position": {"line": 0, "character": len("widget(")},
+        })
+        actual = _completion_labels(result)
+        if actual != expected:
+            raise RuntimeError("widget completion list mismatch")
+        client.notify("textDocument/didClose", {
+            "textDocument": {"uri": fixture.as_uri()},
+        })
+        if client.request(23, "shutdown", {}) is not None:
+            raise RuntimeError("shutdown returned a non-null result")
+        client.notify("exit", {})
+        exit_code, stderr = client.close_after_exit()
+        if exit_code or stderr.strip():
+            raise RuntimeError("server exit=%d stderr=%s" % (exit_code, stderr))
+        command = "%s %s --stdio" % (sys.executable, resolved_server)
+        return True, ("widget completion fixture via server command %s" %
+                      command)
+    except Exception as exc:
+        return False, _one_line(exc)
+    finally:
+        if client is not None and client.process.poll() is None:
+            client.process.kill()
+            try:
+                client.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+
+
 def _check_lsp_javascript() -> tuple[bool, str]:
     """Probe JS diagnostics, save handling, and metadata-backed definition."""
 
@@ -220,6 +294,7 @@ def run() -> int:
         ("movian-analyze", _check_analyzer),
         ("metadata", _check_metadata),
         ("lsp-initialize", _check_lsp_initialize),
+        ("lsp-completion", _check_lsp_completion),
         ("lsp-javascript", _check_lsp_javascript),
     ):
         ok, detail = check()

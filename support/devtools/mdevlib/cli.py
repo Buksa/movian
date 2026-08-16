@@ -52,7 +52,16 @@ def cmd_run(args: argparse.Namespace) -> int:
                 "use --force to restart it" % (args.name, own_pid),
                 exit_code=2,
             )
-        harness.kill_owned_pid(inst, own_pid)
+        outcome = harness.kill_owned_pid(inst, own_pid)
+        if outcome == "still-alive":
+            raise MdevError(
+                "pid %d still alive after SIGKILL; refusing forced restart"
+                % own_pid,
+                exit_code=2,
+            )
+        if outcome == "killed-after-timeout":
+            print("forced restart stopped %s (pid %d) [%s]"
+                  % (args.name, own_pid, outcome), file=sys.stderr)
 
     # Foreign movian instances (not ours, not a same-dir collision) are
     # safe to coexist with: isolated profile + dynamic port, no state.json
@@ -87,15 +96,16 @@ def cmd_stop(args: argparse.Namespace) -> int:
                     "reason": "not running"},
              "instance %r is not running" % args.name)
         return 0
-    harness.kill_owned_pid(inst, pid)
-    if inst.owns_pid(pid):
+    outcome = harness.kill_owned_pid(inst, pid)
+    if outcome == "still-alive":
         raise MdevError("pid %d still alive after SIGKILL" % pid)
     state = inst.load_state() or {}
     state.pop("pid", None)
     state.pop("port", None)
     inst.save_state(state)
-    emit(args, {"name": args.name, "stopped": True, "pid": pid},
-         "stopped %s (pid %d)" % (args.name, pid))
+    emit(args, {"name": args.name, "stopped": True, "pid": pid,
+                "stop_outcome": outcome},
+         "stopped %s (pid %d) [%s]" % (args.name, pid, outcome))
     return 0
 
 

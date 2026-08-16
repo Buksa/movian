@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -16,6 +17,9 @@ from .harness import Instance, MdevError
 
 SMOKES_DIR = harness.REPO_ROOT / "support" / "devtools" / "smokes"
 CURRENT_PAGE = "global/navigators/current/currentpage"
+UI_FRAMERATE = "global/userinterfaces/ui/framerate"
+WEDGE_BACKTRACE_FILE = "thread-backtrace.txt"
+WEDGE_BACKTRACE_TIMEOUT = 5.0
 SMOKE_ORDER = (
     "health",
     "open-home",
@@ -322,24 +326,51 @@ def _execute_step(
     return detail, harness.read_log_delta(inst, offset), None
 
 
+def _wait_for_ui_ready(
+    inst: Instance,
+    timeout: float,
+) -> tuple[bool, str]:
+    """Wait until startup navigation and GLW frame dispatch are both active."""
+    deadline = time.monotonic() + timeout
+    nav_seen = False
+    framerate = None
+    if inst.live_pid() is None:
+        return False, "instance process is not alive"
+    try:
+        base = inst.base_url()
+    except MdevError as error:
+        return False, str(error)
+
+    while time.monotonic() < deadline:
+        if inst.live_pid() is None:
+            return False, "instance process is not alive"
+        if not nav_seen:
+            nav_seen = harness.NAV_OPENING_RE.search(
+                harness.read_log(inst)) is not None
+        framerate = harness.prop_value(base, UI_FRAMERATE)
+        if nav_seen and harness.prop_has_value(framerate):
+            return True, "startup navigator Opening trace and UI framerate present"
+        time.sleep(0.3)
+
+    missing = []
+    if not nav_seen:
+        missing.append("navigator Opening trace")
+    if not harness.prop_has_value(framerate):
+        missing.append("%s usable value" % UI_FRAMERATE)
+    return False, "startup readiness did not complete within %gs: missing %s" % (
+        timeout, " and ".join(missing))
+
+
 def _health_step(inst: Instance, timeout: float = 20.0) -> tuple[str, str]:
-    """Dedicated polling health verb: the startup navigator trace can
-    legitimately arrive after ensure_running() returns (launch() only
-    waits for the HTTP port line), so poll for it instead of judging a
-    single early log snapshot -- a false wedge here turns into exit 2.
+    """Dedicated polling health verb: launch() only waits for the HTTP port,
+    so require both startup navigation and active GLW frame/courier dispatch
+    before issuing the first screenshot.
 
     Returns (detail, sha256_hex) where sha256_hex is from the probe screenshot.
     """
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if inst.live_pid() is None:
-            raise StepFailure("instance process is not alive")
-        if harness.NAV_OPENING_RE.search(harness.read_log(inst)) is not None:
-            break
-        time.sleep(0.3)
-    else:
-        raise StepFailure(
-            "startup navigator Opening trace did not appear within %gs" % timeout)
+    ready, detail = _wait_for_ui_ready(inst, timeout)
+    if not ready:
+        raise StepFailure(detail)
     probe = inst.dir / ".smoke-health.png"
     try:
         _, probe_hash = _take_png(inst, probe)
@@ -349,15 +380,13 @@ def _health_step(inst: Instance, timeout: float = 20.0) -> tuple[str, str]:
         probe.unlink()
     except OSError:
         pass
-    return "startup navigator Opening trace and screenshot PNG present", probe_hash
+    return detail + " and screenshot PNG present", probe_hash
 
 
-def _probe_health(inst: Instance) -> tuple[bool, str]:
-    if inst.live_pid() is None:
-        return False, "instance process is not alive"
-    log = harness.read_log(inst)
-    if harness.NAV_OPENING_RE.search(log) is None:
-        return False, "startup navigator Opening trace is absent"
+def _probe_health(inst: Instance, timeout: float = 20.0) -> tuple[bool, str]:
+    ready, detail = _wait_for_ui_ready(inst, timeout)
+    if not ready:
+        return False, detail
     probe = inst.dir / ".smoke-health.png"
     try:
         _take_png(inst, probe, timeout=7.0)
@@ -367,7 +396,7 @@ def _probe_health(inst: Instance) -> tuple[bool, str]:
         probe.unlink()
     except OSError:
         pass
-    return True, "startup navigator Opening trace and screenshot PNG present"
+    return True, detail + " and screenshot PNG present"
 
 
 def _collect_props(base: str, path: str, depth: int) -> dict[str, Any]:
@@ -385,6 +414,16 @@ def _collect_props(base: str, path: str, depth: int) -> dict[str, Any]:
                 node["children"][ref] = _collect_props(
                     base, path + "/" + ref, depth - 1)
     return node
+
+
+def stop_wedged_instance(inst: Instance) -> str:
+    """Stop a wedged instance owned by this state dir.  Returns the stop
+    outcome from ``harness.kill_owned_pid`` (``"stopped-clean"``,
+    ``"killed-after-timeout"``, or ``"still-alive"``)."""
+    pid = inst.live_pid()
+    if pid is None:
+        return "stopped-clean"
+    return harness.kill_owned_pid(inst, pid)
 
 
 def _write_bundle(
@@ -415,6 +454,115 @@ def _write_bundle(
         except MdevError:
             pass
     return bundle
+
+
+def _capture_wedge_backtrace(
+    inst: Instance,
+    bundle: Path,
+    timeout: float = WEDGE_BACKTRACE_TIMEOUT,
+) -> Path:
+    """Best-effort all-thread GDB capture for an owned wedged instance.
+
+    The fixed-name artifact records success or a bounded, useful failure.  This
+    helper never raises: capture problems must not delay the existing stop and
+    relaunch path beyond ``timeout`` or prevent it from running.
+    """
+    artifact = bundle / WEDGE_BACKTRACE_FILE
+
+    def write_result(
+        status: str,
+        detail: str,
+        pid: int | None = None,
+        output: str = "",
+    ) -> None:
+        lines = [
+            "capture-status: %s" % status,
+            "pid: %s" % (pid if pid is not None else "none"),
+            "timeout-seconds: %g" % timeout,
+            "detail: %s" % detail,
+        ]
+        if output:
+            lines.extend(("", "gdb-output:", output.rstrip()))
+        try:
+            artifact.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+
+    def as_text(value: str | bytes | None) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        return value
+
+    try:
+        pid = inst.live_pid()
+        if pid is None:
+            write_result("skipped", "no live pid proven owned by this instance")
+            return artifact
+        # Re-prove ownership immediately before handing the numeric pid to GDB.
+        # A stale/recycled pid is hands-off, just as it is in kill_owned_pid().
+        if not inst.owns_pid(pid):
+            write_result(
+                "skipped", "pid ownership proof failed before attach", pid=pid)
+            return artifact
+
+        command = [
+            "gdb", "--batch", "--nx", "--quiet", "-p", str(pid),
+            "-ex", "set pagination off",
+            "-ex", "set confirm off",
+            "-ex", "thread apply all bt",
+            "-ex", "detach",
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as error:
+            output = as_text(error.stdout) + as_text(error.stderr)
+            write_result(
+                "timeout", "gdb exceeded the %g-second bound" % timeout,
+                pid=pid, output=output)
+            return artifact
+        except OSError as error:
+            write_result(
+                "error", "could not execute gdb: %s" % error, pid=pid)
+            return artifact
+
+        output = completed.stdout + completed.stderr
+        frame_count = len(re.findall(r"(?m)^#\d+\s", output))
+        if completed.returncode != 0:
+            write_result(
+                "error", "gdb exited with status %d" % completed.returncode,
+                pid=pid, output=output)
+        elif frame_count == 0:
+            write_result(
+                "error", "gdb returned no stack frames", pid=pid, output=output)
+        else:
+            write_result(
+                "success", "captured %d stack frames" % frame_count,
+                pid=pid, output=output)
+    except Exception as error:
+        write_result(
+            "error", "unexpected capture failure: %s: %s" %
+            (type(error).__name__, error))
+    return artifact
+
+
+def _record_stop_outcome(
+    bundle: Path,
+    transcript: dict[str, Any],
+    stop_outcome: str,
+) -> None:
+    transcript["stop_outcome"] = stop_outcome
+    (bundle / "steps.json").write_text(
+        json.dumps(transcript, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8")
 
 
 def _run_one(
@@ -472,9 +620,24 @@ def _run_one(
         "steps": records,
     }
     bundle = _write_bundle(inst, definition["name"], transcript, wedge)
+    stop_outcome = None
     if wedge:
-        print("instance-health failure (wedge), stop+relaunch: %s" % health_detail,
-              file=sys.stderr)
+        _capture_wedge_backtrace(inst, bundle)
+        stop_outcome = stop_wedged_instance(inst)
+        _record_stop_outcome(bundle, transcript, stop_outcome)
+        if stop_outcome == "still-alive":
+            pid = inst.live_pid()
+            print("instance-health failure (wedge), stop+relaunch [%s]: %s"
+                  % (stop_outcome, health_detail), file=sys.stderr)
+            print(str(bundle), file=sys.stderr)
+            raise MdevError(
+                "pid %d still alive after SIGKILL -- cannot relaunch safely"
+                % (pid or 0),
+                exit_code=2,
+            )
+    if wedge:
+        print("instance-health failure (wedge), stop+relaunch [%s]: %s"
+              % (stop_outcome, health_detail), file=sys.stderr)
     else:
         print("smoke %s failed at step %d (%s): %s" % (
             definition["name"], failure["step_index"], failure["verb"],
@@ -509,11 +672,20 @@ def run(
                 "steps": [],
             }
             bundle = _write_bundle(inst, selected[0]["name"], transcript, True)
-            print("instance-health failure (wedge), stop+relaunch: %s" % detail,
-                  file=sys.stderr)
+            _capture_wedge_backtrace(inst, bundle)
+            stop_outcome = stop_wedged_instance(inst)
+            _record_stop_outcome(bundle, transcript, stop_outcome)
+            print("instance-health failure (wedge), stop+relaunch [%s]: %s"
+                  % (stop_outcome, detail), file=sys.stderr)
             print(str(bundle), file=sys.stderr)
+            if stop_outcome == "still-alive":
+                data = {"instance": inst.name, "green": 0, "total": 1,
+                        "results": [transcript], "bundles": [str(bundle)],
+                        "stop_outcome": stop_outcome}
+                return 2, data, "0/1 green (still-alive)"
             data = {"instance": inst.name, "green": 0, "total": 1,
-                    "results": [transcript], "bundles": [str(bundle)]}
+                    "results": [transcript], "bundles": [str(bundle)],
+                    "stop_outcome": stop_outcome}
             return 2, data, "0/1 green"
 
     for definition in selected:
