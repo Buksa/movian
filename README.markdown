@@ -43,7 +43,7 @@ git format-patch cf2f66900..feature/rtmp
 | Branch | Commits | Starts at | What it adds |
 |---|---|---|---|
 | `feature/smb` | 12 | `clean-base-2026-08` | SMB2 client: libsmb2 backend, pooled sessions, name resolution |
-| `feature/smb-server` | 21 | `clean-base-2026-08` | Built-in SMB2 server — **includes `feature/smb`** |
+| `feature/smb-server` | 22 | `clean-base-2026-08` | Built-in SMB2 server — **includes `feature/smb`** |
 | `feature/wsd-discovery` | 14 | `clean-base-2026-08` | WS-Discovery client for Windows hosts — **includes `feature/smb`** |
 | `feature/smb-discovery` | 17 | `clean-base-2026-08` | NetBIOS host discovery with an SMB2 confirm probe — **includes `feature/smb`** |
 | `fix/glw-shutdown` | 1 | `clean-base-2026-08` | Removes a duplicate GLW thread spawn at shutdown |
@@ -63,6 +63,8 @@ git format-patch cf2f66900..feature/rtmp
 | `feature/wsl2-glx` | 1 | `275c334a1` | GLX context creation under WSL2 |
 | `feature/steam-launch` | 1 | `f3f316fbd` | Skips the X11 fullscreen override path when launched from Steam |
 | `feature/plugin-examples` | 3 | `4f8796552` | Twelve worked apiversion-2 plugin examples, run against a live instance |
+| `feature/zip-paths` | 3 | `clean-base-2026-08` | Resolves ZIP member paths through one hardened normalizer |
+| `docs/protocol-specs` | 4 | `d1f0be1e6` | Specifications for the FTP client, FTP server and native SMB client |
 
 ### Three branches are stacked
 
