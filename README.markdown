@@ -22,6 +22,52 @@ The `movian6` branch includes:
 - documented public-branch patterns for build, packaging, media, and smoke
   work.
 
+## Feature Branches
+
+Each feature is also published as its own branch, extracted from `movian6` as a
+readable commit series. They all start from the tag `clean-base-2026-08`, which
+is the shared ancestor plus the four build commits that make it compile on
+current toolchains — GCC 14 (Debian 13, Fedora 40+, Ubuntu 24.10) and the
+Flatpak packaging fix. Nothing under `src/` differs between that tag and its
+parent, so every series applies to a plain tree.
+
+To see one feature and nothing else:
+
+```sh
+git log --oneline clean-base-2026-08..feature/wsd-discovery
+git format-patch clean-base-2026-08..feature/wsd-discovery
+```
+
+| Branch | Commits | What it adds |
+|---|---|---|
+| `feature/smb` | 12 | SMB2 client: libsmb2 backend, pooled sessions, name resolution |
+| `feature/smb-server` | 21 | Built-in SMB2 server — **includes `feature/smb`** |
+| `feature/wsd-discovery` | 14 | WS-Discovery client for Windows hosts — **includes `feature/smb`** |
+| `fix/glw-shutdown` | 1 | Removes a duplicate GLW thread spawn at shutdown |
+| `devtools-mdev` | 7 | `mdev` harness: isolated launch, routes, screenshots, props |
+| `devtools-lsp` | 30 | JavaScript language server for plugin authoring |
+| `devtools-analyze` | 6 | `movian-analyze` static checker for views and plugin JS |
+| `devtools-lifecycle` | 20 | GDB-backed startup/shutdown lifecycle inventory |
+| `plugin-api` | 9 | Generated TypeScript declarations for the plugin API |
+| `plugin-runtime-api` | 2 | Filesystem helpers and per-handle ACLs for plugin JS |
+
+### Two branches are stacked
+
+`feature/smb-server` and `feature/wsd-discovery` both contain the whole of
+`feature/smb` — the server and the discovery client are built on the SMB2
+client and do not stand alone. Taking either one brings the client with it.
+If you only want the client, take `feature/smb`.
+
+Everything else in the table is independent and can be taken on its own.
+
+### Taking part of a series
+
+Commits within a series build on each other, so a series can be cut short but
+not cherry-picked apart: `feature/smb` commit 9 rewrites what commit 4 set up,
+and commit 1 adds the `libsmb2` submodule that the rest needs. Take a prefix —
+`0001` through `0006` gives a working read-only SMB2 client — or take the whole
+series.
+
 ## Linux Debug Build
 
 Install the usual build tools and development headers. Package names vary by
