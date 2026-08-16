@@ -35,7 +35,6 @@ BUILDDIR ?= ${C}/build.${BUILD}
 # All targets deps on Makefile, but we can comment that out during dev:ing
 ALLDEPS=${BUILDDIR}/config.mak Makefile src/arch/${PLATFORM}/${PLATFORM}.mk
 
-ALLDEPS += ${STAMPS}
 
 OPTFLAGS ?= -O${OPTLEVEL}
 
@@ -45,6 +44,13 @@ PROG=${BUILDDIR}/movian
 LIB=${BUILDDIR}/libmovian
 
 include ${BUILDDIR}/config.mak
+EXTDEP_CHECK_FAILURES := $(foreach dep,$(EXTDEPS),$(shell \
+    $(C)/support/ext-cache.sh check "$(dep)" "$(BUILD)" \
+    "$(EXTDEP_$(dep)_CONFIG_HASH)" "$(EXTDEP_$(dep)_ARTIFACTS)" \
+    "$(EXTDEP_$(dep)_STAMP)" "$(C)" "$(BUILDDIR)" >/dev/null || echo "$(dep)"))
+ifneq ($(strip $(EXTDEP_CHECK_FAILURES)),)
+$(error External dependency check failed: $(EXTDEP_CHECK_FAILURES))
+endif
 
 CFLAGS_std_noerror += -Wall -Wwrite-strings -Wno-deprecated-declarations \
 		-Wmissing-prototypes -Wno-multichar  -Iext/dvd -std=gnu99
@@ -259,9 +265,23 @@ SRCS-$(CONFIG_LIBAV) += \
 SRCS-$(CONFIG_LOCATEDB)        += src/fileaccess/fa_locatedb.c
 SRCS-$(CONFIG_SPOTLIGHT)       += src/fileaccess/fa_spotlight.c
 SRCS-$(CONFIG_LIBNTFS)         += src/fileaccess/fa_ntfs.c
-SRCS-$(CONFIG_NATIVESMB)       += src/fileaccess/smb/fa_nativesmb.c \
-				  src/fileaccess/smb/nmb.c
+SRCS-$(CONFIG_NATIVESMB)       += src/fileaccess/smb/fa_nativesmb.c
+SRCS-$(CONFIG_LIBSMB2)         += src/fileaccess/smb2/fa_libsmb2.c \
+				  src/fileaccess/smb2/fa_libsmb2_pool.c
+SRCS-$(CONFIG_LIBSMB2)         += src/networking/smb_server.c \
+				  src/networking/smb_server_session.c \
+				  src/networking/smb_server_handles.c \
+				  src/networking/smb_server_vfs.c \
+				  src/networking/smb_server_srvsvc.c
 SRCS-$(CONFIG_RAR)             += src/fileaccess/fa_rar.c
+
+# nmb.c provides NetBIOS name resolution (a DNS fallback used by both the
+# native SMB1 backend and the smb2 backend) and, only when the native
+# backend is also present, LAN master-browser discovery. Compile it once
+# when either backend is enabled -- never twice when both are.
+ifneq (,$(filter yes,$(CONFIG_NATIVESMB) $(CONFIG_LIBSMB2)))
+SRCS += src/fileaccess/smb/nmb.c
+endif
 
 BUNDLES += res/fileaccess
 
@@ -272,6 +292,14 @@ BUNDLES += res/fileaccess
 SRCS 			+= src/sd/sd.c
 SRCS-$(CONFIG_AVAHI) 	+= src/sd/avahi.c
 SRCS-$(CONFIG_BONJOUR) 	+= src/sd/bonjour.c
+
+# WS-Discovery client -- finds modern Windows (10/11) hosts that dropped
+# SMB1/NetBIOS browsing and don't advertise SMB over mDNS, registering them
+# as smb2:// services. No external library dependency (plain UDP multicast
+# + the in-tree XML parser), so it isn't gated like avahi.c; it only needs
+# the smb2 client to make the services it registers useful, independent of
+# CONFIG_NATIVESMB.
+SRCS-$(CONFIG_LIBSMB2)	+= src/sd/wsd.c
 
 ${BUILDDIR}/src/sd/avahi.o : CFLAGS = $(CFLAGS_AVAHI) -Wall -Werror  ${OPTFLAGS}
 
@@ -861,21 +889,21 @@ $(foreach VAR,$(BRIEF), \
     $(eval $(VAR) = @$$(call ECHO,$(VAR),$$(MSG)); $($(VAR))))
 endif
 
-.PHONY:	clean distclean makever build-%
+.PHONY: clean distclean makever build-%
 
-${PROG}: $(OBJS) $(ALLDEPS)  ${BUILDDIR}/support/dataroot/wd.o
+${PROG}: $(OBJS) $(ALLDEPS) $(STAMPS) $(EXT_ARTIFACTS) ${BUILDDIR}/support/dataroot/wd.o
 	$(LINKER) -o $@ $(OBJS) ${BUILDDIR}/support/dataroot/wd.o $(LDFLAGS) ${LDFLAGS_cfg}
 
-${PROG}.bundle: $(OBJS) $(BUNDLE_OBJS) $(ALLDEPS) ${BUILDDIR}/support/dataroot/bundle.o
+${PROG}.bundle: $(OBJS) $(BUNDLE_OBJS) $(ALLDEPS) $(STAMPS) $(EXT_ARTIFACTS) ${BUILDDIR}/support/dataroot/bundle.o
 	$(LINKER) -o $@ $(OBJS) ${BUILDDIR}/support/dataroot/bundle.o $(BUNDLE_OBJS) $(LDFLAGS) ${LDFLAGS_cfg}
 
 ${PROG}.sbundle: ${PROG}.bundle $(ALLDEPS)
 	$(STRIP) -o $@ $<
 
-${PROG}.datadir: $(OBJS) $(ALLDEPS) ${BUILDDIR}/support/dataroot/datadir.o
+${PROG}.datadir: $(OBJS) $(ALLDEPS) $(STAMPS) $(EXT_ARTIFACTS) ${BUILDDIR}/support/dataroot/datadir.o
 	$(LINKER) -o $@ $(OBJS) ${BUILDDIR}/support/dataroot/datadir.o $(LDFLAGS) ${LDFLAGS_cfg}
 
-${LIB}.so: $(OBJS) $(BUNDLE_OBJS) $(ALLDEPS)  support/dataroot/bundle.c
+${LIB}.so: $(OBJS) $(BUNDLE_OBJS) $(ALLDEPS) $(STAMPS) $(EXT_ARTIFACTS) support/dataroot/bundle.c
 	$(LINKER) -shared -o $@ $(OBJS) support/dataroot/bundle.c $(BUNDLE_OBJS) ${LDFLAGS_cfg}
 
 .PHONY: ${BUILDDIR}/zipbundles/bundle.zip
@@ -887,23 +915,23 @@ ${BUILDDIR}/zipbundles/bundle.zip:
 
 $(BUILDDIR)/support/dataroot/ziptail.o: src/main.h
 
-${PROG}.ziptail: $(OBJS) $(ALLDEPS) $(BUILDDIR)/support/dataroot/ziptail.o
+${PROG}.ziptail: $(OBJS) $(ALLDEPS) $(STAMPS) $(EXT_ARTIFACTS) $(BUILDDIR)/support/dataroot/ziptail.o
 	$(CC) -o $@ $(OBJS) $(BUILDDIR)/support/dataroot/ziptail.o $(LDFLAGS) ${LDFLAGS_cfg}
 
 
-${BUILDDIR}/%.o: %.c $(ALLDEPS)
+${BUILDDIR}/%.o: %.c $(ALLDEPS) $(STAMPS)
 	@mkdir -p $(dir $@)
 	$(CC) -MD -MP $(CFLAGS_com) $(CFLAGS) $(CFLAGS_cfg) -c -o $@ $(C)/$<
 
-${BUILDDIR}/%.o: %.S $(ALLDEPS)
+${BUILDDIR}/%.o: %.S $(ALLDEPS) $(STAMPS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_com) $(CFLAGS) $(CFLAGS_cfg) -c -o $@ $(C)/$<
 
-${BUILDDIR}/%.o: %.m $(ALLDEPS)
+${BUILDDIR}/%.o: %.m $(ALLDEPS) $(STAMPS)
 	@mkdir -p $(dir $@)
 	$(CC) -MD -MP $(CFLAGS_com) $(CFLAGS) $(CFLAGS_cfg) -c -o $@ $(C)/$<
 
-${BUILDDIR}/%.o: %.cpp $(ALLDEPS)
+${BUILDDIR}/%.o: %.cpp $(ALLDEPS) $(STAMPS)
 	@mkdir -p $(dir $@)
 	$(CXX) -MD -MP $(CFLAGS_com) $(CFLAGS_cfg) -c -o $@ $(C)/$<
 
@@ -945,6 +973,11 @@ $(BUILDDIR)/stamps/%.stamp: build-%
 	@mkdir -p $(dir $@)
 	touch $@
 
+$(EXT_STAMPS):
+	+@$(C)/support/ext-cache.sh build "$(EXTDEP_NAME)" "$(BUILD)" \
+	    "$(EXTDEP_CONFIG_HASH)" "$(EXTDEP_ARTIFACTS)" "$@" \
+	    "$(C)" "$(BUILDDIR)" "$(EXT_CACHE_ENABLED)"
+
 build-%:
 	${MAKE} -f ${C}/ext/$*.mk build
 
@@ -952,3 +985,74 @@ include support/mklicense.mk
 
 license: ${BUILDDIR}/LICENSE
 licensepdf: ${BUILDDIR}/LICENSE.pdf
+
+
+# ---------------------------------------------------------------------
+# movian-analyze (#97): host CLI driving the real GLW lexer/preproc/
+# parser outside the application. Reuses this BUILD's own
+# glw_view_*.o/misc/*.o objects (built above as part of $(OBJS) the
+# normal way -- no separate compile rule needed for them); only links
+# in a small shim (support/devtools/analyze/shim.c) plus auto-generated
+# abort-only stubs for every symbol that shim doesn't provide. See
+# support/devtools/analyze/shim.c for the documented symbol contract.
+# ---------------------------------------------------------------------
+
+MOVIAN_ANALYZE_DIR = support/devtools/analyze
+MOVIAN_ANALYZE_BUILDDIR = ${BUILDDIR}/${MOVIAN_ANALYZE_DIR}
+MOVIAN_ANALYZE_BIN = ${BUILDDIR}/movian-analyze
+
+# glw.h/glw_view.h use bare #include "glw.h" (resolved by GCC's quote-
+# include search against the including file's own directory when
+# compiled as part of src/ui/glw/*.c); our driver/shim live under
+# support/devtools/analyze/ instead, so they need src/ui/glw explicitly
+# on the quote-include path.
+${MOVIAN_ANALYZE_BUILDDIR}/%.o : CFLAGS += -iquote${C}/src/ui/glw \
+	-iquote${C}/ext/duktape
+
+MOVIAN_ANALYZE_CORE_OBJS = \
+	${BUILDDIR}/src/ui/glw/glw_view_lexer.o \
+	${BUILDDIR}/src/ui/glw/glw_view_parser.o \
+	${BUILDDIR}/src/ui/glw/glw_view_preproc.o \
+	${BUILDDIR}/src/ui/glw/glw_view_support.o \
+	${BUILDDIR}/src/ui/glw/glw_view_attrib.o \
+	${BUILDDIR}/src/ui/glw/glw_view_eval.o \
+	${BUILDDIR}/src/misc/pool.o \
+	${BUILDDIR}/src/misc/rstr.o \
+	${BUILDDIR}/src/misc/buf.o
+
+MOVIAN_ANALYZE_JS_OBJS = \
+	${BUILDDIR}/ext/duktape/duktape.o
+
+MOVIAN_ANALYZE_OWN_OBJS = \
+	${MOVIAN_ANALYZE_BUILDDIR}/movian_analyze.o \
+	${MOVIAN_ANALYZE_BUILDDIR}/shim.o
+
+MOVIAN_ANALYZE_STUBS_C = ${MOVIAN_ANALYZE_BUILDDIR}/stubs-auto.c
+MOVIAN_ANALYZE_STUBS_O = ${MOVIAN_ANALYZE_BUILDDIR}/stubs-auto.o
+
+.PHONY: movian-analyze movian-analyze-corpus
+
+movian-analyze: ${MOVIAN_ANALYZE_BIN}
+
+# The core glw_view_*.o/misc/*.o objects are ordinary members of $(OBJS)
+# and already have their own pattern rules (with the CFLAGS overrides
+# the normal build uses, e.g. -ffast-math for src/ui/glw/%.o); asking
+# for them here just builds/reuses those same objects, never copies or
+# recompiles with different flags.
+${MOVIAN_ANALYZE_STUBS_C}: ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_JS_OBJS} \
+    ${MOVIAN_ANALYZE_OWN_OBJS} \
+    ${C}/${MOVIAN_ANALYZE_DIR}/gen-abort-stubs.sh
+	@mkdir -p $(dir $@)
+	PROBE_LDFLAGS='${LDFLAGS}' ${C}/${MOVIAN_ANALYZE_DIR}/gen-abort-stubs.sh $@ \
+	    ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_JS_OBJS} \
+	    ${MOVIAN_ANALYZE_OWN_OBJS}
+
+${MOVIAN_ANALYZE_STUBS_O}: ${MOVIAN_ANALYZE_STUBS_C}
+	$(CC) -c -o $@ $<
+
+${MOVIAN_ANALYZE_BIN}: ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_JS_OBJS} \
+    ${MOVIAN_ANALYZE_OWN_OBJS} ${MOVIAN_ANALYZE_STUBS_O}
+	$(LINKER) -o $@ $^ -lm -lpthread
+
+movian-analyze-corpus: ${MOVIAN_ANALYZE_BIN}
+	${C}/tests/tooling/glw/run_corpus.sh ${MOVIAN_ANALYZE_BIN}
