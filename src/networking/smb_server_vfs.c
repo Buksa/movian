@@ -708,12 +708,20 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
 
     /*
      * SMB2 QUERY_DIRECTORY flags:
-     *   SMB2_RESTART_SCANS (0x01) — rewind to start
-     *   SMB2_REOPEN        (0x10) — re-scan the directory
+     *   SMB2_RESTART_SCANS   (0x01) — rewind to start        [handled]
+     *   SMB2_INDEX_SPECIFIED (0x04) — resume at FileIndex    [NOT handled]
+     *   SMB2_REOPEN          (0x10) — re-scan the directory  [handled]
      *
      * We rescan on RESTART or REOPEN (simplest correct behaviour).
      * On subsequent calls with the same handle we return 0 (→ NO_MORE_FILES)
      * until the client reopens.
+     *
+     * INDEX_SPECIFIED is ignored, and so is req->file_index, which is read
+     * only to be traced below. A client asking to resume at an index gets
+     * sequential continuation instead. That is consistent with the FileIndex
+     * we emit -- zero, see the comment where entries are filled -- and the
+     * two must stay consistent: honouring this flag without emitting a usable
+     * index would resume at an offset the client could never have learned.
      */
     if(req->flags & (SMB2_RESTART_SCANS | SMB2_REOPEN)) {
         SMBTRACE("QueryDir: %s '%s'",
@@ -842,13 +850,21 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
          * Directory information structs store name as a const char * (UTF-8).
          * libsmb2 re-encodes to UTF-16 when building the wire PDU.
          * The string pointer name remains valid as long as fe->fa_dir is alive.
+         *
+         * FileIndex stays 0, from the memset below. It used to be set to
+         * n_added, which is a per-RESPONSE counter -- so a directory returned
+         * over three responses reported 0,1,2 then 0,1,2 again, values that are
+         * not unique within one enumeration and identify nothing. MS-FSCC lets
+         * a server that cannot supply a usable index send zero, and zero is
+         * honest; a per-response ordinal is indistinguishable from a real index
+         * and wrong. Do not fill this in without also honouring
+         * SMB2_INDEX_SPECIFIED, or the value we hand out cannot be handed back.
          */
         time_t mtime = fde->fde_statdone ? fde->fde_stat.fs_mtime : fe->mtime;
         if(full_info) {
             struct smb2_fileidfulldirectoryinformation *fs =
                 (struct smb2_fileidfulldirectoryinformation *)(info + info_len);
             memset(fs, 0, entry_size);
-            fs->file_index = n_added;
             fs->file_attributes = entry_is_dir ? SMB2_FILE_ATTRIBUTE_DIRECTORY
                                                : SMB2_FILE_ATTRIBUTE_NORMAL;
             if(!entry_is_dir) {
@@ -862,7 +878,6 @@ smb_query_directory(struct smb2_server *srvr, struct smb2_context *smb2,
             struct smb2_fileidbothdirectoryinformation *fs =
                 (struct smb2_fileidbothdirectoryinformation *)(info + info_len);
             memset(fs, 0, entry_size);
-            fs->file_index = n_added;
             fs->file_attributes = entry_is_dir ? SMB2_FILE_ATTRIBUTE_DIRECTORY
                                                : SMB2_FILE_ATTRIBUTE_NORMAL;
             if(!entry_is_dir) {
