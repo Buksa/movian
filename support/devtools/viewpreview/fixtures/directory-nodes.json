@@ -1,0 +1,20 @@
+{
+  "metadata": {
+    "title": "Directory nodes fixture",
+    "subtitle": "12 items with title/icon"
+  },
+  "nodes": [
+    { "type": "item", "url": "viewpreview:demo:1", "metadata": { "title": "Alpha", "icon": "icons/ic_folder_48px.svg" } },
+    { "type": "item", "url": "viewpreview:demo:2", "metadata": { "title": "Bravo", "icon": "icons/ic_folder_48px.svg" } },
+    { "type": "item", "url": "viewpreview:demo:3", "metadata": { "title": "Charlie", "icon": "icons/ic_folder_48px.svg" } },
+    { "type": "item", "url": "viewpreview:demo:4", "metadata": { "title": "Delta", "icon": "icons/ic_folder_48px.svg" } },
+    { "type": "item", "url": "viewpreview:demo:5", "metadata": { "title": "Echo", "icon": "icons/ic_folder_48px.svg" } },
+    { "type": "item", "url": "viewpreview:demo:6", "metadata": { "title": "Foxtrot", "icon": "icons/ic_folder_48px.svg" } },
+    { "type": "item", "url": "viewpreview:demo:7", "metadata": { "title": "Golf", "icon": "icons/ic_folder_48px.svg" } },
+    { "type": "item", "url": "viewpreview:demo:8", "metadata": { "title": "Hotel", "icon": "icons/ic_folder_48px.svg" } },
+    { "type": "item", "url": "viewpreview:demo:9", "metadata": { "title": "India", "icon": "icons/ic_folder_48px.svg" } },
+    { "type": "item", "url": "viewpreview:demo:10", "metadata": { "title": "Juliett", "icon": "icons/ic_folder_48px.svg" } },
+    { "type": "item", "url": "viewpreview:demo:11", "metadata": { "title": "Kilo", "icon": "icons/ic_folder_48px.svg" } },
+    { "type": "item", "url": "viewpreview:demo:12", "metadata": { "title": "Lima", "icon": "icons/ic_folder_48px.svg" } }
+  ]
+}

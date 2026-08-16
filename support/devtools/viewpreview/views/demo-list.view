@@ -1,0 +1,51 @@
+// Reference target view for viewpreview: a plain vertical list bound to
+// $self.model.nodes -- the fixture-round-trip and 12-item DoD checks in
+// support/devtools/viewpreview/README.md render this view.
+//
+// $self here is the page prop (see README.md "how the target view sees
+// the page model"), so $self.model.metadata.* / $self.model.nodes are
+// the same fixture data the viewpreview.js route applied.
+
+widget(container_y, {
+  padding: 1em;
+
+  widget(label, {
+    caption: $self.model.metadata.title ?? "(untitled)";
+    size: 1.6em;
+  });
+
+  widget(label, {
+    hidden: !($self.model.metadata.subtitle);
+    caption: $self.model.metadata.subtitle;
+    size: 1em;
+    color: 0.7;
+  });
+
+  widget(dummy, {
+    height: 0.5em;
+  });
+
+  // Fixed, compact row height (not sizeScale'd) so a 12-item fixture
+  // (see fixtures/directory-nodes.json) fits on one 720p screen without
+  // scrolling -- the DoD's "screenshot shows the 12 titles" check reads
+  // one static shot, no scroll interaction.
+  widget(list_y, {
+    spacing: 0.15em;
+
+    cloner($self.model.nodes, container_x, {
+      spacing: 0.5em;
+      height: 1.6em;
+
+      widget(icon, {
+        hidden: !($self.metadata.icon);
+        size: 1.2em;
+        source: "skin://" + $self.metadata.icon;
+      });
+
+      widget(label, {
+        caption: $self.metadata.title;
+        size: 1.1em;
+      });
+    });
+  });
+});
