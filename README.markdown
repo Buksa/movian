@@ -25,31 +25,35 @@ The `movian6` branch includes:
 ## Feature Branches
 
 Each feature is also published as its own branch, extracted from `movian6` as a
-readable commit series. They all start from the tag `clean-base-2026-08`, which
-is the shared ancestor plus the four build commits that make it compile on
-current toolchains — GCC 14 (Debian 13, Fedora 40+, Ubuntu 24.10) and the
-Flatpak packaging fix. Nothing under `src/` differs between that tag and its
-parent, so every series applies to a plain tree.
+readable commit series.
 
-To see one feature and nothing else:
+Most start from the tag `clean-base-2026-08` — the shared ancestor plus the four
+build commits that make it compile on current toolchains: GCC 14 (Debian 13,
+Fedora 40+, Ubuntu 24.10) and the Flatpak packaging fix. Nothing under `src/`
+differs between that tag and its parent, so those series apply to a plain tree.
+
+**Two branches start earlier**, because the work they carry predates the tag.
+Each branch's own start point is listed below; use it, not the tag:
 
 ```sh
 git log --oneline clean-base-2026-08..feature/wsd-discovery
-git format-patch clean-base-2026-08..feature/wsd-discovery
+git format-patch cf2f66900..feature/rtmp
 ```
 
-| Branch | Commits | What it adds |
-|---|---|---|
-| `feature/smb` | 12 | SMB2 client: libsmb2 backend, pooled sessions, name resolution |
-| `feature/smb-server` | 21 | Built-in SMB2 server — **includes `feature/smb`** |
-| `feature/wsd-discovery` | 14 | WS-Discovery client for Windows hosts — **includes `feature/smb`** |
-| `fix/glw-shutdown` | 1 | Removes a duplicate GLW thread spawn at shutdown |
-| `devtools-mdev` | 7 | `mdev` harness: isolated launch, routes, screenshots, props |
-| `devtools-lsp` | 30 | JavaScript language server for plugin authoring |
-| `devtools-analyze` | 6 | `movian-analyze` static checker for views and plugin JS |
-| `devtools-lifecycle` | 20 | GDB-backed startup/shutdown lifecycle inventory |
-| `plugin-api` | 9 | Generated TypeScript declarations for the plugin API |
-| `plugin-runtime-api` | 2 | Filesystem helpers and per-handle ACLs for plugin JS |
+| Branch | Commits | Starts at | What it adds |
+|---|---|---|---|
+| `feature/smb` | 12 | `clean-base-2026-08` | SMB2 client: libsmb2 backend, pooled sessions, name resolution |
+| `feature/smb-server` | 21 | `clean-base-2026-08` | Built-in SMB2 server — **includes `feature/smb`** |
+| `feature/wsd-discovery` | 14 | `clean-base-2026-08` | WS-Discovery client for Windows hosts — **includes `feature/smb`** |
+| `fix/glw-shutdown` | 1 | `clean-base-2026-08` | Removes a duplicate GLW thread spawn at shutdown |
+| `devtools-mdev` | 7 | `clean-base-2026-08` | `mdev` harness: isolated launch, routes, screenshots, props |
+| `devtools-lsp` | 30 | `clean-base-2026-08` | JavaScript language server for plugin authoring |
+| `devtools-analyze` | 6 | `clean-base-2026-08` | `movian-analyze` static checker for views and plugin JS |
+| `devtools-lifecycle` | 20 | `clean-base-2026-08` | GDB-backed startup/shutdown lifecycle inventory |
+| `plugin-api` | 9 | `clean-base-2026-08` | Generated TypeScript declarations for the plugin API |
+| `plugin-runtime-api` | 2 | `clean-base-2026-08` | Filesystem helpers and per-handle ACLs for plugin JS |
+| `feature/rtmp` | 11 | `cf2f66900` | RTMP/RTMPS over FFmpeg: fileaccess backend, smoke helpers, Linux and Flatpak wiring |
+| `feature/core-http-prop` | 12 | `08a5f0601` | Core HTTP and property surface: non-creating lookups, indexed `prop_findv`, keypress semantics, raw screenshot API |
 
 ### Two branches are stacked
 
@@ -67,6 +71,16 @@ not cherry-picked apart: `feature/smb` commit 9 rewrites what commit 4 set up,
 and commit 1 adds the `libsmb2` submodule that the rest needs. Take a prefix —
 `0001` through `0006` gives a working read-only SMB2 client — or take the whole
 series.
+
+### A note on overlapping files
+
+A few files are touched by more than one feature, so a branch does not always
+hold the same version of them as `movian6`. `src/api/httpcontrol.c` for instance
+carries the keypress work in `feature/core-http-prop` and the WebP content type
+in `movian6`. Each branch holds its own feature and nothing else, which is the
+point — but it means a whole-file copy from one branch is not a safe substitute
+for applying its patches.
+
 
 ## Linux Debug Build
 
