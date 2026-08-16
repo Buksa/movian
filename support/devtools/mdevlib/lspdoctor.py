@@ -137,6 +137,82 @@ def _check_lsp_initialize() -> tuple[bool, str]:
                 pass
 
 
+def _check_lsp_javascript() -> tuple[bool, str]:
+    """Probe JS diagnostics, save handling, and metadata-backed definition."""
+
+    server = REPOSITORY_ROOT / "support" / "devtools" / "movian-lsp"
+    source = REPOSITORY_ROOT / "plugin_examples" / "async_page_load" / \
+        "async_page_load.js"
+    definition_target = REPOSITORY_ROOT / "res" / "ecmascript" / "modules" / \
+        "movian" / "page.js"
+    client: Any | None = None
+    try:
+        client = _load_lsp_client()(server, REPOSITORY_ROOT)
+        initialized = client.request(
+            11, "initialize", {"rootUri": REPOSITORY_ROOT.as_uri()})
+        sync = initialized.get("capabilities", {}).get("textDocumentSync", {})
+        if not isinstance(sync, dict) \
+                or sync.get("save") != {"includeText": True}:
+            raise RuntimeError("initialize did not advertise didSave includeText")
+        client.notify("initialized", {})
+        uri = source.as_uri()
+        client.notify("textDocument/didOpen", {"textDocument": {
+            "uri": uri,
+            "languageId": "javascript",
+            "version": 1,
+            "text": "var valid = 1;\nvar identity = (x) => x;\n",
+        }})
+        opened = client.wait_for_notification(
+            "textDocument/publishDiagnostics",
+            lambda params: params.get("uri") == uri
+            and len(params.get("diagnostics", [])) == 1,
+        )
+        diagnostic = opened["diagnostics"][0]
+        if diagnostic.get("source") != "duktape" \
+                or diagnostic.get("range", {}).get("start", {}).get("line") != 1:
+            raise RuntimeError("unexpected Duktape diagnostic: %s" % diagnostic)
+
+        clean = "var page = require('movian/page');\n"
+        client.notify("textDocument/didSave", {
+            "textDocument": {"uri": uri},
+            "text": clean,
+        })
+        client.wait_for_notification(
+            "textDocument/publishDiagnostics",
+            lambda params: params.get("uri") == uri
+            and params.get("diagnostics") == [],
+        )
+        definition = client.request(12, "textDocument/definition", {
+            "textDocument": {"uri": uri},
+            "position": {"line": 0,
+                         "character": clean.index("movian/page") + 2},
+        })
+        if not definition \
+                or definition[0].get("uri") != definition_target.as_uri():
+            raise RuntimeError("movian/page definition probe failed: %s" %
+                               definition)
+        client.notify("textDocument/didClose", {
+            "textDocument": {"uri": uri},
+        })
+        if client.request(13, "shutdown", {}) is not None:
+            raise RuntimeError("shutdown returned a non-null result")
+        client.notify("exit", {})
+        exit_code, stderr = client.close_after_exit()
+        if exit_code or stderr.strip():
+            raise RuntimeError("server exit=%d stderr=%s" % (exit_code, stderr))
+        return True, ("didOpen/didSave Duktape diagnostic and movian/page "
+                      "definition")
+    except Exception as exc:
+        return False, _one_line(exc)
+    finally:
+        if client is not None and client.process.poll() is None:
+            client.process.kill()
+            try:
+                client.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+
+
 def run() -> int:
     """Run dependency-ordered checks, stopping before derivative failures."""
     for name, check in (
@@ -144,6 +220,7 @@ def run() -> int:
         ("movian-analyze", _check_analyzer),
         ("metadata", _check_metadata),
         ("lsp-initialize", _check_lsp_initialize),
+        ("lsp-javascript", _check_lsp_javascript),
     ):
         ok, detail = check()
         if not ok:
