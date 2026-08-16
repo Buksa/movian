@@ -1,0 +1,34 @@
+{
+  "metadata": {
+    "title": "Укрытие",
+    "pageTitle": "Серии",
+    "year": "2023",
+    "country": "США",
+    "rating": "8.2",
+    "ageRating": "18+",
+    "genres": "НФ и Фэнтези, Драма",
+    "description": "На отравленной гибнущей планете будущего тысячи людей ютятся в огромном подземном укрытии. Нарушение шерифом основного правила и серия загадочных смертей вынуждают инженера Джульетту заняться раскрытием тайн и поиском правды о бункере.",
+    "poster": "img/pilot/poster.png",
+    "clock": "20:06",
+    "date": "17 Июля 2026",
+    "weekday": "Пятница"
+  },
+  "season": {
+    "title": "Сезон 3",
+    "rating": "4.0",
+    "releaseDate": "2 Июля",
+    "episodeCount": "10"
+  },
+  "nodes": [
+    { "type": "video", "url": "viewpreview:ep:1",  "metadata": { "title": "Кто ты?",     "icon": "img/pilot/ep01.png" }, "episode": "01", "duration": "00:52", "rating": "6.3", "airdate": "2 Июля",    "progress": 0.35 },
+    { "type": "video", "url": "viewpreview:ep:2",  "metadata": { "title": "Всё хорошо",  "icon": "img/pilot/ep02.png" }, "episode": "02", "duration": "00:52", "rating": "5.4", "airdate": "9 Июля",    "progress": 0.30 },
+    { "type": "video", "url": "viewpreview:ep:3",  "metadata": { "title": "Эпизод 3",    "icon": "img/pilot/ep03.png" }, "episode": "03", "duration": "00:50", "rating": "3.2", "airdate": "16 Июля",   "progress": 0.25 },
+    { "type": "video", "url": "viewpreview:ep:4",  "metadata": { "title": "Эпизод 4",    "icon": "img/pilot/ep04.png" }, "episode": "04", "duration": "00:49", "rating": "0.0", "airdate": "23 Июля",   "progress": 0 },
+    { "type": "video", "url": "viewpreview:ep:5",  "metadata": { "title": "Эпизод 5",    "icon": "img/pilot/ep05.png" }, "episode": "05", "duration": "00:51", "rating": "0.0", "airdate": "30 Июля",   "progress": 0 },
+    { "type": "video", "url": "viewpreview:ep:6",  "metadata": { "title": "Эпизод 6",    "icon": "img/pilot/ep06.png" }, "episode": "06", "duration": "00:48", "rating": "0.0", "airdate": "6 Августа",  "progress": 0 },
+    { "type": "video", "url": "viewpreview:ep:7",  "metadata": { "title": "Эпизод 7",    "icon": "img/pilot/ep07.png" }, "episode": "07", "duration": "00:53", "rating": "0.0", "airdate": "13 Августа", "progress": 0 },
+    { "type": "video", "url": "viewpreview:ep:8",  "metadata": { "title": "Эпизод 8",    "icon": "img/pilot/ep08.png" }, "episode": "08", "duration": "00:50", "rating": "0.0", "airdate": "20 Августа", "progress": 0 },
+    { "type": "video", "url": "viewpreview:ep:9",  "metadata": { "title": "Эпизод 9",    "icon": "img/pilot/ep09.png" }, "episode": "09", "duration": "00:55", "rating": "0.0", "airdate": "27 Августа", "progress": 0 },
+    { "type": "video", "url": "viewpreview:ep:10", "metadata": { "title": "Эпизод 10",   "icon": "img/pilot/ep10.png" }, "episode": "10", "duration": "00:58", "rating": "0.0", "airdate": "3 Сентября", "progress": 0 }
+  ]
+}

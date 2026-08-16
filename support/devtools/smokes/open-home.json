@@ -1,0 +1,28 @@
+{
+  "name": "open-home",
+  "describe": "Open page:home and verify the page-ready contract.",
+  "needs": {
+    "plugin": null,
+    "binary": "build.debug/movian"
+  },
+  "steps": [
+    {
+      "do": "open",
+      "url": "page:home"
+    },
+    {
+      "do": "assert_log",
+      "must_match": "navigator.*Opening\\s+page:home"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/loading",
+      "one_of": [0, null]
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "absent": false
+    }
+  ]
+}

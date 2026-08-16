@@ -1,0 +1,13 @@
+{
+  "name": "health",
+  "describe": "Verify startup navigation and a live PNG screenshot.",
+  "needs": {
+    "plugin": null,
+    "binary": "build.debug/movian"
+  },
+  "steps": [
+    {
+      "do": "health"
+    }
+  ]
+}
