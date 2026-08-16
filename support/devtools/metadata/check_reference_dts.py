@@ -2533,6 +2533,23 @@ GENERATED_COVERAGE_FLOOR = (
     (V1_SCOPE, "showtime", "textDialog"),
     (V1_SCOPE, "showtime", "trace"),
     (V1_SCOPE, "showtime", "xmlrpc"),
+    (V1_SCOPE, "plugin", "addHTTPAuth"),
+    (V1_SCOPE, "plugin", "addItemHook"),
+    (V1_SCOPE, "plugin", "addSearcher"),
+    (V1_SCOPE, "plugin", "addSubtitleProvider"),
+    (V1_SCOPE, "plugin", "addURI"),
+    (V1_SCOPE, "plugin", "cacheGet"),
+    (V1_SCOPE, "plugin", "cachePut"),
+    (V1_SCOPE, "plugin", "config"),
+    (V1_SCOPE, "plugin", "copyFile"),
+    (V1_SCOPE, "plugin", "createService"),
+    (V1_SCOPE, "plugin", "createSettings"),
+    (V1_SCOPE, "plugin", "createStore"),
+    (V1_SCOPE, "plugin", "getAuthCredentials"),
+    (V1_SCOPE, "plugin", "getDescriptor"),
+    (V1_SCOPE, "plugin", "path"),
+    (V1_SCOPE, "plugin", "properties"),
+    (V1_SCOPE, "plugin", "selectView"),
 )
 
 # A declaration line inside a `declare module`, an `interface`, or the globals
@@ -2751,11 +2768,35 @@ def check_generated_typescript(tsc: str) -> list[str]:
 
 
 EXAMPLES_DIR = REPO_ROOT / "plugin_examples"
-GENERATED_V1_DTS = REPO_ROOT / "generated" / "movian-api-v1.d.ts"
 # The audit that opened #169 found half this corpus not compiling against the
 # API it demonstrates. Measuring it once buys one clean snapshot; the corpus
 # only stays honest if a gate re-measures it, which is what this is.
-MINIMUM_EXAMPLE_PLUGINS = 8
+MINIMUM_EXAMPLE_PLUGINS = 20
+
+
+def _example_name(entry: Path) -> str:
+    """Path relative to plugin_examples, so a tier prefix stays visible."""
+    return entry.relative_to(EXAMPLES_DIR).as_posix()
+
+
+def _example_plugin_dirs() -> list[Path]:
+    """Every plugin directory under `plugin_examples`, at any depth.
+
+    A plugin is a directory holding JavaScript **or** a `plugin.json`, not one
+    holding either alone: `videoscrobbling/` ships no manifest (so it loads as
+    apiversion 1 by default), while a directory with a manifest and no sources
+    is the regression the empty check exists to catch. Defining a plugin by
+    the manifest alone would have dropped the first from the gate -- the same
+    vanishing act by a different route.
+
+    The tier directories (`01-basic/` and friends) hold neither and are
+    containers, not plugins.
+    """
+    return sorted(
+        (entry for entry in EXAMPLES_DIR.rglob("*")
+         if entry.is_dir()
+         and (any(entry.glob("*.js")) or (entry / "plugin.json").is_file())),
+        key=lambda entry: entry.as_posix())
 
 
 def _example_apiversion(entry: Path) -> int:
@@ -2817,19 +2858,59 @@ def _strtoll_base0(text: str) -> int:
         return 0
 
 
+# `src/plugins.c:674-712` dispatches on the manifest's `type`, and the only
+# arm that runs JavaScript is `ecmascript`. A plugin declaring anything else
+# is loaded as far as the log is concerned -- `plugin_load()` returns 0 and
+# prints "Loaded dev plugin" on the very next line -- and its code never
+# executes. Type-checking cannot see this: the JavaScript is fine, the
+# manifest is what is wrong.
+EXAMPLE_MANIFEST_TYPE = "ecmascript"
+
+
+def _check_example_manifests(plugins: list[Path]) -> list[str]:
+    """Every example must be loadable, not merely well-typed.
+
+    Found by running the corpus: three of the eight legacy examples never
+    executed -- two declared `"type": "javascript"`, which no arm of the
+    loader's dispatch matches, and one shipped no manifest at all. Every gate
+    called them healthy because their JavaScript compiles.
+    """
+    errors: list[str] = []
+    for entry in plugins:
+        manifest = entry / "plugin.json"
+        name = _example_name(entry)
+        if not manifest.is_file():
+            errors.append(
+                "plugin_examples/%s has no plugin.json, so the loader cannot "
+                "run it" % name)
+            continue
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        declared = data.get("type")
+        if declared != EXAMPLE_MANIFEST_TYPE:
+            errors.append(
+                "plugin_examples/%s declares type %r; the loader runs "
+                "JavaScript only for %r and reports \"unknown type\" for "
+                "anything else -- while still logging \"Loaded dev plugin\""
+                % (name, declared, EXAMPLE_MANIFEST_TYPE))
+    return errors
+
+
 def check_plugin_examples(tsc: str) -> list[str]:
     """Type-check `plugin_examples/` against the declarations it would get."""
     errors: list[str] = []
-    plugins = sorted(
-        entry for entry in EXAMPLES_DIR.iterdir() if entry.is_dir())
+    plugins = _example_plugin_dirs()
     # A plugin directory with no JavaScript was silently skipped, so deleting
     # a corpus member's sources removed it from the gate instead of failing
     # it -- and the floor below counted the survivors.
-    empty = [entry.name for entry in plugins if not any(entry.glob("*.js"))]
+    empty = [_example_name(entry) for entry in plugins
+             if not any(entry.glob("*.js"))]
     if empty:
         errors.append(
             "plugin_examples/%s has no .js to check"
             % ", plugin_examples/".join(sorted(empty)))
+        return errors
+    errors.extend(_check_example_manifests(plugins))
+    if errors:
         return errors
     if len(plugins) < MINIMUM_EXAMPLE_PLUGINS:
         errors.append(
@@ -2871,7 +2952,7 @@ def _check_one_example(tsc: str, entry: Path) -> str | None:
     if own:
         return ("plugin_examples/%s does not compile against the "
                 "API it demonstrates:\n%s"
-                % (entry.name, "\n".join(own)))
+                % (_example_name(entry), "\n".join(own)))
     return None
 
 

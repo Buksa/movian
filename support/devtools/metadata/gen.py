@@ -743,6 +743,188 @@ def _uses_arguments(region: str) -> bool:
     return ARGUMENTS_RE.search(_own_body(region)) is not None
 
 
+# The statement keyword, never a property of that name. `\b` alone matches the
+# `return` in `iterator.return()`, which would be collected as a return
+# statement and, being last and unguarded, would satisfy `_always_returns` for a
+# function that plainly falls through.
+RETURN_KW_RE = re.compile(r"(?<![.\w$])return\b")
+VALUELESS_RETURN_RE = re.compile(r"return\s*\Z")
+
+
+def _statement_end(text: str, start: int) -> int:
+    """The index one past the end of the statement beginning at `start`.
+
+    Ends at the `;` that closes it, or at the `}` that closes the enclosing
+    block for a final `return x }` with no semicolon. Brackets are counted so
+    that a callback, an object literal or a call argument list inside the
+    statement does not terminate it early. Comments and string literals are
+    masked by `_masked_js_text` before any of this runs, so a `;` found here is
+    always real.
+    """
+    depth = 0
+    index = start
+    while index < len(text):
+        char = text[index]
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            if depth == 0:
+                return index
+            depth -= 1
+        elif char == ";" and depth == 0:
+            return index
+        index += 1
+    return len(text)
+
+
+def _returns_after(text: str, open_brace: int) -> list[str]:
+    """The `return` statements of the block opening at `open_brace`, verbatim,
+    excluding the returns of functions nested inside it.
+
+    The same walk as `_own_body`, asking the other question. `_own_body` needs
+    callbacks *gone* -- whether a function reads `arguments`, or has a bare
+    `return;`, must not be answered by somebody else's body. One question needs
+    them kept: in
+
+        return gumbo.findByTagName(this._gumboNode, tag).map(function (n) {
+          return new Node(n);
+        });
+
+    the only evidence of the element type is inside the callback, while the
+    statement that owns it belongs to the outer function. Deleting nested
+    bodies loses the evidence; ignoring nesting misattributes the callback's
+    `return` to the outer function. So track which function each `return`
+    belongs to, and keep the text.
+    """
+    return [text[start:end]
+            for start, end in _scan_returns(text, open_brace)[0]]
+
+
+def _scan_returns(text: str, open_brace: int) -> tuple[list[tuple[int, int]], int]:
+    """`(spans of the block's own returns, index of its closing brace)`.
+
+    Offsets rather than text, because two questions need them: what each return
+    says, and where it sits relative to everything else in the body.
+    """
+    spans: list[tuple[int, int]] = []
+    close = len(text)
+    depth = 0
+    nested_at: int | None = None
+    index = open_brace
+    while index < len(text):
+        char = text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                close = index
+                break
+            if nested_at is not None and depth <= nested_at:
+                nested_at = None
+        elif nested_at is None and NESTED_FUNCTION_RE.match(text, index):
+            nested_at = depth
+        elif nested_at is None and RETURN_KW_RE.match(text, index):
+            end = _statement_end(text, index)
+            spans.append((index, end))
+            # Resume ON the terminator, not past it: a statement that ended at
+            # the block's `}` still has to close the depth it was found in.
+            index = end
+            continue
+        index += 1
+    return spans, close
+
+
+GUARD_KW_RE = re.compile(
+    r"\b(?:if|else|for|while|do|switch|case|default|try|catch|finally)\b")
+
+
+def _always_returns(text: str, open_brace: int) -> bool:
+    """Whether the block at `open_brace` must reach a `return <value>`.
+
+    The question `_returned_shape` was not asking. It read every return in a
+    body and required them to agree, which says nothing about the path that
+    returns *nothing*: `function (n) { if (n) return new Node(n); }` has one
+    return, it agrees with itself, and a falsey `n` yields `undefined` anyway
+    (movian#190).
+
+    Approximated, deliberately, by two textual facts about the LAST own return:
+
+    * nothing but whitespace and `;` separates it from the block's closing
+      brace -- so it is the final statement, and a `return` nested inside an
+      `if { ... }` block fails here because the block's own `}` intervenes;
+    * nothing but whitespace separates it from the previous statement boundary
+      (`;`, `{` or `}`) -- so an unbraced `if (n) return ...;` fails, which the
+      first test cannot see because such a return has no closing brace of its
+      own.
+
+    An approximation is correct here only because it errs toward `any`, which
+    is what every other rule in this file already does when the evidence is not
+    plain. `if (a) return X; else return X;` is refused although it is sound;
+    nothing in `res/ecmascript/modules/**` is written that way, and the answer
+    when one is would be `any` until this gets smarter -- never a wrong type.
+    """
+    spans, close = _scan_returns(text, open_brace)
+    if not spans:
+        return False
+    start, end = spans[-1]
+    # A bare `return;` as the last statement IS reached and yields `undefined`,
+    # so a body ending in one has no value type however well its other returns
+    # agree -- and the scalar scan below reads `return new Item(this)` right
+    # past it.
+    if VALUELESS_RETURN_RE.match(text[start:end].strip()):
+        return False
+    if text[end:close].replace(";", "").strip():
+        return False
+    return GUARD_KW_RE.search(text[_statement_start(text, start, open_brace):start]) is None
+
+
+def _statement_start(text: str, index: int, floor: int) -> int:
+    """Where the statement containing `index` begins: just past the previous
+    `;`, `{` or `}` at this nesting level.
+
+    Parenthesised groups are stepped over whole, because a control header
+    carries its own semicolons -- `for (var i = 0; i < n; i++) return x;` would
+    otherwise stop the scan inside the header, hiding the `for` that makes the
+    return conditional.
+    """
+    cursor = index - 1
+    while cursor > floor:
+        char = text[cursor]
+        if char == ")":
+            depth = 0
+            while cursor > floor:
+                if text[cursor] == ")":
+                    depth += 1
+                elif text[cursor] == "(":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                cursor -= 1
+            cursor -= 1
+            continue
+        if char in ";{}":
+            break
+        cursor -= 1
+    return cursor + 1
+
+
+def _own_block(region: str) -> int | None:
+    """The offset of the opening brace of the function assigned at the head of
+    `region`, or `None` when `region` does not open with one."""
+    match = COMMONJS_FUNCTION_RE.search(region)
+    if match is None:
+        return None
+    open_brace = region.find("{", match.end())
+    return None if open_brace < 0 else open_brace
+
+
+def _own_returns(region: str) -> list[str]:
+    """`_returns_after` for the function assigned at the head of `region`."""
+    open_brace = _own_block(region)
+    return [] if open_brace is None else _returns_after(region, open_brace)
+
+
 def _callback_shape_index(
         region: str, param: str, shapes: list[str]) -> tuple[int | None, bool]:
     """Which argument of `param`'s invocation carries a `new <shape>(...)`.
@@ -927,7 +1109,155 @@ def _shape_method(
     # `_uses_arguments` brace-matches this method's own body.
     if region is not None and "params" in record and _uses_arguments(region):
         record["variadic"] = True
+    if region is not None:
+        returned = _returned_shape(region)
+        if returned is not None:
+            record["returns"] = returned
     return record
+
+
+MAP_CALLBACK_RE = re.compile(
+    r"\.\s*map\s*\(\s*function\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\([^)]*\)\s*\{")
+
+
+def _mapped_element_shape(statement: str) -> str | None:
+    """The element shape of `return <expr>.map(function (x) { ... })`.
+
+    Answers only when the callback's own returns are all `new X(...)` for one
+    X. A callback that returns two shapes, or a shape on one path and a plain
+    value on another, gets nothing -- the same rule as the scalar forms, for
+    the same reason: a wrong element type invents errors a plugin does not
+    have.
+
+    The callback must also always reach one of those returns. A conditional
+    `function (n) { if (n) return new Node(n); }` produces `undefined` elements
+    on the other path, and `Node[]` would then permit unchecked member access
+    on them -- the failure #179 exists to prevent, one level in (movian#190).
+
+    Deliberately narrow. Only `.map` with a literal `function` callback, whose
+    result is returned directly. `.filter(...).map(...)` still works because
+    only the last `.map` in the statement is read, but a mapped array stored in
+    a local and returned later is not this pattern and keeps `any`.
+    """
+    match = None
+    for match in MAP_CALLBACK_RE.finditer(statement):
+        pass
+    if match is None:
+        return None
+    # The whole `.map(...)` call must BE the returned value. `return {list:
+    # xs.map(...)}` returns an object, and `return xs.map(...).length` a
+    # number; both would otherwise be read as the array.
+    tail = statement[_statement_end(statement, match.end() - 1) + 1:]
+    if tail.strip():
+        return None
+    callback_brace = match.end() - 1
+    if not _always_returns(statement, callback_brace):
+        return None
+    shapes = set()
+    for returned in _returns_after(statement, callback_brace):
+        constructed = re.match(
+            r"return\s+new\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", returned)
+        if constructed is None:
+            return None
+        shapes.add(constructed.group(1))
+    if len(shapes) != 1:
+        return None
+    return next(iter(shapes))
+
+
+def _returned_shape(region: str) -> str | dict[str, Any] | None:
+    """The shape a method returns, when it plainly returns one.
+
+    Three forms. `return new Item(...)` directly; the construct-then-return
+    that `movian/page` actually uses; and an array built by mapping a
+    constructor over a native result, which is how every `movian/html`
+    selector answers --
+
+        Page.prototype.appendItem = function(url, type, metadata) {
+          var item = new Item(this);
+          ...
+          return item;
+        }
+
+        NodeProto.prototype.getElementByTagName = function(tag) {
+          return gumbo.findByTagName(this._gumboNode, tag).map(function(n) {
+            return new Node(n);
+          });
+        }
+
+    Module exports were already scanned for the first form; prototype methods
+    were scanned for neither and emitted `: any` unconditionally. That is the
+    hole `Item.onSelect` lived in: with the receiver typed `any`, a plugin
+    could assign any member name and every gate stayed green (#177). The array
+    form is the same hole one level out (#179): `interface Node` carries all
+    eleven members, so a phantom directly on a Node is caught, but every
+    selector that reaches one returned `any` and discarded the type --
+    `plugin_examples/02-intermediate/02-html-parser` called `getAttribute`
+    through exactly that path at four sites, type-checked clean, and rendered
+    an `openerror` at runtime until it was fixed by hand (`5706c66cf`).
+
+    Answers only when the evidence is unambiguous -- one shape, and every
+    value-returning path agreeing. A method returning two different things, a
+    shape mixed with a plain value, or an array mixed with a scalar, keeps
+    `any`, because a wrong return type invents errors a plugin does not have.
+
+    "Every value-returning path" is exact, and narrower than it sounds: a path
+    that returns NO value is not consulted. `function (n) { if (n) return new
+    "Every value-returning path" is exact, and it used to be the whole test,
+    which left a path that returns NO value unexamined: `function (n) { if (n)
+    return new Node(n); }` answered `Node`, and `function (t) { if (t) return
+    new Item(this); }` answered `Item` from #178 onward, both yielding
+    `undefined` on the other branch. `_always_returns` now gates both forms
+    (movian#190). It cost nothing: all eleven members that carry a return type
+    end their body with an unconditional `return`, measured before the change.
+
+    Returns a shape name, or `{"kind": "array", "element": name}`.
+    """
+    body = _own_body(region)
+    if not body:
+        return None
+    # Before reading what the returns say, ask whether one is always reached.
+    # Everything below compares return VALUES and requires them to agree, which
+    # is silent about the path that returns nothing at all -- and a function
+    # that can fall out of its body yields `undefined` no matter how well its
+    # explicit returns agree (movian#190).
+    open_brace = _own_block(region)
+    if open_brace is None or not _always_returns(region, open_brace):
+        return None
+    direct = set(re.findall(
+        r"\breturn\s+new\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", body))
+    named = set(re.findall(r"\breturn\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*;", body))
+    shapes = set(direct)
+    for name in named:
+        constructed = re.findall(
+            r"\b(?:var|let|const)\s+%s\s*=\s*new\s+([A-Za-z_$][A-Za-z0-9_$]*)"
+            r"\s*\(" % re.escape(name), body)
+        if not constructed:
+            # `return someArgument;` or a value built another way -- no claim.
+            return None
+        shapes.update(constructed)
+
+    # Read from the unstripped statements, since the construction sits inside
+    # the callback that `_own_body` removed. Every return of the function has
+    # to be a mapped array of the same element: a method answering an array on
+    # one path and a bare node on another has no single type, and guessing one
+    # is how a declaration starts inventing errors.
+    returns = _own_returns(region)
+    elements = set()
+    mapped = 0
+    for statement in returns:
+        element = _mapped_element_shape(statement)
+        if element is not None:
+            mapped += 1
+            elements.add(element)
+    if mapped:
+        if shapes or len(elements) != 1 or mapped != len(returns):
+            return None
+        return {"kind": "array", "element": next(iter(elements))}
+
+    if len(shapes) != 1:
+        return None
+    return next(iter(shapes))
 
 def _split_js_fields(text: str) -> list[str]:
     fields: list[str] = []
@@ -1722,9 +2052,8 @@ def render_v1_dts(artifact: dict[str, Any]) -> str:
     tsc accept it in a v2 plugin, where the name genuinely does not exist --
     a false accept on the exact legacy API this file documents.
     """
-    record = artifact.get("js", {}).get("legacyGlobals", {})
-    members = record.get("members", [])
-    source = record.get("source", {})
+    records = artifact.get("js", {}).get("legacyGlobals", [])
+    source = records[0].get("source", {}) if records else {}
     lines = [
         "// Generated by support/devtools/metadata/gen.py -- do not edit.",
         "// movianRevision: %s" % artifact.get("movianRevision", "unknown"),
@@ -1735,9 +2064,16 @@ def render_v1_dts(artifact: dict[str, Any]) -> str:
         "// Include this file ALONGSIDE movian-api.d.ts when checking such a",
         "// plugin, and never for an apiversion 2 one.",
         "",
-        "declare const showtime: {",
     ]
-    for member in members:
+    for record in records:
+        lines.extend(_render_v1_object(record))
+    return "\n".join(lines)
+
+
+def _render_v1_object(record: dict[str, Any]) -> list[str]:
+    """One `declare const <name>: { ... }` block."""
+    lines = ["declare const %s: {" % record["name"]]
+    for member in record.get("members", []):
         if member.get("callable"):
             params = list(member.get("params") or [])
             rendered = ", ".join("%s?: any" % name for name in params)
@@ -1754,11 +2090,18 @@ def render_v1_dts(artifact: dict[str, Any]) -> str:
             lines.append("  %s: any;" % member["name"])
     lines.append("};")
     lines.append("")
-    return "\n".join(lines)
+    return lines
 
 
-def build_legacy_globals() -> dict[str, Any]:
-    """The `showtime` global, scanned out of `res/ecmascript/legacy/api-v1.js`.
+def build_legacy_globals() -> list[dict[str, Any]]:
+    """The apiversion-1 globals, scanned out of `res/ecmascript/legacy/api-v1.js`.
+
+    Two object literals, both real globals for a version-1 plugin: `showtime`
+    (assigned sloppy-mode at :15) and `plugin` (a top-level `var` at :102, so
+    a global binding of the program). Measured on a running instance: for such
+    a plugin `typeof plugin === "object"`, `plugin.createService` is a
+    function, and **`this === plugin`** at program top level -- which is why
+    the legacy `(function(plugin){...})(this)` wrapper works.
 
     `src/plugins.c:712` -- the JavaScript branch; the identical read at :688
     is the bitcode one, inside `#if ENABLE_VMIR` -- defaults a plugin's
@@ -1768,17 +2111,21 @@ def build_legacy_globals() -> dict[str, Any]:
     on the strength of "no such global exists", which is true only of
     apiversion 2.
     """
+    return [_scan_legacy_literal("showtime", "showtime = {"),
+            _scan_legacy_literal("plugin", "var plugin = {")]
+
+
+def _scan_legacy_literal(name: str, marker: str) -> dict[str, Any]:
     text = _masked_js_text(LEGACY_API_V1, mask_strings=True)
-    marker = "showtime = {"
     start = text.find(marker)
     if start < 0:
-        raise GenError("%s does not assign a showtime global"
-                       % rel(LEGACY_API_V1))
+        raise GenError("%s does not assign a %s global"
+                       % (rel(LEGACY_API_V1), name))
     open_brace = start + len(marker) - 1
     end = _balanced_end(text, open_brace)
     if end is None:
-        raise GenError("showtime literal not terminated in %s"
-                       % rel(LEGACY_API_V1))
+        raise GenError("%s literal not terminated in %s"
+                       % (name, rel(LEGACY_API_V1)))
     body = text[open_brace + 1:end]
     members: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -1797,13 +2144,13 @@ def build_legacy_globals() -> dict[str, Any]:
         # literals built inside its methods sit at depth > 0.
         if depth != 0 or not match.group(1):
             continue
-        name = match.group(1)
-        if name in seen:
+        member_name = match.group(1)
+        if member_name in seen:
             # `print: print` appears twice in the file; the surface is a set.
             continue
-        seen.add(name)
+        seen.add(member_name)
         record: dict[str, Any] = {
-            "name": name,
+            "name": member_name,
             "line": _source_line(text, open_brace + 1 + match.start()),
         }
         if match.group(2) is not None:
@@ -1830,8 +2177,8 @@ def build_legacy_globals() -> dict[str, Any]:
             record["callable"] = False
         members.append(record)
     if not members:
-        raise GenError("showtime literal in %s scanned to nothing"
-                       % rel(LEGACY_API_V1))
+        raise GenError("%s literal in %s scanned to nothing"
+                       % (name, rel(LEGACY_API_V1)))
     # Two independent derivations of the same set, required to agree. The
     # brace-depth scan above cannot see a regex literal: `_masked_js_text`
     # masks comments and strings but not `/.../`, so a `/}/` inside a member
@@ -1852,28 +2199,29 @@ def build_legacy_globals() -> dict[str, Any]:
     # require it to be a plain identifier; blank and bracketed keys both
     # fail, which is the point.
     exotic = [
-        match.group(1) for match in re.finditer(r"^  ([^:\n]*):", body, re.M)
+        match.group(1) for match in
+        re.finditer(r"^  (?! )([^:\n]*):", body, re.M)
         if not re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*",
                             match.group(1).strip())
     ]
     if exotic:
         raise GenError(
-            "showtime literal in %s uses keys this scan cannot read (%s) -- "
+            "%s literal in %s uses keys this scan cannot read (%s) -- "
             "quoted or computed; the emission cannot render them either"
-            % (rel(LEGACY_API_V1),
+            % (name, rel(LEGACY_API_V1),
                ", ".join(repr(key.strip()) for key in exotic)))
     indented = {match.group(1) for match in re.finditer(
         r"^  ([A-Za-z_$][A-Za-z0-9_$]*)\s*:", body, re.M)}
     scanned = {member["name"] for member in members}
     if scanned != indented:
         raise GenError(
-            "showtime literal in %s: brace-depth scan and indentation "
+            "%s literal in %s: brace-depth scan and indentation "
             "disagree (depth-only %s, indent-only %s) -- one of them is "
             "misreading the file"
-            % (rel(LEGACY_API_V1), sorted(scanned - indented),
+            % (name, rel(LEGACY_API_V1), sorted(scanned - indented),
                sorted(indented - scanned)))
     return {
-        "name": "showtime",
+        "name": name,
         "apiversion": 1,
         "source": {"file": rel(LEGACY_API_V1),
                    "line": _source_line(text, start)},
@@ -3132,6 +3480,14 @@ def render_dts(artifact: dict[str, Any]) -> str:
             returned: Any, shape_names: set[str]) -> str:
         if isinstance(returned, str):
             return returned if returned in shape_names else "any"
+        if isinstance(returned, dict) and returned.get("kind") == "array":
+            element = returned.get("element")
+            # Same rule as every other shape reference here: a name the
+            # emitted file does not declare becomes `any`, never a dangling
+            # `Foo[]` that makes the artifact itself fail to compile.
+            if isinstance(element, str) and element in shape_names:
+                return "%s[]" % element
+            return "any"
         if not isinstance(returned, dict) or \
                 returned.get("kind") != "object":
             return "any"
@@ -3206,6 +3562,11 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 shape for shape in shapes
                 if shape.get("kind") == "shared"
             ]
+            # Defined before the first use below, not after it. The prototype
+            # emission needs it to render a return type, and it used to be
+            # assigned further down -- which would have read the PREVIOUS
+            # module's set, making the output depend on module order.
+            shape_names = {shape["name"] for shape in prototype_shapes}
             if prototype_shapes:
                 lines.append("  // CommonJS prototype shapes")
                 for shape in prototype_shapes:
@@ -3214,9 +3575,17 @@ def render_dts(artifact: dict[str, Any]) -> str:
                         arity, signature = member_signature(method)
                         if arity is not None:
                             lines.append("    /** @arity %s */" % arity)
+                        # A method that plainly returns a shape says so.
+                        # Emitting `any` left every member of the returned
+                        # object unchecked: `Item.onSelect` shipped in two
+                        # examples and was never called, because
+                        # `appendItem(...)` was `any` and any assignment onto
+                        # it type-checked (#177).
                         lines.append(
-                            "    %s(%s): any;" %
-                            (method["name"], signature))
+                            "    %s(%s): %s;" %
+                            (method["name"], signature,
+                             render_return_type(
+                                 method.get("returns", "any"), shape_names)))
                     for prop in shape.get("properties", []):
                         # A plugin-supplied hook the module only guards is
                         # optional: requiring it would produce errors the
@@ -3266,9 +3635,17 @@ def render_dts(artifact: dict[str, Any]) -> str:
                         arity, signature = member_signature(method)
                         if arity is not None:
                             lines.append("    /** @arity %s */" % arity)
+                        # A method that plainly returns a shape says so.
+                        # Emitting `any` left every member of the returned
+                        # object unchecked: `Item.onSelect` shipped in two
+                        # examples and was never called, because
+                        # `appendItem(...)` was `any` and any assignment onto
+                        # it type-checked (#177).
                         lines.append(
-                            "    %s(%s): any;" %
-                            (method["name"], signature))
+                            "    %s(%s): %s;" %
+                            (method["name"], signature,
+                             render_return_type(
+                                 method.get("returns", "any"), shape_names)))
                     for prop in shape.get("properties", []):
                         lines.append("    %s%s: any;" % (
                             prop["name"],
@@ -3310,9 +3687,6 @@ def render_dts(artifact: dict[str, Any]) -> str:
 
             if exports:
                 lines.append("  // CommonJS exports")
-            shape_names = {
-                shape["name"] for shape in prototype_shapes
-            }
             # The instance type a receiver-mutating initializer produces.
             # Only unambiguous with exactly one shared shape in the module;
             # with none or several there is nothing to name, and the

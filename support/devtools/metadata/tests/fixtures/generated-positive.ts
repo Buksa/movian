@@ -125,6 +125,13 @@ new page.Route('paged:(.*)', (paged) => {
     // guard-only hook, so it must NOT have become optional.
     paged.paginator = () => true;
 });
+// The append methods return a real `Item`, so its own members resolve --
+// this is what makes an invented one an error rather than a silent no-op.
+new page.Route('appended:(.*)', (p) => {
+    p.appendItem('u', 'directory', {}).addOptAction('t', () => { }, 's');
+    p.appendPassiveItem('label', {}, {}).disable();
+    p.appendAction('t', () => { }).enable();
+});
 // plugin_examples/videoscrobbling/videoscrobbling_example.js:51 -- no arguments.
 const scrobbler = new videoscrobbler.VideoScrobbler();
 scrobbler.onstart = (data: any) => { void data; };
@@ -197,3 +204,18 @@ void loadPath; void storagePath; void pluginPath;
 
 void kvstore; void settingsId; void settingsNodes; void rows; void syncBody;
 void scrobbler;
+
+// The other half of the #179 pin in the negative fixture: giving a selector a
+// real element type must not reject what the runtime allows. `Node[]` has to
+// behave as an array -- length, indexing, and the iteration a scraping plugin
+// actually writes -- or the declaration trades a silent hole for invented
+// errors.
+import htmlpos = require('movian/html');
+const anchors = htmlpos.parse('<a href="x">y</a>').root.getElementsByTagName('a');
+const anchorCount: number = anchors.length;
+const firstAnchor = anchors[0];
+const nestedAnchors = firstAnchor.getElementsByClassName('c');
+anchors.forEach(function (anchor) { void anchor.textContent; });
+const anchorTexts = anchors.map(function (anchor) { return anchor.textContent; });
+
+void anchorCount; void firstAnchor; void nestedAnchors; void anchorTexts;

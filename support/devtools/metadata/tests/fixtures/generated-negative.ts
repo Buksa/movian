@@ -9,6 +9,8 @@ import prop = require('movian/prop');
 import xmlrpc = require('movian/xmlrpc');
 import http = require('movian/http');
 import settings = require('movian/settings');
+import page = require('movian/page');
+import htmlneg = require('movian/html');
 
 // A module the loader does not have. If this ever stops erroring, the
 // declarations have grown a wildcard and TS2307 detection is dead.
@@ -70,4 +72,36 @@ const unguardedStorage: string = Core.storagePath;  // EXPECT_TS2322
 
 void missing; void absent; void tooMany; void bogus; void noProps;
 void async; void nothere; void unguarded;
+// The append methods return `Item`, not `any`. While they returned `any`, a
+// plugin could assign any member name and it type-checked: `Item.onSelect`
+// shipped in two examples, was never called, and no gate could see it (#177).
+// Zero of the nine real plugins use it -- it existed only in examples.
+new page.Route('items:(.*)', (p) => {
+    p.appendItem('u', 'directory', {}).onSelect = () => { };  // EXPECT_TS2339
+    p.appendAction('t', () => { }).onSelect = () => { };  // EXPECT_TS2339
+    p.appendPassiveItem('label', {}, {}).onSelect = () => { };  // EXPECT_TS2339
+});
+
 void unguardedLoad; void unguardedStorage;
+
+// An array-returning selector must carry its element type. While these were
+// `any`, `interface Node` had all eleven members and caught a phantom written
+// directly on a node -- but every selector that REACHED a node discarded the
+// type, so the same typo one level out was silent. That is not hypothetical:
+// plugin_examples/02-intermediate/02-html-parser called `getAttribute` through
+// exactly this path at four sites, type-checked clean, and rendered an
+// `openerror` until it was fixed by hand (#179).
+//
+// TS2551 rather than TS2339 because `Node` declares `attributes`, which is
+// within tsc's spelling-suggestion distance of `getAttribute`. That coupling is
+// the point -- the same suggestion is what makes the diagnostic useful to a
+// plugin author -- but it means renaming `attributes` turns these two pins into
+// TS2339 and fails an otherwise-correct tree. Repin, do not delete: the pin is
+// then telling the truth about a real change to the surface.
+const viaSelector = htmlneg.parse('<a/>').root
+    .getElementsByTagName('a')[0].getAttribute('href');  // EXPECT_TS2551
+// The alias resolves to the same method and must inherit the return type.
+const viaAlias = htmlneg.parse('<a/>').root
+    .getElementsByClassName('c')[0].getAttribute('href');  // EXPECT_TS2551
+
+void viaSelector; void viaAlias;
