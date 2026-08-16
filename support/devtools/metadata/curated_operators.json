@@ -1,0 +1,82 @@
+[
+  {
+    "symbols": ["="],
+    "token": "TOKEN_ASSIGNMENT",
+    "category": "assignment",
+    "semantics": "Normal assignment. If the right side is a property path it is resolved through a live subscription (re-evaluates whenever the underlying prop changes), unless the target attribute is flagged GLW_ATTRIB_FLAG_NO_SUBSCRIPTION (self, itemModel, parentModel, tentative).",
+    "anchor": "TOKEN_ASSIGNMENT",
+    "source": {"file": "src/ui/glw/glw_view_eval.c", "line": 2743}
+  },
+  {
+    "symbols": ["?="],
+    "token": "TOKEN_COND_ASSIGNMENT",
+    "category": "assignment",
+    "semantics": "Conditional assignment: identical to '=', except if the resolved right-hand value is void the assignment is skipped entirely and the left side keeps its previous value.",
+    "anchor": "TOKEN_COND_ASSIGNMENT",
+    "source": {"file": "src/ui/glw/glw_view_eval.c", "line": 2748}
+  },
+  {
+    "symbols": ["_=_"],
+    "token": "TOKEN_DEBUG_ASSIGNMENT",
+    "category": "assignment",
+    "semantics": "Debug assignment: functionally identical to '=' for the common case; in the direct prop-to-prop link case it passes debug=1 into prop_link_ex(), turning on subscription-debug tracing for that link.",
+    "anchor": "TOKEN_DEBUG_ASSIGNMENT",
+    "source": {"file": "src/ui/glw/glw_view_eval.c", "line": 2753}
+  },
+  {
+    "symbols": [":="],
+    "token": "TOKEN_REF_ASSIGNMENT",
+    "category": "assignment",
+    "semantics": "Reference assignment: the right side is not resolved to a value, it stays a property reference. Assigning a bare property with ':=' creates a live prop-symlink; assigning to self/args/itemModel/parentModel/tentative passes the actual prop_t* into the setter.",
+    "anchor": "TOKEN_REF_ASSIGNMENT",
+    "source": {"file": "src/ui/glw/glw_view_eval.c", "line": 2758}
+  },
+  {
+    "symbols": ["<-"],
+    "token": "TOKEN_LINK_ASSIGNMENT",
+    "category": "assignment",
+    "semantics": "Link assignment: always creates a one-way, continuously-live prop_link_ex() link from the right-hand property to the left. The left side may be a bare identifier inside an args/block scope, auto-created as a child prop of the current target.",
+    "anchor": "TOKEN_LINK_ASSIGNMENT",
+    "source": {"file": "src/ui/glw/glw_view_eval.c", "line": 2763}
+  },
+  {
+    "symbols": ["??"],
+    "token": "TOKEN_NULL_COALESCE",
+    "category": "other",
+    "semantics": "'a ?? b': resolves a; if a is void, evaluates to b, else to a. Idiom for falling back to a default only when a prop is genuinely unset.",
+    "anchor": "TOKEN_NULL_COALESCE",
+    "source": {"file": "src/ui/glw/glw_view_lexer.c", "line": 302}
+  },
+  {
+    "symbols": ["?:"],
+    "token": "TOKEN_TENARY",
+    "category": "other",
+    "semantics": "'cond ? a : b': resolves cond via token2bool(), then (unlike '??') does not eagerly resolve both branches -- pushes the unresolved chosen branch.",
+    "anchor": "eval_tenary",
+    "source": {"file": "src/ui/glw/glw_view_eval.c", "line": 1088}
+  },
+  {
+    "symbols": ["&&", "||", "^^"],
+    "token": "TOKEN_BOOLEAN_AND / TOKEN_BOOLEAN_OR / TOKEN_BOOLEAN_XOR",
+    "category": "boolean",
+    "semantics": "Short-circuit-free boolean and/or/xor over token2bool() results -- this DSL's RPN evaluator resolves both operands before combining.",
+    "anchor": "TOKEN_BOOLEAN_AND",
+    "source": {"file": "src/ui/glw/glw_view_lexer.c", "line": 248}
+  },
+  {
+    "symbols": ["==", "!=", "<", ">"],
+    "token": "TOKEN_EQ / TOKEN_NEQ / TOKEN_LT / TOKEN_GT",
+    "category": "comparison",
+    "semantics": "Numeric/string comparison via token_cmp()-style helpers; mixed int/float compares by value.",
+    "anchor": "TOKEN_EQ",
+    "source": {"file": "src/ui/glw/glw_view_lexer.c", "line": 290}
+  },
+  {
+    "symbols": ["+", "-", "*", "/", "%"],
+    "token": "TOKEN_ADD / TOKEN_SUB / TOKEN_MULTIPLY / TOKEN_DIVIDE / TOKEN_MODULO",
+    "category": "arithmetic",
+    "semantics": "Numeric arithmetic; '+' is overloaded for string concatenation when either operand is a string.",
+    "anchor": "TOKEN_ADD",
+    "source": {"file": "src/ui/glw/glw_view_lexer.c", "line": 142}
+  }
+]
