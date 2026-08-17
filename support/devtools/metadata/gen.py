@@ -3417,6 +3417,31 @@ def render_dts(artifact: dict[str, Any]) -> str:
             lines.append("};")
             lines.append("")
 
+    def native_signature(func: dict[str, Any]) -> str:
+        """The parameter list for a native ES_MODULE export.
+
+        `duk_function_list_entry` gives a name and `nargs` and nothing else, so
+        the parameters are positional and untyped -- but `nargs` is a real
+        fact and was being thrown away. Every native function used to be
+        emitted `(...args: any[])`, which accepts any call at all, while the
+        `@arity` comment beside it said otherwise: `fs.basename('a','b','c')`
+        type-checked against an arity of 1 (movian#207).
+
+        Optional parameters bound the call from above only. Passing fewer
+        arguments than `nargs` stays legal, which matches both the runtime --
+        Duktape pads the missing ones with `undefined` -- and how the CommonJS
+        exports in this same file are already emitted.
+
+        A variadic native (`nargs == -1`, `DUK_VARARGS`) keeps the rest
+        parameter, because for those the runtime really does accept anything.
+        """
+        if func.get("variadic"):
+            return "...args: any[]"
+        nargs = func["nargs"]
+        if nargs <= 0:
+            return ""
+        return ", ".join("arg%d?: any" % index for index in range(nargs))
+
     def params_signature(
             params: list[str] | None, export: dict[str, Any] | None = None,
             shape_names: set[str] | None = None
@@ -3530,7 +3555,7 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 nargs = func["nargs"]
                 lines.append("  /** @arity %s */" % nargs)
                 lines.append(
-                    "  function %s(...args: any[]): any;" % fname)
+                    "  function %s(%s): any;" % (fname, native_signature(func)))
         elif kind == "commonjs":
             exports = mod.get("exports", [])
             shapes = mod.get("shapes", [])
