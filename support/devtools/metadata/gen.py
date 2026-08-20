@@ -607,11 +607,23 @@ NATIVE_ARG_OPAQUE = frozenset((
 # `openurl` branch reads slot 2 as an options object (es_prop.c:834-841,
 # used that way by res/ecmascript/modules/movian/itemhook.js:23-25) while a
 # different branch reads it as a string, and only the string was visible.
-NATIVE_ARG_OBJECT_READERS = frozenset((
-    "duk_get_prop_string", "duk_get_prop_index", "duk_has_prop_string",
-    "es_prop_is_true", "es_prop_to_rstr", "es_prop_to_int",
-    "es_prop_to_double",
-))
+NATIVE_ARG_OBJECT_READERS: dict[str, str] = {
+    "es_prop_is_true": "boolean",
+    "es_prop_to_rstr": "string",
+    "es_prop_to_int": "number",
+    "es_prop_to_double": "number",
+    "duk_has_prop_string": "boolean",
+    # `duk_get_prop_string` puts the member on the stack for the body to read
+    # however it likes, so the key is evidence and its type is not.
+    "duk_get_prop_string": "any",
+}
+
+# An options object is emitted with an index signature as well as its known
+# keys. The keys are what the C actually reads; the index signature is the
+# admission that reading only those is not the same as rejecting the rest --
+# Duktape hands the object over untouched, and TypeScript's excess-property
+# check would otherwise turn a call carrying one extra key into an error.
+NATIVE_OPTIONS_INDEX_SIGNATURE = "[key: string]: any;"
 
 NATIVE_ARG_TESTS = frozenset((
     "duk_is_string", "duk_is_number", "duk_is_boolean", "duk_is_null",
@@ -852,6 +864,8 @@ def _function_facts(name: str, functions: dict[str, dict[str, Any]],
     indices: dict[int, dict[str, Any] | None] = {}
     params: dict[int, dict[str, Any] | None] = {}
     tested: set[int] = set()
+    shapes: dict[int, dict[str, str]] = {}
+    primitives: dict[int, set[str]] = {}
 
     def place(slot: str, fact: dict[str, Any] | None) -> None:
         if re.fullmatch(r"-?\d+", slot):
@@ -871,6 +885,8 @@ def _function_facts(name: str, functions: dict[str, dict[str, Any]],
         for args in _c_calls(body, helper, ctx):
             if len(args) >= 2:
                 place(args[1], fact)
+                if fact is not None and re.fullmatch(r"\d+", args[1]):
+                    primitives.setdefault(int(args[1]), set()).add(fact["type"])
 
     # An unspellable read is still a read. Recording it as its own fact lets
     # the ordinary conflict rule below poison a slot that some other branch
@@ -880,10 +896,15 @@ def _function_facts(name: str, functions: dict[str, dict[str, Any]],
             if len(args) >= 2:
                 place(args[1], {"opaque": "buffer"})
 
-    for helper in NATIVE_ARG_OBJECT_READERS:
+    for helper, key_type in NATIVE_ARG_OBJECT_READERS.items():
         for args in _c_calls(body, helper, ctx):
-            if len(args) >= 2:
-                place(args[1], {"opaque": "object"})
+            if len(args) < 2:
+                continue
+            place(args[1], {"opaque": "object"})
+            if len(args) >= 3 and re.fullmatch(r"-?\d+", args[1]):
+                key = args[2].strip()
+                if key.startswith('"') and key.endswith('"') and len(key) > 2:
+                    shapes.setdefault(int(args[1]), {})[key[1:-1]] = key_type
 
     for helper in NATIVE_PROBE_READERS:
         for args in _c_calls(body, helper, ctx):
@@ -901,6 +922,7 @@ def _function_facts(name: str, functions: dict[str, dict[str, Any]],
                             "nativeClass": symbol})
 
     known = set(NATIVE_ARG_READERS) | set(NATIVE_HANDLE_READERS)
+    inherited: list[dict[str, Any]] = []
     for callee, callee_record in functions.items():
         if callee == name or callee in known or callee_record is None:
             continue
@@ -908,6 +930,7 @@ def _function_facts(name: str, functions: dict[str, dict[str, Any]],
         if not calls:
             continue
         inner = _function_facts(callee, functions, memo, depth - 1)
+        inherited.append(inner)
         for args in calls:
             for index, fact in inner["indices"].items():
                 _merge_fact(indices, index, fact)
@@ -917,7 +940,14 @@ def _function_facts(name: str, functions: dict[str, dict[str, Any]],
             for index in inner["tested"]:
                 tested.add(index)
 
-    facts = {"indices": indices, "params": params, "tested": tested}
+    for callee_facts in inherited:
+        for index, shape in callee_facts.get("shapes", {}).items():
+            shapes.setdefault(index, {}).update(shape)
+        for index, kinds in callee_facts.get("primitives", {}).items():
+            primitives.setdefault(index, set()).update(kinds)
+
+    facts = {"indices": indices, "params": params, "tested": tested,
+             "shapes": shapes, "primitives": primitives}
     memo[key] = facts
     return facts
 
@@ -955,6 +985,11 @@ def native_parameters(record: dict[str, Any], facts: dict[str, Any],
         param: dict[str, Any] = {"index": index}
         name = names.get(index)
         fact_here = facts["indices"].get(index)
+        if name is not None and name in facts["shapes"].get(index, {}):
+            # The local holds ONE key off the options object, so it names a
+            # member rather than the argument -- `sendEvent`'s slot 2 came out
+            # `url`, which is a key of the object it accepts.
+            name = None
         if fact_here is not None and fact_here.get("opaque") == "object":
             # The slot is an options object and the local holds ONE key off it.
             # `es_metadata.c:66-98` reads seven properties from index 2 and the
@@ -965,8 +1000,24 @@ def native_parameters(record: dict[str, Any], facts: dict[str, Any],
         if name is not None and name not in used:
             param["name"] = name
             used.add(name)
+        shape = facts["shapes"].get(index)
         fact = facts["indices"].get(index)
-        if fact is not None and index not in facts["tested"]:
+        if shape and index not in facts["tested"]:
+            # The keys the C reads, plus an index signature. Whether anything
+            # ELSE may sit at this index is decided by the primitives seen at
+            # the same slot: `native/prop.sendEvent` reads argument 2 with
+            # duk_require_string for `redirect` and as an options object for
+            # `openurl` (es_prop.c:834-841), which is a union, not a conflict.
+            others = sorted(facts["primitives"].get(index, set()))
+            param["shape"] = dict(sorted(shape.items()))
+            if not others:
+                param["shapeUnion"] = []
+            elif len(others) == 1:
+                param["shapeUnion"] = others
+            else:
+                param.pop("shape")
+                param["ambiguous"] = ["object"] + others
+        elif fact is not None and index not in facts["tested"]:
             if "opaque" in fact:
                 param["ambiguous"] = [fact["opaque"]]
             elif "handle" in fact:
@@ -975,6 +1026,11 @@ def native_parameters(record: dict[str, Any], facts: dict[str, Any],
             else:
                 param["type"] = fact["type"]
                 param["reader"] = fact["reader"]
+        elif fact is None and index in facts["indices"]:
+            # Distinguish "the body reads this two ways" from "the body never
+            # reads this at all". Both came out as an unexplained `any`, which
+            # made the residue impossible to triage.
+            param["ambiguous"] = ["conflict"]
         params.append(param)
     return params
 
@@ -1135,6 +1191,10 @@ def annotate_native_signatures(records: list[dict[str, Any]]) -> None:
                 facts = _function_facts(function["impl"], functions, memo,
                                         NATIVE_HELPER_DEPTH)
                 params = native_parameters(record, facts, function["nargs"])
+                for param in params:
+                    if "shape" in param:
+                        param["shapeName"] = _options_type_name(
+                            function["name"])
                 if params:
                     function["params"] = params
             returns = native_return_type(record, functions)
@@ -1142,6 +1202,28 @@ def annotate_native_signatures(records: list[dict[str, Any]]) -> None:
                 function["returns"] = returns[0]
                 if returns[1] is not None:
                     function["returnsNativeClass"] = returns[1]
+
+
+def _options_type_name(function_name: str) -> str:
+    """`httpReq` -> `HttpReqOptions`."""
+    return function_name[:1].upper() + function_name[1:] + "Options"
+
+
+def native_options_shapes(
+        module: dict[str, Any]) -> list[tuple[str, dict[str, str], list[str]]]:
+    """Every options-object interface one native module needs, in order."""
+    shapes: dict[str, tuple[dict[str, str], list[str]]] = {}
+    for function in module.get("functions", []):
+        for param in function.get("params", []):
+            if "shape" not in param:
+                continue
+            name = param["shapeName"]
+            if name in shapes:
+                raise GenError(
+                    "two options shapes want the name %s in %s"
+                    % (name, module["name"]))
+            shapes[name] = (param["shape"], param.get("shapeUnion", []))
+    return [(name, *shapes[name]) for name in sorted(shapes)]
 
 
 def native_handle_types(
@@ -4103,8 +4185,13 @@ def render_dts(artifact: dict[str, Any]) -> str:
         rendered = []
         for index in range(nargs):
             param = params[index] if index < len(params) else {}
+            if "shapeName" in param:
+                spelling = " | ".join([param["shapeName"],
+                                       *param.get("shapeUnion", [])])
+            else:
+                spelling = param.get("type", "any")
             rendered.append("%s?: %s" % (param.get("name", "arg%d" % index),
-                                         param.get("type", "any")))
+                                         spelling))
         return ", ".join(rendered)
 
     def params_signature(
@@ -4214,6 +4301,20 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 lines.append("}")
                 lines.append("")
                 continue
+            shapes = native_options_shapes(mod)
+            if shapes:
+                lines.append("  // Options objects, keyed by what the C reads."
+                             " The index signature is")
+                lines.append("  // deliberate: the native ignores keys it does"
+                             " not know, so an extra one")
+                lines.append("  // is not an error at runtime and must not"
+                             " become one here.")
+                for shape_name, members, _union in shapes:
+                    lines.append("  interface %s {" % shape_name)
+                    for member, kind in members.items():
+                        lines.append("    %s?: %s;" % (member, kind))
+                    lines.append("    %s" % NATIVE_OPTIONS_INDEX_SIGNATURE)
+                    lines.append("  }")
             lines.append("  // native ES_MODULE exports")
             for func in funcs:
                 fname = func["name"]

@@ -347,6 +347,80 @@ class RefusedNonIndex(unittest.TestCase):
                                  % (name, flag))
 
 
+class OptionsObjects(unittest.TestCase):
+    """A slot read by named property is an options object, and the keys are it.
+
+    The index signature is the load-bearing part. The keys are what the C
+    reads; nothing in the C REJECTS a key it does not read, so a declaration
+    without an index signature would turn TypeScript's excess-property check
+    into a rule the runtime does not have.
+    """
+
+    def _params(self, body: str, nargs: int) -> list[dict]:
+        record = c_function("f", ["duk_context *ctx"], body)
+        return gen.native_parameters(
+            record, gen._function_facts("f", {"f": record}, {},
+                                        gen.NATIVE_HELPER_DEPTH), nargs)
+
+    def test_each_reader_types_the_key_it_reads(self) -> None:
+        params = self._params("""
+  int dbg = es_prop_is_true(ctx, 1, "debug");
+  rstr_t *m = es_prop_to_rstr(ctx, 1, "method");
+  int age = es_prop_to_int(ctx, 1, "cacheTime", -1);
+  duk_get_prop_string(ctx, 1, "headers");
+""", 2)
+        self.assertEqual(params[1]["shape"], {
+            "cacheTime": "number", "debug": "boolean",
+            "headers": "any", "method": "string",
+        })
+
+    def test_a_string_branch_beside_it_is_a_union_not_a_conflict(self) -> None:
+        params = self._params("""
+  if(!strcmp(type, "redirect")) {
+    e = event_create_str(EVENT_REDIRECT, duk_require_string(ctx, 2));
+  } else {
+    rstr_t *url = es_prop_to_rstr(ctx, 2, "url");
+  }
+""", 3)
+        self.assertEqual(params[2]["shape"], {"url": "string"})
+        self.assertEqual(params[2]["shapeUnion"], ["string"])
+
+    def test_two_primitive_branches_beside_it_refuse(self) -> None:
+        params = self._params("""
+  rstr_t *url = es_prop_to_rstr(ctx, 1, "url");
+  const char *s = duk_to_string(ctx, 1);
+  double n = duk_to_number(ctx, 1);
+""", 2)
+        self.assertNotIn("shape", params[1])
+        self.assertNotIn("type", params[1])
+
+    def test_a_key_is_not_the_arguments_name(self) -> None:
+        """The local holds one member; naming the argument after it misleads."""
+        params = self._params("""
+  rstr_t *url = es_prop_to_rstr(ctx, 1, "url");
+""", 2)
+        self.assertNotIn("name", params[1])
+
+    def test_the_real_tree_carries_the_index_signature(self) -> None:
+        modules = {m["name"]: m for m in gen.build_native_modules()}
+        shapes = gen.native_options_shapes(modules["native/io"])
+        self.assertEqual([name for name, _, _ in shapes], ["HttpReqOptions"])
+        _, members, union = shapes[0]
+        self.assertEqual(len(members), 13, members)
+        self.assertEqual(union, [])
+        emitted = (REPO_ROOT / "generated" / "movian-api.d.ts").read_text()
+        self.assertIn(gen.NATIVE_OPTIONS_INDEX_SIGNATURE, emitted)
+
+    def test_an_unread_slot_and_a_contested_one_read_differently(self) -> None:
+        """`any` with no reason was impossible to triage; now it has one."""
+        params = self._params("""
+  const char *s = duk_to_string(ctx, 0);
+  double n = duk_to_number(ctx, 0);
+""", 2)
+        self.assertEqual(params[0].get("ambiguous"), ["conflict"])
+        self.assertNotIn("ambiguous", params[1])
+
+
 class ReturnTypes(unittest.TestCase):
     def test_return_zero_and_no_push_is_void(self) -> None:
         record = c_function("f", ["duk_context *ctx"], "  return 0;")

@@ -6029,6 +6029,9 @@
                 "type": "HashHandle"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
                 "index": 1,
                 "name": "buf"
               }
@@ -6183,10 +6186,13 @@
                 "type": "string"
               },
               {
-                "ambiguous": [
-                  "object"
-                ],
-                "index": 1
+                "index": 1,
+                "shape": {
+                  "cacheable": "boolean",
+                  "redirect": "boolean"
+                },
+                "shapeName": "RegisterOptions",
+                "shapeUnion": []
               }
             ],
             "returns": "FapHandle",
@@ -7022,6 +7028,9 @@
                 "type": "HtsmsgHandle"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
                 "index": 1,
                 "name": "i"
               }
@@ -7164,10 +7173,24 @@
                 "type": "string"
               },
               {
-                "ambiguous": [
-                  "object"
-                ],
-                "index": 1
+                "index": 1,
+                "shape": {
+                  "args": "any",
+                  "cacheTime": "number",
+                  "caching": "boolean",
+                  "compression": "boolean",
+                  "debug": "boolean",
+                  "headRequest": "boolean",
+                  "headers": "any",
+                  "method": "any",
+                  "noAuth": "boolean",
+                  "noFail": "boolean",
+                  "noFollow": "boolean",
+                  "postdata": "any",
+                  "verifySSL": "boolean"
+                },
+                "shapeName": "HttpReqOptions",
+                "shapeUnion": []
               },
               {
                 "index": 2
@@ -7364,6 +7387,9 @@
                 "type": "string"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
                 "index": 3
               }
             ],
@@ -7435,10 +7461,18 @@
                 "type": "string"
               },
               {
-                "ambiguous": [
-                  "object"
-                ],
-                "index": 2
+                "index": 2,
+                "shape": {
+                  "duration": "number",
+                  "episode": "number",
+                  "filename": "string",
+                  "imdb": "string",
+                  "season": "number",
+                  "title": "string",
+                  "year": "number"
+                },
+                "shapeName": "VideoMetadataBindOptions",
+                "shapeUnion": []
               }
             ],
             "returns": "MlvHandle",
@@ -7934,6 +7968,9 @@
                 "type": "PropHandle"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
                 "index": 1,
                 "name": "idx"
               }
@@ -8102,6 +8139,9 @@
             "nargs": 1,
             "params": [
               {
+                "ambiguous": [
+                  "conflict"
+                ],
                 "index": 0,
                 "name": "p"
               }
@@ -8201,6 +8241,9 @@
                 "type": "PropHandle"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
                 "index": 1,
                 "name": "b"
               }
@@ -8240,9 +8283,15 @@
                 "type": "string"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
                 "index": 3
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
                 "index": 4,
                 "name": "enable"
               },
@@ -8408,7 +8457,16 @@
               },
               {
                 "index": 2,
-                "name": "url"
+                "shape": {
+                  "how": "string",
+                  "parenturl": "string",
+                  "url": "string",
+                  "view": "string"
+                },
+                "shapeName": "SendEventOptions",
+                "shapeUnion": [
+                  "string"
+                ]
               }
             ],
             "returns": "void",
@@ -8440,6 +8498,9 @@
                 "type": "string"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
                 "index": 2,
                 "name": "dbl"
               }
@@ -8567,10 +8628,17 @@
                 "index": 1
               },
               {
-                "ambiguous": [
-                  "object"
-                ],
-                "index": 2
+                "index": 2,
+                "shape": {
+                  "actionAsArray": "boolean",
+                  "autoDestroy": "boolean",
+                  "debug": "boolean",
+                  "earlyChildDelete": "boolean",
+                  "ignoreVoid": "boolean",
+                  "noInitialUpdate": "boolean"
+                },
+                "shapeName": "SubscribeOptions",
+                "shapeUnion": []
               }
             ],
             "returns": "PropSubHandle",
@@ -9512,6 +9580,9 @@
                 "type": "WebsocketClientHandle"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
                 "index": 1,
                 "name": "buf"
               }
@@ -9836,6 +9907,6 @@
       }
     ]
   },
-  "movianRevision": "ce587fb8f75da41ca85af4179d996f5964cd3f02",
+  "movianRevision": "eeeafdd14044152fd5e668c6de441523cf166c54",
   "schemaVersion": 1
 }

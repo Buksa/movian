@@ -312,3 +312,26 @@ natmeta.videoMetadataBind(nativeRoot, 'http://e.test/v.mkv',
                           { title: 'T', year: 2026, season: 1, episode: 2 });
 
 void notAProp;
+
+// #207 residue: an argument the C reads by named property is an options
+// object, and the keys it reads are the shape. Every key here is a literal in
+// es_io.c / es_prop.c, not a guess.
+
+
+natio.httpReq('http://e.test/', {
+  debug: true, noFollow: true, compression: false, verifySSL: true,
+  headRequest: false, caching: true, cacheTime: 60,
+  method: 'POST', postdata: { a: 1 }, headers: { 'X-A': 'b' },
+});
+
+// The index signature is the point, not an oversight. The native reads the
+// keys it knows and ignores the rest, so an unknown key is not an error at
+// runtime and must not become one here.
+natio.httpReq('http://e.test/', { debug: true, somethingNewer: 'ok' });
+
+// es_prop.c:834-841 reads argument 2 as a string for `redirect` and as an
+// options object for `openurl`. That is a union, not a conflict, and both
+// halves have to compile.
+natproppos.sendEvent(nativeRoot, 'redirect', 'http://e.test/');
+natproppos.sendEvent(nativeRoot, 'openurl',
+                     { url: 'x', view: 'v', how: 'h', parenturl: 'p' });
