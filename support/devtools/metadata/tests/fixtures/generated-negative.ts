@@ -174,3 +174,11 @@ const wrongOptionType2 = natio2.httpReq('http://e.test/', { cacheTime: '60' }); 
 const notInTheUnion = natprop.sendEvent(someProp, 'openurl', 42);  // EXPECT_TS2345
 
 void wrongOptionType; void wrongOptionType2; void notInTheUnion;
+
+// `Duktape.fin` has two forms, not one signature with an optional argument:
+// duk_bi_duktape_object_fin branches on duk_get_top(ctx) >= 2 and the return
+// type differs between them (ext/duktape/duktape.c:26971). Setting a
+// finalizer evaluates to nothing.
+const finReturnsNothing = Duktape.fin({}, function() { }).valueOf();  // EXPECT_TS2339
+
+void finReturnsNothing;

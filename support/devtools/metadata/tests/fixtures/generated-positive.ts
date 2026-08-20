@@ -335,3 +335,17 @@ natio.httpReq('http://e.test/', { debug: true, somethingNewer: 'ok' });
 natproppos.sendEvent(nativeRoot, 'redirect', 'http://e.test/');
 natproppos.sendEvent(nativeRoot, 'openurl',
                      { url: 'x', view: 'v', how: 'h', parenturl: 'p' });
+
+// `Duktape` is an interpreter global: Duktape installs it, Movian only reaches
+// into it (ecmascript.c:502), so es_create_env never names it and the C
+// scanner cannot see it. Both forms below are what the core modules do.
+const dukBuf = new Duktape.Buffer(16);
+Duktape.fin({}, function() { });
+const finalizer = Duktape.fin({});
+// The index signature is the admission that Duktape 1.8.0 keeps its builtin
+// membership in a bit-packed blob no scanner here can read. Declaring only
+// the three anchored members and stopping would report a real builtin as an
+// error this repository invented.
+const encoded = Duktape.enc('hex', dukBuf);
+
+void dukBuf; void finalizer; void encoded;

@@ -88,6 +88,8 @@ CURATED_SCOPES = METADATA_DIR / "curated_scopes.json"
 CURATED_PLUGIN_MANIFEST = METADATA_DIR / "curated_plugin_manifest.json"
 CURATED_INTERPRETER_GLOBALS = (
     METADATA_DIR / "curated_interpreter_globals.json")
+CURATED_INTERPRETER_OBJECTS = (
+    METADATA_DIR / "curated_interpreter_objects.json")
 
 SCHEMA_VERSION = 1
 GENERATED_BY = "support/devtools/metadata/gen.py"
@@ -2782,6 +2784,7 @@ def build_globals() -> dict[str, Any]:
     # evidence is a builtins table plus two config macros rather than a call
     # sequence -- each entry carries both, and the audit below re-checks them.
     functions.extend(build_interpreter_globals())
+    objects.extend(build_interpreter_objects())
     return {
         "functions": sorted(functions, key=lambda f: f["name"]),
         "objects": sorted(objects, key=lambda entry: entry["name"]),
@@ -3002,6 +3005,73 @@ def build_interpreter_globals() -> list[dict[str, Any]]:
             "variadic": nargs == -1,
         })
     return records
+
+
+def build_interpreter_objects() -> list[dict[str, Any]]:
+    """Global OBJECTS the interpreter installs, with their evidence re-checked.
+
+    `build_interpreter_globals` covers the functions; this covers the one
+    object, `Duktape`. Movian reaches into it (`ecmascript.c:502`) rather than
+    creating it, so `es_create_env` never names it and the scanner that reads
+    that function cannot see it -- while two core modules use it and were
+    reported as `Cannot find name 'Duktape'` against the emitted declarations.
+
+    Every member carries an anchor that is looked up in live C, exactly as the
+    curated functions are, because a curated list is otherwise the place a
+    name survives the thing it described.
+    """
+    entries = load_curated(
+        CURATED_INTERPRETER_OBJECTS,
+        {"name", "why", "properties", "functions", "anchor", "source"})
+    records: list[dict[str, Any]] = []
+    for entry in entries:
+        _require_anchor(entry["source"]["file"], entry["anchor"],
+                        "interpreter object %s" % entry["name"])
+        properties: list[dict[str, Any]] = []
+        for prop in entry["properties"]:
+            # Position, not just presence. `load_curated` checks the
+            # top-level entry's anchor against its exact line and nothing was
+            # doing that for members -- a wrong line number sailed straight
+            # through, which is the same off-by-one that put fifteen bad
+            # citations into a rejected PR once already. A citation nobody
+            # can follow is worse than none.
+            _require_anchor_at(prop["source"]["file"], prop["source"]["line"],
+                               prop["anchor"],
+                               "interpreter object %s.%s"
+                               % (entry["name"], prop["name"]))
+            properties.append({
+                "name": prop["name"],
+                "kind": prop["kind"],
+                "source": prop["source"],
+            })
+        record: dict[str, Any] = {
+            "name": entry["name"],
+            "provider": "duktape",
+            "functions": entry["functions"],
+            "properties": properties,
+        }
+        index_signature = entry.get("indexSignature")
+        if index_signature:
+            record["indexSignature"] = index_signature["kind"]
+        records.append(record)
+    return records
+
+
+def _require_anchor_at(relative_path: str, line: int, anchor: str,
+                       what: str) -> None:
+    """Fail unless `anchor` is on exactly that line of that file."""
+    path = REPO_ROOT / relative_path
+    if not path.is_file():
+        raise GenError("%s: %s does not exist" % (what, relative_path))
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    if not isinstance(line, int) or isinstance(line, bool) or line < 1:
+        raise GenError("%s: invalid source line %r" % (what, line))
+    if line > len(lines):
+        raise GenError("%s: %s:%d is past the end of the file"
+                       % (what, relative_path, line))
+    if anchor not in lines[line - 1]:
+        raise GenError("%s: anchor %r is not at %s:%d"
+                       % (what, anchor, relative_path, line))
 
 
 def _require_anchor(relative_path: str, anchor: str, what: str) -> None:
@@ -4175,6 +4245,9 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     prop["name"],
                     "?" if prop.get("optional") else "",
                     prop["kind"]))
+            if record.get("indexSignature"):
+                lines.append("  [key: string]: %s;"
+                             % record["indexSignature"])
             lines.append("};")
             lines.append("")
 

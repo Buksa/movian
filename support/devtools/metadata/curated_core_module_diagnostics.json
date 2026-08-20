@@ -8,7 +8,9 @@
     "",
     "This corpus is where a wrong native signature shows up first. Three",
     "signatures that contradicted a real call site here shipped green through",
-    "the whole battery (movian#209) because nothing compiled these files."
+    "the whole battery (movian#209) because nothing compiled these files.",
+    "",
+    "`Duktape` used to be listed here as a recorded declaration gap. It is declared now (curated_interpreter_objects.json), the two diagnostics stopped firing, and the both-directions check refused to let the stale entries stay -- which is the half of this list that keeps it from decaying into a baseline."
   ],
   "classes": {
     "private-instance-state": {
@@ -18,10 +20,6 @@
     "placeholder-callback": {
       "code": 2554,
       "why": "`this.onData = function() {}` is a no-op placeholder that `on()` later replaces with a handler taking an argument. tsc infers the arity of the PLACEHOLDER. Calling it with one argument is correct JavaScript and correct at runtime; the declaration is not involved."
-    },
-    "undeclared-global": {
-      "code": 2304,
-      "why": "REAL GAP: `Duktape` is an interpreter builtin the artifact does not declare. curated_interpreter_globals.json carries `print` and `require` for the same reason, but those are functions with an nargs; `Duktape` is an object whose shape no evidence in this tree describes -- the runtime oracle (support/devtools/api-introspector/runtime-api.json) never captured it. Declaring an invented shape is worse than recording the gap, so it is recorded here until the introspector can be run."
     },
     "loose-var-redeclaration": {
       "code": 2403,
@@ -33,12 +31,6 @@
     }
   },
   "expected": [
-    {
-      "file": "res/ecmascript/modules/fs.js",
-      "line": 18,
-      "code": 2304,
-      "class": "undeclared-global"
-    },
     {
       "file": "res/ecmascript/modules/http.js",
       "line": 13,
@@ -242,12 +234,6 @@
       "line": 15,
       "code": 2403,
       "class": "loose-var-redeclaration"
-    },
-    {
-      "file": "res/ecmascript/modules/movian/store.js",
-      "line": 40,
-      "code": 2304,
-      "class": "undeclared-global"
     },
     {
       "file": "res/ecmascript/modules/movian/store.js",
