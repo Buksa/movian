@@ -172,6 +172,7 @@ int smb_close_tree_files(smb_connection_t *sc, uint32_t tree_id);
 /* smb_server_vfs.c */
 int vfs_unlink(const char *url, char *errbuf, size_t errlen);
 int vfs_rmdir(const char *url, char *errbuf, size_t errlen);
+int smb_vfs_error_to_ntstatus(int err, const char *errbuf);
 int smb_create(struct smb2_server *srvr, struct smb2_context *smb2,
                struct smb2_create_request *req,
                struct smb2_create_reply *rep);

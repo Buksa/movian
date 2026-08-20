@@ -135,21 +135,27 @@ smb_free_file(smb_connection_t *sc, smb_file_entry_t *fe)
 int
 smb_close_file_entry(smb_connection_t *sc, smb_file_entry_t *fe)
 {
+    int ntstatus = 0;
+
     if(fe->delete_on_close && fe->path) {
         char errbuf[256];
+        int delete_status;
         SMBINFO("Delete-on-close: '%s' (%s)", fe->path, fe->is_dir ? "dir" : "file");
         SMBTRACE("Close+delete executing unlink/rmdir");
         if(fe->is_dir)
-            vfs_rmdir(fe->path, errbuf, sizeof(errbuf));
+            delete_status = vfs_rmdir(fe->path, errbuf, sizeof(errbuf));
         else
-            vfs_unlink(fe->path, errbuf, sizeof(errbuf));
+            delete_status = vfs_unlink(fe->path, errbuf, sizeof(errbuf));
+        if(delete_status) {
+            ntstatus = smb_vfs_error_to_ntstatus(delete_status, errbuf);
+            SMBINFO("Delete-on-close FAILED: '%s': %s", fe->path, errbuf);
+        }
     }
 
-    SMBTRACE("Close: '%s' (%s)",
-             fe->path,
+    SMBTRACE("Close: '%s' (%s)", fe->path,
              fe->is_pipe ? "PIPE" : fe->is_dir ? "DIR" : "FILE");
     smb_free_file(sc, fe);
-    return 0;
+    return ntstatus;
 }
 
 void
