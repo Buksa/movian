@@ -5983,6 +5983,8 @@
                 "type": "string"
               }
             ],
+            "returns": "HashHandle",
+            "returnsNativeClass": "es_native_hash",
             "source": {
               "file": "src/ecmascript/es_crypto.c",
               "line": 156
@@ -6184,6 +6186,8 @@
                 "index": 1
               }
             ],
+            "returns": "FapHandle",
+            "returnsNativeClass": "es_resource_fap",
             "source": {
               "file": "src/ecmascript/es_faprovider.c",
               "line": 742
@@ -6477,6 +6481,8 @@
                 "type": "number"
               }
             ],
+            "returns": "FdHandle",
+            "returnsNativeClass": "es_resource_fd",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 469
@@ -6541,6 +6547,7 @@
                 "type": "string"
               }
             ],
+            "returns": "string[]",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 479
@@ -6694,7 +6701,6 @@
                 "type": "string"
               }
             ],
-            "returns": "any[]",
             "source": {
               "file": "src/ecmascript/es_gumbo.c",
               "line": 415
@@ -6751,7 +6757,6 @@
                 "type": "string"
               }
             ],
-            "returns": "any[]",
             "source": {
               "file": "src/ecmascript/es_gumbo.c",
               "line": 414
@@ -6802,7 +6807,8 @@
                 "type": "boolean"
               }
             ],
-            "returns": "any[]",
+            "returns": "GumboNodeHandle[]",
+            "returnsNativeClass": "es_native_gumbo_node",
             "source": {
               "file": "src/ecmascript/es_gumbo.c",
               "line": 410
@@ -6825,7 +6831,6 @@
                 "type": "GumboNodeHandle"
               }
             ],
-            "returns": "string",
             "source": {
               "file": "src/ecmascript/es_gumbo.c",
               "line": 409
@@ -6927,6 +6932,8 @@
                 "index": 1
               }
             ],
+            "returns": "HookHandle",
+            "returnsNativeClass": "es_resource_hook",
             "source": {
               "file": "src/ecmascript/es_hook.c",
               "line": 152
@@ -6959,6 +6966,8 @@
                 "type": "string"
               }
             ],
+            "returns": "HtsmsgHandle",
+            "returnsNativeClass": "es_native_htsmsg",
             "source": {
               "file": "src/ecmascript/es_htsmsg.c",
               "line": 213
@@ -6981,6 +6990,7 @@
                 "type": "HtsmsgHandle"
               }
             ],
+            "returns": "string[]",
             "source": {
               "file": "src/ecmascript/es_htsmsg.c",
               "line": 215
@@ -7121,6 +7131,8 @@
                 "type": "boolean"
               }
             ],
+            "returns": "HttpInspectorHandle",
+            "returnsNativeClass": "es_resource_http_inspector",
             "source": {
               "file": "src/ecmascript/es_io.c",
               "line": 919
@@ -7191,6 +7203,8 @@
             },
             "name": "xmlrpc",
             "nargs": -1,
+            "returns": "HtsmsgHandle",
+            "returnsNativeClass": "es_native_htsmsg",
             "source": {
               "file": "src/ecmascript/es_io.c",
               "line": 921
@@ -7413,6 +7427,8 @@
                 "name": "filename"
               }
             ],
+            "returns": "MlvHandle",
+            "returnsNativeClass": "es_resource_mlv",
             "source": {
               "file": "src/ecmascript/es_metadata.c",
               "line": 120
@@ -7451,6 +7467,7 @@
                 "type": "string"
               }
             ],
+            "returns": "null",
             "source": {
               "file": "src/ecmascript/es_misc.c",
               "line": 314
@@ -7779,6 +7796,8 @@
                 "type": "string"
               }
             ],
+            "returns": "PropHandle",
+            "returnsNativeClass": "es_native_prop",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1091
@@ -7961,6 +7980,8 @@
             },
             "name": "global",
             "nargs": 0,
+            "returns": "PropHandle",
+            "returnsNativeClass": "es_native_prop",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1101
@@ -8248,6 +8269,8 @@
                 "type": "PropHandle"
               }
             ],
+            "returns": "PropnfHandle",
+            "returnsNativeClass": "es_native_propnf",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1122
@@ -8535,6 +8558,8 @@
                 "index": 2
               }
             ],
+            "returns": "PropSubHandle",
+            "returnsNativeClass": "es_resource_prop_sub",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1098
@@ -8738,6 +8763,8 @@
                 "index": 1
               }
             ],
+            "returns": "RouteHandle",
+            "returnsNativeClass": "es_resource_route",
             "source": {
               "file": "src/ecmascript/es_route.c",
               "line": 280
@@ -8819,6 +8846,8 @@
                 "index": 5
               }
             ],
+            "returns": "ServiceHandle",
+            "returnsNativeClass": "es_resource_service",
             "source": {
               "file": "src/ecmascript/es_service.c",
               "line": 170
@@ -8899,6 +8928,8 @@
                 "type": "string"
               }
             ],
+            "returns": "SqliteHandle",
+            "returnsNativeClass": "es_resource_sqlite",
             "source": {
               "file": "src/ecmascript/es_sqlite.c",
               "line": 319
@@ -9381,6 +9412,8 @@
                 "type": "string"
               }
             ],
+            "returns": "SpHandle",
+            "returnsNativeClass": "es_resource_sp",
             "source": {
               "file": "src/ecmascript/es_subtitles.c",
               "line": 279
@@ -9395,6 +9428,7 @@
             },
             "name": "getLanguages",
             "nargs": 0,
+            "returns": "string[]",
             "source": {
               "file": "src/ecmascript/es_subtitles.c",
               "line": 281
@@ -9436,6 +9470,8 @@
                 "index": 2
               }
             ],
+            "returns": "WebsocketClientHandle",
+            "returnsNativeClass": "es_resource_websocket_client",
             "source": {
               "file": "src/ecmascript/es_websocket.c",
               "line": 1112
@@ -9490,6 +9526,8 @@
                 "index": 1
               }
             ],
+            "returns": "WebsocketServerHandle",
+            "returnsNativeClass": "es_resource_websocket_server",
             "source": {
               "file": "src/ecmascript/es_websocket.c",
               "line": 1115
@@ -9782,6 +9820,6 @@
       }
     ]
   },
-  "movianRevision": "f3e3b7e68c26d4f83cd54a329202553efc032630",
+  "movianRevision": "6445869f93c9d2aaf0e0689c70690ea26d14fe89",
   "schemaVersion": 1
 }

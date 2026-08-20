@@ -269,14 +269,15 @@ class RefusedNonIndex(unittest.TestCase):
 class ReturnTypes(unittest.TestCase):
     def test_return_zero_and_no_push_is_void(self) -> None:
         record = c_function("f", ["duk_context *ctx"], "  return 0;")
-        self.assertEqual(gen.native_return_type(record), "void")
+        self.assertEqual(gen.native_return_type(record, {}), ("void", None))
 
     def test_a_single_push_kind_under_return_one(self) -> None:
         record = c_function("f", ["duk_context *ctx"], """
   duk_push_string(ctx, tmp);
   return 1;
 """)
-        self.assertEqual(gen.native_return_type(record), "string")
+        self.assertEqual(gen.native_return_type(record, {}),
+                         ("string", None))
 
     def test_mixed_arities_refuse(self) -> None:
         record = c_function("f", ["duk_context *ctx"], """
@@ -285,7 +286,7 @@ class ReturnTypes(unittest.TestCase):
   duk_push_string(ctx, tmp);
   return 1;
 """)
-        self.assertIsNone(gen.native_return_type(record))
+        self.assertIsNone(gen.native_return_type(record, {}))
 
     def test_two_push_kinds_refuse(self) -> None:
         record = c_function("f", ["duk_context *ctx"], """
@@ -295,7 +296,7 @@ class ReturnTypes(unittest.TestCase):
     duk_push_string(ctx, tmp);
   return 1;
 """)
-        self.assertIsNone(gen.native_return_type(record))
+        self.assertIsNone(gen.native_return_type(record, {}))
 
     def test_a_pushed_object_is_not_a_named_type(self) -> None:
         """`object` is a shape this scan cannot describe, so it says nothing."""
@@ -303,15 +304,90 @@ class ReturnTypes(unittest.TestCase):
   duk_push_object(ctx);
   return 1;
 """)
-        self.assertIsNone(gen.native_return_type(record))
+        self.assertIsNone(gen.native_return_type(record, {}))
 
-    def test_a_push_it_cannot_read_refuses(self) -> None:
-        """A value put on the stack by a helper is not a value it can name."""
+    def test_a_push_through_a_helper_is_named_when_the_helper_is_known(
+            self) -> None:
+        """`es_stprop_push` is one hop from a class named at a call site.
+
+        Refusing it would leave every handle-returning native at `any` while
+        the same class is accepted on the reading side, and `native/prop` has
+        no other way to hand one out.
+        """
         record = c_function("f", ["duk_context *ctx"], """
   es_stprop_push(ctx, p);
   return 1;
 """)
-        self.assertIsNone(gen.native_return_type(record))
+        helper = c_function("es_stprop_push", ["duk_context *ctx",
+                                               "prop_t *p"], """
+  es_push_native_obj(ctx, &es_native_prop, p);
+""")
+        self.assertIsNone(gen.native_return_type(record, {}))
+        self.assertEqual(
+            gen.native_return_type(record, {"es_stprop_push": helper}),
+            ("PropHandle", "es_native_prop"))
+
+    def test_a_resource_push_resolves_the_class_it_created(self) -> None:
+        """Every resource is pushed as one class; the specific one is created.
+
+        `es_resource_push` goes through `es_push_native_obj(ctx,
+        &es_native_resource, er)`, so reading it literally would declare
+        `fs.open()` and `sqlite.create()` the same type -- and then reject
+        `fs.read(fs.open(...))`, which the runtime accepts.
+        """
+        record = c_function("f", ["duk_context *ctx"], """
+  es_fd_t *efd = es_resource_create(ec, &es_resource_fd, 0);
+  es_resource_push(ctx, &efd->super);
+  return 1;
+""")
+        self.assertEqual(gen.native_return_type(record, {}),
+                         ("FdHandle", "es_resource_fd"))
+
+    def test_two_resource_classes_in_one_body_refuse(self) -> None:
+        record = c_function("f", ["duk_context *ctx"], """
+  es_resource_create(ec, &es_resource_fd, 0);
+  es_resource_create(ec, &es_resource_sqlite, 0);
+  es_resource_push(ctx, er);
+  return 1;
+""")
+        self.assertIsNone(gen.native_return_type(record, {}))
+
+    def test_a_filled_container_returns_the_container(self) -> None:
+        """The idiom half this surface is written in.
+
+        Reading the nearest push gives the ELEMENT, which would declare
+        `readdir()` as `string` when it returns `string[]`.
+        """
+        record = c_function("f", ["duk_context *ctx"], """
+  duk_push_array(ctx);
+  RB_FOREACH(fde, &fd->fd_entries, fde_link) {
+    duk_push_string(ctx, name);
+    duk_put_prop_index(ctx, -2, idx++);
+  }
+  return 1;
+""")
+        self.assertEqual(gen.native_return_type(record, {}),
+                         ("string[]", None))
+
+    def test_a_container_whose_element_is_not_stored_refuses(self) -> None:
+        """Without the `duk_put_prop_*` the second push is the result, not an
+        element, and nothing here can tell which."""
+        record = c_function("f", ["duk_context *ctx"], """
+  duk_push_array(ctx);
+  duk_push_string(ctx, name);
+  return 1;
+""")
+        self.assertIsNone(gen.native_return_type(record, {}))
+
+    def test_the_real_tree_still_typed_readdir_and_open(self) -> None:
+        """The corpus assertion behind the synthetic ones above."""
+        functions = gen.scan_c_functions()
+        self.assertEqual(
+            gen.native_return_type(functions["es_file_readdir"], functions),
+            ("string[]", None))
+        self.assertEqual(
+            gen.native_return_type(functions["es_file_open"], functions),
+            ("FdHandle", "es_resource_fd"))
 
 
 if __name__ == "__main__":

@@ -628,6 +628,18 @@ NATIVE_NAME_REJECT = frozenset((
     "typeof", "undefined", "unknown", "var", "void", "while", "with", "yield",
 ))
 
+# Calls that consume the value on the stack top. They are what separates an
+# element being stored into a container from the container itself.
+NATIVE_PUT_CALLS = frozenset((
+    "duk_put_prop_index", "duk_put_prop_string", "duk_put_prop",
+    "duk_put_prop_lstring",
+))
+
+NATIVE_HANDLE_PUSH = "es_push_native_obj"
+NATIVE_RESOURCE_PUSH = "es_resource_push"
+RESOURCE_CREATE_RE = re.compile(
+    r"\bes_resource_(?:create|alloc)\s*\([^;]*?&\s*(es_resource_\w+)")
+
 NATIVE_ARG_INDEX_RE = re.compile(r"^arg\d+$")
 NATIVE_C_DEF_RE = re.compile(r"^([A-Za-z_]\w*)\(", re.M)
 
@@ -913,32 +925,142 @@ def native_parameters(record: dict[str, Any], facts: dict[str, Any],
     return params
 
 
-def native_return_type(record: dict[str, Any]) -> str | None:
+def _pushed_handle(callee: str, args: list[str],
+                   record: dict[str, Any]) -> tuple[str, str] | None:
+    """The handle class a push call leaves on the stack, if it names one.
+
+    `es_push_native_obj(ctx, &es_native_prop, p)` names its class at the call
+    site, exactly as `es_get_native_obj` does on the reading side -- refusing
+    it here while accepting it there would leave `native/prop.create()` at
+    `any` and make every handle in the surface unobtainable.
+
+    `es_resource_push` is the case that has to be resolved rather than read.
+    It pushes through `es_push_native_obj(ctx, &es_native_resource, er)`
+    (src/ecmascript/ecmascript.c:283) -- EVERY resource reaches JS as that one
+    class, and `es_resource_get` then rejects the wrong one at runtime by
+    comparing `er_class`. Declaring the pushed value by that base class would
+    make the round trip `fs.read(fs.open(...))` a type error while the runtime
+    accepts it, so the specific class comes from the `es_resource_create` in
+    the same body -- and only when the body creates exactly one.
+    """
+    if callee == NATIVE_RESOURCE_PUSH:
+        classes = {match.group(1) for match
+                   in RESOURCE_CREATE_RE.finditer(record["body"])}
+        if len(classes) != 1:
+            return None
+        symbol = next(iter(classes))
+        return _handle_type_name(symbol), symbol
+    if callee != NATIVE_HANDLE_PUSH or len(args) < 2:
+        return None
+    symbol = args[1].lstrip("&").strip()
+    if not re.fullmatch(r"es_(?:native|resource)_\w+", symbol):
+        return None
+    return _handle_type_name(symbol), symbol
+
+
+def _helper_push_type(name: str, functions: dict[str, Any],
+                      depth: int) -> tuple[str, str | None] | None:
+    """The single type a helper leaves on the stack, or None.
+
+    `push_gumbo_node()` is how `nodeChilds` fills its array; without following
+    one hop the element type is unknowable and the array degrades to `any[]`.
+    """
+    record = functions.get(name)
+    if record is None or depth <= 0:
+        return None
+    kinds = {(kind, symbol)
+             for _, kind, symbol in _push_sites(record, functions, depth - 1)}
+    if len(kinds) != 1:
+        return None
+    return next(iter(kinds))
+
+
+def _push_sites(record: dict[str, Any], functions: dict[str, Any],
+                depth: int) -> list[tuple[int, str, str | None]]:
+    """`(position, type, class)` for every value the body leaves on the stack.
+
+    `class` is the `es_native_*`/`es_resource_*` symbol behind a handle, kept
+    so a class named only by a return still gets its interface declared.
+    """
+    ctx = record["ctx"]
+    body = record["body"]
+    sites: list[tuple[int, str, str | None]] = []
+    for match in re.finditer(
+            r"\b(\w+)\s*\(\s*%s\b" % re.escape(ctx), body):
+        callee = match.group(1)
+        if callee in NATIVE_PUSH_TYPES:
+            sites.append((match.start(), NATIVE_PUSH_TYPES[callee], None))
+            continue
+        if callee in (NATIVE_HANDLE_PUSH, NATIVE_RESOURCE_PUSH):
+            args = _c_calls(body, callee, ctx)
+            handle = _pushed_handle(callee, args[0] if args else [], record)
+            if handle is not None:
+                sites.append((match.start(), handle[0], handle[1]))
+            continue
+        if callee in functions and functions[callee] is not None:
+            helper = _helper_push_type(callee, functions, depth)
+            if helper is not None:
+                sites.append((match.start(), helper[0], helper[1]))
+    return sites
+
+
+def native_return_type(record: dict[str, Any],
+                       functions: dict[str, Any]
+                       ) -> tuple[str, str | None] | None:
     """A native's return type, or None when the body does not decide one.
 
     A Duktape native returns the number of values it left on the stack: `0`
     means the call evaluates to `undefined`, `1` means the top of the stack.
     A body whose every `return` is `0` and which pushes nothing returns
-    nothing; a body with a single `return 1` and a single kind of push returns
-    that kind. Everything else -- a mix of `0` and `1`, several push kinds, a
-    value pushed by a helper this scan does not follow -- has no single answer
-    and is given none.
+    nothing; a body with a single `return 1` and one value pushed returns that.
+
+    The second shape a body may take is a container it fills:
+
+        duk_push_array(ctx);
+        RB_FOREACH(fde, &fd->fd_entries, fde_link) {
+          duk_push_string(ctx, name);
+          duk_put_prop_index(ctx, -2, idx++);
+        }
+        return 1;
+
+    Reading the nearest push there gives the ELEMENT, and `readdir` comes out
+    `string` when it returns `string[]`. So a body with several pushes is read
+    only when the first is a container and every later push is consumed by a
+    `duk_put_prop_*` before the next one arrives -- a shape that cannot be
+    mistaken for anything else. Everything past those two -- a mix of `0` and
+    `1`, disagreeing pushes, a container filled some other way -- has no
+    single answer and is given none.
     """
     ctx = re.escape(record["ctx"])
     body = record["body"]
     returns = set(re.findall(r"\breturn\s+(\d+)\s*;", body))
-    pushes = {match.group(1) for match in
-              re.finditer(r"\b(duk_push_[a-z_0-9]+)\s*\(\s*%s\b" % ctx, body)}
-    if returns == {"0"} and not pushes:
-        return "void"
-    if returns != {"1"}:
+    sites = _push_sites(record, functions, NATIVE_HELPER_DEPTH)
+    if returns == {"0"} and not sites:
+        return "void", None
+    if returns != {"1"} or not sites:
         return None
-    kinds = {NATIVE_PUSH_TYPES[push] for push in pushes
-             if push in NATIVE_PUSH_TYPES}
-    if len(pushes) != len(kinds) or len(kinds) != 1:
+    if len(sites) == 1:
+        _, kind, symbol = sites[0]
+        return None if kind in ("object", "any[]") else (kind, symbol)
+
+    if sites[0][1] != "any[]":
         return None
-    kind = next(iter(kinds))
-    return None if kind == "object" else kind
+    puts = [match.start() for match in re.finditer(
+        r"\b(?:%s)\s*\(\s*%s\b"
+        % ("|".join(sorted(NATIVE_PUT_CALLS)), ctx), body)]
+    elements: set[tuple[str, str | None]] = set()
+    for order, (position, kind, symbol) in enumerate(sites[1:], start=1):
+        following = [put for put in puts if put > position]
+        after = sites[order + 1][0] if order + 1 < len(sites) else None
+        if not following or (after is not None and following[0] > after):
+            return None
+        if kind in ("object", "any[]"):
+            return None
+        elements.add((kind, symbol))
+    if len(elements) != 1:
+        return None
+    kind, symbol = next(iter(elements))
+    return kind + "[]", symbol
 
 
 def annotate_native_signatures(records: list[dict[str, Any]]) -> None:
@@ -961,9 +1083,11 @@ def annotate_native_signatures(records: list[dict[str, Any]]) -> None:
                 params = native_parameters(record, facts, function["nargs"])
                 if params:
                     function["params"] = params
-            returns = native_return_type(record)
+            returns = native_return_type(record, functions)
             if returns is not None:
-                function["returns"] = returns
+                function["returns"] = returns[0]
+                if returns[1] is not None:
+                    function["returnsNativeClass"] = returns[1]
 
 
 def native_handle_types(
@@ -975,6 +1099,11 @@ def native_handle_types(
             for param in function.get("params", []):
                 if "nativeClass" in param:
                     seen[param["type"]] = param["nativeClass"]
+            # A class a native only ever returns still needs its interface;
+            # `native/route.create()` hands back a route handle nothing takes.
+            symbol = function.get("returnsNativeClass")
+            if symbol is not None:
+                seen[(function["returns"] or "").rstrip("[]")] = symbol
     return sorted(seen.items())
 
 

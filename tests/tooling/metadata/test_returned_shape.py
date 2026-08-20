@@ -157,7 +157,12 @@ class ReturnedShape(unittest.TestCase):
              "native" if "impl" in m else "commonjs")
             for m in typed(json.loads(artifact.read_text())))
         counted = collections.Counter(kind for _, _, kind in members)
-        self.assertEqual(dict(counted), {"commonjs": 11, "native": 72},
+        # 72 natives when the return scan read a body with one push and
+        # refused everything else; 91 once it also resolves the class behind
+        # `es_resource_push`/`es_push_native_obj` and reads a container filled
+        # through `duk_put_prop_*`. Both numbers are measurements, not targets
+        # -- if this fails, re-measure before adjusting it.
+        self.assertEqual(dict(counted), {"commonjs": 11, "native": 91},
                          members)
 
 
