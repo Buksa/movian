@@ -105,3 +105,21 @@ const viaAlias = htmlneg.parse('<a/>').root
     .getElementsByClassName('c')[0].getAttribute('href');  // EXPECT_TS2551
 
 void viaSelector; void viaAlias;
+
+// Native modules declare an arity and, until #207, did not enforce it: every
+// export was emitted `(...args: any[])`, so `@arity 1` was a comment beside a
+// signature that accepted anything. The CommonJS half of this same artifact has
+// bounded arity since the beginning, which is what made the gap visible.
+//
+// Optional parameters bound the call from above only — passing FEWER arguments
+// stays legal, matching Duktape, which pads the missing ones with `undefined`.
+// The positive fixture pins that half.
+import natfs = require('native/fs');
+import natprop = require('native/prop');
+
+const tooManyForNative = natfs.basename('a', 'b');  // EXPECT_TS2554
+const tooManyForNative2 = natfs.copyfile('a', 'b', 'c');  // EXPECT_TS2554
+// @arity 0 means zero: `native/prop.global()` takes nothing.
+const tooManyForZeroArg = natprop.global('x');  // EXPECT_TS2554
+
+void tooManyForNative; void tooManyForNative2; void tooManyForZeroArg;

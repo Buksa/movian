@@ -219,3 +219,35 @@ anchors.forEach(function (anchor) { void anchor.textContent; });
 const anchorTexts = anchors.map(function (anchor) { return anchor.textContent; });
 
 void anchorCount; void firstAnchor; void nestedAnchors; void anchorTexts;
+
+// The other half of the #207 pins in the negative fixture. Bounding native
+// arity must not reject what the runtime accepts: fewer arguments than `nargs`
+// is legal (Duktape pads with `undefined`), and a variadic native — `nargs`
+// -1, DUK_VARARGS — really does take anything.
+import natfspos = require('native/fs');
+import natio = require('native/io');
+import natsqlite = require('native/sqlite');
+
+const exactArity = natfspos.basename('/a/b');
+const fewerThanArity = natfspos.copyfile('/a/b');
+const noneAtAll = natfspos.basename();
+const variadicNative = natio.xmlrpc('a', 'b', 'c', 'd', 'e', 'f');
+const variadicQuery = natsqlite.query('SELECT 1', 1, 2, 3);
+
+void exactArity; void fewerThanArity; void noneAtAll;
+void variadicNative; void variadicQuery;
+
+// `native/fs` exports BOTH `ftruncate` and `ftrunctae`, at
+// src/ecmascript/es_fs.c:473-474, bound to the same C function. The second is
+// a typo that reached the public native surface, and it is callable at
+// runtime.
+//
+// Decision (#207): keep emitting it. The artifact describes the runtime, and
+// dropping the alias would make a call that works today an error in the type
+// checker. This line records the choice where it can be checked — if a future
+// round decides to remove it from the emitted surface, this fixture fails and
+// forces that to be a decision rather than a silent narrowing.
+const typoAlias = natfspos.ftrunctae('/a/b', 0);
+const spelledCorrectly = natfspos.ftruncate('/a/b', 0);
+
+void typoAlias; void spelledCorrectly;
