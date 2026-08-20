@@ -59,7 +59,7 @@ Request.prototype.on = function(name, fn) {
 }
 
 exports.request = function(opts, callback, https) {
-  url = typeof(opts) === 'string' ? opts : require('url').format(opts);
+  var url = typeof(opts) === 'string' ? opts : require('url').format(opts);
   return new Request(url);
 }
 
