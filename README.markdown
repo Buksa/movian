@@ -32,7 +32,7 @@ build commits that make it compile on current toolchains: GCC 14 (Debian 13,
 Fedora 40+, Ubuntu 24.10) and the Flatpak packaging fix. Nothing under `src/`
 differs between that tag and its parent, so those series apply to a plain tree.
 
-**Two branches start earlier**, because the work they carry predates the tag.
+**10 branches start earlier**, because the work they carry predates the tag.
 Each branch's own start point is listed below; use it, not the tag:
 
 ```sh
@@ -43,28 +43,30 @@ git format-patch cf2f66900..feature/rtmp
 | Branch | Commits | Starts at | What it adds |
 |---|---|---|---|
 | `feature/smb` | 12 | `clean-base-2026-08` | SMB2 client: libsmb2 backend, pooled sessions, name resolution |
-| `feature/smb-server` | 22 | `clean-base-2026-08` | Built-in SMB2 server — **includes `feature/smb`** |
+| `feature/smb-server` | 25 | `clean-base-2026-08` | Built-in SMB2 server — **includes `feature/smb`** |
 | `feature/wsd-discovery` | 14 | `clean-base-2026-08` | WS-Discovery client for Windows hosts — **includes `feature/smb`** |
-| `feature/smb-discovery` | 17 | `clean-base-2026-08` | NetBIOS host discovery with an SMB2 confirm probe — **includes `feature/smb`** |
+| `feature/smb-discovery` | 18 | `clean-base-2026-08` | NetBIOS host discovery with an SMB2 confirm probe — **includes `feature/smb`** |
+| `feature/smb-avahi` | 2 | `clean-base-2026-08` | Announces SMB servers found over mDNS/Avahi as browsable services |
 | `fix/glw-shutdown` | 1 | `clean-base-2026-08` | Removes a duplicate GLW thread spawn at shutdown |
 | `fix/nativesmb-session` | 1 | `clean-base-2026-08` | Names an NTSTATUS the native SMB session setup reported as unknown |
-| `devtools-mdev` | 7 | `clean-base-2026-08` | `mdev` harness: isolated launch, routes, screenshots, props |
+| `devtools-mdev` | 13 | `clean-base-2026-08` | `mdev` harness: isolated launch, routes, screenshots, props |
 | `devtools-lsp` | 30 | `clean-base-2026-08` | JavaScript language server for plugin authoring |
 | `devtools-analyze` | 6 | `clean-base-2026-08` | `movian-analyze` static checker for views and plugin JS |
-| `devtools-lifecycle` | 20 | `clean-base-2026-08` | GDB-backed startup/shutdown lifecycle inventory |
-| `plugin-api` | 9 | `clean-base-2026-08` | Generated TypeScript declarations for the plugin API |
-| `plugin-runtime-api` | 2 | `clean-base-2026-08` | Filesystem helpers and per-handle ACLs for plugin JS |
+| `devtools-lifecycle` | 23 | `clean-base-2026-08` | GDB-backed startup/shutdown lifecycle inventory |
+| `plugin-api` | 10 | `clean-base-2026-08` | Generated TypeScript declarations for the plugin API |
+| `plugin-runtime-api` | 3 | `clean-base-2026-08` | Filesystem helpers and per-handle ACLs for plugin JS |
 | `feature/core-http-prop` | 12 | `08a5f0601` | Core HTTP and property surface: non-creating lookups, indexed `prop_findv`, keypress semantics, raw screenshot API |
 | `feature/rtmp` | 11 | `cf2f66900` | RTMP/RTMPS over FFmpeg: fileaccess backend, smoke helpers, Linux and Flatpak wiring |
 | `feature/flatpak-steamos` | 5 | `9137bc64c` | SteamOS Flatpak packaging, Avahi discovery, Steam Deck remote testing guide |
 | `feature/glw-recorder` | 4 | `622291d52` | GLW recorder: output cleanup, Flatpak opt-out, release policy |
 | `feature/ffmpeg-backend` | 3 | `50d5955ce` | Bundled media backend moved to FFmpeg 4.4.7 with `libav` option names kept |
-| `feature/html-parser` | 2 | `639371a02` | DOM-style aliases for the bundled HTML parser |
+| `feature/html-parser` | 3 | `639371a02` | DOM-style aliases for the bundled HTML parser |
 | `feature/wsl2-glx` | 1 | `275c334a1` | GLX context creation under WSL2 |
 | `feature/steam-launch` | 1 | `f3f316fbd` | Skips the X11 fullscreen override path when launched from Steam |
 | `feature/plugin-examples` | 3 | `4f8796552` | Twelve worked apiversion-2 plugin examples, run against a live instance |
-| `feature/zip-paths` | 3 | `clean-base-2026-08` | Resolves ZIP member paths through one hardened normalizer |
-| `docs/protocol-specs` | 4 | `d1f0be1e6` | Specifications for the FTP client, FTP server and native SMB client |
+| `feature/zip-paths` | 4 | `clean-base-2026-08` | Resolves ZIP member paths through one hardened normalizer |
+| `docs/protocol-specs` | 4 | `80e6c3617` | Specifications for the FTP client, FTP server and native SMB client |
+| `docs/dev-environment` | 1 | `clean-base-2026-08` | Launching the UI over SSH, the LAN test stand, and the knowledge workflow |
 
 ### Three branches are stacked
 
@@ -75,14 +77,17 @@ client with it. If you only want the client, take `feature/smb`.
 
 Everything else in the table is independent and can be taken on its own.
 
-### One branch ships a known defect
+### Three discovery branches, one shared defect
 
-`feature/smb-discovery` finds hosts that WS-Discovery does not — a Samba or
-NAS host answers a NetBIOS name query but not a `pub:Computer` probe. Run
-alongside `feature/wsd-discovery` it also produces a second entry for any host
-both find, because `service_create_managed` never looks up the id it is given.
-That is [issue #195](https://github.com/Buksa/movian/issues/195), open, and it
-is a fix in `service.c` rather than a reason to drop either mechanism.
+`feature/smb-discovery` (NetBIOS), `feature/wsd-discovery` (WS-Discovery) and
+`feature/smb-avahi` (mDNS) each find hosts the others miss — a Samba or NAS box
+answers a NetBIOS name query but not a `pub:Computer` probe, while a host
+announcing `_smb._tcp` answers neither. None of them is redundant.
+
+Run more than one and any host found twice appears twice, because
+`service_create_managed` never looks up the id it is given. That is
+[issue #195](https://github.com/Buksa/movian/issues/195), open, and it is a fix
+in `service.c` rather than a reason to drop a mechanism.
 
 ### Taking part of a series
 
