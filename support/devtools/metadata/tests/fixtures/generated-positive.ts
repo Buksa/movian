@@ -312,3 +312,54 @@ natmeta.videoMetadataBind(nativeRoot, 'http://e.test/v.mkv',
                           { title: 'T', year: 2026, season: 1, episode: 2 });
 
 void notAProp;
+
+// #207 residue: an argument the C reads by named property is an options
+// object, and the keys it reads are the shape. Every key here is a literal in
+// es_io.c / es_prop.c, not a guess.
+
+
+natio.httpReq('http://e.test/', {
+  debug: true, noFollow: true, compression: false, verifySSL: true,
+  headRequest: false, caching: true, cacheTime: 60,
+  method: 'POST', postdata: { a: 1 }, headers: { 'X-A': 'b' },
+});
+
+// The index signature is the point, not an oversight. The native reads the
+// keys it knows and ignores the rest, so an unknown key is not an error at
+// runtime and must not become one here.
+natio.httpReq('http://e.test/', { debug: true, somethingNewer: 'ok' });
+
+// es_prop.c:834-841 reads argument 2 as a string for `redirect` and as an
+// options object for `openurl`. That is a union, not a conflict, and both
+// halves have to compile.
+natproppos.sendEvent(nativeRoot, 'redirect', 'http://e.test/');
+natproppos.sendEvent(nativeRoot, 'openurl',
+                     { url: 'x', view: 'v', how: 'h', parenturl: 'p' });
+
+// `Duktape` is an interpreter global: Duktape installs it, Movian only reaches
+// into it (ecmascript.c:502), so es_create_env never names it and the C
+// scanner cannot see it. Both forms below are what the core modules do.
+const dukBuf = new Duktape.Buffer(16);
+Duktape.fin({}, function() { });
+const finalizer = Duktape.fin({});
+// The index signature is the admission that Duktape 1.8.0 keeps its builtin
+// membership in a bit-packed blob no scanner here can read. Declaring only
+// the three anchored members and stopping would report a real builtin as an
+// error this repository invented.
+const encoded = Duktape.enc('hex', dukBuf);
+
+void dukBuf; void finalizer; void encoded;
+
+// Buffers. `duk_require_buffer_data` demands one; `duk_to_buffer` coerces, and
+// the string is the coercion that matters -- tests/reference/fs.d.ts:33-37
+// records that declaring the buffer alone rejects the file-copy round trip.
+import natfsbuf = require('native/fs');
+import natmisc = require('native/misc');
+
+const copyBuf = new Duktape.Buffer(64);
+const rfd = natfsbuf.open('/a/b', 'r');
+natfsbuf.read(rfd, copyBuf.valueOf(), 0, copyBuf.length, 0);
+const wfd = natfsbuf.open('/a/c', 'w');
+natfsbuf.write(wfd, copyBuf, 0, copyBuf.length, 0);
+natfsbuf.write(wfd, 'a text payload', 0, null, 0);
+natmisc.cachePut('stash', 'key', 'a string is coerced too', 60);

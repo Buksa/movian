@@ -162,3 +162,36 @@ const voidHasNoMembers = natprop.destroy(someProp).toString();  // EXPECT_TS2339
 
 void pathIsNotAHandle; void propIsNotADatabase; void htsmsgIsNotAProp;
 void numberIsNotAPath; void numberIsNotATimestamp; void voidHasNoMembers;
+
+// The index signature admits UNKNOWN keys; it does not weaken a known one.
+// `debug` is read with es_prop_is_true, so it is a boolean.
+import natio2 = require('native/io');
+
+const wrongOptionType = natio2.httpReq('http://e.test/', { debug: 'yes' });  // EXPECT_TS2322
+// `cacheTime` is read with es_prop_to_int.
+const wrongOptionType2 = natio2.httpReq('http://e.test/', { cacheTime: '60' });  // EXPECT_TS2322
+// The union on sendEvent's third argument is string-or-object, not anything.
+const notInTheUnion = natprop.sendEvent(someProp, 'openurl', 42);  // EXPECT_TS2345
+
+void wrongOptionType; void wrongOptionType2; void notInTheUnion;
+
+// `Duktape.fin` has two forms, not one signature with an optional argument:
+// duk_bi_duktape_object_fin branches on duk_get_top(ctx) >= 2 and the return
+// type differs between them (ext/duktape/duktape.c:26971). Setting a
+// finalizer evaluates to nothing.
+const finReturnsNothing = Duktape.fin({}, function() { }).valueOf();  // EXPECT_TS2339
+
+void finReturnsNothing;
+
+// The buffer brand is uninhabitable on purpose. Without it a plain number[]
+// satisfies the interface structurally and type-checks into a binary API that
+// does not recognise an array -- see tests/reference/movian-http.d.ts:13-27.
+import natstrbuf = require('native/string');
+
+const forgedBuffer: DuktapeBuffer = { length: 1, 0: 65,  // EXPECT_TS2741
+                                      toString: () => 'A',
+                                      valueOf: () => forgedBuffer };
+// `duk_require_buffer_data` demands a real buffer, so no string coercion here.
+const stringIsNotABuffer = natstrbuf.utf8FromBytes('not bytes', 'utf-8');  // EXPECT_TS2345
+
+void forgedBuffer; void stringIsNotABuffer;

@@ -1,0 +1,51 @@
+[
+  {
+    "name": "Duktape",
+    "why": "An interpreter global installed by Duktape itself, so es_create_env never mentions it and the C scanner cannot see it. Movian reaches into it (ecmascript.c:502) rather than creating it. res/ecmascript/modules/fs.js:18 and movian/store.js:40 use it, and until this entry both were 'Cannot find name Duktape' against the emitted declarations.",
+    "anchor": "duk_get_prop_string(ctx, -1, \"Duktape\")",
+    "source": {
+      "file": "src/ecmascript/ecmascript.c",
+      "line": 502
+    },
+    "indexSignature": {
+      "kind": "any",
+      "why": "Duktape 1.8.0 (ext/duktape/duktape.h:231) keeps its builtin membership in a bit-packed metadata blob (duk_builtins_data), which no scanner here can read. The members below are the ones this tree gives an anchor for; the rest exist and are not enumerable, so an index signature is the truthful spelling. Without it a valid Duktape.enc() would be reported as an error this repository invented."
+    },
+    "properties": [
+      {
+        "name": "Buffer",
+        "kind": "{ new (value?: any, dynamic?: boolean): DuktapeBuffer; (value?: any, dynamic?: boolean): DuktapeBuffer }",
+        "source": {
+          "file": "ext/duktape/duktape.c",
+          "line": 22232
+        },
+        "evidence": "res/ecmascript/modules/fs.js:18 calls new Duktape.Buffer(fs.fsize(fd)); 'Buffer' is DUK_STRIDX_UC_BUFFER at ext/duktape/duktape.c:973",
+        "why": "duk_bi_buffer_constructor switches on duk_get_type(ctx, 0) over number, buffer and string, so argument 0 has no single spelling and stays any. Argument 1 is read with duk_get_boolean and is definite. Callable as well as constructible: the body says so in as many words -- 'no change if called as a function'. The result is the DuktapeBuffer brand the accepted corpus already settled at tests/reference/movian-http.d.ts:13-40, so new Duktape.Buffer(n) flows into the buffer-taking natives end to end.",
+        "anchor": "duk_bi_buffer_constructor(duk_context *ctx)"
+      },
+      {
+        "name": "fin",
+        "kind": "{ (target: object): any; (target: object, finalizer: any): void }",
+        "source": {
+          "file": "ext/duktape/duktape.c",
+          "line": 26971
+        },
+        "evidence": "res/ecmascript/modules/movian/store.js:40 calls Duktape.fin(obj, function(obj) {...})",
+        "why": "duk_bi_duktape_object_fin branches on duk_get_top(ctx) >= 2: with two arguments it sets the finalizer and returns nothing, with one it reads and returns it. Two forms, not one optional parameter, because the return type differs between them. duk_require_hobject(ctx, 0) makes the first argument definite.",
+        "anchor": "duk_bi_duktape_object_fin(duk_context *ctx)"
+      },
+      {
+        "name": "modSearch",
+        "kind": "(id: string, require?: any, exports?: any, module?: any) => any",
+        "source": {
+          "file": "src/ecmascript/ecmascript.c",
+          "line": 504
+        },
+        "evidence": "duk_push_c_function(ctx, es_modsearch, 4) then duk_put_prop_string(ctx, -2, \"modSearch\")",
+        "why": "The one member Movian installs rather than Duktape. Its arity is the 4 in the push and its first argument is duk_require_string in es_modsearch. Declared because it is part of the observable global surface, not because a plugin should call it -- Duktape calls it, on require().",
+        "anchor": "duk_put_prop_string(ctx, -2, \"modSearch\")"
+      }
+    ],
+    "functions": []
+  }
+]

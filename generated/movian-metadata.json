@@ -3641,6 +3641,38 @@
         },
         {
           "functions": [],
+          "indexSignature": "any",
+          "name": "Duktape",
+          "properties": [
+            {
+              "kind": "{ new (value?: any, dynamic?: boolean): DuktapeBuffer; (value?: any, dynamic?: boolean): DuktapeBuffer }",
+              "name": "Buffer",
+              "source": {
+                "file": "ext/duktape/duktape.c",
+                "line": 22232
+              }
+            },
+            {
+              "kind": "{ (target: object): any; (target: object, finalizer: any): void }",
+              "name": "fin",
+              "source": {
+                "file": "ext/duktape/duktape.c",
+                "line": 26971
+              }
+            },
+            {
+              "kind": "(id: string, require?: any, exports?: any, module?: any) => any",
+              "name": "modSearch",
+              "source": {
+                "file": "src/ecmascript/ecmascript.c",
+                "line": 504
+              }
+            }
+          ],
+          "provider": "duktape"
+        },
+        {
+          "functions": [],
           "name": "Plugin",
           "properties": [
             {
@@ -6029,6 +6061,12 @@
                 "type": "HashHandle"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
+                "candidates": [
+                  "string"
+                ],
                 "index": 1,
                 "name": "buf"
               }
@@ -6183,10 +6221,13 @@
                 "type": "string"
               },
               {
-                "ambiguous": [
-                  "object"
-                ],
-                "index": 1
+                "index": 1,
+                "shape": {
+                  "cacheable": "boolean",
+                  "redirect": "boolean"
+                },
+                "shapeName": "RegisterOptions",
+                "shapeUnion": []
               }
             ],
             "returns": "FapHandle",
@@ -6508,11 +6549,10 @@
                 "type": "FdHandle"
               },
               {
-                "ambiguous": [
-                  "buffer"
-                ],
                 "index": 1,
-                "name": "buf"
+                "name": "buf",
+                "reader": "require",
+                "type": "DuktapeBuffer"
               },
               {
                 "index": 2,
@@ -6651,11 +6691,10 @@
                 "type": "FdHandle"
               },
               {
-                "ambiguous": [
-                  "buffer"
-                ],
                 "index": 1,
-                "name": "buf"
+                "name": "buf",
+                "reader": "coerce",
+                "type": "string | DuktapeBuffer"
               },
               {
                 "index": 2,
@@ -7022,6 +7061,13 @@
                 "type": "HtsmsgHandle"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
+                "candidates": [
+                  "number",
+                  "string"
+                ],
                 "index": 1,
                 "name": "i"
               }
@@ -7164,10 +7210,24 @@
                 "type": "string"
               },
               {
-                "ambiguous": [
-                  "object"
-                ],
-                "index": 1
+                "index": 1,
+                "shape": {
+                  "args": "any",
+                  "cacheTime": "number",
+                  "caching": "boolean",
+                  "compression": "boolean",
+                  "debug": "boolean",
+                  "headRequest": "boolean",
+                  "headers": "any",
+                  "method": "any",
+                  "noAuth": "boolean",
+                  "noFail": "boolean",
+                  "noFollow": "boolean",
+                  "postdata": "any",
+                  "verifySSL": "boolean"
+                },
+                "shapeName": "HttpReqOptions",
+                "shapeUnion": []
               },
               {
                 "index": 2
@@ -7364,6 +7424,14 @@
                 "type": "string"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
+                "candidates": [
+                  "boolean",
+                  "number",
+                  "string"
+                ],
                 "index": 3
               }
             ],
@@ -7435,10 +7503,18 @@
                 "type": "string"
               },
               {
-                "ambiguous": [
-                  "object"
-                ],
-                "index": 2
+                "index": 2,
+                "shape": {
+                  "duration": "number",
+                  "episode": "number",
+                  "filename": "string",
+                  "imdb": "string",
+                  "season": "number",
+                  "title": "string",
+                  "year": "number"
+                },
+                "shapeName": "VideoMetadataBindOptions",
+                "shapeUnion": []
               }
             ],
             "returns": "MlvHandle",
@@ -7510,11 +7586,10 @@
                 "type": "string"
               },
               {
-                "ambiguous": [
-                  "buffer"
-                ],
                 "index": 2,
-                "name": "buf"
+                "name": "buf",
+                "reader": "coerce",
+                "type": "string | DuktapeBuffer"
               },
               {
                 "index": 3,
@@ -7934,6 +8009,13 @@
                 "type": "PropHandle"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
+                "candidates": [
+                  "number",
+                  "string"
+                ],
                 "index": 1,
                 "name": "idx"
               }
@@ -8102,6 +8184,9 @@
             "nargs": 1,
             "params": [
               {
+                "ambiguous": [
+                  "conflict"
+                ],
                 "index": 0,
                 "name": "p"
               }
@@ -8201,6 +8286,9 @@
                 "type": "PropHandle"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
                 "index": 1,
                 "name": "b"
               }
@@ -8240,9 +8328,19 @@
                 "type": "string"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
+                "candidates": [
+                  "number",
+                  "string"
+                ],
                 "index": 3
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
                 "index": 4,
                 "name": "enable"
               },
@@ -8351,7 +8449,7 @@
             "params": [
               {
                 "ambiguous": [
-                  "buffer"
+                  "pointer"
                 ],
                 "index": 0,
                 "name": "p"
@@ -8408,7 +8506,16 @@
               },
               {
                 "index": 2,
-                "name": "url"
+                "shape": {
+                  "how": "string",
+                  "parenturl": "string",
+                  "url": "string",
+                  "view": "string"
+                },
+                "shapeName": "SendEventOptions",
+                "shapeUnion": [
+                  "string"
+                ]
               }
             ],
             "returns": "void",
@@ -8440,6 +8547,14 @@
                 "type": "string"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
+                "candidates": [
+                  "boolean",
+                  "number",
+                  "string"
+                ],
                 "index": 2,
                 "name": "dbl"
               }
@@ -8567,10 +8682,17 @@
                 "index": 1
               },
               {
-                "ambiguous": [
-                  "object"
-                ],
-                "index": 2
+                "index": 2,
+                "shape": {
+                  "actionAsArray": "boolean",
+                  "autoDestroy": "boolean",
+                  "debug": "boolean",
+                  "earlyChildDelete": "boolean",
+                  "ignoreVoid": "boolean",
+                  "noInitialUpdate": "boolean"
+                },
+                "shapeName": "SubscribeOptions",
+                "shapeUnion": []
               }
             ],
             "returns": "PropSubHandle",
@@ -9313,11 +9435,10 @@
             "nargs": 2,
             "params": [
               {
-                "ambiguous": [
-                  "buffer"
-                ],
                 "index": 0,
-                "name": "bytes"
+                "name": "bytes",
+                "reader": "require",
+                "type": "DuktapeBuffer"
               },
               {
                 "index": 1,
@@ -9512,6 +9633,12 @@
                 "type": "WebsocketClientHandle"
               },
               {
+                "ambiguous": [
+                  "conflict"
+                ],
+                "candidates": [
+                  "string"
+                ],
                 "index": 1,
                 "name": "buf"
               }
@@ -9836,6 +9963,6 @@
       }
     ]
   },
-  "movianRevision": "ce587fb8f75da41ca85af4179d996f5964cd3f02",
+  "movianRevision": "f90da8553666f517f91f8166dc271132e201f81e",
   "schemaVersion": 1
 }

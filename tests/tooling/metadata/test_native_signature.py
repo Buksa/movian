@@ -347,6 +347,140 @@ class RefusedNonIndex(unittest.TestCase):
                                  % (name, flag))
 
 
+class OptionsObjects(unittest.TestCase):
+    """A slot read by named property is an options object, and the keys are it.
+
+    The index signature is the load-bearing part. The keys are what the C
+    reads; nothing in the C REJECTS a key it does not read, so a declaration
+    without an index signature would turn TypeScript's excess-property check
+    into a rule the runtime does not have.
+    """
+
+    def _params(self, body: str, nargs: int) -> list[dict]:
+        record = c_function("f", ["duk_context *ctx"], body)
+        return gen.native_parameters(
+            record, gen._function_facts("f", {"f": record}, {},
+                                        gen.NATIVE_HELPER_DEPTH), nargs)
+
+    def test_each_reader_types_the_key_it_reads(self) -> None:
+        params = self._params("""
+  int dbg = es_prop_is_true(ctx, 1, "debug");
+  rstr_t *m = es_prop_to_rstr(ctx, 1, "method");
+  int age = es_prop_to_int(ctx, 1, "cacheTime", -1);
+  duk_get_prop_string(ctx, 1, "headers");
+""", 2)
+        self.assertEqual(params[1]["shape"], {
+            "cacheTime": "number", "debug": "boolean",
+            "headers": "any", "method": "string",
+        })
+
+    def test_a_string_branch_beside_it_is_a_union_not_a_conflict(self) -> None:
+        params = self._params("""
+  if(!strcmp(type, "redirect")) {
+    e = event_create_str(EVENT_REDIRECT, duk_require_string(ctx, 2));
+  } else {
+    rstr_t *url = es_prop_to_rstr(ctx, 2, "url");
+  }
+""", 3)
+        self.assertEqual(params[2]["shape"], {"url": "string"})
+        self.assertEqual(params[2]["shapeUnion"], ["string"])
+
+    def test_two_primitive_branches_beside_it_refuse(self) -> None:
+        params = self._params("""
+  rstr_t *url = es_prop_to_rstr(ctx, 1, "url");
+  const char *s = duk_to_string(ctx, 1);
+  double n = duk_to_number(ctx, 1);
+""", 2)
+        self.assertNotIn("shape", params[1])
+        self.assertNotIn("type", params[1])
+
+    def test_a_key_is_not_the_arguments_name(self) -> None:
+        """The local holds one member; naming the argument after it misleads."""
+        params = self._params("""
+  rstr_t *url = es_prop_to_rstr(ctx, 1, "url");
+""", 2)
+        self.assertNotIn("name", params[1])
+
+    def test_the_real_tree_carries_the_index_signature(self) -> None:
+        modules = {m["name"]: m for m in gen.build_native_modules()}
+        shapes = gen.native_options_shapes(modules["native/io"])
+        self.assertEqual([name for name, _, _ in shapes], ["HttpReqOptions"])
+        _, members, union = shapes[0]
+        self.assertEqual(len(members), 13, members)
+        self.assertEqual(union, [])
+        emitted = (REPO_ROOT / "generated" / "movian-api.d.ts").read_text()
+        self.assertIn(gen.NATIVE_OPTIONS_INDEX_SIGNATURE, emitted)
+
+    def test_an_unread_slot_and_a_contested_one_read_differently(self) -> None:
+        """`any` with no reason was impossible to triage; now it has one."""
+        params = self._params("""
+  const char *s = duk_to_string(ctx, 0);
+  double n = duk_to_number(ctx, 0);
+""", 2)
+        self.assertEqual(params[0].get("ambiguous"), ["conflict"])
+        self.assertNotIn("ambiguous", params[1])
+
+
+class ContestedSlotsAreNotUnions(unittest.TestCase):
+    """Evidence is recorded; the union is not guessed.
+
+    Whether a tested slot's union is CLOSED is a control-flow property this
+    scan cannot see, and the three shapes in the tree are indistinguishable to
+    it:
+
+      native/prop.getChild   tests duk_is_number, falls through to
+                             duk_require_string -> anything else throws, so
+                             `number | string` would be exact
+      native/kvstore.set     tests boolean, number, object-coercible, and its
+                             final else stores KVSTORE_SET_VOID -- undefined
+                             and null are accepted on purpose
+      native/htsmsg.get      falls through to duk_safe_to_string, which
+                             coerces anything at all
+
+    All three present the same accessor set. Emitting the union would be
+    right for one and would reject legal calls for the other two, so the
+    emitted type stays `any` and the candidates are recorded for a reader.
+    """
+
+    def test_the_candidates_are_recorded(self) -> None:
+        record = c_function("f", ["duk_context *ctx"], """
+  if(duk_is_number(ctx, 1)) {
+    idx = duk_to_int(ctx, 1);
+  } else {
+    str = duk_require_string(ctx, 1);
+  }
+""")
+        params = gen.native_parameters(
+            record, gen._function_facts("f", {"f": record}, {},
+                                        gen.NATIVE_HELPER_DEPTH), 2)
+        self.assertEqual(params[1]["candidates"], ["number", "string"])
+
+    def test_no_contested_slot_is_emitted_as_a_type(self) -> None:
+        for module in gen.build_native_modules():
+            for function in module["functions"]:
+                for param in function.get("params", []):
+                    if "candidates" not in param:
+                        continue
+                    with self.subTest("%s.%s[%d]" % (module["name"],
+                                                     function["name"],
+                                                     param["index"])):
+                        self.assertNotIn("type", param)
+                        self.assertNotIn("shape", param)
+
+    def test_the_three_shapes_still_look_alike_to_the_scan(self) -> None:
+        """A corpus assertion, so the reason above cannot rot unnoticed."""
+        modules = {m["name"]: m for m in gen.build_native_modules()}
+        cases = [("native/prop", "getChild", 1, ["number", "string"]),
+                 ("native/kvstore", "set", 3, ["boolean", "number", "string"]),
+                 ("native/htsmsg", "get", 1, ["number", "string"])]
+        for module, name, index, candidates in cases:
+            with self.subTest("%s.%s" % (module, name)):
+                function = next(f for f in modules[module]["functions"]
+                                if f["name"] == name)
+                self.assertEqual(function["params"][index].get("candidates"),
+                                 candidates)
+
+
 class ReturnTypes(unittest.TestCase):
     def test_return_zero_and_no_push_is_void(self) -> None:
         record = c_function("f", ["duk_context *ctx"], "  return 0;")
