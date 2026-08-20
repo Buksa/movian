@@ -14,13 +14,13 @@
     "properties": [
       {
         "name": "Buffer",
-        "kind": "{ new (value?: any, dynamic?: boolean): any; (value?: any, dynamic?: boolean): any }",
+        "kind": "{ new (value?: any, dynamic?: boolean): DuktapeBuffer; (value?: any, dynamic?: boolean): DuktapeBuffer }",
         "source": {
           "file": "ext/duktape/duktape.c",
           "line": 22232
         },
         "evidence": "res/ecmascript/modules/fs.js:18 calls new Duktape.Buffer(fs.fsize(fd)); 'Buffer' is DUK_STRIDX_UC_BUFFER at ext/duktape/duktape.c:973",
-        "why": "duk_bi_buffer_constructor switches on duk_get_type(ctx, 0) over number, buffer and string, so argument 0 has no single spelling and stays any. Argument 1 is read with duk_get_boolean and is definite. Callable as well as constructible: the body says so in as many words -- 'no change if called as a function'.",
+        "why": "duk_bi_buffer_constructor switches on duk_get_type(ctx, 0) over number, buffer and string, so argument 0 has no single spelling and stays any. Argument 1 is read with duk_get_boolean and is definite. Callable as well as constructible: the body says so in as many words -- 'no change if called as a function'. The result is the DuktapeBuffer brand the accepted corpus already settled at tests/reference/movian-http.d.ts:13-40, so new Duktape.Buffer(n) flows into the buffer-taking natives end to end.",
         "anchor": "duk_bi_buffer_constructor(duk_context *ctx)"
       },
       {

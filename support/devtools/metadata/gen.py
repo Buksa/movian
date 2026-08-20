@@ -595,10 +595,42 @@ NATIVE_PROBE_READERS: dict[str, int] = {
 # buffer is a first-class binary send, which this repository's own accepted
 # oracle already states at tests/reference/websocket.d.ts:42-53, and emitting
 # `buf?: string` contradicted it.
-NATIVE_ARG_OPAQUE = frozenset((
-    "duk_to_buffer", "duk_get_buffer", "duk_get_buffer_data",
-    "duk_require_buffer", "duk_require_buffer_data", "duk_require_pointer",
-))
+NATIVE_ARG_BUFFER_READERS: dict[str, str] = {
+    "duk_require_buffer": "require",
+    "duk_require_buffer_data": "require",
+    "duk_to_buffer": "coerce",
+    "duk_get_buffer": "get",
+    "duk_get_buffer_data": "get",
+}
+
+# A pointer is not a buffer. `native/prop.release` reads argument 0 with
+# duk_require_pointer and was being reported as taking a buffer -- the label
+# was wrong, which is worse than having no label, because a residue nobody
+# can trust is a residue nobody re-reads.
+NATIVE_ARG_POINTER_READERS = frozenset(("duk_require_pointer",))
+
+NATIVE_ARG_OPAQUE = (frozenset(NATIVE_ARG_BUFFER_READERS)
+                     | NATIVE_ARG_POINTER_READERS)
+
+# The one shape the accepted calibration corpus already settled, reused here
+# verbatim rather than re-derived: tests/reference/movian-http.d.ts:13-40.
+# The brand is uninhabitable on purpose. Without it the interface is purely
+# structural, an ordinary `number[]` satisfies it, and it type-checks straight
+# into `native/websocket.clientSend`'s binary branch -- where
+# duk_get_buffer_data does not recognise an array and the value silently goes
+# out as a stringified text frame instead.
+NATIVE_BUFFER_TYPE = "DuktapeBuffer"
+NATIVE_BUFFER_DECLARATION = (
+    "interface %s {" % NATIVE_BUFFER_TYPE,
+    "  readonly __duktapeBuffer__: never;",
+    "  readonly length: number;",
+    "  [index: number]: number;",
+    "  toString(): string;",
+    # res/ecmascript/modules/fs.js:19 calls buf.valueOf() before handing the
+    # value to native/fs.read, so the raw view is part of the surface.
+    "  valueOf(): %s;" % NATIVE_BUFFER_TYPE,
+    "}",
+)
 
 # `duk_is_X(ctx, n)` asks a question. A body that asks is a body that accepts
 # more than one shape at that index, so a test is never read as a type -- it
@@ -893,10 +925,24 @@ def _function_facts(name: str, functions: dict[str, dict[str, Any]],
     # An unspellable read is still a read. Recording it as its own fact lets
     # the ordinary conflict rule below poison a slot that some other branch
     # reads as a primitive, instead of letting that primitive stand alone.
-    for helper in NATIVE_ARG_OPAQUE:
+    for helper, reader in NATIVE_ARG_BUFFER_READERS.items():
+        for args in _c_calls(body, helper, ctx):
+            if len(args) < 2:
+                continue
+            # `duk_require_buffer_data` demands a buffer. `duk_to_buffer`
+            # COERCES, and a string is the coercion that matters: the accepted
+            # corpus spells out at tests/reference/fs.d.ts:33-37 that
+            # declaring the buffer alone rejects
+            # `writeFileSync(dst, readFileSync(src))`, a round trip the
+            # runtime supports. So the coercive readers keep the string.
+            spelling = (NATIVE_BUFFER_TYPE if reader == "require"
+                        else "string | " + NATIVE_BUFFER_TYPE)
+            place(args[1], {"type": spelling, "reader": reader})
+
+    for helper in NATIVE_ARG_POINTER_READERS:
         for args in _c_calls(body, helper, ctx):
             if len(args) >= 2:
-                place(args[1], {"opaque": "buffer"})
+                place(args[1], {"opaque": "pointer"})
 
     for helper, key_type in NATIVE_ARG_OBJECT_READERS.items():
         for args in _c_calls(body, helper, ctx):
@@ -4203,6 +4249,9 @@ def render_dts(artifact: dict[str, Any]) -> str:
     # plugin can build one, which is correct, and passing a string or the
     # wrong kind of handle stops type-checking, which is the point. The brand
     # member is `declare`-only and never exists at runtime.
+    lines.extend(NATIVE_BUFFER_DECLARATION)
+    lines.append("")
+
     handles = native_handle_types(modules)
     if handles:
         lines.append("// Wrapped C pointers. Obtained from a native call,"

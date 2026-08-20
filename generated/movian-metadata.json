@@ -3645,7 +3645,7 @@
           "name": "Duktape",
           "properties": [
             {
-              "kind": "{ new (value?: any, dynamic?: boolean): any; (value?: any, dynamic?: boolean): any }",
+              "kind": "{ new (value?: any, dynamic?: boolean): DuktapeBuffer; (value?: any, dynamic?: boolean): DuktapeBuffer }",
               "name": "Buffer",
               "source": {
                 "file": "ext/duktape/duktape.c",
@@ -6549,11 +6549,10 @@
                 "type": "FdHandle"
               },
               {
-                "ambiguous": [
-                  "buffer"
-                ],
                 "index": 1,
-                "name": "buf"
+                "name": "buf",
+                "reader": "require",
+                "type": "DuktapeBuffer"
               },
               {
                 "index": 2,
@@ -6692,11 +6691,10 @@
                 "type": "FdHandle"
               },
               {
-                "ambiguous": [
-                  "buffer"
-                ],
                 "index": 1,
-                "name": "buf"
+                "name": "buf",
+                "reader": "coerce",
+                "type": "string | DuktapeBuffer"
               },
               {
                 "index": 2,
@@ -7588,11 +7586,10 @@
                 "type": "string"
               },
               {
-                "ambiguous": [
-                  "buffer"
-                ],
                 "index": 2,
-                "name": "buf"
+                "name": "buf",
+                "reader": "coerce",
+                "type": "string | DuktapeBuffer"
               },
               {
                 "index": 3,
@@ -8452,7 +8449,7 @@
             "params": [
               {
                 "ambiguous": [
-                  "buffer"
+                  "pointer"
                 ],
                 "index": 0,
                 "name": "p"
@@ -9438,11 +9435,10 @@
             "nargs": 2,
             "params": [
               {
-                "ambiguous": [
-                  "buffer"
-                ],
                 "index": 0,
-                "name": "bytes"
+                "name": "bytes",
+                "reader": "require",
+                "type": "DuktapeBuffer"
               },
               {
                 "index": 1,
@@ -9967,6 +9963,6 @@
       }
     ]
   },
-  "movianRevision": "df73a9093de91b7ed157efe0652250b1f24da9aa",
+  "movianRevision": "f90da8553666f517f91f8166dc271132e201f81e",
   "schemaVersion": 1
 }

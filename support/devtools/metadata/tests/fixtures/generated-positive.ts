@@ -349,3 +349,17 @@ const finalizer = Duktape.fin({});
 const encoded = Duktape.enc('hex', dukBuf);
 
 void dukBuf; void finalizer; void encoded;
+
+// Buffers. `duk_require_buffer_data` demands one; `duk_to_buffer` coerces, and
+// the string is the coercion that matters -- tests/reference/fs.d.ts:33-37
+// records that declaring the buffer alone rejects the file-copy round trip.
+import natfsbuf = require('native/fs');
+import natmisc = require('native/misc');
+
+const copyBuf = new Duktape.Buffer(64);
+const rfd = natfsbuf.open('/a/b', 'r');
+natfsbuf.read(rfd, copyBuf.valueOf(), 0, copyBuf.length, 0);
+const wfd = natfsbuf.open('/a/c', 'w');
+natfsbuf.write(wfd, copyBuf, 0, copyBuf.length, 0);
+natfsbuf.write(wfd, 'a text payload', 0, null, 0);
+natmisc.cachePut('stash', 'key', 'a string is coerced too', 60);

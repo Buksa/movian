@@ -182,3 +182,16 @@ void wrongOptionType; void wrongOptionType2; void notInTheUnion;
 const finReturnsNothing = Duktape.fin({}, function() { }).valueOf();  // EXPECT_TS2339
 
 void finReturnsNothing;
+
+// The buffer brand is uninhabitable on purpose. Without it a plain number[]
+// satisfies the interface structurally and type-checks into a binary API that
+// does not recognise an array -- see tests/reference/movian-http.d.ts:13-27.
+import natstrbuf = require('native/string');
+
+const forgedBuffer: DuktapeBuffer = { length: 1, 0: 65,  // EXPECT_TS2741
+                                      toString: () => 'A',
+                                      valueOf: () => forgedBuffer };
+// `duk_require_buffer_data` demands a real buffer, so no string coercion here.
+const stringIsNotABuffer = natstrbuf.utf8FromBytes('not bytes', 'utf-8');  // EXPECT_TS2345
+
+void forgedBuffer; void stringIsNotABuffer;
