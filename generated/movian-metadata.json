@@ -4080,7 +4080,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/fs.js",
-              "line": 34
+              "line": 52
             }
           },
           {
@@ -4092,7 +4092,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/fs.js",
-              "line": 14
+              "line": 26
             }
           },
           {
@@ -4103,7 +4103,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/fs.js",
-              "line": 26
+              "line": 42
             }
           },
           {
@@ -4114,7 +4114,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/fs.js",
-              "line": 38
+              "line": 57
             }
           },
           {
@@ -4125,7 +4125,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/fs.js",
-              "line": 30
+              "line": 47
             }
           },
           {
@@ -4138,7 +4138,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/fs.js",
-              "line": 3
+              "line": 10
             }
           }
         ],
@@ -4161,7 +4161,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/http.js",
-              "line": 67
+              "line": 94
             }
           },
           {
@@ -4175,7 +4175,7 @@
             "returns": "Request",
             "source": {
               "file": "res/ecmascript/modules/http.js",
-              "line": 61
+              "line": 88
             }
           }
         ],
@@ -4191,7 +4191,7 @@
                 "params": [],
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
-                  "line": 38
+                  "line": 54
                 }
               },
               {
@@ -4203,7 +4203,7 @@
                 ],
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
-                  "line": 54
+                  "line": 75
                 }
               }
             ],
@@ -4214,7 +4214,7 @@
                 "name": "headers",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
-                  "line": 32
+                  "line": 46
                 }
               },
               {
@@ -4222,7 +4222,7 @@
                 "name": "onError",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
-                  "line": 34
+                  "line": 50
                 }
               },
               {
@@ -4230,7 +4230,7 @@
                 "name": "onResponse",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
-                  "line": 33
+                  "line": 48
                 }
               },
               {
@@ -4238,14 +4238,14 @@
                 "name": "url",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
-                  "line": 31
+                  "line": 45
                 }
               }
             ],
             "receiver": "Request",
             "source": {
               "file": "res/ecmascript/modules/http.js",
-              "line": 31
+              "line": 45
             }
           },
           {
@@ -4260,7 +4260,7 @@
                 ],
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
-                  "line": 22
+                  "line": 36
                 }
               },
               {
@@ -4271,7 +4271,7 @@
                 ],
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
-                  "line": 18
+                  "line": 25
                 }
               }
             ],
@@ -4298,7 +4298,7 @@
                 "name": "onData",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
-                  "line": 7
+                  "line": 12
                 }
               },
               {
@@ -4306,7 +4306,7 @@
                 "name": "onEnd",
                 "source": {
                   "file": "res/ecmascript/modules/http.js",
-                  "line": 8
+                  "line": 14
                 }
               },
               {
@@ -4341,7 +4341,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/https.js",
-              "line": 6
+              "line": 14
             }
           },
           {
@@ -4353,7 +4353,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/https.js",
-              "line": 3
+              "line": 7
             }
           }
         ],
@@ -9712,21 +9712,21 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/url.js",
-              "line": 6
+              "line": 15
             }
           },
           {
             "name": "parse",
             "source": {
               "file": "res/ecmascript/modules/url.js",
-              "line": 35
+              "line": 44
             }
           },
           {
             "name": "resolve",
             "source": {
               "file": "res/ecmascript/modules/url.js",
-              "line": 37
+              "line": 46
             }
           }
         ],
@@ -9749,7 +9749,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/websocket.js",
-              "line": 4
+              "line": 8
             }
           }
         ],
@@ -9767,7 +9767,7 @@
                 ],
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
-                  "line": 33
+                  "line": 46
                 }
               },
               {
@@ -9778,7 +9778,7 @@
                 ],
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
-                  "line": 29
+                  "line": 41
                 }
               }
             ],
@@ -9789,7 +9789,7 @@
                 "name": "_sock",
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
-                  "line": 12
+                  "line": 19
                 }
               },
               {
@@ -9797,7 +9797,7 @@
                 "name": "onclose",
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
-                  "line": 10
+                  "line": 17
                 }
               },
               {
@@ -9805,7 +9805,7 @@
                 "name": "oninput",
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
-                  "line": 9
+                  "line": 15
                 }
               },
               {
@@ -9813,14 +9813,14 @@
                 "name": "onopen",
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
-                  "line": 8
+                  "line": 13
                 }
               }
             ],
             "receiver": "exports.w3cwebsocket",
             "source": {
               "file": "res/ecmascript/modules/websocket.js",
-              "line": 8
+              "line": 13
             }
           }
         ],
@@ -9963,6 +9963,6 @@
       }
     ]
   },
-  "movianRevision": "f90da8553666f517f91f8166dc271132e201f81e",
+  "movianRevision": "3aa7df07735c6883d95ffe59478df857662fb0fc",
   "schemaVersion": 1
 }

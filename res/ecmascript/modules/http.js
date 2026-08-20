@@ -4,7 +4,13 @@ function Response(res) {
   this.statusCode = res.statuscode;
   this.encoding = 'utf8';
   this.bytes = res.buffer;
+  /**
+    * Replaced by on('data'). Declared with the handler's signature rather than
+    * left to infer `() => void` from the placeholder -- the module calls it
+    * with the decoded body one line below, which a zero-argument type rejects.
+    * @type {(data: any) => void} */
   this.onData = function() {}
+  /** @type {() => void} */
   this.onEnd = function() {}
 
   var resp = this;
@@ -15,10 +21,18 @@ function Response(res) {
   }, 0);
 }
 
+/** @param {string} enc handed to native/string.utf8FromBytes as the charset */
 Response.prototype.setEncoding = function(enc) {
   this._encoding = enc;
 }
 
+/**
+ * @param {string} event 'data' or 'end'; anything else is ignored
+ * @param {(...args: any[]) => void} fn replaces the placeholder set in the
+ *   constructor. Deliberately variadic: one `on` serves handlers of two
+ *   different arities -- 'data' takes the decoded body, 'end' takes nothing --
+ *   so no single fixed signature is assignable to both.
+ */
 Response.prototype.on = function(event, fn) {
   if(event == 'data')
     this.onData = fn;
@@ -30,7 +44,9 @@ Response.prototype.on = function(event, fn) {
 function Request(url) {
   this.url = url
   this.headers = [];
+  /** @type {(response: Response) => void} */
   this.onResponse = function() {}
+  /** @type {(err: any) => void} */
   this.onError = function() {}
 }
 
@@ -51,6 +67,11 @@ Request.prototype.end = function() {
   });
 }
 
+/**
+ * @param {string} name 'response' or 'error'; anything else is ignored
+ * @param {(...args: any[]) => void} fn replaces the placeholder set in the
+ *   constructor. Variadic for the same reason as Response.prototype.on.
+ */
 Request.prototype.on = function(name, fn) {
   if(name == 'response')
     this.onResponse = fn;
@@ -58,6 +79,12 @@ Request.prototype.on = function(name, fn) {
     this.onError = fn;
 }
 
+/**
+ * @param {string|Object} opts a URL, or an object url.format() can render
+ * @param {Function} [callback] unused here; Request.end() drives the response
+ * @param {boolean} [https] set by the https module wrapper
+ * @returns {Request}
+ */
 exports.request = function(opts, callback, https) {
   var url = typeof(opts) === 'string' ? opts : require('url').format(opts);
   return new Request(url);

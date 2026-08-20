@@ -10,16 +10,14 @@
     "signatures that contradicted a real call site here shipped green through",
     "the whole battery (movian#209) because nothing compiled these files.",
     "",
-    "`Duktape` used to be listed here as a recorded declaration gap. It is declared now (curated_interpreter_objects.json), the two diagnostics stopped firing, and the both-directions check refused to let the stale entries stay -- which is the half of this list that keeps it from decaying into a baseline."
+    "`Duktape` used to be listed here as a recorded declaration gap. It is declared now (curated_interpreter_objects.json), the two diagnostics stopped firing, and the both-directions check refused to let the stale entries stay -- which is the half of this list that keeps it from decaying into a baseline.",
+    "",
+    "`placeholder-callback` is gone too. It was never a fact about the declarations -- it was `this.onData = function() {}` inferring `() => void` from a no-op the module replaces at runtime. Declaring the placeholders with the handler signature they actually carry (movian#211) removed all four, so an accepted diagnostic turned out to be an annotation nobody had written."
   ],
   "classes": {
     "private-instance-state": {
       "code": 2339,
       "why": "The calibration corpus declares the PUBLIC surface. State a constructor assigns for its own use -- Item.root, Item.page, NodeProto._gumboNode, Service.id, the videoscrobbler handlers -- is deliberately not declared; requiring it produces false positives from legitimate private state (settled in movian#137). The module reading its own private field is that decision, observed."
-    },
-    "placeholder-callback": {
-      "code": 2554,
-      "why": "`this.onData = function() {}` is a no-op placeholder that `on()` later replaces with a handler taking an argument. tsc infers the arity of the PLACEHOLDER. Calling it with one argument is correct JavaScript and correct at runtime; the declaration is not involved."
     },
     "loose-var-redeclaration": {
       "code": 2403,
@@ -31,24 +29,6 @@
     }
   },
   "expected": [
-    {
-      "file": "res/ecmascript/modules/http.js",
-      "line": 13,
-      "code": 2554,
-      "class": "placeholder-callback"
-    },
-    {
-      "file": "res/ecmascript/modules/http.js",
-      "line": 47,
-      "code": 2554,
-      "class": "placeholder-callback"
-    },
-    {
-      "file": "res/ecmascript/modules/http.js",
-      "line": 49,
-      "code": 2554,
-      "class": "placeholder-callback"
-    },
     {
       "file": "res/ecmascript/modules/movian/html.js",
       "line": 55,
@@ -288,12 +268,6 @@
       "line": 38,
       "code": 2339,
       "class": "private-instance-state"
-    },
-    {
-      "file": "res/ecmascript/modules/websocket.js",
-      "line": 18,
-      "code": 2554,
-      "class": "placeholder-callback"
     }
   ]
 }

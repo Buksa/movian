@@ -3,6 +3,15 @@ var pe = string.paramEscape;
 
 // https://nodejs.org/docs/latest/api/url.html#url_url_format_urlobj
 
+/**
+ * The fields this function actually reads, and nothing beyond them.
+ *
+ * @param {{protocol: string, slashes?: boolean, host?: string,
+ *          hostname?: string, port?: string|number, auth?: string,
+ *          pathname: string, search?: string,
+ *          query?: Object, hash?: string}} d
+ * @returns {string}
+ */
 exports.format = function(d) {
   var proto = d.protocol;
   if(proto[proto.length - 1] == ':')
