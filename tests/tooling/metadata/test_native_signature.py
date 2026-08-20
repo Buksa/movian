@@ -165,10 +165,91 @@ class HandleClasses(unittest.TestCase):
 
     def test_two_classes_at_one_slot_poison_it(self) -> None:
         corpus = {"f": c_function("f", ["duk_context *ctx"], """
-  void *a = es_get_native_obj_nothrow(ctx, 0, &es_native_prop);
-  void *b = es_get_native_obj_nothrow(ctx, 0, &es_native_htsmsg);
+  void *a = es_get_native_obj(ctx, 0, &es_native_prop);
+  void *b = es_get_native_obj(ctx, 0, &es_native_htsmsg);
 """)}
         self.assertIsNone(facts(corpus, "f")[0])
+
+    def test_the_nonthrowing_probe_does_not_brand(self) -> None:
+        """`es_get_native_obj_nothrow` answers NULL instead of throwing.
+
+        It is the same shape as the enforcing lookup and means the opposite:
+        the argument may be anything. `native/prop.isValue` is a predicate
+        over arbitrary values and `native/prop.moveBefore` is called with
+        `null` at `res/ecmascript/modules/movian/page.js:105`; branding either
+        rejects a call the runtime is built to accept.
+        """
+        corpus = {"f": c_function("f", ["duk_context *ctx"], """
+  void *a = es_get_native_obj_nothrow(ctx, 0, &es_native_prop);
+""")}
+        record = corpus["f"]
+        derived = gen.native_parameters(
+            record, gen._function_facts("f", corpus, {},
+                                        gen.NATIVE_HELPER_DEPTH), 1)
+        self.assertNotIn("type", derived[0])
+
+    def test_the_real_tree_keeps_both_probe_callers_open(self) -> None:
+        modules = {m["name"]: m for m in gen.build_native_modules()}
+        by_name = {f["name"]: f
+                   for f in modules["native/prop"]["functions"]}
+        self.assertNotIn("type", by_name["isValue"]["params"][0])
+        self.assertNotIn("type", by_name["moveBefore"]["params"][1])
+
+
+class UnspellableReadsPoison(unittest.TestCase):
+    """A read this scan cannot spell is evidence, not silence.
+
+    Ignoring one let a primitive reader in a single branch speak for a whole
+    slot, which is how three separate wrong signatures got emitted at once.
+    """
+
+    def test_a_buffer_read_poisons_a_string_read(self) -> None:
+        """es_websocket.c's clientSend: binary first, string as the fallback.
+
+        This repository's own accepted oracle already says so at
+        tests/reference/websocket.d.ts:42-53, so emitting `string` here
+        contradicted a committed calibration input.
+        """
+        corpus = {"f": c_function("f", ["duk_context *ctx"], """
+  buf = duk_get_buffer_data(ctx, 1, &bufsize);
+  if(buf == NULL)
+    buf = duk_to_string(ctx, 1);
+""")}
+        self.assertIsNone(facts(corpus, "f")[1])
+
+    def test_a_named_property_read_poisons_a_string_read(self) -> None:
+        """es_prop.c's sendEvent: `openurl` reads slot 2 as an options object."""
+        corpus = {"f": c_function("f", ["duk_context *ctx"], """
+  if(!strcmp(type, "openurl")) {
+    duk_get_prop_string(ctx, 2, "url");
+  } else {
+    const char *s = duk_to_string(ctx, 2);
+  }
+""")}
+        self.assertIsNone(facts(corpus, "f")[2])
+
+    def test_an_options_object_does_not_take_a_members_name(self) -> None:
+        """es_metadata.c reads seven keys off slot 2; the first is `filename`."""
+        record = c_function("f", ["duk_context *ctx"], """
+  rstr_t *filename = es_prop_to_rstr(ctx, 2, "filename");
+  int year = es_prop_to_int(ctx, 2, "year", -1);
+""")
+        derived = gen.native_parameters(
+            record, gen._function_facts("f", {"f": record}, {},
+                                        gen.NATIVE_HELPER_DEPTH), 3)
+        self.assertNotIn("name", derived[2])
+        self.assertNotIn("type", derived[2])
+
+    def test_the_real_tree_no_longer_narrows_the_three(self) -> None:
+        modules = {m["name"]: m for m in gen.build_native_modules()}
+        cases = [("native/websocket", "clientSend", 1),
+                 ("native/prop", "sendEvent", 2),
+                 ("native/metadata", "videoMetadataBind", 2)]
+        for module, name, index in cases:
+            with self.subTest("%s.%s" % (module, name)):
+                function = next(f for f in modules[module]["functions"]
+                                if f["name"] == name)
+                self.assertNotIn("type", function["params"][index])
 
 
 class HelperForwarding(unittest.TestCase):

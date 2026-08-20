@@ -133,12 +133,14 @@ void tooManyForNative; void tooManyForNative2; void tooManyForZeroArg;
 // handle belongs.
 import natsqlite = require('native/sqlite');
 import natstring = require('native/string');
+import nathtsmsg = require('native/htsmsg');
 
-// No native returns a typed handle: handles are pushed by es_push_native_obj,
-// which the return derivation deliberately refuses to read. These stand in for
-// values a plugin would hold from an earlier call.
-declare const someProp: PropHandle;
-declare const someHtsmsg: HtsmsgHandle;
+// Both sides of the boundary are derived, so a handle is obtained the way a
+// plugin obtains one -- from the native that pushes it. `native/prop.create`
+// pushes through es_push_native_obj(&es_native_prop) and
+// `native/htsmsg.createFromXML` through es_push_native_obj(&es_native_htsmsg).
+const someProp = natprop.create('root');
+const someHtsmsg = nathtsmsg.createFromXML('<a/>');
 
 // es_file_ftruncate reads slot 0 with es_fd_get() -> es_resource_get(ctx, idx,
 // &es_resource_fd). A path is not a file handle, and passing one throws at

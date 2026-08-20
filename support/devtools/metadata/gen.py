@@ -573,12 +573,26 @@ NATIVE_ARG_READERS: dict[str, tuple[str, str]] = {
 # deserves an opaque type instead of `any`.
 NATIVE_HANDLE_READERS: dict[str, int] = {
     "es_get_native_obj": 2,
-    "es_get_native_obj_nothrow": 2,
     "es_resource_get": 2,
 }
 
-# Readers that prove an argument is read but whose type has no honest
-# JavaScript spelling. They contribute a NAME and nothing else.
+# `es_get_native_obj_nothrow` looks identical to `es_get_native_obj` and means
+# the opposite: it accepts anything and answers NULL instead of throwing
+# (src/ecmascript/es_native_obj.c). `native/prop.isValue` is a predicate over
+# arbitrary values and `native/prop.moveBefore` takes null as its second
+# argument -- `res/ecmascript/modules/movian/page.js:105` calls it that way.
+# Branding either would reject a call the runtime is built to accept.
+NATIVE_PROBE_READERS: dict[str, int] = {
+    "es_get_native_obj_nothrow": 2,
+}
+
+# Reads whose result has no honest JavaScript spelling here. They are recorded
+# as FACTS rather than ignored, because ignoring them let a primitive reader in
+# one branch speak for the whole slot. `native/websocket.clientSend` tries
+# `duk_get_buffer_data(ctx, 1)` first and falls back to `duk_to_string` -- so a
+# buffer is a first-class binary send, which this repository's own accepted
+# oracle already states at tests/reference/websocket.d.ts:42-53, and emitting
+# `buf?: string` contradicted it.
 NATIVE_ARG_OPAQUE = frozenset((
     "duk_to_buffer", "duk_get_buffer", "duk_get_buffer_data",
     "duk_require_buffer", "duk_require_buffer_data", "duk_require_pointer",
@@ -587,6 +601,18 @@ NATIVE_ARG_OPAQUE = frozenset((
 # `duk_is_X(ctx, n)` asks a question. A body that asks is a body that accepts
 # more than one shape at that index, so a test is never read as a type -- it
 # is the opposite evidence, and it suppresses whatever a reader claims.
+# `duk_get_prop_string(ctx, n, "key")` and the `es_prop_*` family read a NAMED
+# PROPERTY off argument n. That proves n is an object, and it is the evidence
+# that was missing when `native/prop.sendEvent` came out `string`: the
+# `openurl` branch reads slot 2 as an options object (es_prop.c:834-841,
+# used that way by res/ecmascript/modules/movian/itemhook.js:23-25) while a
+# different branch reads it as a string, and only the string was visible.
+NATIVE_ARG_OBJECT_READERS = frozenset((
+    "duk_get_prop_string", "duk_get_prop_index", "duk_has_prop_string",
+    "es_prop_is_true", "es_prop_to_rstr", "es_prop_to_int",
+    "es_prop_to_double",
+))
+
 NATIVE_ARG_TESTS = frozenset((
     "duk_is_string", "duk_is_number", "duk_is_boolean", "duk_is_null",
     "duk_is_undefined", "duk_is_null_or_undefined", "duk_is_object",
@@ -846,6 +872,24 @@ def _function_facts(name: str, functions: dict[str, dict[str, Any]],
             if len(args) >= 2:
                 place(args[1], fact)
 
+    # An unspellable read is still a read. Recording it as its own fact lets
+    # the ordinary conflict rule below poison a slot that some other branch
+    # reads as a primitive, instead of letting that primitive stand alone.
+    for helper in NATIVE_ARG_OPAQUE:
+        for args in _c_calls(body, helper, ctx):
+            if len(args) >= 2:
+                place(args[1], {"opaque": "buffer"})
+
+    for helper in NATIVE_ARG_OBJECT_READERS:
+        for args in _c_calls(body, helper, ctx):
+            if len(args) >= 2:
+                place(args[1], {"opaque": "object"})
+
+    for helper in NATIVE_PROBE_READERS:
+        for args in _c_calls(body, helper, ctx):
+            if len(args) >= 2:
+                place(args[1], {"opaque": "probe"})
+
     for helper, class_position in NATIVE_HANDLE_READERS.items():
         for args in _c_calls(body, helper, ctx):
             if len(args) <= class_position:
@@ -910,12 +954,22 @@ def native_parameters(record: dict[str, Any], facts: dict[str, Any],
     for index in range(nargs):
         param: dict[str, Any] = {"index": index}
         name = names.get(index)
+        fact_here = facts["indices"].get(index)
+        if fact_here is not None and fact_here.get("opaque") == "object":
+            # The slot is an options object and the local holds ONE key off it.
+            # `es_metadata.c:66-98` reads seven properties from index 2 and the
+            # first assignment is `filename`, which advertised
+            # `videoMetadataBind(root, urlstr, filename)` -- a name that names
+            # a member, not the argument.
+            name = None
         if name is not None and name not in used:
             param["name"] = name
             used.add(name)
         fact = facts["indices"].get(index)
         if fact is not None and index not in facts["tested"]:
-            if "handle" in fact:
+            if "opaque" in fact:
+                param["ambiguous"] = [fact["opaque"]]
+            elif "handle" in fact:
                 param["type"] = fact["handle"]
                 param["nativeClass"] = fact["nativeClass"]
             else:

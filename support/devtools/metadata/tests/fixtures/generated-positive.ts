@@ -263,10 +263,9 @@ import natsqlitepos = require('native/sqlite');
 import natproppos = require('native/prop');
 import natstringpos = require('native/string');
 
-// A handle comes out of a native that pushes it through es_push_native_obj.
-// The return derivation refuses to read those, so they stay `any` -- and `any`
-// flows into a handle parameter, which is what keeps every existing call
-// working while the wrong-class calls in the negative fixture fail.
+// A handle comes out of the native that pushes it, and the return derivation
+// now names the class, so the round trip is checked on both sides rather than
+// resting on `any`.
 const nativeDb = natsqlitepos.create('mydb');
 const nativeRows: number = natsqlitepos.changes(nativeDb);
 
@@ -282,3 +281,34 @@ const seconds: number = natstringpos.parseTime('2026-08-20T00:00:00Z');
 const someUrl: string = natstringpos.resolveURL('http://e.test/');
 
 void nativeRows; void upper; void nameLength; void seconds; void someUrl;
+
+// Review of #209 found three signatures that narrowed a legal call. All three
+// were the same mistake: a read the derivation cannot spell was ignored
+// instead of recorded, so a primitive reader in one branch spoke for the whole
+// slot. These lines are the calls that used to fail.
+import natws = require('native/websocket');
+import natmeta = require('native/metadata');
+
+// es_websocket.c tries duk_get_buffer_data(ctx, 1) first and falls back to
+// duk_to_string: a buffer is a first-class binary send, which
+// tests/reference/websocket.d.ts:42-53 already states.
+const someSocket = natws.clientCreate('ws://e.test/', 'proto');
+declare const binaryFrame: Uint8Array;
+natws.clientSend(someSocket, binaryFrame);
+natws.clientSend(someSocket, 'a text frame');
+
+// es_prop.c:834-841 reads argument 2 as an options object for `openurl`, and
+// res/ecmascript/modules/movian/itemhook.js:23-25 calls it that way.
+natproppos.sendEvent(nativeRoot, 'openurl', { url: 'x', view: 'y' });
+natproppos.sendEvent(nativeRoot, 'redirect', 'http://e.test/');
+
+// es_get_native_obj_nothrow accepts anything and answers NULL. isValue is a
+// predicate over arbitrary values; moveBefore takes null, as page.js:105 does.
+const notAProp: boolean = natproppos.isValue('anything at all');
+natproppos.moveBefore(nativeRoot, null);
+
+// es_metadata.c reads seven keys off argument 2.
+natmeta.videoMetadataBind(nativeRoot, 'http://e.test/v.mkv',
+                          { title: 'T', year: 2026, season: 1, episode: 2 });
+
+void notAProp;
