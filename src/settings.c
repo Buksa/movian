@@ -367,6 +367,8 @@ setting_release(setting_t *s)
 void
 setting_destroy(setting_t *s)
 {
+  if(s == NULL)
+    return;
   if(s->s_on_group_list)
     LIST_REMOVE(s, s_group_link);
   s->s_callback = NULL;
