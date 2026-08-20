@@ -247,7 +247,38 @@ void variadicNative; void variadicQuery;
 // checker. This line records the choice where it can be checked — if a future
 // round decides to remove it from the emitted surface, this fixture fails and
 // forces that to be a decision rather than a silent narrowing.
-const typoAlias = natfspos.ftrunctae('/a/b', 0);
-const spelledCorrectly = natfspos.ftruncate('/a/b', 0);
+//
+// The first argument is a file handle from `native/fs.open`, not a path:
+// es_file_ftruncate reads slot 0 with es_fd_get(). #208 wrote a path string
+// here, which type-checked while every native parameter was `any` and would
+// have thrown at runtime. The signature derivation caught it.
+const truncFd = natfspos.open('/a/b', 'w', 420);
+natfspos.ftrunctae(truncFd, 0);
+natfspos.ftruncate(truncFd, 0);
 
-void typoAlias; void spelledCorrectly;
+// #207, second half: the inverse of the negative fixture's handle and
+// primitive pins. Everything the C body actually permits must still compile,
+// or the derivation has narrowed the surface rather than described it.
+import natsqlitepos = require('native/sqlite');
+import natproppos = require('native/prop');
+import natstringpos = require('native/string');
+
+// A handle comes out of a native that pushes it through es_push_native_obj.
+// The return derivation refuses to read those, so they stay `any` -- and `any`
+// flows into a handle parameter, which is what keeps every existing call
+// working while the wrong-class calls in the negative fixture fail.
+const nativeDb = natsqlitepos.create('mydb');
+const nativeRows: number = natsqlitepos.changes(nativeDb);
+
+const nativeRoot = natproppos.create('root');
+natproppos.destroy(nativeRoot);
+
+// Derived return types are real: a string result has string members.
+const upper: string = natfspos.basename('/a/b.txt').toUpperCase();
+const nameLength: number = natproppos.getName(nativeRoot).length;
+const seconds: number = natstringpos.parseTime('2026-08-20T00:00:00Z');
+
+// Fewer arguments than nargs stays legal -- Duktape pads with `undefined`.
+const someUrl: string = natstringpos.resolveURL('http://e.test/');
+
+void nativeRows; void upper; void nameLength; void seconds; void someUrl;

@@ -123,3 +123,40 @@ const tooManyForNative2 = natfs.copyfile('a', 'b', 'c');  // EXPECT_TS2554
 const tooManyForZeroArg = natprop.global('x');  // EXPECT_TS2554
 
 void tooManyForNative; void tooManyForNative2; void tooManyForZeroArg;
+
+// #207, second half: `nargs` was never all the C had to say. The table's
+// second field names the C function, and that body shows which Duktape reader
+// it applies to each argument index. An argument read through
+// es_get_native_obj() or es_resource_get() is a wrapped C pointer whose class
+// is written at the call site, so it gets an opaque handle type rather than
+// `any` -- which is what stops a prop handle being passed where a database
+// handle belongs.
+import natsqlite = require('native/sqlite');
+import natstring = require('native/string');
+
+// No native returns a typed handle: handles are pushed by es_push_native_obj,
+// which the return derivation deliberately refuses to read. These stand in for
+// values a plugin would hold from an earlier call.
+declare const someProp: PropHandle;
+declare const someHtsmsg: HtsmsgHandle;
+
+// es_file_ftruncate reads slot 0 with es_fd_get() -> es_resource_get(ctx, idx,
+// &es_resource_fd). A path is not a file handle, and passing one throws at
+// runtime -- this line type-checked until the derivation landed.
+const pathIsNotAHandle = natfs.ftruncate('/a/b', 0);  // EXPECT_TS2345
+
+// Handle classes are distinct types, not one shared opaque blob.
+const propIsNotADatabase = natsqlite.changes(someProp);  // EXPECT_TS2345
+const htsmsgIsNotAProp = natprop.destroy(someHtsmsg);  // EXPECT_TS2345
+
+// A primitive read out of the C body is enforced like any other parameter.
+const numberIsNotAPath = natfs.readdir(42);  // EXPECT_TS2345
+const numberIsNotATimestamp = natstring.parseTime(42);  // EXPECT_TS2345
+
+// A native whose every `return` is 0 leaves nothing on the stack, so the call
+// evaluates to `undefined`. Emitting `void` is what makes using it as a value
+// an error instead of silently `any`.
+const voidHasNoMembers = natprop.destroy(someProp).toString();  // EXPECT_TS2339
+
+void pathIsNotAHandle; void propIsNotADatabase; void htsmsgIsNotAProp;
+void numberIsNotAPath; void numberIsNotATimestamp; void voidHasNoMembers;
