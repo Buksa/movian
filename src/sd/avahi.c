@@ -107,6 +107,10 @@ resolve_callback(AvahiServiceResolver *r,
       sd_add_service_htsp(si, name, a, port);
       break;
 
+    case SERVICE_SMB:
+      sd_add_service_smb(si, name, a, port);
+      break;
+
     case SERVICE_WEBDAV:
       apath = avahi_string_list_find(txt, "path");
       if(apath == NULL ||
@@ -403,6 +407,7 @@ avahi_thread(void *aux)
 
   service_type_add("_webdav._tcp", SERVICE_WEBDAV, c);
   service_type_add("_htsp._tcp", SERVICE_HTSP, c);
+  service_type_add("_smb._tcp", SERVICE_SMB, c);
 
 #if ENABLE_AIRPLAY
   name = strdup(APPNAMEUSER);
