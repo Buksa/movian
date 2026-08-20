@@ -61,6 +61,7 @@ git format-patch cf2f66900..feature/rtmp
 | `feature/glw-recorder` | 4 | `622291d52` | GLW recorder: output cleanup, Flatpak opt-out, release policy |
 | `feature/ffmpeg-backend` | 3 | `50d5955ce` | Bundled media backend moved to FFmpeg 4.4.7 with `libav` option names kept |
 | `feature/html-parser` | 3 | `639371a02` | DOM-style aliases for the bundled HTML parser |
+| `feature/tvdb-v4` | 1 | `clean-base-2026-08` | Series search through TVDB's v4 index, replacing the retired `GetSeries.php` — **taken from M7** |
 | `feature/wsl2-glx` | 1 | `275c334a1` | GLX context creation under WSL2 |
 | `feature/steam-launch` | 1 | `f3f316fbd` | Skips the X11 fullscreen override path when launched from Steam |
 | `feature/plugin-examples` | 3 | `4f8796552` | Twelve worked apiversion-2 plugin examples, run against a live instance |
