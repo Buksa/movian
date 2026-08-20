@@ -131,7 +131,7 @@ Item.prototype.onEvent = function(type, callback) {
         if(type != "action")
           return;
         if(val in this.eventhandlers) {
-          for(x in this.eventhandlers[val]) {
+          for(var x in this.eventhandlers[val]) {
             this.eventhandlers[val][x](val);
           }
         }
@@ -362,7 +362,7 @@ Page.prototype.onEvent = function(type, callback) {
         if(type != "action")
           return;
         if(val in this.eventhandlers) {
-          for(x in this.eventhandlers[val]) {
+          for(var x in this.eventhandlers[val]) {
             this.eventhandlers[val][x](val);
           }
         }

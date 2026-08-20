@@ -11,7 +11,7 @@ exports.format = function(d) {
   var slashes = d.slashes ||
     ['http', 'https', 'ftp', 'file'].indexOf(proto) != -1;
 
-  var host = d.host || (d.hostname + (d.port ? (':' + port) : ''));
+  var host = d.host || (d.hostname + (d.port ? (':' + d.port) : ''));
 
   var url = proto + (slashes ? '://' : ':') + (d.auth ? d.auth + '@' : '') +
     host + (d.pathname[0] == '/' ? d.pathname : '/' + d.pathname)
@@ -20,7 +20,7 @@ exports.format = function(d) {
     url += d.search[0] == '?' ? d.search : '?' + d.search;
   } else if(d.query) {
     var pfx = '?';
-    for(k in d.query) {
+    for(var k in d.query) {
       url += pfx + pe(k) + '=' + pe(d.query[k]);
       pfx = '&';
     }

@@ -2,8 +2,8 @@
 """Behavior tests for `gen.py`'s return-type inference.
 
 Why a unit test and not a fixture. The declaration fixtures observe the emitted
-artifact, and this rule's whole point is that the artifact does NOT change: all
-eleven members that carry a return type already end their body with an
+artifact, and this rule's whole point is that the artifact does NOT change:
+every CommonJS member that carries a return type already ends its body with an
 unconditional `return`, so tightening the rule costs nothing and shows nothing.
 The only place the change is visible is at the rule itself.
 
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import collections
 import unittest
 from pathlib import Path
 
@@ -125,6 +126,16 @@ class ReturnedShape(unittest.TestCase):
         `res/ecmascript/modules/**` or to the rule drops one of these, that is a
         real loss of checking and it should be a decision, not a diff nobody
         reads.
+
+        The two populations are counted apart because they are derived by
+        different rules over different corpora, and a single total would let a
+        loss on one side hide behind a gain on the other. `impl` is what tells
+        them apart: only a native ES_MODULE export names the C function
+        implementing it.
+
+        Native return types were all 0 until movian#207 read them out of the C
+        bodies; the 11 in this assertion used to be the whole population, which
+        is why it was written as a bare total.
         """
         artifact = REPO_ROOT / "generated" / "movian-metadata.json"
         if not artifact.is_file():
@@ -142,9 +153,17 @@ class ReturnedShape(unittest.TestCase):
                     yield from typed(value)
 
         members = sorted(
-            (m["name"], m.get("source", {}).get("file", "?"))
+            (m["name"], m.get("source", {}).get("file", "?"),
+             "native" if "impl" in m else "commonjs")
             for m in typed(json.loads(artifact.read_text())))
-        self.assertEqual(len(members), 11, members)
+        counted = collections.Counter(kind for _, _, kind in members)
+        # 72 natives when the return scan read a body with one push and
+        # refused everything else; 91 once it also resolves the class behind
+        # `es_resource_push`/`es_push_native_obj` and reads a container filled
+        # through `duk_put_prop_*`. Both numbers are measurements, not targets
+        # -- if this fails, re-measure before adjusting it.
+        self.assertEqual(dict(counted), {"commonjs": 11, "native": 91},
+                         members)
 
 
 if __name__ == "__main__":

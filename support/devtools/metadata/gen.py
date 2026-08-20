@@ -520,6 +520,647 @@ def build_widgets() -> list[dict[str, Any]]:
 # js.modules -- native ES_MODULE tables and static CommonJS exports
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Native signatures -- what the C body says about its own arguments
+# ---------------------------------------------------------------------------
+#
+# `duk_function_list_entry` carries `{name, func, nargs}`, which is why every
+# native was emitted `(...args: any[]) => any` and, after movian#208, still
+# `(arg0?: any) => any`. But `func` names a C function in this same tree, and
+# that body says a great deal more: which Duktape reader it applies to each
+# argument index, what it calls the result, and what it pushes back.
+#
+# Three reader families appear, and the difference between them is the whole
+# reason `reader` is recorded rather than flattened away:
+#
+#   duk_require_X(ctx, n)   argument n must already be an X; anything else
+#                           throws before the body runs. Enforcement.
+#   duk_to_X(ctx, n)        argument n is coerced to X. The runtime accepts
+#                           anything -- duk_to_string turns 42 into "42" and
+#                           does not complain. Intent, not enforcement.
+#   duk_get_X(ctx, n)       argument n is read when it is an X and silently
+#                           replaced by a default when it is not. Also intent.
+#
+# The declared type follows the intent in all three cases, because a type
+# library exists to say what a function is for. `reader` keeps the difference
+# in the metadata, so the choice stays visible and revisable without anyone
+# re-reading the C.
+NATIVE_ARG_READERS: dict[str, tuple[str, str]] = {
+    "duk_require_string": ("string", "require"),
+    "duk_require_number": ("number", "require"),
+    "duk_require_int": ("number", "require"),
+    "duk_require_uint": ("number", "require"),
+    "duk_require_boolean": ("boolean", "require"),
+    "duk_to_string": ("string", "coerce"),
+    "duk_safe_to_string": ("string", "coerce"),
+    "duk_to_lstring": ("string", "coerce"),
+    "duk_to_number": ("number", "coerce"),
+    "duk_to_int": ("number", "coerce"),
+    "duk_to_int32": ("number", "coerce"),
+    "duk_to_uint": ("number", "coerce"),
+    "duk_to_boolean": ("boolean", "coerce"),
+    "duk_get_string": ("string", "get"),
+    "duk_get_number": ("number", "get"),
+    "duk_get_int": ("number", "get"),
+    "duk_get_uint": ("number", "get"),
+    "duk_get_boolean": ("boolean", "get"),
+}
+
+# `es_get_native_obj(ctx, n, &es_native_prop)` says argument n is a wrapped C
+# pointer of a named class. That class is written at the call site, so the
+# type comes out of the call rather than out of any curated table -- and a
+# wrapped pointer has no JavaScript shape at all, which is exactly why it
+# deserves an opaque type instead of `any`.
+NATIVE_HANDLE_READERS: dict[str, int] = {
+    "es_get_native_obj": 2,
+    "es_resource_get": 2,
+}
+
+# `es_get_native_obj_nothrow` looks identical to `es_get_native_obj` and means
+# the opposite: it accepts anything and answers NULL instead of throwing
+# (src/ecmascript/es_native_obj.c). `native/prop.isValue` is a predicate over
+# arbitrary values and `native/prop.moveBefore` takes null as its second
+# argument -- `res/ecmascript/modules/movian/page.js:105` calls it that way.
+# Branding either would reject a call the runtime is built to accept.
+NATIVE_PROBE_READERS: dict[str, int] = {
+    "es_get_native_obj_nothrow": 2,
+}
+
+# Reads whose result has no honest JavaScript spelling here. They are recorded
+# as FACTS rather than ignored, because ignoring them let a primitive reader in
+# one branch speak for the whole slot. `native/websocket.clientSend` tries
+# `duk_get_buffer_data(ctx, 1)` first and falls back to `duk_to_string` -- so a
+# buffer is a first-class binary send, which this repository's own accepted
+# oracle already states at tests/reference/websocket.d.ts:42-53, and emitting
+# `buf?: string` contradicted it.
+NATIVE_ARG_OPAQUE = frozenset((
+    "duk_to_buffer", "duk_get_buffer", "duk_get_buffer_data",
+    "duk_require_buffer", "duk_require_buffer_data", "duk_require_pointer",
+))
+
+# `duk_is_X(ctx, n)` asks a question. A body that asks is a body that accepts
+# more than one shape at that index, so a test is never read as a type -- it
+# is the opposite evidence, and it suppresses whatever a reader claims.
+# `duk_get_prop_string(ctx, n, "key")` and the `es_prop_*` family read a NAMED
+# PROPERTY off argument n. That proves n is an object, and it is the evidence
+# that was missing when `native/prop.sendEvent` came out `string`: the
+# `openurl` branch reads slot 2 as an options object (es_prop.c:834-841,
+# used that way by res/ecmascript/modules/movian/itemhook.js:23-25) while a
+# different branch reads it as a string, and only the string was visible.
+NATIVE_ARG_OBJECT_READERS = frozenset((
+    "duk_get_prop_string", "duk_get_prop_index", "duk_has_prop_string",
+    "es_prop_is_true", "es_prop_to_rstr", "es_prop_to_int",
+    "es_prop_to_double",
+))
+
+NATIVE_ARG_TESTS = frozenset((
+    "duk_is_string", "duk_is_number", "duk_is_boolean", "duk_is_null",
+    "duk_is_undefined", "duk_is_null_or_undefined", "duk_is_object",
+    "duk_is_object_coercible", "duk_is_buffer", "duk_is_function",
+    "duk_is_array", "duk_is_pointer", "duk_is_nan",
+))
+
+# What `duk_push_X` leaves on the stack, for the return type. `duk_push_object`
+# describes a shape this scan cannot name, so it resolves to nothing rather
+# than to an invented interface -- the rule the CommonJS path already follows
+# for anonymous returns.
+NATIVE_PUSH_TYPES: dict[str, str] = {
+    "duk_push_string": "string",
+    "duk_push_lstring": "string",
+    "duk_push_sprintf": "string",
+    "duk_push_number": "number",
+    "duk_push_int": "number",
+    "duk_push_uint": "number",
+    "duk_push_nan": "number",
+    "duk_push_boolean": "boolean",
+    "duk_push_true": "boolean",
+    "duk_push_false": "boolean",
+    "duk_push_null": "null",
+    "duk_push_undefined": "undefined",
+    "duk_push_array": "any[]",
+    "duk_push_object": "object",
+}
+
+# TypeScript keywords, plus the padding spelling itself. A C local called
+# `new` or `arg0` is a fine C local and an unusable parameter name.
+NATIVE_NAME_REJECT = frozenset((
+    "any", "arguments", "as", "async", "await", "boolean", "break", "case",
+    "catch", "class", "const", "continue", "debugger", "declare", "default",
+    "delete", "do", "else", "enum", "eval", "export", "extends", "false",
+    "finally", "for", "function", "if", "implements", "import", "in",
+    "instanceof", "interface", "let", "namespace", "new", "null", "number",
+    "package", "private", "protected", "public", "return", "static", "string",
+    "super", "switch", "symbol", "this", "throw", "true", "try", "type",
+    "typeof", "undefined", "unknown", "var", "void", "while", "with", "yield",
+))
+
+# Calls that consume the value on the stack top. They are what separates an
+# element being stored into a container from the container itself.
+NATIVE_PUT_CALLS = frozenset((
+    "duk_put_prop_index", "duk_put_prop_string", "duk_put_prop",
+    "duk_put_prop_lstring",
+))
+
+NATIVE_HANDLE_PUSH = "es_push_native_obj"
+NATIVE_RESOURCE_PUSH = "es_resource_push"
+RESOURCE_CREATE_RE = re.compile(
+    r"\bes_resource_(?:create|alloc)\s*\([^;]*?&\s*(es_resource_\w+)")
+
+NATIVE_ARG_INDEX_RE = re.compile(r"^arg\d+$")
+NATIVE_C_DEF_RE = re.compile(r"^([A-Za-z_]\w*)\(", re.M)
+
+# How deep a fact is chased through helpers. es_file_basename -> get_filename
+# is one hop; es_prop_setValue -> es_stprop_get -> es_get_native_obj is two.
+# Nothing in src/ecmascript needs a third, and a cap keeps a cycle from
+# turning into a hang.
+NATIVE_HELPER_DEPTH = 3
+
+
+def _brace_match(text: str, open_index: int, path: Path) -> int:
+    """Index of the `}` (or `)`) closing the bracket at `open_index`."""
+    closing = {"{": "}", "(": ")"}[text[open_index]]
+    opening = text[open_index]
+    depth = 0
+    index = open_index
+    while index < len(text):
+        char = text[index]
+        if char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    raise GenError("unbalanced %s from offset %d in %s"
+                   % (opening, open_index, rel(path)))
+
+
+def _split_c_params(text: str) -> list[str]:
+    """Top-level comma split of a C parameter list."""
+    parts: list[str] = []
+    depth = 0
+    current = ""
+    for char in text:
+        if char in "([":
+            depth += 1
+        elif char in ")]":
+            depth -= 1
+        if char == "," and depth == 0:
+            parts.append(current.strip())
+            current = ""
+        else:
+            current += char
+    if current.strip():
+        parts.append(current.strip())
+    return parts
+
+
+def _c_param_name(declaration: str) -> str | None:
+    match = re.search(r"([A-Za-z_]\w*)\s*$", declaration.strip())
+    return match.group(1) if match else None
+
+
+def scan_c_functions() -> dict[str, dict[str, Any]]:
+    """Every C function definition in src/ecmascript, by name.
+
+    The Duktape context parameter is not always spelled `ctx` -- es_string.c
+    calls it `duk`, and two natives were invisible to an earlier draft of this
+    scan for exactly that reason. Whatever it is called is captured and used,
+    because every argument reader in the body is written against that name.
+    """
+    functions: dict[str, dict[str, Any]] = {}
+    for path in sorted(ECMASCRIPT_DIR.glob("es_*.c")):
+        text = path.read_text(encoding="utf-8")
+        for match in NATIVE_C_DEF_RE.finditer(text):
+            open_paren = match.end() - 1
+            try:
+                close_paren = _brace_match(text, open_paren, path)
+            except GenError:
+                continue
+            tail = text[close_paren + 1:close_paren + 40]
+            if not re.match(r"\s*\{", tail):
+                continue
+            params = _split_c_params(text[open_paren + 1:close_paren])
+            if not params or not re.match(r"^\s*duk_context\s*\*", params[0]):
+                continue
+            name = match.group(1)
+            open_brace = text.index("{", close_paren)
+            close_brace = _brace_match(text, open_brace, path)
+            if name in functions:
+                # Two static helpers in different translation units may share
+                # a name; C allows it and nothing here can tell which one a
+                # call meant. Poisoning the entry makes both contribute no
+                # facts, which is a narrower failure than guessing.
+                functions[name] = None
+                continue
+            functions[name] = {
+                "file": rel(path),
+                "line": text[:match.start()].count("\n") + 1,
+                "ctx": _c_param_name(params[0]),
+                "params": [_c_param_name(part) for part in params],
+                "body": text[open_brace:close_brace + 1],
+            }
+    return functions
+
+
+def _handle_type_name(symbol: str) -> str:
+    """`es_native_gumbo_node` -> `GumboNodeHandle`."""
+    stem = re.sub(r"^es_(native|resource)_", "", symbol)
+    return "".join(part.title() for part in stem.split("_")) + "Handle"
+
+
+def _fact_reader(helper: str) -> dict[str, Any] | None:
+    known = NATIVE_ARG_READERS.get(helper)
+    if known is None:
+        return None
+    return {"type": known[0], "reader": known[1]}
+
+
+def _merge_fact(target: dict[Any, Any], key: Any,
+                fact: dict[str, Any] | None) -> None:
+    """Record a fact about `key`, or mark it contested.
+
+    Two helpers disagreeing about one argument index is not a tie to break --
+    it means the body accepts more than one shape there, and `any` is the only
+    truthful answer. `None` is the poison value that says so, and once poured
+    it is never washed out.
+    """
+    if key in target and target[key] != fact:
+        target[key] = None
+        return
+    if key not in target:
+        target[key] = fact
+
+
+def _c_calls(body: str, callee: str, ctx: str) -> list[list[str]]:
+    """Argument lists of every `callee(ctx, ...)` call in `body`."""
+    calls: list[list[str]] = []
+    pattern = re.compile(r"\b%s\s*\(" % re.escape(callee))
+    for match in pattern.finditer(body):
+        open_paren = match.end() - 1
+        depth = 0
+        index = open_paren
+        while index < len(body):
+            if body[index] == "(":
+                depth += 1
+            elif body[index] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            index += 1
+        else:
+            continue
+        args = _split_c_params(body[open_paren + 1:index])
+        if args and args[0].strip() == ctx:
+            calls.append([arg.strip() for arg in args])
+    return calls
+
+
+def _function_facts(name: str, functions: dict[str, dict[str, Any]],
+                    memo: dict[tuple[str, int], dict[str, Any]],
+                    depth: int) -> dict[str, Any]:
+    """What a C function does with each Duktape argument index.
+
+    Returns `{"indices": {n: fact}, "params": {p: fact}, "tested": {n}}`:
+    `indices` is what the body says about the caller's argument n, `params` is
+    what it says about the argument index handed to its own parameter p --
+    which is how `get_filename(ctx, 0, ec, 0)` transfers the string it reads
+    onto argument 0 of whoever called it.
+
+    A helper's `int` parameter is only treated as an argument index when the
+    body is seen applying a reader to *that name*. es_string.c's
+    `es_escape(ctx, how)` and es_timer.c's `set_timer(duk, repeat)` both take
+    an int that is a mode flag, and both are called with a small literal that
+    would read as an index. Requiring proof is what tells the two apart.
+    """
+    # Depth belongs in the key. Without it the first caller to reach a helper
+    # fixes the answer every later caller gets, and the artifact starts
+    # depending on the order modules happen to be scanned in.
+    key = (name, depth)
+    if key in memo:
+        return memo[key]
+    empty: dict[str, Any] = {"indices": {}, "params": {}, "tested": set()}
+    record = functions.get(name)
+    if record is None or depth <= 0:
+        return empty
+    memo[key] = empty           # cycle guard: a recursive helper sees nothing
+    ctx = record["ctx"]
+    body = record["body"]
+    positions = {param: index for index, param in enumerate(record["params"])
+                 if param}
+
+    indices: dict[int, dict[str, Any] | None] = {}
+    params: dict[int, dict[str, Any] | None] = {}
+    tested: set[int] = set()
+
+    def place(slot: str, fact: dict[str, Any] | None) -> None:
+        if re.fullmatch(r"-?\d+", slot):
+            value = int(slot)
+            if value >= 0:
+                _merge_fact(indices, value, fact)
+        elif slot in positions:
+            _merge_fact(params, positions[slot], fact)
+
+    for helper in NATIVE_ARG_TESTS:
+        for args in _c_calls(body, helper, ctx):
+            if len(args) >= 2 and re.fullmatch(r"\d+", args[1]):
+                tested.add(int(args[1]))
+
+    for helper in NATIVE_ARG_READERS:
+        fact = _fact_reader(helper)
+        for args in _c_calls(body, helper, ctx):
+            if len(args) >= 2:
+                place(args[1], fact)
+
+    # An unspellable read is still a read. Recording it as its own fact lets
+    # the ordinary conflict rule below poison a slot that some other branch
+    # reads as a primitive, instead of letting that primitive stand alone.
+    for helper in NATIVE_ARG_OPAQUE:
+        for args in _c_calls(body, helper, ctx):
+            if len(args) >= 2:
+                place(args[1], {"opaque": "buffer"})
+
+    for helper in NATIVE_ARG_OBJECT_READERS:
+        for args in _c_calls(body, helper, ctx):
+            if len(args) >= 2:
+                place(args[1], {"opaque": "object"})
+
+    for helper in NATIVE_PROBE_READERS:
+        for args in _c_calls(body, helper, ctx):
+            if len(args) >= 2:
+                place(args[1], {"opaque": "probe"})
+
+    for helper, class_position in NATIVE_HANDLE_READERS.items():
+        for args in _c_calls(body, helper, ctx):
+            if len(args) <= class_position:
+                continue
+            symbol = args[class_position].lstrip("&").strip()
+            if not re.fullmatch(r"[A-Za-z_]\w*", symbol):
+                continue
+            place(args[1], {"handle": _handle_type_name(symbol),
+                            "nativeClass": symbol})
+
+    known = set(NATIVE_ARG_READERS) | set(NATIVE_HANDLE_READERS)
+    for callee, callee_record in functions.items():
+        if callee == name or callee in known or callee_record is None:
+            continue
+        calls = _c_calls(body, callee, ctx)
+        if not calls:
+            continue
+        inner = _function_facts(callee, functions, memo, depth - 1)
+        for args in calls:
+            for index, fact in inner["indices"].items():
+                _merge_fact(indices, index, fact)
+            for position, fact in inner["params"].items():
+                if position < len(args):
+                    place(args[position], fact)
+            for index in inner["tested"]:
+                tested.add(index)
+
+    facts = {"indices": indices, "params": params, "tested": tested}
+    memo[key] = facts
+    return facts
+
+
+def native_parameters(record: dict[str, Any], facts: dict[str, Any],
+                      nargs: int) -> list[dict[str, Any]]:
+    """Per-index facts about one native's arguments, read from its C body."""
+    ctx = re.escape(record["ctx"])
+    body = record["body"]
+    # `const char *path = duk_to_string(ctx, 0);` names argument 0 far better
+    # than `arg0` does. A parenthesised cast may sit between `=` and the call.
+    # The assignment target has to be a bare local. `ehr->ehr_headreq = ...`
+    # ends in an identifier too, and taking it produced the parameter name
+    # `ehr_headreq` for what is an options object -- a struct field of the
+    # callee's own bookkeeping, presented to a plugin author as the name of
+    # their argument. The lookbehind is what keeps a member out.
+    assign_re = re.compile(
+        r"(?<![.\w>])([A-Za-z_]\w*)\s*=\s*(?:\([^();]*\)\s*)?"
+        r"([A-Za-z_]\w*)\s*\(\s*%s\s*,\s*(\d+)" % ctx)
+    names: dict[int, str] = {}
+    for match in assign_re.finditer(body):
+        variable, helper, index = (match.group(1), match.group(2),
+                                   int(match.group(3)))
+        if not (helper in NATIVE_ARG_READERS or helper in NATIVE_ARG_OPAQUE
+                or helper.startswith("es_") or helper.startswith("get_")):
+            continue
+        if variable in NATIVE_NAME_REJECT or NATIVE_ARG_INDEX_RE.match(
+                variable):
+            continue
+        names.setdefault(index, variable)
+
+    params: list[dict[str, Any]] = []
+    used: set[str] = set()
+    for index in range(nargs):
+        param: dict[str, Any] = {"index": index}
+        name = names.get(index)
+        fact_here = facts["indices"].get(index)
+        if fact_here is not None and fact_here.get("opaque") == "object":
+            # The slot is an options object and the local holds ONE key off it.
+            # `es_metadata.c:66-98` reads seven properties from index 2 and the
+            # first assignment is `filename`, which advertised
+            # `videoMetadataBind(root, urlstr, filename)` -- a name that names
+            # a member, not the argument.
+            name = None
+        if name is not None and name not in used:
+            param["name"] = name
+            used.add(name)
+        fact = facts["indices"].get(index)
+        if fact is not None and index not in facts["tested"]:
+            if "opaque" in fact:
+                param["ambiguous"] = [fact["opaque"]]
+            elif "handle" in fact:
+                param["type"] = fact["handle"]
+                param["nativeClass"] = fact["nativeClass"]
+            else:
+                param["type"] = fact["type"]
+                param["reader"] = fact["reader"]
+        params.append(param)
+    return params
+
+
+def _pushed_handle(callee: str, args: list[str],
+                   record: dict[str, Any]) -> tuple[str, str] | None:
+    """The handle class a push call leaves on the stack, if it names one.
+
+    `es_push_native_obj(ctx, &es_native_prop, p)` names its class at the call
+    site, exactly as `es_get_native_obj` does on the reading side -- refusing
+    it here while accepting it there would leave `native/prop.create()` at
+    `any` and make every handle in the surface unobtainable.
+
+    `es_resource_push` is the case that has to be resolved rather than read.
+    It pushes through `es_push_native_obj(ctx, &es_native_resource, er)`
+    (src/ecmascript/ecmascript.c:283) -- EVERY resource reaches JS as that one
+    class, and `es_resource_get` then rejects the wrong one at runtime by
+    comparing `er_class`. Declaring the pushed value by that base class would
+    make the round trip `fs.read(fs.open(...))` a type error while the runtime
+    accepts it, so the specific class comes from the `es_resource_create` in
+    the same body -- and only when the body creates exactly one.
+    """
+    if callee == NATIVE_RESOURCE_PUSH:
+        classes = {match.group(1) for match
+                   in RESOURCE_CREATE_RE.finditer(record["body"])}
+        if len(classes) != 1:
+            return None
+        symbol = next(iter(classes))
+        return _handle_type_name(symbol), symbol
+    if callee != NATIVE_HANDLE_PUSH or len(args) < 2:
+        return None
+    symbol = args[1].lstrip("&").strip()
+    if not re.fullmatch(r"es_(?:native|resource)_\w+", symbol):
+        return None
+    return _handle_type_name(symbol), symbol
+
+
+def _helper_push_type(name: str, functions: dict[str, Any],
+                      depth: int) -> tuple[str, str | None] | None:
+    """The single type a helper leaves on the stack, or None.
+
+    `push_gumbo_node()` is how `nodeChilds` fills its array; without following
+    one hop the element type is unknowable and the array degrades to `any[]`.
+    """
+    record = functions.get(name)
+    if record is None or depth <= 0:
+        return None
+    kinds = {(kind, symbol)
+             for _, kind, symbol in _push_sites(record, functions, depth - 1)}
+    if len(kinds) != 1:
+        return None
+    return next(iter(kinds))
+
+
+def _push_sites(record: dict[str, Any], functions: dict[str, Any],
+                depth: int) -> list[tuple[int, str, str | None]]:
+    """`(position, type, class)` for every value the body leaves on the stack.
+
+    `class` is the `es_native_*`/`es_resource_*` symbol behind a handle, kept
+    so a class named only by a return still gets its interface declared.
+    """
+    ctx = record["ctx"]
+    body = record["body"]
+    sites: list[tuple[int, str, str | None]] = []
+    for match in re.finditer(
+            r"\b(\w+)\s*\(\s*%s\b" % re.escape(ctx), body):
+        callee = match.group(1)
+        if callee in NATIVE_PUSH_TYPES:
+            sites.append((match.start(), NATIVE_PUSH_TYPES[callee], None))
+            continue
+        if callee in (NATIVE_HANDLE_PUSH, NATIVE_RESOURCE_PUSH):
+            args = _c_calls(body, callee, ctx)
+            handle = _pushed_handle(callee, args[0] if args else [], record)
+            if handle is not None:
+                sites.append((match.start(), handle[0], handle[1]))
+            continue
+        if callee in functions and functions[callee] is not None:
+            helper = _helper_push_type(callee, functions, depth)
+            if helper is not None:
+                sites.append((match.start(), helper[0], helper[1]))
+    return sites
+
+
+def native_return_type(record: dict[str, Any],
+                       functions: dict[str, Any]
+                       ) -> tuple[str, str | None] | None:
+    """A native's return type, or None when the body does not decide one.
+
+    A Duktape native returns the number of values it left on the stack: `0`
+    means the call evaluates to `undefined`, `1` means the top of the stack.
+    A body whose every `return` is `0` and which pushes nothing returns
+    nothing; a body with a single `return 1` and one value pushed returns that.
+
+    The second shape a body may take is a container it fills:
+
+        duk_push_array(ctx);
+        RB_FOREACH(fde, &fd->fd_entries, fde_link) {
+          duk_push_string(ctx, name);
+          duk_put_prop_index(ctx, -2, idx++);
+        }
+        return 1;
+
+    Reading the nearest push there gives the ELEMENT, and `readdir` comes out
+    `string` when it returns `string[]`. So a body with several pushes is read
+    only when the first is a container and every later push is consumed by a
+    `duk_put_prop_*` before the next one arrives -- a shape that cannot be
+    mistaken for anything else. Everything past those two -- a mix of `0` and
+    `1`, disagreeing pushes, a container filled some other way -- has no
+    single answer and is given none.
+    """
+    ctx = re.escape(record["ctx"])
+    body = record["body"]
+    returns = set(re.findall(r"\breturn\s+(\d+)\s*;", body))
+    sites = _push_sites(record, functions, NATIVE_HELPER_DEPTH)
+    if returns == {"0"} and not sites:
+        return "void", None
+    if returns != {"1"} or not sites:
+        return None
+    if len(sites) == 1:
+        _, kind, symbol = sites[0]
+        return None if kind in ("object", "any[]") else (kind, symbol)
+
+    if sites[0][1] != "any[]":
+        return None
+    puts = [match.start() for match in re.finditer(
+        r"\b(?:%s)\s*\(\s*%s\b"
+        % ("|".join(sorted(NATIVE_PUT_CALLS)), ctx), body)]
+    elements: set[tuple[str, str | None]] = set()
+    for order, (position, kind, symbol) in enumerate(sites[1:], start=1):
+        following = [put for put in puts if put > position]
+        after = sites[order + 1][0] if order + 1 < len(sites) else None
+        if not following or (after is not None and following[0] > after):
+            return None
+        if kind in ("object", "any[]"):
+            return None
+        elements.add((kind, symbol))
+    if len(elements) != 1:
+        return None
+    kind, symbol = next(iter(elements))
+    return kind + "[]", symbol
+
+
+def annotate_native_signatures(records: list[dict[str, Any]]) -> None:
+    """Attach the implementation anchor, parameters and return to each native."""
+    functions = scan_c_functions()
+    memo: dict[tuple[str, int], dict[str, Any]] = {}
+    for module in records:
+        for function in module["functions"]:
+            record = functions.get(function["impl"])
+            if record is None:
+                raise GenError(
+                    "no C body for %s.%s -> %s(), declared at %s:%d"
+                    % (module["name"], function["name"], function["impl"],
+                       function["source"]["file"], function["source"]["line"]))
+            function["implSource"] = {"file": record["file"],
+                                      "line": record["line"]}
+            if not function["variadic"] and function["nargs"] > 0:
+                facts = _function_facts(function["impl"], functions, memo,
+                                        NATIVE_HELPER_DEPTH)
+                params = native_parameters(record, facts, function["nargs"])
+                if params:
+                    function["params"] = params
+            returns = native_return_type(record, functions)
+            if returns is not None:
+                function["returns"] = returns[0]
+                if returns[1] is not None:
+                    function["returnsNativeClass"] = returns[1]
+
+
+def native_handle_types(
+        records: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """Every wrapped-pointer class named by a parameter, in emission order."""
+    seen: dict[str, str] = {}
+    for module in records:
+        for function in module.get("functions", []):
+            for param in function.get("params", []):
+                if "nativeClass" in param:
+                    seen[param["type"]] = param["nativeClass"]
+            # A class a native only ever returns still needs its interface;
+            # `native/route.create()` hands back a route handle nothing takes.
+            symbol = function.get("returnsNativeClass")
+            if symbol is not None:
+                seen[(function["returns"] or "").rstrip("[]")] = symbol
+    return sorted(seen.items())
+
+
 def build_native_modules() -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     seen_modules: set[str] = set()
@@ -565,6 +1206,7 @@ def build_native_modules() -> list[dict[str, Any]]:
                                path, entry_line)) from error
                 function = {
                     "name": function_name,
+                    "impl": fields[1],
                     "nargs": nargs,
                     "variadic": nargs == -1,
                     "source": {"file": rel(path), "line": entry_line},
@@ -586,6 +1228,7 @@ def build_native_modules() -> list[dict[str, Any]]:
                 module["condition"] = condition
             records.append(module)
     records.sort(key=lambda r: r["name"])
+    annotate_native_signatures(records)
     return records
 
 
@@ -3381,6 +4024,22 @@ def render_dts(artifact: dict[str, Any]) -> str:
     lines.append("// collision reports as TS2451 against this file.")
     lines.append("")
 
+    # A native that reads an argument through es_get_native_obj() or
+    # es_resource_get() is being handed a wrapped C pointer, not a value: the
+    # class it names at the call site is the type. These have no JavaScript
+    # shape to describe, so each is declared as a distinct empty brand -- no
+    # plugin can build one, which is correct, and passing a string or the
+    # wrong kind of handle stops type-checking, which is the point. The brand
+    # member is `declare`-only and never exists at runtime.
+    handles = native_handle_types(modules)
+    if handles:
+        lines.append("// Wrapped C pointers. Obtained from a native call,"
+                     " never constructed.")
+        for type_name, native_class in handles:
+            lines.append("interface %s { readonly __nativeClass: '%s'; }"
+                         % (type_name, native_class))
+        lines.append("")
+
     # The C tables give a name and an nargs, never parameter names, so every
     # global function is emitted variadic. `@arity` above it is the nargs as
     # documentation -- tsc cannot enforce it through a rest parameter, and
@@ -3440,7 +4099,13 @@ def render_dts(artifact: dict[str, Any]) -> str:
         nargs = func["nargs"]
         if nargs <= 0:
             return ""
-        return ", ".join("arg%d?: any" % index for index in range(nargs))
+        params = func.get("params") or []
+        rendered = []
+        for index in range(nargs):
+            param = params[index] if index < len(params) else {}
+            rendered.append("%s?: %s" % (param.get("name", "arg%d" % index),
+                                         param.get("type", "any")))
+        return ", ".join(rendered)
 
     def params_signature(
             params: list[str] | None, export: dict[str, Any] | None = None,
@@ -3555,7 +4220,9 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 nargs = func["nargs"]
                 lines.append("  /** @arity %s */" % nargs)
                 lines.append(
-                    "  function %s(%s): any;" % (fname, native_signature(func)))
+                    "  function %s(%s): %s;"
+                    % (fname, native_signature(func),
+                       func.get("returns", "any")))
         elif kind == "commonjs":
             exports = mod.get("exports", [])
             shapes = mod.get("shapes", [])

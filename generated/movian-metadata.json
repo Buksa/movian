@@ -5968,8 +5968,23 @@
       {
         "functions": [
           {
+            "impl": "es_hashCreate",
+            "implSource": {
+              "file": "src/ecmascript/es_crypto.c",
+              "line": 66
+            },
             "name": "hashCreate",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "algo",
+                "reader": "require",
+                "type": "string"
+              }
+            ],
+            "returns": "HashHandle",
+            "returnsNativeClass": "es_native_hash",
             "source": {
               "file": "src/ecmascript/es_crypto.c",
               "line": 156
@@ -5977,8 +5992,21 @@
             "variadic": false
           },
           {
+            "impl": "es_hashFinalize",
+            "implSource": {
+              "file": "src/ecmascript/es_crypto.c",
+              "line": 132
+            },
             "name": "hashFinalize",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "eh",
+                "nativeClass": "es_native_hash",
+                "type": "HashHandle"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_crypto.c",
               "line": 158
@@ -5986,8 +6014,26 @@
             "variadic": false
           },
           {
+            "impl": "es_hashUpdate",
+            "implSource": {
+              "file": "src/ecmascript/es_crypto.c",
+              "line": 104
+            },
             "name": "hashUpdate",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "eh",
+                "nativeClass": "es_native_hash",
+                "type": "HashHandle"
+              },
+              {
+                "index": 1,
+                "name": "buf"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_crypto.c",
               "line": 157
@@ -6005,8 +6051,22 @@
       {
         "functions": [
           {
+            "impl": "es_faprovider_closeRespond",
+            "implSource": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 451
+            },
             "name": "closeRespond",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "fah",
+                "nativeClass": "es_native_fah",
+                "type": "FahHandle"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_faprovider.c",
               "line": 745
@@ -6014,8 +6074,30 @@
             "variadic": false
           },
           {
+            "impl": "es_faprovider_openRespond",
+            "implSource": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 287
+            },
             "name": "openRespond",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "fah",
+                "nativeClass": "es_native_fah",
+                "type": "FahHandle"
+              },
+              {
+                "index": 1,
+                "reader": "get",
+                "type": "boolean"
+              },
+              {
+                "index": 2
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_faprovider.c",
               "line": 743
@@ -6023,8 +6105,28 @@
             "variadic": false
           },
           {
+            "impl": "es_faprovider_readRespond",
+            "implSource": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 385
+            },
             "name": "readRespond",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "fah",
+                "nativeClass": "es_native_fah",
+                "type": "FahHandle"
+              },
+              {
+                "index": 1,
+                "name": "size",
+                "reader": "get",
+                "type": "number"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_faprovider.c",
               "line": 744
@@ -6032,8 +6134,33 @@
             "variadic": false
           },
           {
+            "impl": "es_faprovider_redirectRespond",
+            "implSource": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 685
+            },
             "name": "redirectRespond",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "fah",
+                "nativeClass": "es_native_fah",
+                "type": "FahHandle"
+              },
+              {
+                "index": 1,
+                "reader": "get",
+                "type": "boolean"
+              },
+              {
+                "index": 2,
+                "name": "newurl",
+                "reader": "get",
+                "type": "string"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_faprovider.c",
               "line": 747
@@ -6041,8 +6168,29 @@
             "variadic": false
           },
           {
+            "impl": "es_faprovider_register",
+            "implSource": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 705
+            },
             "name": "register",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "name",
+                "reader": "require",
+                "type": "string"
+              },
+              {
+                "ambiguous": [
+                  "object"
+                ],
+                "index": 1
+              }
+            ],
+            "returns": "FapHandle",
+            "returnsNativeClass": "es_resource_fap",
             "source": {
               "file": "src/ecmascript/es_faprovider.c",
               "line": 742
@@ -6050,8 +6198,27 @@
             "variadic": false
           },
           {
+            "impl": "es_faprovider_setSize",
+            "implSource": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 464
+            },
             "name": "setSize",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "fah",
+                "nativeClass": "es_native_fah",
+                "type": "FahHandle"
+              },
+              {
+                "index": 1,
+                "reader": "get",
+                "type": "number"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_faprovider.c",
               "line": 748
@@ -6059,8 +6226,42 @@
             "variadic": false
           },
           {
+            "impl": "es_faprovider_statRespond",
+            "implSource": {
+              "file": "src/ecmascript/es_faprovider.c",
+              "line": 589
+            },
             "name": "statRespond",
             "nargs": 5,
+            "params": [
+              {
+                "index": 0,
+                "name": "fah",
+                "nativeClass": "es_native_fah",
+                "type": "FahHandle"
+              },
+              {
+                "index": 1,
+                "reader": "get",
+                "type": "boolean"
+              },
+              {
+                "index": 2,
+                "reader": "get",
+                "type": "number"
+              },
+              {
+                "index": 3,
+                "reader": "get",
+                "type": "string"
+              },
+              {
+                "index": 4,
+                "reader": "get",
+                "type": "number"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_faprovider.c",
               "line": 746
@@ -6078,8 +6279,21 @@
       {
         "functions": [
           {
+            "impl": "es_file_basename",
+            "implSource": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 427
+            },
             "name": "basename",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "string",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 481
@@ -6087,8 +6301,28 @@
             "variadic": false
           },
           {
+            "impl": "es_file_copy",
+            "implSource": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 442
+            },
             "name": "copyfile",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "from",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "to",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "string",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 482
@@ -6096,8 +6330,21 @@
             "variadic": false
           },
           {
+            "impl": "es_file_dirname",
+            "implSource": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 409
+            },
             "name": "dirname",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "string",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 480
@@ -6105,8 +6352,22 @@
             "variadic": false
           },
           {
+            "impl": "es_file_fsize",
+            "implSource": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 266
+            },
             "name": "fsize",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "efd",
+                "nativeClass": "es_resource_fd",
+                "type": "FdHandle"
+              }
+            ],
+            "returns": "number",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 472
@@ -6114,8 +6375,27 @@
             "variadic": false
           },
           {
+            "impl": "es_file_ftruncate",
+            "implSource": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 282
+            },
             "name": "ftruncate",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "efd",
+                "nativeClass": "es_resource_fd",
+                "type": "FdHandle"
+              },
+              {
+                "index": 1,
+                "reader": "coerce",
+                "type": "number"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 473
@@ -6123,8 +6403,27 @@
             "variadic": false
           },
           {
+            "impl": "es_file_ftruncate",
+            "implSource": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 282
+            },
             "name": "ftrunctae",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "efd",
+                "nativeClass": "es_resource_fd",
+                "type": "FdHandle"
+              },
+              {
+                "index": 1,
+                "reader": "coerce",
+                "type": "number"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 474
@@ -6132,8 +6431,25 @@
             "variadic": false
           },
           {
+            "impl": "es_file_mkdirs",
+            "implSource": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 320
+            },
             "name": "mkdirs",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "filename",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 476
@@ -6141,8 +6457,35 @@
             "variadic": false
           },
           {
+            "impl": "es_file_open",
+            "implSource": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 125
+            },
             "name": "open",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "filename",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "flagsstr",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 2,
+                "name": "mode",
+                "reader": "coerce",
+                "type": "number"
+              }
+            ],
+            "returns": "FdHandle",
+            "returnsNativeClass": "es_resource_fd",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 469
@@ -6150,8 +6493,44 @@
             "variadic": false
           },
           {
+            "impl": "es_file_read",
+            "implSource": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 192
+            },
             "name": "read",
             "nargs": 5,
+            "params": [
+              {
+                "index": 0,
+                "name": "efd",
+                "nativeClass": "es_resource_fd",
+                "type": "FdHandle"
+              },
+              {
+                "ambiguous": [
+                  "buffer"
+                ],
+                "index": 1,
+                "name": "buf"
+              },
+              {
+                "index": 2,
+                "name": "offset",
+                "reader": "coerce",
+                "type": "number"
+              },
+              {
+                "index": 3,
+                "name": "len",
+                "reader": "coerce",
+                "type": "number"
+              },
+              {
+                "index": 4
+              }
+            ],
+            "returns": "number",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 470
@@ -6159,8 +6538,22 @@
             "variadic": false
           },
           {
+            "impl": "es_file_readdir",
+            "implSource": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 377
+            },
             "name": "readdir",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "path",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "string[]",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 479
@@ -6168,8 +6561,28 @@
             "variadic": false
           },
           {
+            "impl": "es_file_rename",
+            "implSource": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 300
+            },
             "name": "rename",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "oldname",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "newname",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 475
@@ -6177,8 +6590,22 @@
             "variadic": false
           },
           {
+            "impl": "es_file_rmdir",
+            "implSource": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 358
+            },
             "name": "rmdir",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "path",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 478
@@ -6186,8 +6613,22 @@
             "variadic": false
           },
           {
+            "impl": "es_file_unlink",
+            "implSource": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 339
+            },
             "name": "unlink",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "filename",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 477
@@ -6195,8 +6636,42 @@
             "variadic": false
           },
           {
+            "impl": "es_file_write",
+            "implSource": {
+              "file": "src/ecmascript/es_fs.c",
+              "line": 227
+            },
             "name": "write",
             "nargs": 5,
+            "params": [
+              {
+                "index": 0,
+                "name": "efd",
+                "nativeClass": "es_resource_fd",
+                "type": "FdHandle"
+              },
+              {
+                "ambiguous": [
+                  "buffer"
+                ],
+                "index": 1,
+                "name": "buf"
+              },
+              {
+                "index": 2,
+                "name": "offset",
+                "reader": "coerce",
+                "type": "number"
+              },
+              {
+                "index": 3,
+                "name": "len"
+              },
+              {
+                "index": 4
+              }
+            ],
+            "returns": "number",
             "source": {
               "file": "src/ecmascript/es_fs.c",
               "line": 471
@@ -6214,8 +6689,27 @@
       {
         "functions": [
           {
+            "impl": "es_gumbo_find_by_class",
+            "implSource": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 392
+            },
             "name": "findByClassName",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "egn",
+                "nativeClass": "es_native_gumbo_node",
+                "type": "GumboNodeHandle"
+              },
+              {
+                "index": 1,
+                "name": "cls",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_gumbo.c",
               "line": 415
@@ -6223,8 +6717,27 @@
             "variadic": false
           },
           {
+            "impl": "es_gumbo_find_by_id",
+            "implSource": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 299
+            },
             "name": "findById",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "egn",
+                "nativeClass": "es_native_gumbo_node",
+                "type": "GumboNodeHandle"
+              },
+              {
+                "index": 1,
+                "name": "id",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_gumbo.c",
               "line": 413
@@ -6232,8 +6745,27 @@
             "variadic": false
           },
           {
+            "impl": "es_gumbo_find_by_tag_name",
+            "implSource": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 336
+            },
             "name": "findByTagName",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "egn",
+                "nativeClass": "es_native_gumbo_node",
+                "type": "GumboNodeHandle"
+              },
+              {
+                "index": 1,
+                "name": "tagstr",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_gumbo.c",
               "line": 414
@@ -6241,8 +6773,21 @@
             "variadic": false
           },
           {
+            "impl": "es_gumbo_node_attributes",
+            "implSource": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 205
+            },
             "name": "nodeAttributes",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "egn",
+                "nativeClass": "es_native_gumbo_node",
+                "type": "GumboNodeHandle"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_gumbo.c",
               "line": 411
@@ -6250,8 +6795,29 @@
             "variadic": false
           },
           {
+            "impl": "es_gumbo_node_childs",
+            "implSource": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 173
+            },
             "name": "nodeChilds",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "egn",
+                "nativeClass": "es_native_gumbo_node",
+                "type": "GumboNodeHandle"
+              },
+              {
+                "index": 1,
+                "name": "all",
+                "reader": "get",
+                "type": "boolean"
+              }
+            ],
+            "returns": "GumboNodeHandle[]",
+            "returnsNativeClass": "es_native_gumbo_node",
             "source": {
               "file": "src/ecmascript/es_gumbo.c",
               "line": 410
@@ -6259,8 +6825,21 @@
             "variadic": false
           },
           {
+            "impl": "es_gumbo_node_name",
+            "implSource": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 149
+            },
             "name": "nodeName",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "egn",
+                "nativeClass": "es_native_gumbo_node",
+                "type": "GumboNodeHandle"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_gumbo.c",
               "line": 409
@@ -6268,8 +6847,21 @@
             "variadic": false
           },
           {
+            "impl": "es_gumbo_node_textContent",
+            "implSource": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 259
+            },
             "name": "nodeTextContent",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "egn",
+                "nativeClass": "es_native_gumbo_node",
+                "type": "GumboNodeHandle"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_gumbo.c",
               "line": 412
@@ -6277,8 +6869,22 @@
             "variadic": false
           },
           {
+            "impl": "es_gumbo_node_type",
+            "implSource": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 127
+            },
             "name": "nodeType",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "egn",
+                "nativeClass": "es_native_gumbo_node",
+                "type": "GumboNodeHandle"
+              }
+            ],
+            "returns": "number",
             "source": {
               "file": "src/ecmascript/es_gumbo.c",
               "line": 408
@@ -6286,8 +6892,21 @@
             "variadic": false
           },
           {
+            "impl": "es_gumbo_parse",
+            "implSource": {
+              "file": "src/ecmascript/es_gumbo.c",
+              "line": 94
+            },
             "name": "parse",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "str",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_gumbo.c",
               "line": 407
@@ -6305,8 +6924,25 @@
       {
         "functions": [
           {
+            "impl": "es_hook_register",
+            "implSource": {
+              "file": "src/ecmascript/es_hook.c",
+              "line": 131
+            },
             "name": "register",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1
+              }
+            ],
+            "returns": "HookHandle",
+            "returnsNativeClass": "es_resource_hook",
             "source": {
               "file": "src/ecmascript/es_hook.c",
               "line": 152
@@ -6324,8 +6960,23 @@
       {
         "functions": [
           {
+            "impl": "es_htsmsg_create_from_xml_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 32
+            },
             "name": "createFromXML",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "xml",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "HtsmsgHandle",
+            "returnsNativeClass": "es_native_htsmsg",
             "source": {
               "file": "src/ecmascript/es_htsmsg.c",
               "line": 213
@@ -6333,8 +6984,22 @@
             "variadic": false
           },
           {
+            "impl": "es_htsmsg_enumerate_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 156
+            },
             "name": "enumerate",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "m",
+                "nativeClass": "es_native_htsmsg",
+                "type": "HtsmsgHandle"
+              }
+            ],
+            "returns": "string[]",
             "source": {
               "file": "src/ecmascript/es_htsmsg.c",
               "line": 215
@@ -6342,8 +7007,25 @@
             "variadic": false
           },
           {
+            "impl": "es_htsmsg_get_value_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 73
+            },
             "name": "get",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "m",
+                "nativeClass": "es_native_htsmsg",
+                "type": "HtsmsgHandle"
+              },
+              {
+                "index": 1,
+                "name": "i"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_htsmsg.c",
               "line": 214
@@ -6351,8 +7033,27 @@
             "variadic": false
           },
           {
+            "impl": "es_htsmsg_get_name_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 132
+            },
             "name": "getName",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "m",
+                "nativeClass": "es_native_htsmsg",
+                "type": "HtsmsgHandle"
+              },
+              {
+                "index": 1,
+                "name": "i",
+                "reader": "require",
+                "type": "number"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_htsmsg.c",
               "line": 217
@@ -6360,8 +7061,22 @@
             "variadic": false
           },
           {
+            "impl": "es_htsmsg_length_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 182
+            },
             "name": "length",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "m",
+                "nativeClass": "es_native_htsmsg",
+                "type": "HtsmsgHandle"
+              }
+            ],
+            "returns": "number",
             "source": {
               "file": "src/ecmascript/es_htsmsg.c",
               "line": 216
@@ -6369,8 +7084,22 @@
             "variadic": false
           },
           {
+            "impl": "es_htsmsg_print_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_htsmsg.c",
+              "line": 202
+            },
             "name": "print",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "m",
+                "nativeClass": "es_native_htsmsg",
+                "type": "HtsmsgHandle"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_htsmsg.c",
               "line": 218
@@ -6388,8 +7117,31 @@
       {
         "functions": [
           {
+            "impl": "es_http_inspector_create",
+            "implSource": {
+              "file": "src/ecmascript/es_io.c",
+              "line": 561
+            },
             "name": "httpInspectorCreate",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "str",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1
+              },
+              {
+                "index": 2,
+                "reader": "get",
+                "type": "boolean"
+              }
+            ],
+            "returns": "HttpInspectorHandle",
+            "returnsNativeClass": "es_resource_http_inspector",
             "source": {
               "file": "src/ecmascript/es_io.c",
               "line": 919
@@ -6397,8 +7149,30 @@
             "variadic": false
           },
           {
+            "impl": "es_http_req",
+            "implSource": {
+              "file": "src/ecmascript/es_io.c",
+              "line": 289
+            },
             "name": "httpReq",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "url",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "ambiguous": [
+                  "object"
+                ],
+                "index": 1
+              },
+              {
+                "index": 2
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_io.c",
               "line": 918
@@ -6406,8 +7180,27 @@
             "variadic": false
           },
           {
+            "impl": "es_probe",
+            "implSource": {
+              "file": "src/ecmascript/es_io.c",
+              "line": 865
+            },
             "name": "probe",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "url",
+                "reader": "require",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "timeout",
+                "reader": "coerce",
+                "type": "number"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_io.c",
               "line": 920
@@ -6415,8 +7208,15 @@
             "variadic": false
           },
           {
+            "impl": "es_xmlrpc",
+            "implSource": {
+              "file": "src/ecmascript/es_io.c",
+              "line": 891
+            },
             "name": "xmlrpc",
             "nargs": -1,
+            "returns": "HtsmsgHandle",
+            "returnsNativeClass": "es_native_htsmsg",
             "source": {
               "file": "src/ecmascript/es_io.c",
               "line": 921
@@ -6434,8 +7234,36 @@
       {
         "functions": [
           {
+            "impl": "es_kvstore_get_bool",
+            "implSource": {
+              "file": "src/ecmascript/es_kvstore.c",
+              "line": 80
+            },
             "name": "getBoolean",
             "nargs": 4,
+            "params": [
+              {
+                "index": 0,
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 2,
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 3,
+                "reader": "coerce",
+                "type": "boolean"
+              }
+            ],
+            "returns": "boolean",
             "source": {
               "file": "src/ecmascript/es_kvstore.c",
               "line": 124
@@ -6443,8 +7271,34 @@
             "variadic": false
           },
           {
+            "impl": "es_kvstore_get_int",
+            "implSource": {
+              "file": "src/ecmascript/es_kvstore.c",
+              "line": 63
+            },
             "name": "getInteger",
             "nargs": 4,
+            "params": [
+              {
+                "index": 0,
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 2,
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 3
+              }
+            ],
+            "returns": "number",
             "source": {
               "file": "src/ecmascript/es_kvstore.c",
               "line": 123
@@ -6452,8 +7306,30 @@
             "variadic": false
           },
           {
+            "impl": "es_kvstore_get_string",
+            "implSource": {
+              "file": "src/ecmascript/es_kvstore.c",
+              "line": 45
+            },
             "name": "getString",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 2,
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_kvstore.c",
               "line": 122
@@ -6461,8 +7337,37 @@
             "variadic": false
           },
           {
+            "impl": "es_kvstore_set",
+            "implSource": {
+              "file": "src/ecmascript/es_kvstore.c",
+              "line": 96
+            },
             "name": "set",
             "nargs": 4,
+            "params": [
+              {
+                "index": 0,
+                "name": "url",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "domain",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 2,
+                "name": "key",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 3
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_kvstore.c",
               "line": 125
@@ -6480,8 +7385,28 @@
       {
         "functions": [
           {
+            "impl": "es_bind_play_info",
+            "implSource": {
+              "file": "src/ecmascript/es_metadata.c",
+              "line": 107
+            },
             "name": "bindPlayInfo",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "name": "url",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_metadata.c",
               "line": 121
@@ -6489,8 +7414,35 @@
             "variadic": false
           },
           {
+            "impl": "es_video_metadata_bind_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_metadata.c",
+              "line": 66
+            },
             "name": "videoMetadataBind",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "root",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "name": "urlstr",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "ambiguous": [
+                  "object"
+                ],
+                "index": 2
+              }
+            ],
+            "returns": "MlvHandle",
+            "returnsNativeClass": "es_resource_mlv",
             "source": {
               "file": "src/ecmascript/es_metadata.c",
               "line": 120
@@ -6508,8 +7460,28 @@
       {
         "functions": [
           {
+            "impl": "es_cacheGet",
+            "implSource": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 258
+            },
             "name": "cacheGet",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "stash",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "key",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "null",
             "source": {
               "file": "src/ecmascript/es_misc.c",
               "line": 314
@@ -6517,8 +7489,41 @@
             "variadic": false
           },
           {
+            "impl": "es_cachePut",
+            "implSource": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 240
+            },
             "name": "cachePut",
             "nargs": 4,
+            "params": [
+              {
+                "index": 0,
+                "name": "stash",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "key",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "ambiguous": [
+                  "buffer"
+                ],
+                "index": 2,
+                "name": "buf"
+              },
+              {
+                "index": 3,
+                "name": "maxage",
+                "reader": "get",
+                "type": "number"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_misc.c",
               "line": 313
@@ -6527,8 +7532,22 @@
           },
           {
             "condition": "#if ENABLE_PLUGINS",
+            "impl": "es_select_view",
+            "implSource": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 299
+            },
             "name": "selectView",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "filename",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_misc.c",
               "line": 317
@@ -6536,6 +7555,11 @@
             "variadic": false
           },
           {
+            "impl": "es_system_ip",
+            "implSource": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 278
+            },
             "name": "systemIpAddress",
             "nargs": 0,
             "source": {
@@ -6555,8 +7579,42 @@
       {
         "functions": [
           {
+            "impl": "es_getAuthCredentials",
+            "implSource": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 102
+            },
             "name": "getAuthCredentials",
             "nargs": 5,
+            "params": [
+              {
+                "index": 0,
+                "name": "source",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "reason",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 2,
+                "name": "query",
+                "reader": "coerce",
+                "type": "boolean"
+              },
+              {
+                "index": 3
+              },
+              {
+                "index": 4,
+                "name": "forcetmp",
+                "reader": "coerce",
+                "type": "boolean"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_misc.c",
               "line": 328
@@ -6564,8 +7622,33 @@
             "variadic": false
           },
           {
+            "impl": "es_message",
+            "implSource": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 154
+            },
             "name": "message",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "message",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "ok",
+                "reader": "coerce",
+                "type": "boolean"
+              },
+              {
+                "index": 2,
+                "name": "cancel",
+                "reader": "coerce",
+                "type": "boolean"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_misc.c",
               "line": 329
@@ -6573,8 +7656,34 @@
             "variadic": false
           },
           {
+            "impl": "es_notify",
+            "implSource": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 226
+            },
             "name": "notify",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "text",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "delay",
+                "reader": "coerce",
+                "type": "number"
+              },
+              {
+                "index": 2,
+                "name": "icon",
+                "reader": "get",
+                "type": "string"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_misc.c",
               "line": 331
@@ -6582,8 +7691,33 @@
             "variadic": false
           },
           {
+            "impl": "es_textDialog",
+            "implSource": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 189
+            },
             "name": "textDialog",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "message",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "ok",
+                "reader": "coerce",
+                "type": "boolean"
+              },
+              {
+                "index": 2,
+                "name": "cancel",
+                "reader": "coerce",
+                "type": "boolean"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_misc.c",
               "line": 330
@@ -6591,8 +7725,33 @@
             "variadic": false
           },
           {
+            "impl": "es_webpopup",
+            "implSource": {
+              "file": "src/ecmascript/es_misc.c",
+              "line": 41
+            },
             "name": "webpopup",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "url",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "title",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 2,
+                "name": "trap",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_misc.c",
               "line": 327
@@ -6610,8 +7769,28 @@
       {
         "functions": [
           {
+            "impl": "es_prop_atomic_add",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 904
+            },
             "name": "atomicAdd",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "name": "num",
+                "reader": "require",
+                "type": "number"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1112
@@ -6619,8 +7798,23 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_create_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 129
+            },
             "name": "create",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "str",
+                "reader": "get",
+                "type": "string"
+              }
+            ],
+            "returns": "PropHandle",
+            "returnsNativeClass": "es_native_prop",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1091
@@ -6628,8 +7822,28 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_delete_child_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 371
+            },
             "name": "deleteChild",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "name": "name",
+                "reader": "require",
+                "type": "string"
+              }
+            ],
+            "returns": "boolean",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1104
@@ -6637,8 +7851,22 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_delete_childs_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 385
+            },
             "name": "deleteChilds",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1105
@@ -6646,8 +7874,22 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_destroy_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 397
+            },
             "name": "destroy",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1106
@@ -6655,8 +7897,21 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_enum_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 299
+            },
             "name": "enumerate",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1102
@@ -6664,8 +7919,25 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_get_child_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 253
+            },
             "name": "getChild",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "name": "idx"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1094
@@ -6673,8 +7945,22 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_get_name_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 152
+            },
             "name": "getName",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
+            "returns": "string",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1093
@@ -6682,8 +7968,21 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_get_value_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 167
+            },
             "name": "getValue",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1092
@@ -6691,8 +7990,15 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_get_global",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 141
+            },
             "name": "global",
             "nargs": 0,
+            "returns": "PropHandle",
+            "returnsNativeClass": "es_native_prop",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1101
@@ -6700,8 +8006,28 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_has_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 344
+            },
             "name": "has",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "name": "name",
+                "reader": "get",
+                "type": "string"
+              }
+            ],
+            "returns": "boolean",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1103
@@ -6709,8 +8035,28 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_have_more",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 766
+            },
             "name": "haveMore",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "name": "yes",
+                "reader": "require",
+                "type": "boolean"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1099
@@ -6718,8 +8064,28 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_is_same",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 918
+            },
             "name": "isSame",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "a",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "name": "b",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
+            "returns": "boolean",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1113
@@ -6727,8 +8093,19 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_is_value",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 869
+            },
             "name": "isValue",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "p"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1111
@@ -6736,8 +8113,22 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_is_zombie",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 957
+            },
             "name": "isZombie",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "a",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
+            "returns": "boolean",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1116
@@ -6745,8 +8136,26 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_link",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 804
+            },
             "name": "link",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1108
@@ -6754,8 +8163,22 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_make_url",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 779
+            },
             "name": "makeUrl",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
+            "returns": "string",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1100
@@ -6763,8 +8186,26 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_move_before",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 931
+            },
             "name": "moveBefore",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "a",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "name": "b"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1114
@@ -6772,8 +8213,47 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_node_filter_add_pred",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1035
+            },
             "name": "nodeFilterAddPred",
             "nargs": 6,
+            "params": [
+              {
+                "index": 0,
+                "name": "pnf",
+                "nativeClass": "es_native_propnf",
+                "type": "PropnfHandle"
+              },
+              {
+                "index": 1,
+                "name": "path",
+                "reader": "require",
+                "type": "string"
+              },
+              {
+                "index": 2,
+                "name": "cfstr",
+                "reader": "require",
+                "type": "string"
+              },
+              {
+                "index": 3
+              },
+              {
+                "index": 4,
+                "name": "enable"
+              },
+              {
+                "index": 5,
+                "name": "modestr",
+                "reader": "require",
+                "type": "string"
+              }
+            ],
+            "returns": "number",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1123
@@ -6781,8 +8261,27 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_node_filter_create",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1024
+            },
             "name": "nodeFilterCreate",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
+            "returns": "PropnfHandle",
+            "returnsNativeClass": "es_native_propnf",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1122
@@ -6790,8 +8289,28 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_node_filter_del_pred",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1078
+            },
             "name": "nodeFilterDelPred",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "pnf",
+                "nativeClass": "es_native_propnf",
+                "type": "PropnfHandle"
+              },
+              {
+                "index": 1,
+                "name": "predid",
+                "reader": "require",
+                "type": "number"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1124
@@ -6799,8 +8318,22 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_print_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 117
+            },
             "name": "print",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1089
@@ -6808,8 +8341,23 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_release_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 97
+            },
             "name": "release",
             "nargs": 1,
+            "params": [
+              {
+                "ambiguous": [
+                  "buffer"
+                ],
+                "index": 0,
+                "name": "p"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1090
@@ -6817,8 +8365,21 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_select",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 793
+            },
             "name": "select",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1107
@@ -6826,8 +8387,31 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_send_event",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 826
+            },
             "name": "sendEvent",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "reader": "require",
+                "type": "string"
+              },
+              {
+                "index": 2,
+                "name": "url"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1110
@@ -6835,8 +8419,32 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_set_value_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 412
+            },
             "name": "set",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "name": "str",
+                "reader": "require",
+                "type": "string"
+              },
+              {
+                "index": 2,
+                "name": "dbl"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1095
@@ -6844,8 +8452,32 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_set_clip_range",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 969
+            },
             "name": "setClipRange",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "a",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "reader": "coerce",
+                "type": "number"
+              },
+              {
+                "index": 2,
+                "reader": "coerce",
+                "type": "number"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1117
@@ -6853,8 +8485,28 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_set_parent_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 465
+            },
             "name": "setParent",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "name": "parent",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1097
@@ -6862,8 +8514,34 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_set_rich_str_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 448
+            },
             "name": "setRichStr",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "name": "key",
+                "reader": "require",
+                "type": "string"
+              },
+              {
+                "index": 2,
+                "name": "richstr",
+                "reader": "require",
+                "type": "string"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1096
@@ -6871,8 +8549,32 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_subscribe",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 721
+            },
             "name": "subscribe",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1
+              },
+              {
+                "ambiguous": [
+                  "object"
+                ],
+                "index": 2
+              }
+            ],
+            "returns": "PropSubHandle",
+            "returnsNativeClass": "es_resource_prop_sub",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1098
@@ -6880,8 +8582,27 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_tag_clear",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 995
+            },
             "name": "tagClear",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "eps",
+                "nativeClass": "es_resource_prop_sub",
+                "type": "PropSubHandle"
+              },
+              {
+                "index": 1,
+                "name": "a",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1119
@@ -6889,8 +8610,27 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_tag_get",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 1010
+            },
             "name": "tagGet",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "eps",
+                "nativeClass": "es_resource_prop_sub",
+                "type": "PropSubHandle"
+              },
+              {
+                "index": 1,
+                "name": "a",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1120
@@ -6898,8 +8638,31 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_tag_set",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 981
+            },
             "name": "tagSet",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "eps",
+                "nativeClass": "es_resource_prop_sub",
+                "type": "PropSubHandle"
+              },
+              {
+                "index": 1,
+                "name": "a",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 2
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1118
@@ -6907,8 +8670,21 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_unlink",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 815
+            },
             "name": "unlink",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1109
@@ -6916,8 +8692,22 @@
             "variadic": false
           },
           {
+            "impl": "es_prop_unload_destroy",
+            "implSource": {
+              "file": "src/ecmascript/es_prop.c",
+              "line": 944
+            },
             "name": "unloadDestroy",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "a",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_prop.c",
               "line": 1115
@@ -6935,8 +8725,34 @@
       {
         "functions": [
           {
+            "impl": "es_backend_open",
+            "implSource": {
+              "file": "src/ecmascript/es_route.c",
+              "line": 268
+            },
             "name": "backendOpen",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "p",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "name": "url",
+                "reader": "require",
+                "type": "string"
+              },
+              {
+                "index": 2,
+                "name": "sync",
+                "reader": "require",
+                "type": "boolean"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_route.c",
               "line": 281
@@ -6944,8 +8760,26 @@
             "variadic": false
           },
           {
+            "impl": "es_route_create",
+            "implSource": {
+              "file": "src/ecmascript/es_route.c",
+              "line": 105
+            },
             "name": "create",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "str",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1
+              }
+            ],
+            "returns": "RouteHandle",
+            "returnsNativeClass": "es_resource_route",
             "source": {
               "file": "src/ecmascript/es_route.c",
               "line": 280
@@ -6953,8 +8787,22 @@
             "variadic": false
           },
           {
+            "impl": "es_route_test",
+            "implSource": {
+              "file": "src/ecmascript/es_route.c",
+              "line": 164
+            },
             "name": "test",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "str",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "boolean",
             "source": {
               "file": "src/ecmascript/es_route.c",
               "line": 282
@@ -6972,8 +8820,49 @@
       {
         "functions": [
           {
+            "impl": "es_service_create",
+            "implSource": {
+              "file": "src/ecmascript/es_service.c",
+              "line": 108
+            },
             "name": "create",
             "nargs": 6,
+            "params": [
+              {
+                "index": 0,
+                "name": "svcid",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "title",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 2,
+                "name": "url",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 3,
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 4,
+                "name": "enabled",
+                "reader": "coerce",
+                "type": "boolean"
+              },
+              {
+                "index": 5
+              }
+            ],
+            "returns": "ServiceHandle",
+            "returnsNativeClass": "es_resource_service",
             "source": {
               "file": "src/ecmascript/es_service.c",
               "line": 170
@@ -6981,8 +8870,24 @@
             "variadic": false
           },
           {
+            "impl": "es_service_enable",
+            "implSource": {
+              "file": "src/ecmascript/es_service.c",
+              "line": 150
+            },
             "name": "enable",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "es",
+                "nativeClass": "es_resource_service",
+                "type": "ServiceHandle"
+              },
+              {
+                "index": 1
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_service.c",
               "line": 171
@@ -7000,8 +8905,22 @@
       {
         "functions": [
           {
+            "impl": "es_db_changes",
+            "implSource": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 253
+            },
             "name": "changes",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "es",
+                "nativeClass": "es_resource_sqlite",
+                "type": "SqliteHandle"
+              }
+            ],
+            "returns": "number",
             "source": {
               "file": "src/ecmascript/es_sqlite.c",
               "line": 321
@@ -7009,8 +8928,23 @@
             "variadic": false
           },
           {
+            "impl": "es_sqlite_create",
+            "implSource": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 89
+            },
             "name": "create",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "name",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "SqliteHandle",
+            "returnsNativeClass": "es_resource_sqlite",
             "source": {
               "file": "src/ecmascript/es_sqlite.c",
               "line": 319
@@ -7018,8 +8952,22 @@
             "variadic": false
           },
           {
+            "impl": "es_db_last_error_code",
+            "implSource": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 265
+            },
             "name": "lastErrorCode",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "es",
+                "nativeClass": "es_resource_sqlite",
+                "type": "SqliteHandle"
+              }
+            ],
+            "returns": "number",
             "source": {
               "file": "src/ecmascript/es_sqlite.c",
               "line": 323
@@ -7027,8 +8975,22 @@
             "variadic": false
           },
           {
+            "impl": "es_db_last_error_str",
+            "implSource": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 277
+            },
             "name": "lastErrorString",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "es",
+                "nativeClass": "es_resource_sqlite",
+                "type": "SqliteHandle"
+              }
+            ],
+            "returns": "string",
             "source": {
               "file": "src/ecmascript/es_sqlite.c",
               "line": 324
@@ -7036,8 +8998,22 @@
             "variadic": false
           },
           {
+            "impl": "es_db_last_insert_row_id",
+            "implSource": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 289
+            },
             "name": "lastRowId",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "es",
+                "nativeClass": "es_resource_sqlite",
+                "type": "SqliteHandle"
+              }
+            ],
+            "returns": "number",
             "source": {
               "file": "src/ecmascript/es_sqlite.c",
               "line": 325
@@ -7045,8 +9021,14 @@
             "variadic": false
           },
           {
+            "impl": "es_sqlite_query",
+            "implSource": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 151
+            },
             "name": "query",
             "nargs": -1,
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_sqlite.c",
               "line": 320
@@ -7054,8 +9036,21 @@
             "variadic": true
           },
           {
+            "impl": "es_sqlite_step",
+            "implSource": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 204
+            },
             "name": "step",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "es",
+                "nativeClass": "es_resource_sqlite",
+                "type": "SqliteHandle"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_sqlite.c",
               "line": 322
@@ -7063,8 +9058,27 @@
             "variadic": false
           },
           {
+            "impl": "es_db_upgrade_schema",
+            "implSource": {
+              "file": "src/ecmascript/es_sqlite.c",
+              "line": 301
+            },
             "name": "upgradeSchema",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "es",
+                "nativeClass": "es_resource_sqlite",
+                "type": "SqliteHandle"
+              },
+              {
+                "index": 1,
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_sqlite.c",
               "line": 326
@@ -7082,8 +9096,22 @@
       {
         "functions": [
           {
+            "impl": "es_durationtostring",
+            "implSource": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 253
+            },
             "name": "durationToString",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "s",
+                "reader": "coerce",
+                "type": "number"
+              }
+            ],
+            "returns": "string",
             "source": {
               "file": "src/ecmascript/es_string.c",
               "line": 384
@@ -7091,8 +9119,21 @@
             "variadic": false
           },
           {
+            "impl": "es_entitydecode",
+            "implSource": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 154
+            },
             "name": "entityDecode",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "string",
             "source": {
               "file": "src/ecmascript/es_string.c",
               "line": 380
@@ -7100,8 +9141,19 @@
             "variadic": false
           },
           {
+            "impl": "es_is_utf8_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 32
+            },
             "name": "isUtf8",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "bytes"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_string.c",
               "line": 378
@@ -7109,8 +9161,20 @@
             "variadic": false
           },
           {
+            "impl": "es_paramEscape",
+            "implSource": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 244
+            },
             "name": "paramEscape",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_string.c",
               "line": 383
@@ -7118,8 +9182,22 @@
             "variadic": false
           },
           {
+            "impl": "es_parseTime",
+            "implSource": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 273
+            },
             "name": "parseTime",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "name": "str",
+                "reader": "require",
+                "type": "string"
+              }
+            ],
+            "returns": "number",
             "source": {
               "file": "src/ecmascript/es_string.c",
               "line": 385
@@ -7127,8 +9205,27 @@
             "variadic": false
           },
           {
+            "impl": "es_parseURL",
+            "implSource": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 288
+            },
             "name": "parseURL",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "str",
+                "reader": "require",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "parseq",
+                "reader": "get",
+                "type": "boolean"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_string.c",
               "line": 386
@@ -7136,8 +9233,20 @@
             "variadic": false
           },
           {
+            "impl": "es_pathEscape",
+            "implSource": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 234
+            },
             "name": "pathEscape",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_string.c",
               "line": 382
@@ -7145,8 +9254,20 @@
             "variadic": false
           },
           {
+            "impl": "es_queryStringSplit",
+            "implSource": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 206
+            },
             "name": "queryStringSplit",
             "nargs": 1,
+            "params": [
+              {
+                "index": 0,
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_string.c",
               "line": 381
@@ -7154,8 +9275,28 @@
             "variadic": false
           },
           {
+            "impl": "es_resolveURL",
+            "implSource": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 366
+            },
             "name": "resolveURL",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "base",
+                "reader": "require",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "url",
+                "reader": "require",
+                "type": "string"
+              }
+            ],
+            "returns": "string",
             "source": {
               "file": "src/ecmascript/es_string.c",
               "line": 387
@@ -7163,8 +9304,26 @@
             "variadic": false
           },
           {
+            "impl": "es_utf8_from_bytes_duk",
+            "implSource": {
+              "file": "src/ecmascript/es_string.c",
+              "line": 103
+            },
             "name": "utf8FromBytes",
             "nargs": 2,
+            "params": [
+              {
+                "ambiguous": [
+                  "buffer"
+                ],
+                "index": 0,
+                "name": "bytes"
+              },
+              {
+                "index": 1,
+                "name": "csname"
+              }
+            ],
             "source": {
               "file": "src/ecmascript/es_string.c",
               "line": 379
@@ -7182,8 +9341,64 @@
       {
         "functions": [
           {
+            "impl": "es_subtitleadditem",
+            "implSource": {
+              "file": "src/ecmascript/es_subtitles.c",
+              "line": 236
+            },
             "name": "addItem",
             "nargs": 8,
+            "params": [
+              {
+                "index": 0,
+                "name": "proproot",
+                "nativeClass": "es_native_prop",
+                "type": "PropHandle"
+              },
+              {
+                "index": 1,
+                "name": "url",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 2,
+                "name": "title",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 3,
+                "name": "language",
+                "reader": "get",
+                "type": "string"
+              },
+              {
+                "index": 4,
+                "name": "format",
+                "reader": "get",
+                "type": "string"
+              },
+              {
+                "index": 5,
+                "name": "source",
+                "reader": "get",
+                "type": "string"
+              },
+              {
+                "index": 6,
+                "name": "score",
+                "reader": "get",
+                "type": "number"
+              },
+              {
+                "index": 7,
+                "name": "autosel",
+                "reader": "get",
+                "type": "boolean"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_subtitles.c",
               "line": 280
@@ -7191,8 +9406,32 @@
             "variadic": false
           },
           {
+            "impl": "es_subtitleprovideradd",
+            "implSource": {
+              "file": "src/ecmascript/es_subtitles.c",
+              "line": 208
+            },
             "name": "addProvider",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0
+              },
+              {
+                "index": 1,
+                "name": "id",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 2,
+                "name": "title",
+                "reader": "coerce",
+                "type": "string"
+              }
+            ],
+            "returns": "SpHandle",
+            "returnsNativeClass": "es_resource_sp",
             "source": {
               "file": "src/ecmascript/es_subtitles.c",
               "line": 279
@@ -7200,8 +9439,14 @@
             "variadic": false
           },
           {
+            "impl": "es_getsubtitlelanguages",
+            "implSource": {
+              "file": "src/ecmascript/es_subtitles.c",
+              "line": 259
+            },
             "name": "getLanguages",
             "nargs": 0,
+            "returns": "string[]",
             "source": {
               "file": "src/ecmascript/es_subtitles.c",
               "line": 281
@@ -7219,8 +9464,32 @@
       {
         "functions": [
           {
+            "impl": "es_websocket_client_create",
+            "implSource": {
+              "file": "src/ecmascript/es_websocket.c",
+              "line": 558
+            },
             "name": "clientCreate",
             "nargs": 3,
+            "params": [
+              {
+                "index": 0,
+                "name": "url",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1,
+                "name": "proto",
+                "reader": "get",
+                "type": "string"
+              },
+              {
+                "index": 2
+              }
+            ],
+            "returns": "WebsocketClientHandle",
+            "returnsNativeClass": "es_resource_websocket_client",
             "source": {
               "file": "src/ecmascript/es_websocket.c",
               "line": 1112
@@ -7228,8 +9497,26 @@
             "variadic": false
           },
           {
+            "impl": "es_websocket_client_send",
+            "implSource": {
+              "file": "src/ecmascript/es_websocket.c",
+              "line": 613
+            },
             "name": "clientSend",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "ewc",
+                "nativeClass": "es_resource_websocket_client",
+                "type": "WebsocketClientHandle"
+              },
+              {
+                "index": 1,
+                "name": "buf"
+              }
+            ],
+            "returns": "void",
             "source": {
               "file": "src/ecmascript/es_websocket.c",
               "line": 1113
@@ -7237,8 +9524,26 @@
             "variadic": false
           },
           {
+            "impl": "es_websocket_server_create",
+            "implSource": {
+              "file": "src/ecmascript/es_websocket.c",
+              "line": 1086
+            },
             "name": "serverCreate",
             "nargs": 2,
+            "params": [
+              {
+                "index": 0,
+                "name": "path",
+                "reader": "coerce",
+                "type": "string"
+              },
+              {
+                "index": 1
+              }
+            ],
+            "returns": "WebsocketServerHandle",
+            "returnsNativeClass": "es_resource_websocket_server",
             "source": {
               "file": "src/ecmascript/es_websocket.c",
               "line": 1115
@@ -7531,6 +9836,6 @@
       }
     ]
   },
-  "movianRevision": "9b1c9767abb752fd3b4f4412a98841bc94d91838",
+  "movianRevision": "ce587fb8f75da41ca85af4179d996f5964cd3f02",
   "schemaVersion": 1
 }

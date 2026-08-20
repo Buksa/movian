@@ -3030,6 +3030,114 @@ def _check_commonjs_coverage() -> list[str]:
     return errors
 
 
+CORE_MODULES_DIR = REPO_ROOT / "res" / "ecmascript" / "modules"
+CORE_MODULE_DIAGNOSTICS = (
+    Path(__file__).resolve().parent / "curated_core_module_diagnostics.json")
+
+
+def _core_module_sources() -> list[Path]:
+    return sorted(CORE_MODULES_DIR.rglob("*.js"))
+
+
+def _core_module_tsc_command(tsc: str) -> list[str]:
+    """Compile the core JS modules against the generated declarations.
+
+    Not `--strict`, and deliberately so: these files are Duktape ES5.1 written
+    years before any of this, and the question being asked is not whether they
+    are modern TypeScript. It is whether the declarations this generator emits
+    agree with the way the modules actually call the natives.
+    """
+    inputs = [GENERATED_DTS, *_core_module_sources()]
+    return [
+        tsc,
+        "--noEmit",
+        "--allowJs",
+        "--checkJs",
+        "--target", "ES5",
+        "--lib", "ES2015",
+        "--module", "commonjs",
+        "--moduleResolution", "node",
+        "--types",
+        "--pretty", "false",
+        "--noErrorTruncation",
+        *[_tsc_input_argument(path) for path in inputs],
+    ]
+
+
+def _core_module_diagnostics(output: str) -> set[tuple[str, int, int]]:
+    found: set[tuple[str, int, int]] = set()
+    for path, line, _column, code in DIAGNOSTIC_RE.findall(output):
+        resolved = Path(path)
+        if not resolved.is_absolute():
+            resolved = (REPO_ROOT / path).resolve()
+        try:
+            relative = resolved.relative_to(REPO_ROOT).as_posix()
+        except ValueError:
+            relative = resolved.as_posix()
+        found.add((relative, int(line), int(code)))
+    return found
+
+
+def check_core_modules(tsc: str) -> tuple[list[str], dict[str, int]]:
+    """Type-check res/ecmascript/modules/** against the emitted declarations.
+
+    This corpus was the hole. `plugin_examples` exercises what a PLUGIN calls,
+    and only two of the tracked examples require a `native/*` module at all --
+    but eighteen core modules are built directly on that surface, and they are
+    what plugins reach through. Three native signatures that contradicted a
+    real call site in these files passed the entire battery green during
+    movian#209, because nothing compiled them.
+
+    Enforced in both directions against the curated list. An unlisted
+    diagnostic fails, which is the point. A LISTED one that no longer fires
+    also fails, because a stale entry is how an expectation list decays into a
+    baseline that agrees with anything.
+    """
+    errors: list[str] = []
+    sources = _core_module_sources()
+    if not sources:
+        return (["no core modules found under %s" % rel(CORE_MODULES_DIR)], {})
+
+    import json as _json
+    curated = _json.loads(CORE_MODULE_DIAGNOSTICS.read_text(encoding="utf-8"))
+    classes = curated["classes"]
+    expected: dict[tuple[str, int, int], str] = {}
+    for entry in curated["expected"]:
+        key = (entry["file"], int(entry["line"]), int(entry["code"]))
+        if entry["class"] not in classes:
+            errors.append("curated core-module diagnostic %s:%d TS%d names "
+                          "unknown class %r"
+                          % (*key, entry["class"]))
+        expected[key] = entry["class"]
+
+    result = subprocess.run(
+        _core_module_tsc_command(tsc),
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+        timeout=SUBPROCESS_TIMEOUT_SECONDS,
+    )
+    actual = _core_module_diagnostics(result.stdout)
+
+    for key in sorted(actual - set(expected)):
+        errors.append(
+            "core module %s:%d reports TS%d against the generated "
+            "declarations, and nothing in "
+            "curated_core_module_diagnostics.json accounts for it" % key)
+    for key in sorted(set(expected) - actual):
+        errors.append(
+            "curated core-module diagnostic %s:%d TS%d no longer fires; "
+            "remove it rather than leave the list agreeing with anything"
+            % key)
+
+    counts: dict[str, int] = {}
+    for name in expected.values():
+        counts[name] = counts.get(name, 0) + 1
+    return errors, counts
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Check reference .d.ts calibration fixtures")
@@ -3127,6 +3235,23 @@ def main() -> int:
         return 1
     print("reference-dts: plugin_examples OK "
           "(every example compiles against its own apiversion's declarations)")
+
+    try:
+        errors, counts = check_core_modules(tsc)
+    except (OSError, ValueError, KeyError,
+            subprocess.TimeoutExpired) as error:
+        print("reference-dts: core-module check failed to run: %s: %s" %
+              (type(error).__name__, error), file=sys.stderr)
+        return 1
+    if errors:
+        for error in errors:
+            print("reference-dts: %s" % error, file=sys.stderr)
+        return 1
+    print("reference-dts: core modules OK (%d files compiled against the "
+          "generated declarations; %d accounted diagnostics: %s)"
+          % (len(_core_module_sources()), sum(counts.values()),
+             ", ".join("%s %d" % (name, counts[name])
+                       for name in sorted(counts))))
     return 0
 
 
