@@ -1031,6 +1031,26 @@ def native_parameters(record: dict[str, Any], facts: dict[str, Any],
             # reads this at all". Both came out as an unexplained `any`, which
             # made the residue impossible to triage.
             param["ambiguous"] = ["conflict"]
+            candidates = sorted(facts["primitives"].get(index, set()))
+            if candidates:
+                # Recorded, and deliberately NOT joined into a union.
+                #
+                # Whether the union is closed is a control-flow property this
+                # scan cannot see. `native/prop.getChild` tests
+                # duk_is_number and falls through to duk_require_string, so
+                # anything else throws and `number | string` would be exact.
+                # `native/kvstore.set` tests boolean, then number, then
+                # object-coercible, and its final else stores KVSTORE_SET_VOID
+                # -- undefined and null are accepted on purpose, so the same
+                # union would reject a legal call. `native/htsmsg.get` falls
+                # through to duk_safe_to_string, which coerces anything.
+                #
+                # The three are indistinguishable to a reader that sees which
+                # accessors appear but not which of them the fall-through
+                # reaches. Joining them would be the same over-reading this
+                # file spent movian#209 removing, so the evidence is recorded
+                # for a human and the emitted type stays `any`.
+                param["candidates"] = candidates
         params.append(param)
     return params
 

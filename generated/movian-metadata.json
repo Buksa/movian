@@ -6032,6 +6032,9 @@
                 "ambiguous": [
                   "conflict"
                 ],
+                "candidates": [
+                  "string"
+                ],
                 "index": 1,
                 "name": "buf"
               }
@@ -7031,6 +7034,10 @@
                 "ambiguous": [
                   "conflict"
                 ],
+                "candidates": [
+                  "number",
+                  "string"
+                ],
                 "index": 1,
                 "name": "i"
               }
@@ -7389,6 +7396,11 @@
               {
                 "ambiguous": [
                   "conflict"
+                ],
+                "candidates": [
+                  "boolean",
+                  "number",
+                  "string"
                 ],
                 "index": 3
               }
@@ -7971,6 +7983,10 @@
                 "ambiguous": [
                   "conflict"
                 ],
+                "candidates": [
+                  "number",
+                  "string"
+                ],
                 "index": 1,
                 "name": "idx"
               }
@@ -8286,6 +8302,10 @@
                 "ambiguous": [
                   "conflict"
                 ],
+                "candidates": [
+                  "number",
+                  "string"
+                ],
                 "index": 3
               },
               {
@@ -8500,6 +8520,11 @@
               {
                 "ambiguous": [
                   "conflict"
+                ],
+                "candidates": [
+                  "boolean",
+                  "number",
+                  "string"
                 ],
                 "index": 2,
                 "name": "dbl"
@@ -9583,6 +9608,9 @@
                 "ambiguous": [
                   "conflict"
                 ],
+                "candidates": [
+                  "string"
+                ],
                 "index": 1,
                 "name": "buf"
               }
@@ -9907,6 +9935,6 @@
       }
     ]
   },
-  "movianRevision": "eeeafdd14044152fd5e668c6de441523cf166c54",
+  "movianRevision": "b8c285704d4cf8470b30d08a016cfdffd2b5491c",
   "schemaVersion": 1
 }

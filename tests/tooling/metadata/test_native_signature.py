@@ -421,6 +421,66 @@ class OptionsObjects(unittest.TestCase):
         self.assertNotIn("ambiguous", params[1])
 
 
+class ContestedSlotsAreNotUnions(unittest.TestCase):
+    """Evidence is recorded; the union is not guessed.
+
+    Whether a tested slot's union is CLOSED is a control-flow property this
+    scan cannot see, and the three shapes in the tree are indistinguishable to
+    it:
+
+      native/prop.getChild   tests duk_is_number, falls through to
+                             duk_require_string -> anything else throws, so
+                             `number | string` would be exact
+      native/kvstore.set     tests boolean, number, object-coercible, and its
+                             final else stores KVSTORE_SET_VOID -- undefined
+                             and null are accepted on purpose
+      native/htsmsg.get      falls through to duk_safe_to_string, which
+                             coerces anything at all
+
+    All three present the same accessor set. Emitting the union would be
+    right for one and would reject legal calls for the other two, so the
+    emitted type stays `any` and the candidates are recorded for a reader.
+    """
+
+    def test_the_candidates_are_recorded(self) -> None:
+        record = c_function("f", ["duk_context *ctx"], """
+  if(duk_is_number(ctx, 1)) {
+    idx = duk_to_int(ctx, 1);
+  } else {
+    str = duk_require_string(ctx, 1);
+  }
+""")
+        params = gen.native_parameters(
+            record, gen._function_facts("f", {"f": record}, {},
+                                        gen.NATIVE_HELPER_DEPTH), 2)
+        self.assertEqual(params[1]["candidates"], ["number", "string"])
+
+    def test_no_contested_slot_is_emitted_as_a_type(self) -> None:
+        for module in gen.build_native_modules():
+            for function in module["functions"]:
+                for param in function.get("params", []):
+                    if "candidates" not in param:
+                        continue
+                    with self.subTest("%s.%s[%d]" % (module["name"],
+                                                     function["name"],
+                                                     param["index"])):
+                        self.assertNotIn("type", param)
+                        self.assertNotIn("shape", param)
+
+    def test_the_three_shapes_still_look_alike_to_the_scan(self) -> None:
+        """A corpus assertion, so the reason above cannot rot unnoticed."""
+        modules = {m["name"]: m for m in gen.build_native_modules()}
+        cases = [("native/prop", "getChild", 1, ["number", "string"]),
+                 ("native/kvstore", "set", 3, ["boolean", "number", "string"]),
+                 ("native/htsmsg", "get", 1, ["number", "string"])]
+        for module, name, index, candidates in cases:
+            with self.subTest("%s.%s" % (module, name)):
+                function = next(f for f in modules[module]["functions"]
+                                if f["name"] == name)
+                self.assertEqual(function["params"][index].get("candidates"),
+                                 candidates)
+
+
 class ReturnTypes(unittest.TestCase):
     def test_return_zero_and_no_push_is_void(self) -> None:
         record = c_function("f", ["duk_context *ctx"], "  return 0;")
