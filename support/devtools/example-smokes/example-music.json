@@ -1,0 +1,22 @@
+{
+  "name": "example-music",
+  "describe": "An apiversion-1 plugin: the route comes from plugin.addURI, not page.Route.",
+  "needs": {
+    "binary": "build.debug/movian",
+    "plugin": "../../../plugin_examples/music"
+  },
+  "steps": [
+    {
+      "do": "health"
+    },
+    {
+      "do": "open",
+      "url": "example:music:"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "Music examples"
+    }
+  ]
+}

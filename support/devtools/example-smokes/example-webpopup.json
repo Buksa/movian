@@ -1,0 +1,17 @@
+{
+  "name": "example-webpopup",
+  "describe": "The web-popup development route opens.",
+  "needs": {
+    "binary": "build.debug/movian",
+    "plugin": "../../../plugin_examples/webpopupplugin"
+  },
+  "steps": [
+    {
+      "do": "health"
+    },
+    {
+      "do": "open",
+      "url": "devplug:webtest"
+    }
+  ]
+}

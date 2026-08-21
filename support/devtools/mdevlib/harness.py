@@ -87,6 +87,7 @@ PAGE_URL = "global/navigators/current/currentpage/url"
 PAGE_LOADING = "global/navigators/current/currentpage/model/loading"
 PAGE_TITLE = "global/navigators/current/currentpage/model/metadata/title"
 PAGE_TYPE = "global/navigators/current/currentpage/model/type"
+PAGE_ERROR = "global/navigators/current/currentpage/model/error"
 PAGE_NODES = "global/navigators/current/currentpage/model/nodes"
 
 
@@ -571,9 +572,28 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
         cur_url = prop_value(base, PAGE_URL)
         loading = prop_value(base, PAGE_LOADING)
         title = prop_value(base, PAGE_TITLE)
+        # An error page IS ready -- it is the answer, not a slow arrival.
+        # It carries no title, so waiting for one turned a definite refusal
+        # into a 20-second timeout reporting `title='(void)'`, which is what
+        # movian#182 had been reading as "URLs containing a space": any URL
+        # that lands on openerror shows the same symptom, space or not.
+        if prop_value(base, PAGE_TYPE) == "openerror" and \
+                (cur_url == url or cur_url != before_url):
+            raise MdevError(
+                "page opened as an error: url=%r %s"
+                % (cur_url, prop_value(base, PAGE_ERROR) or "(no detail)")
+            )
         # Ready when loading is 0 -- or void/absent: static page:* routes
         # never create the loading prop at all.
-        if loading in ("0", "(void)", None) and prop_has_value(title):
+        #
+        # A title is NOT required. Nothing obliges a route to set one, and
+        # demanding it declared a fully rendered page unready: measured on
+        # `asyncPageLoad:test:smoke`, whose model carries 40 nodes and a type
+        # while metadata/title stays void, and on `devplug:webtest`. The
+        # nav_seen gate above is what stops the previous page being read as
+        # this one, so the title was never doing that job -- it was only
+        # excluding pages that do not have one (movian#182).
+        if loading in ("0", "(void)", None):
             # Verify navigation actually targeted our URL: either the page
             # url now equals the requested one, or it at least changed away
             # from what was open before (redirecting backends may rewrite

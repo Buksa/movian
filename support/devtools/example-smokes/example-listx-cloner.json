@@ -1,0 +1,22 @@
+{
+  "name": "example-listx-cloner",
+  "describe": "The service this plugin registers advertises a URL, and that URL opens. NOTE the service node is listed under global/services/all but is not addressable by that path through /api/prop, so the registration is checked by opening what it advertises rather than by reading the node.",
+  "needs": {
+    "binary": "build.debug/movian",
+    "plugin": "../../../plugin_examples/listx_cloner"
+  },
+  "steps": [
+    {
+      "do": "health"
+    },
+    {
+      "do": "open",
+      "url": "example:listx-cloner:"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "list_x Cloner Example"
+    }
+  ]
+}

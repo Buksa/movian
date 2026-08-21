@@ -1,0 +1,22 @@
+{
+  "name": "example-search-provider",
+  "describe": "The searchable directory route opens. NOTE the title comes from this route, not from the sibling example:search:(.*) route.",
+  "needs": {
+    "binary": "build.debug/movian",
+    "plugin": "../../../plugin_examples/02-intermediate/04-search-provider"
+  },
+  "steps": [
+    {
+      "do": "health"
+    },
+    {
+      "do": "open",
+      "url": "example:searchable:"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "Searchable Directory"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "example-hello-world",
+  "describe": "The simplest route opens and names itself.",
+  "needs": {
+    "binary": "build.debug/movian",
+    "plugin": "../../../plugin_examples/01-basic/01-hello-world"
+  },
+  "steps": [
+    {
+      "do": "health"
+    },
+    {
+      "do": "open",
+      "url": "example:hello:"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "Hello World"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/nodes",
+      "equals": 1
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "example-html-parser",
+  "describe": "Parsed HTML becomes three items.",
+  "needs": {
+    "binary": "build.debug/movian",
+    "plugin": "../../../plugin_examples/02-intermediate/02-html-parser"
+  },
+  "steps": [
+    {
+      "do": "health"
+    },
+    {
+      "do": "open",
+      "url": "example:scrape:"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "Scraped Content"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/nodes",
+      "equals": 3
+    }
+  ]
+}

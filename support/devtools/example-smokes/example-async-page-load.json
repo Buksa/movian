@@ -1,0 +1,17 @@
+{
+  "name": "example-async-page-load",
+  "describe": "The asynchronous paginator route opens; it sets no title of its own.",
+  "needs": {
+    "binary": "build.debug/movian",
+    "plugin": "../../../plugin_examples/async_page_load"
+  },
+  "steps": [
+    {
+      "do": "health"
+    },
+    {
+      "do": "open",
+      "url": "asyncPageLoad:test:smoke"
+    }
+  ]
+}

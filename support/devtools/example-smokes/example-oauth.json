@@ -1,0 +1,18 @@
+{
+  "name": "example-oauth",
+  "describe": "The plugin's settings group is registered.",
+  "needs": {
+    "binary": "build.debug/movian",
+    "plugin": "../../../plugin_examples/03-advanced/02-oauth-authentication"
+  },
+  "steps": [
+    {
+      "do": "health"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/settings/apps/nodes/examples.oauth/nodes",
+      "equals": 1
+    }
+  ]
+}
