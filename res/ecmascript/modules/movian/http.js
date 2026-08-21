@@ -64,6 +64,7 @@ HttpResponse.prototype.toString = function() {
   return string.utf8FromBytes(this.bytes);
 }
 
+/** @param {string} encoding a charset native/string.utf8FromBytes knows */
 HttpResponse.prototype.convertFromEncoding = function(encoding) {
   return require('native/string').utf8FromBytes(this.bytes, encoding);
 }
@@ -71,6 +72,15 @@ HttpResponse.prototype.convertFromEncoding = function(encoding) {
 
 /**
  *
+ */
+/**
+ * @param {string} url
+ * @param {import('native/io').HttpReqOptions} [ctrl] the keys es_http_req
+ *   reads off argument 1. `args` may additionally be an ARRAY of objects
+ *   here, which this wrapper merges into one before the native sees it.
+ * @param {(err: any, res: HttpResponse|null) => void} [callback] when given,
+ *   the request runs asynchronously and this IS invoked -- unlike the
+ *   top-level `http` module's callback, which is accepted and ignored
  */
 exports.request = function(url, ctrl, callback) {
 

@@ -4387,7 +4387,7 @@
             },
             "source": {
               "file": "res/ecmascript/modules/movian/html.js",
-              "line": 88
+              "line": 101
             }
           }
         ],
@@ -4409,7 +4409,7 @@
                 },
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
-                  "line": 59
+                  "line": 67
                 }
               },
               {
@@ -4420,7 +4420,7 @@
                 ],
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
-                  "line": 54
+                  "line": 58
                 }
               },
               {
@@ -4435,7 +4435,7 @@
                 },
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
-                  "line": 68
+                  "line": 80
                 }
               },
               {
@@ -4451,7 +4451,7 @@
                 },
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
-                  "line": 65
+                  "line": 73
                 }
               },
               {
@@ -4467,7 +4467,7 @@
                 },
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
-                  "line": 74
+                  "line": 86
                 }
               }
             ],
@@ -4478,7 +4478,7 @@
                 "name": "_gumboNode",
                 "source": {
                   "file": "res/ecmascript/modules/movian/html.js",
-                  "line": 80
+                  "line": 92
                 }
               },
               {
@@ -4551,7 +4551,7 @@
             "returns": "HttpResponse",
             "source": {
               "file": "res/ecmascript/modules/movian/http.js",
-              "line": 75
+              "line": 85
             },
             "voidWhen": "callback"
           }
@@ -4570,7 +4570,7 @@
                 ],
                 "source": {
                   "file": "res/ecmascript/modules/movian/http.js",
-                  "line": 67
+                  "line": 68
                 }
               },
               {
@@ -4672,7 +4672,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/movian/itemhook.js",
-              "line": 3
+              "line": 7
             }
           }
         ],
@@ -5249,7 +5249,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/movian/prop.js",
-              "line": 97
+              "line": 101
             }
           },
           {
@@ -5276,7 +5276,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/movian/prop.js",
-              "line": 101
+              "line": 111
             }
           }
         ],
@@ -5303,7 +5303,7 @@
             "returns": "Service",
             "source": {
               "file": "res/ecmascript/modules/movian/service.js",
-              "line": 27
+              "line": 35
             }
           }
         ],
@@ -5376,7 +5376,7 @@
                 ],
                 "source": {
                   "file": "res/ecmascript/modules/movian/settings.js",
-                  "line": 292
+                  "line": 298
                 }
               },
               {
@@ -5384,7 +5384,7 @@
                 "name": "id",
                 "source": {
                   "file": "res/ecmascript/modules/movian/settings.js",
-                  "line": 274
+                  "line": 280
                 }
               },
               {
@@ -5392,7 +5392,7 @@
                 "name": "nodes",
                 "source": {
                   "file": "res/ecmascript/modules/movian/settings.js",
-                  "line": 284
+                  "line": 290
                 }
               },
               {
@@ -5400,7 +5400,7 @@
                 "name": "properties",
                 "source": {
                   "file": "res/ecmascript/modules/movian/settings.js",
-                  "line": 300
+                  "line": 306
                 }
               },
               {
@@ -5413,14 +5413,14 @@
                 ],
                 "source": {
                   "file": "res/ecmascript/modules/movian/settings.js",
-                  "line": 296
+                  "line": 302
                 }
               }
             ],
             "receiverMutation": true,
             "source": {
               "file": "res/ecmascript/modules/movian/settings.js",
-              "line": 266
+              "line": 272
             }
           },
           {
@@ -5444,7 +5444,7 @@
                 ],
                 "source": {
                   "file": "res/ecmascript/modules/movian/settings.js",
-                  "line": 317
+                  "line": 328
                 }
               },
               {
@@ -5452,7 +5452,7 @@
                 "name": "nodes",
                 "source": {
                   "file": "res/ecmascript/modules/movian/settings.js",
-                  "line": 313
+                  "line": 324
                 }
               },
               {
@@ -5466,14 +5466,14 @@
                 ],
                 "source": {
                   "file": "res/ecmascript/modules/movian/settings.js",
-                  "line": 329
+                  "line": 340
                 }
               }
             ],
             "receiverMutation": true,
             "source": {
               "file": "res/ecmascript/modules/movian/settings.js",
-              "line": 309
+              "line": 320
             }
           }
         ],
@@ -5492,7 +5492,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/movian/settings.js",
-              "line": 317
+              "line": 328
             }
           },
           {
@@ -5500,7 +5500,7 @@
             "name": "id",
             "source": {
               "file": "res/ecmascript/modules/movian/settings.js",
-              "line": 274
+              "line": 280
             }
           },
           {
@@ -5508,7 +5508,7 @@
             "name": "nodes",
             "source": {
               "file": "res/ecmascript/modules/movian/settings.js",
-              "line": 284
+              "line": 290
             }
           },
           {
@@ -5516,7 +5516,7 @@
             "name": "properties",
             "source": {
               "file": "res/ecmascript/modules/movian/settings.js",
-              "line": 300
+              "line": 306
             }
           },
           {
@@ -5530,7 +5530,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/movian/settings.js",
-              "line": 329
+              "line": 340
             }
           }
         ],
@@ -5692,7 +5692,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/movian/sqlite.js",
-              "line": 4
+              "line": 5
             }
           }
         ],
@@ -5708,7 +5708,7 @@
                 "params": [],
                 "source": {
                   "file": "res/ecmascript/modules/movian/sqlite.js",
-                  "line": 8
+                  "line": 9
                 }
               },
               {
@@ -5717,7 +5717,7 @@
                 "params": [],
                 "source": {
                   "file": "res/ecmascript/modules/movian/sqlite.js",
-                  "line": 12
+                  "line": 13
                 },
                 "variadic": true
               },
@@ -5727,7 +5727,7 @@
                 "params": [],
                 "source": {
                   "file": "res/ecmascript/modules/movian/sqlite.js",
-                  "line": 22
+                  "line": 23
                 }
               },
               {
@@ -5738,7 +5738,7 @@
                 ],
                 "source": {
                   "file": "res/ecmascript/modules/movian/sqlite.js",
-                  "line": 27
+                  "line": 29
                 }
               }
             ],
@@ -5749,7 +5749,7 @@
                 "name": "db",
                 "source": {
                   "file": "res/ecmascript/modules/movian/sqlite.js",
-                  "line": 5
+                  "line": 6
                 }
               },
               {
@@ -5757,7 +5757,7 @@
                 "name": "lastErrorCode",
                 "source": {
                   "file": "res/ecmascript/modules/movian/sqlite.js",
-                  "line": 39
+                  "line": 41
                 }
               },
               {
@@ -5765,7 +5765,7 @@
                 "name": "lastErrorString",
                 "source": {
                   "file": "res/ecmascript/modules/movian/sqlite.js",
-                  "line": 36
+                  "line": 38
                 }
               },
               {
@@ -5773,14 +5773,14 @@
                 "name": "lastRowId",
                 "source": {
                   "file": "res/ecmascript/modules/movian/sqlite.js",
-                  "line": 33
+                  "line": 35
                 }
               }
             ],
             "receiver": "exports.DB",
             "source": {
               "file": "res/ecmascript/modules/movian/sqlite.js",
-              "line": 5
+              "line": 6
             }
           }
         ],
@@ -5799,7 +5799,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/movian/store.js",
-              "line": 56
+              "line": 58
             }
           },
           {
@@ -5810,7 +5810,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/movian/store.js",
-              "line": 33
+              "line": 34
             }
           }
         ],
@@ -5831,14 +5831,14 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/movian/subtitles.js",
-              "line": 4
+              "line": 5
             }
           },
           {
             "name": "getLanguages",
             "source": {
               "file": "res/ecmascript/modules/movian/subtitles.js",
-              "line": 17
+              "line": 18
             }
           }
         ],
@@ -5955,7 +5955,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/movian/xml.js",
-              "line": 74
+              "line": 76
             }
           },
           {
@@ -5966,7 +5966,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/movian/xml.js",
-              "line": 69
+              "line": 70
             }
           }
         ],
@@ -9963,6 +9963,6 @@
       }
     ]
   },
-  "movianRevision": "0da2750626c7320c8495ad2f6b3d859ba095b9eb",
+  "movianRevision": "65bdd07e19bb769c099055db1ca40baa5d70d036",
   "schemaVersion": 1
 }

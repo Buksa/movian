@@ -1,6 +1,7 @@
 
 var sqlite = require('native/sqlite');
 
+/** @param {string} dbname handed to native/sqlite.create */
 exports.DB = function(dbname) {
   this.db = sqlite.create(dbname);
 }
@@ -24,6 +25,7 @@ exports.DB.prototype.step = function() {
 }
 
 
+/** @param {string} path a directory of numbered schema steps */
 exports.DB.prototype.upgradeSchema = function(path) {
   return sqlite.upgradeSchema(this.db, path);
 }

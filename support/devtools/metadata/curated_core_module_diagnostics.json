@@ -33,19 +33,19 @@
   "expected": [
     {
       "file": "res/ecmascript/modules/movian/html.js",
-      "line": 55,
+      "line": 59,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/html.js",
-      "line": 60,
+      "line": 68,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/html.js",
-      "line": 69,
+      "line": 81,
       "code": 2339,
       "class": "private-instance-state"
     },
@@ -213,13 +213,13 @@
     },
     {
       "file": "res/ecmascript/modules/movian/sqlite.js",
-      "line": 15,
+      "line": 16,
       "code": 2403,
       "class": "loose-var-redeclaration"
     },
     {
       "file": "res/ecmascript/modules/movian/store.js",
-      "line": 52,
+      "line": 53,
       "code": 2345,
       "class": "duktape-proxy-handler"
     },

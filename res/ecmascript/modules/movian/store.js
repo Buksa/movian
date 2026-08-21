@@ -30,6 +30,7 @@ var storeproxy = {
   }
 }
 
+/** @param {string} path a filename, not a store name */
 exports.createFromPath = function(path) {
   var obj = {
     filename: path,
@@ -53,6 +54,7 @@ exports.createFromPath = function(path) {
 }
 
 
+/** @param {string} name resolved under the plugin's persistent directory */
 exports.create = function(name) {
   var path = Core.storagePath + '/store/' + name;
   var fs = require('native/fs');
