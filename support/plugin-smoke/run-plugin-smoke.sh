@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=../movian-procs.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/movian-procs.sh"
+
 MOVIAN_BIN=${MOVIAN_BIN:-./build.debug/movian}
 PLUGIN_PATH=${PLUGIN_PATH:-}
 START_URL=${START_URL:-}
@@ -58,7 +61,7 @@ case "$MIN_NODES" in
 esac
 
 if [ "$ALLOW_EXISTING_MOVIAN" != "1" ]; then
-  existing=$(pgrep -a -f '/movian( |$)|build\.(debug|release|debug-gdb|asan)/movian' || true)
+  existing=$(movian_running_procs)
   [ -z "$existing" ] || fail "Movian already appears to be running. Set ALLOW_EXISTING_MOVIAN=1 to continue.
 $existing"
 fi

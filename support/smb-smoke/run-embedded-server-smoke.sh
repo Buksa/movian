@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 . "$SCRIPT_DIR/common.sh"
+# shellcheck source=../movian-procs.sh
+. "$SCRIPT_DIR/../movian-procs.sh"
 
 SMB_SMOKE_ROOT="${SMB_SMOKE_ROOT:-$(pwd)}"
 SMB_SMOKE_MOVIAN="${SMB_SMOKE_MOVIAN:-$SMB_SMOKE_ROOT/build.debug/movian}"
@@ -27,7 +29,7 @@ command -v "${CC:-gcc}" >/dev/null ||
   fail "${CC:-gcc} is required"
 
 if [ "$SMB_SERVER_SMOKE_ALLOW_EXISTING" != "1" ]; then
-  existing=$(pgrep -a -f '/movian( |$)|build\.(debug|release)/movian' || true)
+  existing=$(movian_running_procs)
   [ -z "$existing" ] || fail "Movian already appears to be running:
 $existing
 Set SMB_SERVER_SMOKE_ALLOW_EXISTING=1 to run anyway."
