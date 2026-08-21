@@ -24,6 +24,14 @@ Service.prototype.destroy = function() {
 }
 
 
+/**
+ * @param {string} title
+ * @param {string} url
+ * @param {string} type
+ * @param {boolean} enabled
+ * @param {string} [icon]
+ * @returns {Service}
+ */
 exports.create = function(title, url, type, enabled, icon) {
   var s = require('native/service');
   return new Service(s.create("plugin:" + Plugin.id, title, url,

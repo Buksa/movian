@@ -10,16 +10,16 @@
     "signatures that contradicted a real call site here shipped green through",
     "the whole battery (movian#209) because nothing compiled these files.",
     "",
-    "`Duktape` used to be listed here as a recorded declaration gap. It is declared now (curated_interpreter_objects.json), the two diagnostics stopped firing, and the both-directions check refused to let the stale entries stay -- which is the half of this list that keeps it from decaying into a baseline."
+    "`Duktape` used to be listed here as a recorded declaration gap. It is declared now (curated_interpreter_objects.json), the two diagnostics stopped firing, and the both-directions check refused to let the stale entries stay -- which is the half of this list that keeps it from decaying into a baseline.",
+    "",
+    "`placeholder-callback` is gone too. It was never a fact about the declarations -- it was `this.onData = function() {}` inferring `() => void` from a no-op the module replaces at runtime. Declaring the placeholders with the handler signature they actually carry (movian#211) removed all four, so an accepted diagnostic turned out to be an annotation nobody had written.",
+    "",
+    "Line numbers move when the modules gain comments, and movian#211's annotations moved all of them at once. That is the cost of pinning position: a re-baseline is a prompt to re-read the list, which is the opposite of what a count-only pin would have done -- there, a defect moving into a file that already had that code would have hidden."
   ],
   "classes": {
     "private-instance-state": {
       "code": 2339,
       "why": "The calibration corpus declares the PUBLIC surface. State a constructor assigns for its own use -- Item.root, Item.page, NodeProto._gumboNode, Service.id, the videoscrobbler handlers -- is deliberately not declared; requiring it produces false positives from legitimate private state (settled in movian#137). The module reading its own private field is that decision, observed."
-    },
-    "placeholder-callback": {
-      "code": 2554,
-      "why": "`this.onData = function() {}` is a no-op placeholder that `on()` later replaces with a handler taking an argument. tsc infers the arity of the PLACEHOLDER. Calling it with one argument is correct JavaScript and correct at runtime; the declaration is not involved."
     },
     "loose-var-redeclaration": {
       "code": 2403,
@@ -32,182 +32,164 @@
   },
   "expected": [
     {
-      "file": "res/ecmascript/modules/http.js",
-      "line": 13,
-      "code": 2554,
-      "class": "placeholder-callback"
+      "file": "res/ecmascript/modules/movian/html.js",
+      "line": 59,
+      "code": 2339,
+      "class": "private-instance-state"
     },
     {
-      "file": "res/ecmascript/modules/http.js",
-      "line": 47,
-      "code": 2554,
-      "class": "placeholder-callback"
+      "file": "res/ecmascript/modules/movian/html.js",
+      "line": 68,
+      "code": 2339,
+      "class": "private-instance-state"
     },
     {
-      "file": "res/ecmascript/modules/http.js",
+      "file": "res/ecmascript/modules/movian/html.js",
+      "line": 81,
+      "code": 2339,
+      "class": "private-instance-state"
+    },
+    {
+      "file": "res/ecmascript/modules/movian/page.js",
+      "line": 28,
+      "code": 2339,
+      "class": "private-instance-state"
+    },
+    {
+      "file": "res/ecmascript/modules/movian/page.js",
+      "line": 29,
+      "code": 2339,
+      "class": "private-instance-state"
+    },
+    {
+      "file": "res/ecmascript/modules/movian/page.js",
+      "line": 41,
+      "code": 2339,
+      "class": "private-instance-state"
+    },
+    {
+      "file": "res/ecmascript/modules/movian/page.js",
+      "line": 45,
+      "code": 2339,
+      "class": "private-instance-state"
+    },
+    {
+      "file": "res/ecmascript/modules/movian/page.js",
       "line": 49,
-      "code": 2554,
-      "class": "placeholder-callback"
-    },
-    {
-      "file": "res/ecmascript/modules/movian/html.js",
-      "line": 55,
-      "code": 2339,
-      "class": "private-instance-state"
-    },
-    {
-      "file": "res/ecmascript/modules/movian/html.js",
-      "line": 60,
-      "code": 2339,
-      "class": "private-instance-state"
-    },
-    {
-      "file": "res/ecmascript/modules/movian/html.js",
-      "line": 69,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 24,
+      "line": 53,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 25,
+      "line": 81,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 36,
+      "line": 103,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 40,
+      "line": 118,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 44,
+      "line": 123,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 48,
+      "line": 125,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 69,
+      "line": 126,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 82,
+      "line": 136,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 92,
+      "line": 137,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 97,
+      "line": 139,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 99,
+      "line": 140,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 100,
+      "line": 143,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 105,
+      "line": 145,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 106,
+      "line": 146,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 108,
+      "line": 166,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 109,
+      "line": 316,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 112,
+      "line": 356,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 114,
+      "line": 385,
       "code": 2339,
       "class": "private-instance-state"
     },
     {
       "file": "res/ecmascript/modules/movian/page.js",
-      "line": 115,
-      "code": 2339,
-      "class": "private-instance-state"
-    },
-    {
-      "file": "res/ecmascript/modules/movian/page.js",
-      "line": 130,
-      "code": 2339,
-      "class": "private-instance-state"
-    },
-    {
-      "file": "res/ecmascript/modules/movian/page.js",
-      "line": 268,
-      "code": 2339,
-      "class": "private-instance-state"
-    },
-    {
-      "file": "res/ecmascript/modules/movian/page.js",
-      "line": 302,
-      "code": 2339,
-      "class": "private-instance-state"
-    },
-    {
-      "file": "res/ecmascript/modules/movian/page.js",
-      "line": 325,
-      "code": 2339,
-      "class": "private-instance-state"
-    },
-    {
-      "file": "res/ecmascript/modules/movian/page.js",
-      "line": 430,
+      "line": 504,
       "code": 2339,
       "class": "private-instance-state"
     },
@@ -231,13 +213,13 @@
     },
     {
       "file": "res/ecmascript/modules/movian/sqlite.js",
-      "line": 15,
+      "line": 16,
       "code": 2403,
       "class": "loose-var-redeclaration"
     },
     {
       "file": "res/ecmascript/modules/movian/store.js",
-      "line": 52,
+      "line": 53,
       "code": 2345,
       "class": "duktape-proxy-handler"
     },
@@ -288,12 +270,6 @@
       "line": 38,
       "code": 2339,
       "class": "private-instance-state"
-    },
-    {
-      "file": "res/ecmascript/modules/websocket.js",
-      "line": 18,
-      "code": 2554,
-      "class": "placeholder-callback"
     }
   ]
 }

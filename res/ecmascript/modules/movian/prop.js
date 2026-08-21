@@ -94,10 +94,20 @@ exports.__proto__ = np;
 exports.global = makeProp(np.global());
 exports.makeProp = makeProp;
 
+/**
+ * @param {string} [name] native/prop.create takes it with duk_to_string and
+ *   the wrapper is called with no argument throughout movian/page.js
+ */
 exports.createRoot = function(name) {
   return makeProp(np.create(name));
 }
 
+/**
+ * @param {PropHandle} prop
+ * @param {(...args: any[]) => void} callback
+ * @param {import('native/prop').SubscribeOptions} [ctrl] the keys
+ *   es_prop_subscribe reads off argument 2
+ */
 exports.subscribeValue = function(prop, callback, ctrl) {
   return np.subscribe(prop, function(type, v1, v2) {
 

@@ -1,5 +1,9 @@
 var prop = require('movian/prop');
 
+/**
+ * @param {{itemtype?: string, title?: string, icon?: string,
+ *          handler?: Function}} conf the fields this function reads
+ */
 exports.create = function(conf) {
 
   var node = prop.createRoot();

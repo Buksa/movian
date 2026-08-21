@@ -66,11 +66,13 @@ var htsmsgHandler = {
 }
 
 
+/** @param {string} str handed to native/htsmsg.createFromXML */
 exports.parse = function(str) {
   var x = htsmsg.createFromXML(str);
   return new Proxy({msg: x}, htsmsgHandler);
 }
 
+/** @param {HtsmsgHandle} x an htsmsg a native already produced */
 exports.htsmsg = function(x) {
   return new Proxy({msg: x}, htsmsgHandler);
 }

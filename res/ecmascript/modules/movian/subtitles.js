@@ -1,6 +1,7 @@
 var subtitle = require('native/subtitle');
 
 
+/** @param {(req: any) => void} fn called back per subtitle search */
 exports.addProvider = function(fn) {
   subtitle.addProvider(function(root, query, basescore, autosel) {
     var req = Object.create(query);

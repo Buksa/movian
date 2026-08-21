@@ -18,6 +18,10 @@ function Item(page) {
   this.eventhandlers = {};
 }
 
+/**
+ * @param {import('native/metadata').VideoMetadataBindOptions} obj the keys
+ *   es_video_metadata_bind_duk reads off argument 2
+ */
 Item.prototype.bindVideoMetadata = function(obj) {
   if(this.mlv)
     Core.resourceDestroy(this.mlv);
@@ -25,6 +29,7 @@ Item.prototype.bindVideoMetadata = function(obj) {
                                                           this.root.url, obj);
 }
 
+/** @param {*} [obj] never read; the binding is held on the item itself */
 Item.prototype.unbindVideoMetadata = function(obj) {
   if(this.mlv) {
     Core.resourceDestroy(this.mlv);
@@ -48,10 +53,17 @@ Item.prototype.disable = function() {
   this.root.enabled = false;
 }
 
+/** @param {PropHandle} item an option node returned by addOpt* */
 Item.prototype.destroyOption = function(item) {
   prop.destroy(item);
 }
 
+/**
+ * @param {string} title shown as the option's metadata.title
+ * @param {Function} func invoked when the action fires
+ * @param {string} [subtype] optional discriminator on the node
+ * @returns {PropHandle} the option node, for destroyOption
+ */
 Item.prototype.addOptAction = function(title, func, subtype) {
   var node = prop.createRoot();
   node.type = 'action';
@@ -71,6 +83,15 @@ Item.prototype.addOptAction = function(title, func, subtype) {
 }
 
 
+/**
+ * @param {string} title
+ * @param {string} url the location the option opens
+ * @param {string} [subtype]
+ *
+ * Returns nothing, unlike addOptAction, which hands back the node so
+ * destroyOption can remove it later. The asymmetry is in the source, not in
+ * this comment.
+ */
 Item.prototype.addOptURL = function(title, url, subtype) {
   var node = prop.createRoot();
   node.type = 'location';
@@ -83,6 +104,11 @@ Item.prototype.addOptURL = function(title, url, subtype) {
 }
 
 
+/**
+ * @param {string} title
+ *
+ * Returns nothing; see addOptURL.
+ */
 Item.prototype.addOptSeparator = function(title) {
   var node = prop.createRoot();
   node.type = 'separator';
@@ -101,6 +127,11 @@ Item.prototype.destroy = function() {
 }
 
 
+/**
+ * @param {Item|null} before the item to move this one in front of; null or
+ *   undefined moves it last, which native/prop.moveBefore accepts because it
+ *   reads its second argument with the nonthrowing lookup
+ */
 Item.prototype.moveBefore = function(before) {
   prop.moveBefore(this.root, before ? before.root : null);
   var thispos = this.page.items.indexOf(this);
@@ -118,6 +149,11 @@ Item.prototype.moveBefore = function(before) {
 
 
 
+/**
+ * @param {string} type the event name to dispatch on
+ * @param {(...args: any[]) => void} callback appended to the handlers for
+ *   that name; several may be registered
+ */
 Item.prototype.onEvent = function(type, callback) {
   if(type in this.eventhandlers) {
     this.eventhandlers[type].push(callback);
@@ -236,10 +272,15 @@ function Page(root, sync, flat) {
 }
 
 
+/** @param {boolean} v handed to native/prop.haveMore */
 Page.prototype.haveMore = function(v) {
   prop.haveMore(this.model.nodes, v);
 }
 
+/**
+ * @param {PropHandle} v compared against each item's root
+ * @returns {number} the index, or -1
+ */
 Page.prototype.findItemByProp = function(v) {
   for(var i = 0; i < this.items.length; i++) {
     if(prop.isSame(this.items[i].root, v)) {
@@ -249,6 +290,7 @@ Page.prototype.findItemByProp = function(v) {
   return -1;
 }
 
+/** @param {*} msg anything with a toString(); Error is the usual case */
 Page.prototype.error = function(msg) {
   this.model.loading = false;
   this.model.type = 'openerror';
@@ -260,6 +302,12 @@ Page.prototype.getItems = function() {
 }
 
 
+/**
+ * @param {string} url
+ * @param {string} [type]
+ * @param {Object} [metadata]
+ * @returns {Item}
+ */
 Page.prototype.appendItem = function(url, type, metadata) {
 
   var item = new Item(this);
@@ -296,6 +344,12 @@ Page.prototype.appendItem = function(url, type, metadata) {
   return item;
 }
 
+/**
+ * @param {string} title
+ * @param {Function} func
+ * @param {string} [subtype]
+ * @returns {Item}
+ */
 Page.prototype.appendAction = function(title, func, subtype) {
   var item = new Item(this);
 
@@ -317,6 +371,12 @@ Page.prototype.appendAction = function(title, func, subtype) {
   return item;
 }
 
+/**
+ * @param {string} type
+ * @param {*} [data]
+ * @param {Object} [metadata]
+ * @returns {Item}
+ */
 Page.prototype.appendPassiveItem = function(type, data, metadata) {
 
   var item = new Item(this);
@@ -338,6 +398,7 @@ Page.prototype.flush = function() {
   prop.deleteChilds(this.model.nodes);
 }
 
+/** @param {string} url */
 Page.prototype.redirect = function(url) {
 
   Core.resourceDestroy(this.nodesub);
@@ -349,6 +410,10 @@ Page.prototype.redirect = function(url) {
   }
 }
 
+/**
+ * @param {string} type
+ * @param {(...args: any[]) => void} callback
+ */
 Page.prototype.onEvent = function(type, callback) {
   if(type in this.eventhandlers) {
     this.eventhandlers[type].push(callback);
@@ -381,6 +446,10 @@ Page.prototype.onEvent = function(type, callback) {
 // ---------------------------------------------------------------
 
 
+/**
+ * @param {string} re a regular expression; native/route.create anchors it
+ * @param {(page: Page, ...matches: any[]) => void} callback
+ */
 exports.Route = function(re, callback) {
 
   this.route = require('native/route').create(re, function(pageprop, sync, args) {
@@ -410,6 +479,11 @@ exports.Route.prototype.destroy = function() {
 }
 
 
+/**
+ * @param {string} title
+ * @param {string} icon
+ * @param {(page: Page, query: string) => void} callback
+ */
 exports.Searcher = function(title, icon, callback) {
 
   this.searcher = require('native/hook').register('searcher', function(model, query, loading) {

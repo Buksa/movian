@@ -263,6 +263,12 @@ sp.createMultiOpt = function(id, title, options, callback, persistent) {
 /// Store settings using store.js and add to global settings tree
 /// ---------------------------------------------------------------
 
+/**
+ * @param {string} id
+ * @param {string} title
+ * @param {string} icon
+ * @param {string} desc
+ */
 exports.globalSettings = function(id, title, icon, desc) {
 
   this.__proto__ = sp;
@@ -306,6 +312,11 @@ exports.globalSettings = function(id, title, icon, desc) {
 /// Store settings in the kvstore (key'ed on an URL)
 /// -----------------------------------------------
 
+/**
+ * @param {*} nodes the property node the settings are attached to
+ * @param {string} url the kvstore key prefix
+ * @param {string} domain es_kvstore_get_domain accepts only "plugin"
+ */
 exports.kvstoreSettings = function(nodes, url, domain) {
 
   this.__proto__ = sp;

@@ -51,11 +51,19 @@ function NodeProto() {
 }
 
 
+/**
+ * @param {string} id
+ * @returns {Node|null} native/gumbo.findById answers nothing when it misses
+ */
 NodeProto.prototype.getElementById = function(id) {
   var n = gumbo.findById(this._gumboNode, id);
   return n ? new Node(n) : null;
 }
 
+/**
+ * @param {string} cls
+ * @returns {Node[]}
+ */
 NodeProto.prototype.getElementByClassName = function(cls) {
   return gumbo.findByClassName(this._gumboNode, cls).map(function(n) {
     return new Node(n);
@@ -65,6 +73,10 @@ NodeProto.prototype.getElementByClassName = function(cls) {
 NodeProto.prototype.getElementsByClassName =
   NodeProto.prototype.getElementByClassName;
 
+/**
+ * @param {string} tag
+ * @returns {Node[]}
+ */
 NodeProto.prototype.getElementByTagName = function(tag) {
   return gumbo.findByTagName(this._gumboNode, tag).map(function(n) {
     return new Node(n);
@@ -85,6 +97,7 @@ function Node(node) {
 /**
  *
  */
+/** @param {string} html handed to native/gumbo.parse */
 exports.parse = function(html) {
   var gdoc = gumbo.parse(html);
 
