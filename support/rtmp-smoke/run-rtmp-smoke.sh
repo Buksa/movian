@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=../movian-procs.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/movian-procs.sh"
+
 MOVIAN_BIN=${MOVIAN_BIN:-./build.debug/movian}
 ARTIFACTS=${ARTIFACTS:-/tmp/movian-rtmp-smoke}
 PORT=${PORT:-19368}
@@ -71,11 +74,10 @@ case "$WAIT_SECONDS" in
 esac
 
 if [ "$ALLOW_EXISTING_MOVIAN" != "1" ]; then
-  existing=$(
-    pgrep -a -f '/movian( |$)|build\.(debug|release|debug-gdb|asan|debug-ffrtmp-smoke)/movian' |
-      awk -v self="$$" -v parent="$PPID" '$1 != self && $1 != parent { print }' ||
-      true
-  )
+  # The awk filter that used to sit here dropped only $$ and $PPID -- a
+  # symptom-level patch for this same self-match. The path can equally sit in
+  # a grandparent's argv, or in any unrelated process that names it.
+  existing=$(movian_running_procs)
   [ -z "$existing" ] || fail "Movian already appears to be running. Set ALLOW_EXISTING_MOVIAN=1 to continue.
 $existing"
 fi
