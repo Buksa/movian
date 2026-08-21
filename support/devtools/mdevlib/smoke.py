@@ -18,7 +18,11 @@ from typing import Any, Callable
 from . import harness
 from .harness import Instance, MdevError
 
-SMOKES_DIR = harness.REPO_ROOT / "support" / "devtools" / "smokes"
+CORE_SMOKES_DIR = harness.REPO_ROOT / "support" / "devtools" / "smokes"
+# Kept as the core location under its old name; discovery is a path now.
+SMOKES_DIR = CORE_SMOKES_DIR
+SMOKES_PATH_ENV = "MOVIAN_SMOKES_PATH"
+LOCAL_SMOKES_SUBDIR = Path(".movian") / "smokes"
 CURRENT_PAGE = "global/navigators/current/currentpage"
 UI_FRAMERATE = "global/userinterfaces/ui/framerate"
 WEDGE_BACKTRACE_FILE = "thread-backtrace.txt"
@@ -127,19 +131,67 @@ def _validate_definition(path: Path, data: Any) -> dict[str, Any]:
     return data
 
 
+def smoke_search_path() -> list[Path]:
+    """Directories searched for smoke definitions, in order.
+
+    A plugin repository could not ship a regression smoke at all: discovery
+    was the single hardcoded core directory, so an author had to write JSON
+    into somebody else's checkout and name their plugin by absolute path,
+    neither of which survives being cloned (movian#164).
+
+    Three sources now, and the last one is the point: a plugin repo with
+    `.movian/smokes/*.json` is found by running mdev from that repo, with no
+    configuration and nothing written into the core.
+    """
+    candidates = [CORE_SMOKES_DIR]
+    for part in os.environ.get(SMOKES_PATH_ENV, "").split(os.pathsep):
+        part = part.strip()
+        if part:
+            candidates.append(Path(part).expanduser())
+    candidates.append(Path.cwd() / LOCAL_SMOKES_SUBDIR)
+
+    seen: set[Path] = set()
+    path: list[Path] = []
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        path.append(resolved)
+    return path
+
+
 def load_definitions() -> list[dict[str, Any]]:
     definitions = []
-    for path in SMOKES_DIR.glob("*.json"):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as error:
-            raise MdevError("cannot read smoke definition %s: %s" % (path, error))
-        definitions.append(_validate_definition(path, data))
+    origin: dict[str, Path] = {}
+    searched = smoke_search_path()
+    for directory in searched:
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob("*.json")):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as error:
+                raise MdevError("cannot read smoke definition %s: %s" % (path, error))
+            definition = _validate_definition(path, data)
+            name = definition["name"]
+            if name in origin:
+                # Naming both files, because "duplicate smoke name" with one
+                # directory in the message was unactionable the moment there
+                # was more than one directory.
+                raise MdevError(
+                    "duplicate smoke name %r: %s and %s" % (name, origin[name], path))
+            origin[name] = path
+            # Provenance travels with the definition: it decides what a
+            # relative needs.plugin is relative TO, and `smoke list` shows it.
+            definition["source"] = path
+            definitions.append(definition)
     if not definitions:
-        raise MdevError("no smoke definitions found in %s" % SMOKES_DIR)
-    names = [definition["name"] for definition in definitions]
-    if len(set(names)) != len(names):
-        raise MdevError("duplicate smoke name in %s" % SMOKES_DIR)
+        raise MdevError("no smoke definitions found in %s"
+                        % ", ".join(str(d) for d in searched))
     order = {name: index for index, name in enumerate(SMOKE_ORDER)}
     return sorted(definitions, key=lambda item: (order.get(item["name"], len(order)),
                                                  item["name"]))
@@ -157,11 +209,30 @@ def select_definitions(definitions: list[dict[str, Any]], target: str) -> list[d
     return selected
 
 
-def _resolve_repo_path(path: str) -> str:
+def _resolve_repo_path(path: str, base: Path | None = None) -> str:
+    """Resolve a path from a smoke definition.
+
+    A relative path resolves against `base` -- the directory of the file that
+    declared it -- so a plugin repo can say `"plugin": "."` and mean itself.
+    Core definitions keep resolving against the repository root, which is
+    what the existing set is written against.
+    """
     value = Path(path)
     if not value.is_absolute():
-        value = harness.REPO_ROOT / value
+        value = (base if base is not None else harness.REPO_ROOT) / value
     return str(value.resolve())
+
+
+def _definition_base(definition: dict[str, Any]) -> Path:
+    source = definition.get("source")
+    if source is None:
+        return harness.REPO_ROOT
+    parent = Path(source).parent
+    try:
+        parent.relative_to(CORE_SMOKES_DIR)
+    except ValueError:
+        return parent
+    return harness.REPO_ROOT
 
 
 def _plugins_for(definitions: list[dict[str, Any]]) -> list[str]:
@@ -173,7 +244,7 @@ def _plugins_for(definitions: list[dict[str, Any]]) -> list[str]:
                 definition["name"], binary))
         plugin = definition["needs"]["plugin"]
         if plugin is not None:
-            resolved = _resolve_repo_path(plugin)
+            resolved = _resolve_repo_path(plugin, _definition_base(definition))
             if resolved not in plugins:
                 plugins.append(resolved)
     return plugins

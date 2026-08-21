@@ -568,14 +568,33 @@ def cmd_lsp_doctor(_args: argparse.Namespace) -> int:
 
 def cmd_smoke_list(args: argparse.Namespace) -> int:
     definitions = smoke.load_definitions()
+    core = smoke.CORE_SMOKES_DIR
+
+    def provenance(item):
+        source = item.get("source")
+        if source is None:
+            return "core"
+        try:
+            Path(source).parent.relative_to(core)
+        except ValueError:
+            return str(source)
+        return "core"
+
     data = {
+        "searchPath": [str(d) for d in smoke.smoke_search_path()],
         "smokes": [
-            {"name": item["name"], "describe": item["describe"]}
+            {"name": item["name"], "describe": item["describe"],
+             "source": str(item["source"]) if item.get("source") else None,
+             "provenance": provenance(item)}
             for item in definitions
-        ]
+        ],
     }
+    # Provenance is shown per entry because a name alone stops identifying a
+    # definition the moment discovery spans more than one directory.
     human = "\n".join(
-        "%-16s %s" % (item["name"], item["describe"])
+        "%-16s %-8s %s" % (item["name"], provenance(item)[:8]
+                           if provenance(item) == "core" else "plugin",
+                           item["describe"])
         for item in definitions
     )
     emit(args, data, human)
