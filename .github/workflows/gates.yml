@@ -86,6 +86,16 @@ jobs:
       - name: metadata rule tests
         run: python3 -m unittest discover -s tests/tooling/metadata -v
 
+      # Smoke DISCOVERY is path resolution and JSON loading, so it runs here
+      # even though the rest of tests/tooling/mdev cannot: its sibling
+      # test_http_401_inspector.py drives a real Movian, and this workflow
+      # deliberately does not build. Selected by filename rather than by
+      # directory for exactly that reason (movian#164).
+      - name: mdev smoke discovery
+        run: >
+          python3 -m unittest discover -s tests/tooling/mdev
+          -p 'test_smoke_discovery.py' -v
+
   hygiene:
     name: whitespace and merge markers
     runs-on: ubuntu-latest
