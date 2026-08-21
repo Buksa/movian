@@ -4161,7 +4161,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/http.js",
-              "line": 94
+              "line": 104
             }
           },
           {
@@ -4175,7 +4175,7 @@
             "returns": "Request",
             "source": {
               "file": "res/ecmascript/modules/http.js",
-              "line": 88
+              "line": 92
             }
           }
         ],
@@ -9749,7 +9749,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/websocket.js",
-              "line": 8
+              "line": 12
             }
           }
         ],
@@ -9767,7 +9767,7 @@
                 ],
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
-                  "line": 46
+                  "line": 54
                 }
               },
               {
@@ -9778,7 +9778,7 @@
                 ],
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
-                  "line": 41
+                  "line": 49
                 }
               }
             ],
@@ -9789,7 +9789,7 @@
                 "name": "_sock",
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
-                  "line": 19
+                  "line": 23
                 }
               },
               {
@@ -9797,7 +9797,7 @@
                 "name": "onclose",
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
-                  "line": 17
+                  "line": 21
                 }
               },
               {
@@ -9805,7 +9805,7 @@
                 "name": "oninput",
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
-                  "line": 15
+                  "line": 19
                 }
               },
               {
@@ -9813,14 +9813,14 @@
                 "name": "onopen",
                 "source": {
                   "file": "res/ecmascript/modules/websocket.js",
-                  "line": 13
+                  "line": 17
                 }
               }
             ],
             "receiver": "exports.w3cwebsocket",
             "source": {
               "file": "res/ecmascript/modules/websocket.js",
-              "line": 13
+              "line": 17
             }
           }
         ],
@@ -9963,6 +9963,6 @@
       }
     ]
   },
-  "movianRevision": "3c9b2c38bcb9fc8090541f74aa9294634f11d8b8",
+  "movianRevision": "0da2750626c7320c8495ad2f6b3d859ba095b9eb",
   "schemaVersion": 1
 }

@@ -81,7 +81,11 @@ Request.prototype.on = function(name, fn) {
 
 /**
  * @param {string|Object} opts a URL, or an object url.format() can render
- * @param {Function} [callback] unused here; Request.end() drives the response
+ * @param {unknown} [callback] accepted and NEVER invoked anywhere in this
+ *   module -- Request.on('response') is the real callback surface. Typing it
+ *   `Function` would advertise a callable contract the code does not have and
+ *   reject values the wrapper safely ignores; the accepted declaration at
+ *   tests/reference/http.d.ts:26 says `unknown` for the same reason.
  * @param {boolean} [https] set by the https module wrapper
  * @returns {Request}
  */
@@ -91,6 +95,12 @@ exports.request = function(opts, callback, https) {
 }
 
 
+/**
+ * @param {string|Object} opts a URL, or an object url.format() can render
+ * @param {unknown} [callback] forwarded to request, which never invokes it
+ * @param {boolean} [https] set by the https module wrapper
+ * @returns {Request}
+ */
 exports.get = function(opts, callback, https) {
 
   var r = exports.request(opts, callback, https);
