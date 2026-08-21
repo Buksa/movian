@@ -5,9 +5,9 @@ var ws = require('native/websocket');
  * @param {string} URL passed to native/websocket.clientCreate
  * @param {string} [protocol] the subprotocol. Optional:
  *   es_websocket_client_create reads it with duk_get_string, which answers
- *   NULL when it is absent, and
- *   plugin_examples/03-advanced/01-websocket-client/main.js:43 constructs
- *   with a URL alone.
+ *   NULL when it is absent -- and es_websocket.c:569 then reads it as
+ *   `proto ? strdup(proto) : NULL`, so the absent case is written out
+ *   rather than tolerated by accident.
  */
 exports.w3cwebsocket = function(URL, protocol) {
 
