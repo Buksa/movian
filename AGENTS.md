@@ -151,11 +151,18 @@ measurement bug, not a finding.
 `generated/movian-api.d.ts` is a contract. It has one plugin author today and
 is written for more later, which means the moment to be careful is now.
 
-**Widening is free** -- `any` to a real type, a union gaining a member. Nothing
-that compiled stops compiling.
+**Only a union gaining a member is free.** Everything else needs the proof
+below, and that includes replacing `any`.
+
+`any` accepts every argument, so giving a parameter a concrete type rejects
+callers that compiled before -- `f(42)` is fine against `any` and an error
+against `string`. Calling that widening would license exactly the unproven
+restrictions this rule exists to prevent. It is narrowing, and the fact that
+it usually improves the declaration does not change what it does to a caller.
 
 **Narrowing requires proof from the C**, quoted in the commit: the exact
-accessor, at the line where the callee reads that argument. `plugin_examples`
+accessor, at the line where the callee reads that argument. Replacing `any`
+is narrowing and needs that proof like any other. `plugin_examples`
 and the fixtures cannot license a narrowing, because both are our own corpus
 and contain no third-party call site by construction. Four signatures were
 narrowed wrongly in one round and every one of them passed the whole battery
