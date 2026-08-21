@@ -561,6 +561,39 @@ es_websocket_client_create(duk_context *ctx)
   const char *url = duk_safe_to_string(ctx, 0);
   const char *proto = duk_get_string(ctx, 1);
 
+  char protostr[64];
+  char hostname[256];
+  char path[1024];
+  int port = -1;
+
+  url_split(protostr, sizeof(protostr), NULL, 0,
+	    hostname, sizeof(hostname),
+            &port, path, sizeof(path), url);
+
+  const int want_tls = !strcmp(protostr, "wss");
+
+  if(port == -1)
+    port = want_tls ? 443 : 80;
+
+  // The URL is parsed and the TLS context obtained BEFORE anything is
+  // allocated, so the failure below can raise without a resource to unwind.
+  void *tlsctx = NULL;
+  if(want_tls) {
+    tlsctx = asyncio_ssl_create_client();
+    if(tlsctx == NULL) {
+      // asyncio_ssl_create_client() answers NULL on any build without
+      // OpenSSL -- the #else stub in asyncio_posix.c. That was assigned
+      // unchecked, so asyncio_connect() went on to open a PLAINTEXT socket
+      // to port 443 and put the handshake, Sec-WebSocket-Key included, on
+      // the wire in the clear. Captured doing exactly that (movian#213).
+      // Refusing is the only safe answer: a caller asked for wss and there
+      // is no transport that can honour it.
+      duk_error(ctx, DUK_ERR_ERROR,
+                "Unable to open %s -- this build has no TLS transport for "
+                "websockets", url);
+    }
+  }
+
   es_websocket_client_t *ewc = es_resource_alloc(&es_resource_websocket_client);
   ewc->ewc_task_group = task_group_create();
   prng_init2(&ewc->ewc_ws.maskgen);
@@ -572,25 +605,7 @@ es_websocket_client_create(duk_context *ctx)
 
   htsbuf_queue_init(&ewc->ewc_outq, 0);
 
-  char protostr[64];
-  char hostname[256];
-  char path[1024];
-  int port = -1;
-
-  url_split(protostr, sizeof(protostr), NULL, 0,
-	    hostname, sizeof(hostname),
-            &port, path, sizeof(path), url);
-
-  if(port == -1) {
-    if(!strcmp(protostr, "wss"))
-      port = 443;
-    else
-      port = 80;
-  }
-
-  if(!strcmp(protostr, "wss")) {
-    ewc->ewc_tlsctx = asyncio_ssl_create_client();
-  }
+  ewc->ewc_tlsctx = tlsctx;
 
   ewc->ewc_hostname = strdup(hostname);
   ewc->ewc_path = strdup(path);
