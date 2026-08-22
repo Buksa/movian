@@ -318,13 +318,34 @@ class Adoption(unittest.TestCase):
         # The refusal must come before the write.
         self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
 
-    def test_the_committed_oracle_records_its_build(self):
+    def _build_revision(self):
+        """The commit the committed oracle was captured from, skipping if
+        this clone does not have it.
+
+        A shallow clone is the normal state of a fresh `git clone --depth`,
+        and refusing to run there would fail a correct tree. CI fetches this
+        one commit explicitly so the skip is unreachable there -- if it ever
+        becomes reachable in CI, the fetch step failed and the run is red for
+        that instead.
+        """
         import json
+        import subprocess
         oracle = json.loads(
             gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
+        version = oracle.get("movianVersion")
+        self.assertIsInstance(version, str)
+        revision = version.rsplit(".g", 1)[-1]
+        present = subprocess.run(
+            ["git", "cat-file", "-e", revision + "^{commit}"],
+            cwd=str(REPO_ROOT), capture_output=True)
+        if present.returncode != 0:
+            self.skipTest(
+                "shallow clone: build %s not present" % revision)
+        return version
+
+    def test_the_committed_oracle_records_its_build(self):
         self.assertEqual(
-            gen.runtime_oracle_build_mismatch(oracle.get("movianVersion")),
-            [])
+            gen.runtime_oracle_build_mismatch(self._build_revision()), [])
 
     def test_a_capture_with_no_build_is_refused(self):
         self.assertTrue(gen.runtime_oracle_build_mismatch(None))
@@ -341,16 +362,14 @@ class Adoption(unittest.TestCase):
     def test_a_build_predating_a_c_change_is_refused(self):
         # The case the C half of the stamp exists for: the sources moved,
         # the binary did not, and the capture reports the old surface.
-        import json
-        oracle = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        version = self._build_revision()
         victim = REPO_ROOT / "src" / "ecmascript" / "es_fs.c"
         original = victim.read_text(encoding="utf-8")
         try:
             victim.write_text(
                 original + "\nstatic int probe_added(void) { return 1; }\n",
                 encoding="utf-8")
-            reasons = gen.runtime_oracle_build_mismatch(
-                oracle["movianVersion"])
+            reasons = gen.runtime_oracle_build_mismatch(version)
             self.assertTrue(reasons)
             self.assertIn("es_fs.c", reasons[0])
         finally:
@@ -362,8 +381,7 @@ class Adoption(unittest.TestCase):
         # from disk, so an unchanged binary answers correctly for an edited
         # module. Making that cost a rebuild would be the "too much" failure
         # in a different place.
-        import json
-        oracle = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        version = self._build_revision()
         victim = (REPO_ROOT / "res" / "ecmascript" / "modules"
                   / "movian" / "sqlite.js")
         original = victim.read_text(encoding="utf-8")
@@ -373,8 +391,7 @@ class Adoption(unittest.TestCase):
                            " function(a){};\n",
                 encoding="utf-8")
             self.assertEqual(
-                gen.runtime_oracle_build_mismatch(oracle["movianVersion"]),
-                [])
+                gen.runtime_oracle_build_mismatch(version), [])
         finally:
             victim.write_text(original, encoding="utf-8")
 

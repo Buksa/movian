@@ -38,6 +38,22 @@ jobs:
           # shallow-clone tricks beyond the default.
           submodules: false
 
+      # The oracle records the build that produced it, and one test checks
+      # that build's compiled sources against this tree. The default checkout
+      # is shallow, so that commit is usually absent and the check would
+      # degrade to a skip -- a guard that never runs. Fetching exactly the
+      # one commit costs almost nothing and keeps it a real check. It fails
+      # loudly if the commit is gone, which is itself worth knowing: it means
+      # the committed oracle can no longer be traced to a build.
+      - name: Fetch the commit the oracle was captured from
+        run: |
+          version=$(python3 -c "import json;print(json.load(open('support/devtools/api-introspector/runtime-api.json')).get('movianVersion') or '')")
+          echo "oracle build: ${version:-<none>}"
+          revision=${version##*.g}
+          if [ -n "$revision" ] && [ "$revision" != "$version" ]; then
+            git fetch --no-tags --depth=1 origin "$revision"
+          fi
+
       - uses: actions/setup-python@v5
         with:
           # gen.py uses PEP 604 unions and 3.10+ syntax throughout.
