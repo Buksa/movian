@@ -1,6 +1,6 @@
 {
   "name": "example-subscriptions",
-  "describe": "An apiversion-1 plugin whose route also arrives through plugin.addURI. Its prop subscriptions leave no node of their own -- subscribing is not registering.",
+  "describe": "Asserts the route opens with its title. The route arrives through plugin.addURI; the plugin's prop subscriptions create no node of their own and are not observed here.",
   "needs": {
     "binary": "build.debug/movian",
     "plugin": "../../../plugin_examples/subscriptions"

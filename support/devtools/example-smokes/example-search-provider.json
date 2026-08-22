@@ -1,6 +1,6 @@
 {
   "name": "example-search-provider",
-  "describe": "The searchable directory route opens. NOTE the title comes from this route, not from the sibling example:search:(.*) route.",
+  "describe": "Asserts the searchable-directory route opens with its title. Two routes in this plugin set a title; the start URL selects this one, and the assertion would not tell them apart on its own.",
   "needs": {
     "binary": "build.debug/movian",
     "plugin": "../../../plugin_examples/02-intermediate/04-search-provider"

@@ -1,6 +1,6 @@
 {
   "name": "example-websocket-client",
-  "describe": "The menu renders. It does NOT open a socket -- connecting is bound to an action, and wss:// does not work on a PolarSSL build anyway (#213).",
+  "describe": "Asserts the menu page renders. It does NOT exercise the socket: connecting is bound to an action, and no step activates it.",
   "needs": {
     "binary": "build.debug/movian",
     "plugin": "../../../plugin_examples/03-advanced/01-websocket-client"

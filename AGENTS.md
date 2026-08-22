@@ -104,9 +104,11 @@ requirement, not the host that happens to satisfy it today.
 ## Where Work Is Pushed
 
 Work goes to this project's own repositories: `Buksa/movian` for the core and
-`Buksa/movian-plugin-sdk` for the SDK. The fork's upstream is configured here
-as a remote for fetching only -- its push URL is deliberately not a URL, so a
-push aimed at it fails on the remote name rather than reaching a server.
+`Buksa/movian-plugin-sdk` for the SDK. This is a fork, so a checkout may also
+carry a remote for the upstream it came from; if you add one, point its push
+URL at something that is not a URL, so a push aimed there fails on the remote
+name rather than reaching a server. That is per-checkout configuration, not a
+property of the repository -- a fresh clone has one remote and no such guard.
 
 **Push by explicit URL, not by remote name.** Six checkouts are in play and
 they do not agree on which remote is called what, so `git push origin
@@ -151,14 +153,19 @@ measurement bug, not a finding.
 `generated/movian-api.d.ts` is a contract. It has one plugin author today and
 is written for more later, which means the moment to be careful is now.
 
-**Only a union gaining a member is free.** Everything else needs the proof
-below, and that includes replacing `any`.
+**The test is what a parameter ACCEPTS, not how its type is spelled.** A
+change that accepts strictly more is free; one that accepts less is narrowing
+and needs the proof below.
 
-`any` accepts every argument, so giving a parameter a concrete type rejects
-callers that compiled before -- `f(42)` is fine against `any` and an error
-against `string`. Calling that widening would license exactly the unproven
-restrictions this rule exists to prevent. It is narrowing, and the fact that
-it usually improves the declaration does not change what it does to a caller.
+Free, because every call that compiled still does -- measured, not assumed:
+`string` to `any`, `string` to `string | number`, a required parameter becoming
+optional, an object parameter gaining an optional member.
+
+Narrowing, and this is the case that matters here: `any` to a concrete type.
+`any` accepts every argument, so `f(42)` is fine against `any` and an error
+against `string`. An earlier draft called that widening, which would have
+licensed exactly the unproven restrictions the rule exists to prevent -- and
+#209 replaced `any` on 203 parameter slots, four of them wrongly.
 
 **Narrowing requires proof from the C**, quoted in the commit: the exact
 accessor, at the line where the callee reads that argument. Replacing `any`
