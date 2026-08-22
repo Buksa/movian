@@ -1568,6 +1568,33 @@
     }
   },
   "globalSettingsError": null,
+  "inputs": {
+    "digest": "af6181ba1ed9e2243c5106b9285b6e80334b400846475a1a5e702e69533ba813",
+    "files": {
+      "res/ecmascript/modules/fs.js": "c4743a9de2f1ac9c264dd4938d4847b1f902a25bd72cdf6bf5db0d789a244173",
+      "res/ecmascript/modules/http.js": "0630459a5be4b44a5c7cff020e50216b18b3a4edb1e57c2e522be2a986eea10d",
+      "res/ecmascript/modules/https.js": "c352369d9ef336da0d51598badd9420407834c8a598b0f08271724e0606a5b79",
+      "res/ecmascript/modules/movian/html.js": "1c9ab552bbab5a5b46f8ca59c33c2a337c1cfa8a782edfdd8d5edaa5b52d5f08",
+      "res/ecmascript/modules/movian/http.js": "5033a16b1db4b07c8880cd63f5dc86468968dce0d732c0c679e6f454ac7ae997",
+      "res/ecmascript/modules/movian/itemhook.js": "0848da10d51ab8b3935b8b3956ee8517f888861768f29d5b6b7f8b27ab310017",
+      "res/ecmascript/modules/movian/page.js": "f405ef861e488555f9d0a7cf0dfa7668e6f816d4630531666cd76134ea1dc0de",
+      "res/ecmascript/modules/movian/popup.js": "3c964b30c6cc871d23949ce84cfe2bdff0b3fe72e46ec19cdece88bf2f8c2038",
+      "res/ecmascript/modules/movian/prop.js": "2503556e6fe0577383b9bd00f459428ca0d59ef644e7edf498f51223cb6a2885",
+      "res/ecmascript/modules/movian/service.js": "039433d9e540e2a587801546a34390bfbc69c8ab019ba4a96bd1a276c74558e0",
+      "res/ecmascript/modules/movian/settings.js": "44e48ed962dea43d119537536cdace646c486e1d6538e059cbc0dbe82f72fabc",
+      "res/ecmascript/modules/movian/sqlite.js": "155011babe6badcbde37f20abce95adf6c072793455d9760efcfc90c443f34d1",
+      "res/ecmascript/modules/movian/store.js": "723c7154aa387d1f6c1b166502df571d7879761e65437450d28e5edbbdbe9c77",
+      "res/ecmascript/modules/movian/subtitles.js": "1ec21caa0f43bf9325366a6cd2ab1a5c2a097b34c3be78cede24d21f79b67e23",
+      "res/ecmascript/modules/movian/videoscrobbler.js": "7c79d29fe549d37f633a669baf7458120b13522183f9ce50212b9be555e5d5ef",
+      "res/ecmascript/modules/movian/xml.js": "8a5e816ff5bcf921b1946b56dfdfef34a3d3cd918430abe48d66950c9e41500a",
+      "res/ecmascript/modules/movian/xmlrpc.js": "ca10dd4c9de8c9d0cc12b2946bf3e39e8799164e5f04458e76d3e2025d3ad08a",
+      "res/ecmascript/modules/querystring.js": "9e3c41147febc6bc84469292c7b2f66292a1a67823c885b2ecb34cd3f52c2550",
+      "res/ecmascript/modules/url.js": "08d76058e906e1618357111760cac5c27796dd2843f13f55a23191c0d4694956",
+      "res/ecmascript/modules/websocket.js": "0698a93cf7cea7098dc1dfafdf40a3477fa08a0ae2df4218e3e2d136bba4f889",
+      "support/devtools/api-introspector/introspector.js": "03fc7e423addf941c8bedc684ce5bab3d37bd31eb61719fbce7c4c8830fd02dd"
+    },
+    "version": 1
+  },
   "loadErrors": {},
   "modules": [
     "fs",
@@ -5131,5 +5158,6 @@
       "url": "ws://127.0.0.1:1/"
     }
   },
+  "tier3PageOpened": true,
   "version": 2
 }

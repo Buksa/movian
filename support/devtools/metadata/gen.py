@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import hashlib
 import re
 import subprocess
 import sys
@@ -76,6 +77,199 @@ RUNTIME_ORACLE_PATH = (
     REPO_ROOT / "support" / "devtools" / "api-introspector"
     / "runtime-api.json")
 RUNTIME_ORACLE_VERSION = 2
+
+RUNTIME_ORACLE_INPUTS_VERSION = 1
+# The files the oracle is a reading OF. A stamp over more than this goes red
+# on commits that cannot have moved the surface; over less, it misses the
+# case this check exists for. `res/ecmascript/modules/**` is what the capture
+# walks and `introspector.js` is what does the walking -- a change to either
+# can move the answer, and nothing else can.
+RUNTIME_ORACLE_INPUT_GLOBS = (
+    "res/ecmascript/modules/**/*.js",
+    "support/devtools/api-introspector/introspector.js",
+)
+RUNTIME_ORACLE_RECAPTURE = (
+    "recapture in the checkout that owns build.debug:\n"
+    "    mdev run -p support/devtools/api-introspector --name introspect\n"
+    "    mdev open introspect:page\n"
+    "  then adopt the payload printed after the route opened:\n"
+    "    gen.py --adopt-oracle <captured.json>")
+
+# `/` begins a regex literal after these words and division after any other
+# identifier. Without the distinction `return /a\/b/` reads as a division
+# followed by a comment.
+_JS_REGEX_KEYWORDS = frozenset((
+    "return", "typeof", "instanceof", "in", "of", "new", "delete", "void",
+    "throw", "case", "do", "else", "yield", "await",
+))
+
+
+def _js_regex_allowed(prev: str, prev_word: str) -> bool:
+    if prev == "":
+        return True
+    if prev in ")]":
+        return False
+    if prev.isalnum() or prev in "_$":
+        return prev_word in _JS_REGEX_KEYWORDS
+    # `}` ends a block (regex legal after it) or an object literal (division
+    # legal, and absurd). Reading it as a regex start is the safe half: a
+    # span wrongly taken for a regex is copied out verbatim, which can only
+    # keep a comment, never drop code.
+    return True
+
+
+def _js_regex_end(source: str, start: int) -> int:
+    """Index just past the regex literal at `start`, or `start` if there is
+    none. A literal cannot span a newline, so an unterminated scan is the
+    signal that this `/` was division after all."""
+    index = start + 1
+    length = len(source)
+    in_class = False
+    while index < length:
+        char = source[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "\n":
+            return start
+        if in_class:
+            if char == "]":
+                in_class = False
+        elif char == "[":
+            in_class = True
+        elif char == "/":
+            index += 1
+            while index < length and source[index].isalpha():
+                index += 1
+            return index
+        index += 1
+    return start
+
+
+def _js_code_only(source: str) -> str:
+    """`source` with its comments removed and everything else byte-identical.
+
+    Why not hash the file. The stamp has to go red exactly when the surface
+    the oracle observed could have moved, and a byte hash also goes red on a
+    comment: #212 added 231 lines of JSDoc across 16 of these 20 modules and
+    moved no member. Under a byte stamp that commit demands a live Movian, a
+    run and a route to restate an unchanged answer -- the "key over too much"
+    failure, met on the last commit to touch these files.
+
+    A comment cannot declare a member, so dropping comments cannot hide a
+    surface change. Nothing else is normalized; two files differing only in
+    indentation are meant to hash apart. String and regex literals are
+    tracked because a `//` inside either is not a comment, and mistaking one
+    for a comment deletes real code from the hash -- the single error
+    direction that fails green.
+    """
+    out: list[str] = []
+    index = 0
+    length = len(source)
+    prev = ""
+    prev_word = ""
+    while index < length:
+        char = source[index]
+        if char in "\"'`":
+            cursor = index + 1
+            while cursor < length:
+                current = source[cursor]
+                if current == "\\":
+                    cursor += 2
+                    continue
+                if current == char:
+                    cursor += 1
+                    break
+                if current == "\n" and char != "`":
+                    break
+                cursor += 1
+            out.append(source[index:cursor])
+            prev, prev_word = char, ""
+            index = cursor
+            continue
+        if char == "/" and index + 1 < length and source[index + 1] == "/":
+            newline = source.find("\n", index)
+            index = length if newline < 0 else newline
+            continue
+        if char == "/" and index + 1 < length and source[index + 1] == "*":
+            close = source.find("*/", index + 2)
+            stop = length if close < 0 else close + 2
+            # A space so `a/*x*/b` cannot hash as `ab`; the newlines because
+            # dropping them would join two statements that ASI kept apart.
+            out.append(" " + "\n" * source.count("\n", index, stop))
+            index = stop
+            continue
+        if char == "/" and _js_regex_allowed(prev, prev_word):
+            stop = _js_regex_end(source, index)
+            if stop > index:
+                out.append(source[index:stop])
+                prev, prev_word = "/", ""
+                index = stop
+                continue
+        out.append(char)
+        if not char.isspace():
+            if char.isalnum() or char in "_$":
+                prev_word = (
+                    prev_word + char
+                    if prev.isalnum() or prev in "_$" else char)
+            else:
+                prev_word = ""
+            prev = char
+        index += 1
+    return "".join(out)
+
+
+def _js_hash_text(source: str) -> str:
+    """The text the freshness stamp is taken over.
+
+    Comments are gone, horizontal whitespace inside a line is collapsed and
+    blank lines are dropped -- re-indenting a module cannot move a member any
+    more than commenting it can, and leaving either in makes the stamp go red
+    for nothing. Newlines between real lines are KEPT: automatic semicolon
+    insertion reads them, so `return\n  x` and `return x` are different
+    programs and must hash apart.
+    """
+    lines = [" ".join(line.split())
+             for line in _js_code_only(source).split("\n")]
+    return "\n".join(line for line in lines if line)
+
+
+def runtime_oracle_input_digests(
+        root: Path | None = None) -> dict[str, str]:
+    """sha256 of each oracle input's code, comments removed."""
+    base = REPO_ROOT if root is None else root
+    digests: dict[str, str] = {}
+    for pattern in RUNTIME_ORACLE_INPUT_GLOBS:
+        for path in sorted(base.glob(pattern)):
+            if not path.is_file():
+                continue
+            digests[path.relative_to(base).as_posix()] = hashlib.sha256(
+                _js_hash_text(path.read_text(encoding="utf-8"))
+                .encode("utf-8")).hexdigest()
+    return digests
+
+
+def runtime_oracle_inputs_digest(digests: dict[str, str]) -> str:
+    joined = "".join(
+        "%s\0%s\n" % (name, digests[name]) for name in sorted(digests))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+def runtime_oracle_stale_inputs(
+        stamped: Any, root: Path | None = None) -> list[str]:
+    """Human-readable reasons the stamp no longer describes the tree."""
+    if not isinstance(stamped, dict):
+        return ["the stamp carries no per-file digests"]
+    current = runtime_oracle_input_digests(root)
+    reasons = []
+    for name in sorted(set(current) - set(stamped)):
+        reasons.append("added since the capture: %s" % name)
+    for name in sorted(set(stamped) - set(current)):
+        reasons.append("gone since the capture: %s" % name)
+    for name in sorted(set(stamped) & set(current)):
+        if stamped[name] != current[name]:
+            reasons.append("code changed since the capture: %s" % name)
+    return reasons
 
 ATTRIB_C = REPO_ROOT / "src" / "ui" / "glw" / "glw_view_attrib.c"
 EVAL_C = REPO_ROOT / "src" / "ui" / "glw" / "glw_view_eval.c"
@@ -3546,6 +3740,106 @@ def _format_runtime_member(
     return text
 
 
+# The reviewed exclusion list: every member the capture could not reach, as
+# (module, shape, member). It is data under review precisely because the
+# cross-check's best score is otherwise achieved by observing nothing -- with
+# the oracle's tiers emptied the run reported `match 174, unreachable 105`
+# and still exited 0. Growth here has to show up in a diff, not in a green
+# run, so the set is compared exactly: an entry that arrives unreviewed fails,
+# and an entry that becomes reachable fails too, because leaving it listed
+# lets the floor keep credit for a member nobody observes any more.
+RUNTIME_ORACLE_UNREACHABLE: tuple[tuple[str, str, str], ...] = (
+    # The capture never constructs a Request. The reason it records --
+    # "the request factory starts network I/O" -- is false: http.js:61-64
+    # formats a URL and calls `new Request(url)`, and the socket only
+    # opens in `end()`. These six are therefore the six most likely to
+    # leave this list, and they leave it by the introspector attempting
+    # the construction, not by anyone editing the excuse.
+    ("http", "Request", "end"),
+    ("http", "Request", "headers"),
+    ("http", "Request", "on"),
+    ("http", "Request", "onError"),
+    ("http", "Request", "onResponse"),
+    ("http", "Request", "url"),
+    # A Response exists only as the result of a transfer.
+    ("http", "Response", "bytes"),
+    ("http", "Response", "encoding"),
+    ("http", "Response", "on"),
+    ("http", "Response", "onData"),
+    ("http", "Response", "onEnd"),
+    ("http", "Response", "setEncoding"),
+    ("http", "Response", "statusCode"),
+    # Same: movian/http hands back a response object the capture cannot
+    # obtain without performing the request.
+    ("movian/http", "HttpResponse", "allheaders"),
+    ("movian/http", "HttpResponse", "bytes"),
+    ("movian/http", "HttpResponse", "contenttype"),
+    ("movian/http", "HttpResponse", "convertFromEncoding"),
+    ("movian/http", "HttpResponse", "headers"),
+    ("movian/http", "HttpResponse", "headers_lc"),
+    ("movian/http", "HttpResponse", "multiheaders"),
+    ("movian/http", "HttpResponse", "multiheaders_lc"),
+    ("movian/http", "HttpResponse", "statuscode"),
+    ("movian/http", "HttpResponse", "toString"),
+    # Constructing a Searcher registers a global search hook, which would
+    # outlive the capture and change what later tiers observe.
+    ("movian/page", "Searcher", "searcher"),
+    # service.create mutates global service state -- the same state the
+    # home screen reads.
+    ("movian/service", "Service", "destroy"),
+    ("movian/service", "Service", "enabled"),
+    ("movian/service", "Service", "id"),
+    # The shared settings receiver could not be constructed safely; the
+    # capture records the attempt rather than a hand-written excuse.
+    ("movian/settings", "sp", "zombie"),
+    # Opening a DB creates a file in the persistent path.
+    ("movian/sqlite", "DB", "db"),
+    # The constructor calls native hook.register, a global registration.
+    ("movian/videoscrobbler", "VideoScrobbler", "hook"),
+    ("movian/videoscrobbler", "VideoScrobbler", "onpause"),
+    ("movian/videoscrobbler", "VideoScrobbler", "onresume"),
+    ("movian/videoscrobbler", "VideoScrobbler", "onstart"),
+    ("movian/videoscrobbler", "VideoScrobbler", "onstop"),
+    ("movian/videoscrobbler", "VideoScrobbler", "paused"),
+)
+# Members the capture must actually agree with. Derived, not chosen: it has
+# to equal expected minus the reviewed exclusions minus the plugin-supplied
+# slots, and the check below says so, so the number cannot carry slack that
+# would let coverage fall without anyone noticing.
+RUNTIME_ORACLE_MIN_MATCH = 242
+
+
+def _runtime_oracle_floor_problems(
+        matches: int,
+        unreachable: list[dict[str, Any]],
+        expected_total: int,
+        plugin_supplied: int) -> list[str]:
+    problems: list[str] = []
+    reviewed = set(RUNTIME_ORACLE_UNREACHABLE)
+    observed = {(entry["module"], entry["shape"], entry["member"])
+                for entry in unreachable}
+    for key in sorted(observed - reviewed):
+        problems.append(
+            "unreviewed exclusion %s.%s.%s -- the capture stopped reaching "
+            "it; review why and add it to RUNTIME_ORACLE_UNREACHABLE"
+            % key)
+    for key in sorted(reviewed - observed):
+        problems.append(
+            "stale exclusion %s.%s.%s -- the capture reaches it now; drop it "
+            "from RUNTIME_ORACLE_UNREACHABLE" % key)
+    if matches < RUNTIME_ORACLE_MIN_MATCH:
+        problems.append(
+            "coverage %d is below the floor of %d"
+            % (matches, RUNTIME_ORACLE_MIN_MATCH))
+    tight = expected_total - len(reviewed) - plugin_supplied
+    if RUNTIME_ORACLE_MIN_MATCH < tight and not (observed - reviewed):
+        problems.append(
+            "the floor carries %d of slack: %d members are neither excluded "
+            "nor plugin-supplied, so RUNTIME_ORACLE_MIN_MATCH must be %d"
+            % (tight - RUNTIME_ORACLE_MIN_MATCH, tight, tight))
+    return problems
+
+
 def _format_runtime_oracle_report(
         report: dict[str, Any]) -> str:
     status = report.get("status")
@@ -3560,8 +3854,8 @@ def _format_runtime_oracle_report(
         return "\n".join(lines)
 
     missing_modules = report.get("missingModules", [])
-    state = "OK" if report.get("drift", 0) == 0 and not missing_modules \
-        else "DRIFT"
+    state = "OK" if (report.get("drift", 0) == 0 and not missing_modules
+                     and not report.get("floorProblems")) else "DRIFT"
     lines = [
         "RUNTIME ORACLE CROSS-CHECK %s" % state,
         "counts: match %d, drift %d, missing-modules %d, plugin-supplied %d,"
@@ -3584,6 +3878,10 @@ def _format_runtime_oracle_report(
         lines.append("plugin-supplied members (declared optional, unset):")
         lines.extend("  " + _format_runtime_member(entry)
                      for entry in supplied)
+    problems = report.get("floorProblems", [])
+    if problems:
+        lines.append("coverage floor:")
+        lines.extend("  " + problem for problem in problems)
     lines.append("oracle-unreachable members:")
     unreachable = report.get("unreachableMembers", [])
     if unreachable:
@@ -3631,6 +3929,34 @@ def _check_runtime_oracle(
                 "runtime oracle is the partial load-time payload "
                 "(tier3PageOpened false); capture the payload emitted after "
                 "opening the introspect:page route"),
+        }
+        return False, _format_runtime_oracle_report(report), report
+    stamp = oracle.get("inputs")
+    if (not isinstance(stamp, dict)
+            or stamp.get("version") != RUNTIME_ORACLE_INPUTS_VERSION):
+        report = {
+            "status": "failed",
+            "match": 0,
+            "drift": 0,
+            "oracleUnreachable": 0,
+            "error": (
+                "runtime oracle carries no freshness stamp, so nothing "
+                "binds it to the sources it was captured from; "
+                + RUNTIME_ORACLE_RECAPTURE),
+        }
+        return False, _format_runtime_oracle_report(report), report
+    stale = runtime_oracle_stale_inputs(stamp.get("files"))
+    if stale:
+        report = {
+            "status": "failed",
+            "match": 0,
+            "drift": 0,
+            "oracleUnreachable": 0,
+            "error": (
+                "runtime oracle is stale -- it was captured from a different "
+                "source tree, so agreeing with it proves nothing about this "
+                "one:\n  " + "\n  ".join(stale) + "\n  "
+                + RUNTIME_ORACLE_RECAPTURE),
         }
         return False, _format_runtime_oracle_report(report), report
 
@@ -4085,9 +4411,12 @@ def _check_runtime_oracle(
         entry["module"], entry["shape"], entry["member"]))
     unreachable.sort(key=lambda entry: (
         entry["module"], entry["shape"], entry["member"]))
-    agreed = not drift and not missing_modules
+    floor_problems = _runtime_oracle_floor_problems(
+        matches, unreachable, len(expected), len(plugin_supplied))
+    agreed = not drift and not missing_modules and not floor_problems
     report = {
         "status": "ok" if agreed else "drift",
+        "floorProblems": floor_problems,
         "match": matches,
         "drift": len(drift),
         "pluginSupplied": len(plugin_supplied),
@@ -4977,6 +5306,60 @@ def format_diff(diff: dict[str, Any]) -> list[str]:
     return lines
 
 
+def cmd_adopt_oracle(args: argparse.Namespace) -> int:
+    """Stamp a fresh capture with the tree it was captured from and commit it
+    as the oracle.
+
+    Stamping is deliberately not a separate verb. A `--restamp` that blessed
+    the file already on disk would be a one-word way to make a stale oracle
+    green again, which is the whole defect this path exists to close, so the
+    only way to move the stamp is to bring a new capture.
+    """
+    source = Path(args.adopt_oracle)
+    try:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        print("gen.py: could not read capture %s: %s" % (source, error),
+              file=sys.stderr)
+        return 1
+    if not isinstance(payload, dict):
+        print("gen.py: capture is not a JSON object", file=sys.stderr)
+        return 1
+    if payload.get("version") != RUNTIME_ORACLE_VERSION:
+        print("gen.py: capture version %r, expected %d"
+              % (payload.get("version"), RUNTIME_ORACLE_VERSION),
+              file=sys.stderr)
+        return 1
+    if payload.get("tier3PageOpened") is False:
+        print("gen.py: capture is the partial load-time payload; adopt the "
+              "one printed after opening introspect:page", file=sys.stderr)
+        return 1
+    if RUNTIME_ORACLE_PATH.is_file():
+        current = json.loads(
+            RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
+        without_stamp = {key: value for key, value in current.items()
+                         if key != "inputs"}
+        if without_stamp == {key: value for key, value in payload.items()
+                             if key != "inputs"}:
+            print("gen.py: this capture is the committed oracle again. "
+                  "Re-stamping it would certify the old observations against "
+                  "a tree they did not come from -- run the capture.",
+                  file=sys.stderr)
+            return 1
+    digests = runtime_oracle_input_digests()
+    payload["inputs"] = {
+        "version": RUNTIME_ORACLE_INPUTS_VERSION,
+        "digest": runtime_oracle_inputs_digest(digests),
+        "files": digests,
+    }
+    RUNTIME_ORACLE_PATH.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8")
+    print("adopted %s as %s (%d input files stamped)"
+          % (source, RUNTIME_ORACLE_PATH.name, len(digests)))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="gen.py",
@@ -4985,6 +5368,10 @@ def build_parser() -> argparse.ArgumentParser:
                          help="diff regenerated content against the "
                               "committed artifacts (movianRevision "
                               "ignored); exit 1 on drift")
+    parser.add_argument("--adopt-oracle", metavar="CAPTURE",
+                         help="stamp a fresh introspector capture with the "
+                              "sources it was taken from and install it as "
+                              "the runtime oracle")
     parser.add_argument("--json", action="store_true",
                          help="machine-readable JSON output (--check only)")
     return parser
@@ -4993,6 +5380,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.adopt_oracle:
+            return cmd_adopt_oracle(args)
         if args.check:
             return cmd_check(args)
         return cmd_generate(args)
