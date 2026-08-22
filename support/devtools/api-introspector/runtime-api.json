@@ -1567,11 +1567,12 @@
       "type": "object"
     }
   },
-  "capturedAt": 1787372762138,
+  "capturedAt": 1787374911106,
   "globalSettingsError": null,
   "inputs": {
-    "digest": "e55abf384e70a747f4808bb35221ebf86aa535da9ab223a6e93f7e6f9d3d2937",
+    "digest": "2865adb257f404f416beecd8c3e27a8be4fe4acacea3d064c48db6e5f8ce6412",
     "files": {
+      "res/ecmascript/legacy/api-v1.js": "ff3bc1f704125fc3fddc1cb4ddd032577f22b35bc5729e470a915bffd9c8635a",
       "res/ecmascript/modules/fs.js": "57b8f284517c9408b38eae2f6d4f9d56def540dfc5dabe43b35292dbd3f7420f",
       "res/ecmascript/modules/http.js": "0724d6709b41536edbc90c2cf2c3dfba57a0e782d68b354acd2884c589d9bd1a",
       "res/ecmascript/modules/https.js": "08652805b6b6a353ae81cb1685679ea97f589258f0464401f2a0076f9cdd0b2d",
@@ -1618,7 +1619,8 @@
       "src/ecmascript/es_subtitles.c": "4564703cccfac8c218563fc92eb4353ce97f5c62e7de9da1d8307b90acc79b8e",
       "src/ecmascript/es_timer.c": "9f16b4c0c770171625f709bad659cf170cbef06b2ab6801171a874b25698d30a",
       "src/ecmascript/es_websocket.c": "bec99ef07cfba36091465266853bac309553baddc3c6ca5618bd2810d0d936d5",
-      "support/devtools/api-introspector/introspector.js": "ef20a665646628109f094256b5c1217cbc5dab2e735b813885076fe63b1a3136"
+      "support/devtools/api-introspector/introspector.js": "0bb812d1fc170f835b8c72983eb51c54e6fd0bd95acab4694e716b954bb57c70",
+      "support/devtools/api-introspector/plugin.json": "10125b05a633d255b651b202965eff05638065c89fc7b4936a3fdea288a0e767"
     },
     "version": 1
   },
@@ -1677,6 +1679,7 @@
     "showtime/xml",
     "showtime/xmlrpc"
   ],
+  "movianVersion": "5.0.1017.gf1c26",
   "tier1": {
     "fs": {
       "functionExports": {

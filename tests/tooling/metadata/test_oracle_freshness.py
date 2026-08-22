@@ -115,6 +115,16 @@ class CommentStrippingRefusals(unittest.TestCase):
         self.assertNotEqual(gen._js_hash_text('exports["a  b"] = 1;'),
                             gen._js_hash_text('exports["a b"] = 1;'))
 
+    def test_regex_after_an_asi_terminated_keyword(self):
+        # ASI ends `break`, `continue` and `debugger` at the newline, so what
+        # follows is a fresh statement and may open with a regex. Reading
+        # that `/` as division lets `/*` in the character class comment out
+        # the rest of the file.
+        for keyword in ("break", "continue", "debugger"):
+            kept = gen._js_hash_text(
+                "%s\n/x[/*]y/.test(v);\nexports.stillHere = 1;" % keyword)
+            self.assertIn("exports.stillHere", kept, keyword)
+
     def test_whitespace_inside_a_regex_is_content(self):
         # An introspector regex can change what it matches by a space alone.
         self.assertNotEqual(gen._js_hash_text("var r = /a  b/;"),
@@ -142,7 +152,28 @@ class StripperOverTheRealInputs(unittest.TestCase):
         # and the introspector. The C half matters: 18 of the 52 modules the
         # oracle observes are `native/*`, so a stamp over the JS alone
         # guards half of what the cross-check covers.
-        self.assertEqual(len(self._inputs()), 47)
+        self.assertEqual(len(self._inputs()), 49)
+
+    def test_the_apiversion_1_bootstrap_is_stamped(self):
+        # The introspector's manifest selects apiversion 1, so the legacy
+        # bootstrap runs in its context before it and anything the bootstrap
+        # adds to a cached module is surface the capture sees. The manifest
+        # is stamped too, because it is what selects the bootstrap.
+        stamped = gen.runtime_oracle_input_digests()
+        for name in ("res/ecmascript/legacy/api-v1.js",
+                     "support/devtools/api-introspector/plugin.json"):
+            self.assertIn(name, stamped)
+
+    def test_compiled_and_runtime_inputs_are_disjoint_and_complete(self):
+        compiled = {path.relative_to(REPO_ROOT).as_posix()
+                    for pattern in gen.RUNTIME_ORACLE_COMPILED_GLOBS
+                    for path in REPO_ROOT.glob(pattern)}
+        runtime = {path.relative_to(REPO_ROOT).as_posix()
+                   for pattern in gen.RUNTIME_ORACLE_RUNTIME_GLOBS
+                   for path in REPO_ROOT.glob(pattern)}
+        self.assertEqual(compiled & runtime, set())
+        self.assertEqual(compiled | runtime,
+                         set(gen.runtime_oracle_input_digests()))
 
     def test_the_native_sources_are_stamped(self):
         stamped = gen.runtime_oracle_input_digests()
@@ -286,6 +317,66 @@ class Adoption(unittest.TestCase):
         self.assertIn("same capturedAt", result.stderr)
         # The refusal must come before the write.
         self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
+
+    def test_the_committed_oracle_records_its_build(self):
+        import json
+        oracle = json.loads(
+            gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(
+            gen.runtime_oracle_build_mismatch(oracle.get("movianVersion")),
+            [])
+
+    def test_a_capture_with_no_build_is_refused(self):
+        self.assertTrue(gen.runtime_oracle_build_mismatch(None))
+        self.assertTrue(gen.runtime_oracle_build_mismatch(""))
+
+    def test_a_build_this_repository_does_not_have_is_refused(self):
+        # `mdev run` launches whatever binary is in build.debug; it does not
+        # rebuild. A capture that cannot be traced back to a commit here
+        # cannot be shown to describe these sources.
+        reasons = gen.runtime_oracle_build_mismatch("5.0.1017.gdeadbee")
+        self.assertTrue(reasons)
+        self.assertIn("deadbee", reasons[0])
+
+    def test_a_build_predating_a_c_change_is_refused(self):
+        # The case the C half of the stamp exists for: the sources moved,
+        # the binary did not, and the capture reports the old surface.
+        import json
+        oracle = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        victim = REPO_ROOT / "src" / "ecmascript" / "es_fs.c"
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(
+                original + "\nstatic int probe_added(void) { return 1; }\n",
+                encoding="utf-8")
+            reasons = gen.runtime_oracle_build_mismatch(
+                oracle["movianVersion"])
+            self.assertTrue(reasons)
+            self.assertIn("es_fs.c", reasons[0])
+        finally:
+            victim.write_text(original, encoding="utf-8")
+
+    def test_a_module_change_needs_no_rebuild(self):
+        # The other half, and the reason only the compiled inputs are
+        # checked: modules reach the runtime through dataroot:// and are read
+        # from disk, so an unchanged binary answers correctly for an edited
+        # module. Making that cost a rebuild would be the "too much" failure
+        # in a different place.
+        import json
+        oracle = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        victim = (REPO_ROOT / "res" / "ecmascript" / "modules"
+                  / "movian" / "sqlite.js")
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(
+                original + "\nexports.DB.prototype.probeNotFirst ="
+                           " function(a){};\n",
+                encoding="utf-8")
+            self.assertEqual(
+                gen.runtime_oracle_build_mismatch(oracle["movianVersion"]),
+                [])
+        finally:
+            victim.write_text(original, encoding="utf-8")
 
     def test_a_capture_without_a_capturedat_is_refused(self):
         import json

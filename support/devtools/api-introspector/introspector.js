@@ -993,6 +993,14 @@ function emitPayload(complete) {
     // happened to observe the same API -- which is what an
     // implementation-only change to a module produces.
     capturedAt: Date.now(),
+    // Which BUILD answered. `mdev run` launches the binary that is there; it
+    // does not rebuild. So a native registration can change in the C while
+    // the running binary still reports the old surface, and stamping that
+    // payload against the new sources certifies a reading nothing produced.
+    // Adoption resolves this string back to a commit and refuses unless the
+    // compiled sources there match the tree being stamped.
+    movianVersion: (typeof Core === 'object' && Core)
+                     ? Core.currentVersionString : null,
     modules: moduleNames,
     before: before,
     tier1: tier1,

@@ -84,18 +84,35 @@ RUNTIME_ORACLE_INPUTS_VERSION = 1
 # case this check exists for. `res/ecmascript/modules/**` is what the capture
 # walks and `introspector.js` is what does the walking -- a change to either
 # can move the answer, and nothing else can.
-RUNTIME_ORACLE_INPUT_GLOBS = (
-    "res/ecmascript/modules/**/*.js",
-    # 18 of the 52 modules the oracle observes are `native/*`, registered
-    # from these files. Leaving them out left the stamp guarding half of
-    # what the cross-check covers: a native registered in a shape the C
-    # scanner does not read is absent from the artifact, absent from a
-    # capture that predates it, and -- without this -- absent from the
-    # freshness key too. That is the same blind spot in the other language.
+# 18 of the 52 modules the oracle observes are `native/*`, registered from
+# these files. Leaving them out left the stamp guarding half of what the
+# cross-check covers: a native registered in a shape the C scanner does not
+# read is absent from the artifact, absent from a capture that predates it,
+# and -- without this -- absent from the freshness key too. The same blind
+# spot in the other language.
+#
+# These are also the only inputs the BINARY carries. Everything else reaches
+# the runtime through `dataroot://` and is read from disk, which is why a
+# capture can be taken against an unchanged build after a module edit but
+# not after a C edit. `--adopt-oracle` enforces exactly that difference.
+RUNTIME_ORACLE_COMPILED_GLOBS = (
     "src/ecmascript/**/*.c",
     "src/ecmascript/**/*.h",
+)
+RUNTIME_ORACLE_RUNTIME_GLOBS = (
+    "res/ecmascript/modules/**/*.js",
+    # The introspector declares apiversion 1, so ecmascript.c:913-919 runs
+    # this bootstrap in its context before it -- anything the bootstrap adds
+    # to a cached module is surface the capture sees and the static scanner
+    # does not. The manifest is stamped too, because it is what selects the
+    # bootstrap: flipping it to apiversion 2 changes what was observed while
+    # every other input stays byte-identical.
+    "res/ecmascript/legacy/api-v1.js",
+    "support/devtools/api-introspector/plugin.json",
     "support/devtools/api-introspector/introspector.js",
 )
+RUNTIME_ORACLE_INPUT_GLOBS = (
+    RUNTIME_ORACLE_RUNTIME_GLOBS + RUNTIME_ORACLE_COMPILED_GLOBS)
 RUNTIME_ORACLE_RECAPTURE = (
     "recapture in the checkout that owns build.debug:\n"
     "    mdev run -p support/devtools/api-introspector --name introspect\n"
@@ -109,6 +126,11 @@ RUNTIME_ORACLE_RECAPTURE = (
 _JS_REGEX_KEYWORDS = frozenset((
     "return", "typeof", "instanceof", "in", "of", "new", "delete", "void",
     "throw", "case", "do", "else", "yield", "await",
+    # ASI ends these at the newline, so what follows is a fresh statement and
+    # may open with a regex: `debugger\n/x[/*]y/.test(v)` is live code.
+    # Division never follows any of the three, so allowing a regex here can
+    # only ever be right.
+    "break", "continue", "debugger",
 ))
 # A `)` that closes one of these closes a CONDITION, and a regex may follow
 # it: `if (ready) /x[/*]y/.test(s)` is legal. Reading that `/` as division
@@ -5368,6 +5390,47 @@ def format_diff(diff: dict[str, Any]) -> list[str]:
     return lines
 
 
+def runtime_oracle_build_mismatch(version: Any) -> list[str]:
+    """Reasons the build that produced a capture does not match this tree.
+
+    Only the compiled inputs are compared. Everything else is read through
+    `dataroot://` at run time, so an unchanged binary answers correctly for
+    an edited module -- which is the ordinary case and must not cost a
+    rebuild. A C edit is the opposite: the binary already in `build.debug`
+    still reports the surface it was compiled with.
+    """
+    if not isinstance(version, str) or not version:
+        return ["the capture does not say which build produced it"]
+    match = re.search(r"g([0-9a-f]{5,40})$", version)
+    if not match:
+        return ["cannot read a commit out of the build version %r" % version]
+    revision = match.group(1)
+    resolved = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", revision + "^{commit}"],
+        cwd=str(REPO_ROOT), capture_output=True, text=True)
+    if resolved.returncode != 0:
+        return ["build %s is not a commit in this repository" % revision]
+    reasons = []
+    for pattern in RUNTIME_ORACLE_COMPILED_GLOBS:
+        for path in sorted(REPO_ROOT.glob(pattern)):
+            if not path.is_file():
+                continue
+            name = path.relative_to(REPO_ROOT).as_posix()
+            shown = subprocess.run(
+                ["git", "show", "%s:%s" % (revision, name)],
+                cwd=str(REPO_ROOT), capture_output=True, text=True)
+            if shown.returncode != 0:
+                reasons.append("%s does not exist in build %s"
+                               % (name, revision))
+                continue
+            if (_js_hash_text(shown.stdout)
+                    != _js_hash_text(path.read_text(encoding="utf-8"))):
+                reasons.append(
+                    "%s differs from the copy build %s was compiled from"
+                    % (name, revision))
+    return reasons
+
+
 def cmd_adopt_oracle(args: argparse.Namespace) -> int:
     """Stamp a fresh capture with the tree it was captured from and commit it
     as the oracle.
@@ -5416,6 +5479,15 @@ def cmd_adopt_oracle(args: argparse.Namespace) -> int:
                   "observations against a tree they did not come from; run "
                   "the capture.", file=sys.stderr)
             return 1
+    mismatch = runtime_oracle_build_mismatch(payload.get("movianVersion"))
+    if mismatch:
+        print("gen.py: the capture came from a build that does not match "
+              "this tree, so stamping it would certify a reading nothing "
+              "produced:", file=sys.stderr)
+        for reason in mismatch:
+            print("  %s" % reason, file=sys.stderr)
+        print("  rebuild, recapture, and adopt that.", file=sys.stderr)
+        return 1
     digests = runtime_oracle_input_digests()
     payload["inputs"] = {
         "version": RUNTIME_ORACLE_INPUTS_VERSION,
