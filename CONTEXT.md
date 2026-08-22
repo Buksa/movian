@@ -44,15 +44,20 @@ not what `Function.length` reports at runtime — every native callable reports
 a running Movian actually exposes. A snapshot, not a live query, and therefore
 only as good as its **stamp**: an `inputs` block digesting all 49 files the
 capture was taken from — the CommonJS modules, the apiversion-1 bootstrap and
-the introspector with its manifest, all read from disk at run time, plus the C
-the natives are registered in, which the binary carries. Comments and
-whitespace between tokens are excluded, so the stamp goes red when a member
-could have moved and not when a docblock did. `gen.py --check` refuses an
-unstamped or stale oracle rather than comparing against it. `gen.py
---adopt-oracle` is the only way to move the stamp: it takes a fresh capture,
-tells one from a copy of the committed file by the `capturedAt` every run
-writes, and refuses a capture whose build no longer matches the compiled
-sources — `mdev run` launches the binary that is there and does not rebuild.
+every loadable file in the introspector's own directory, all read from disk at
+run time, plus the C the natives are registered in, which the binary carries.
+Comments and whitespace between tokens are excluded, so the stamp goes red
+when a member could have moved and not when a docblock did.
+
+`gen.py --check` refuses an unstamped or stale oracle rather than comparing
+against it. `gen.py --adopt-oracle` is the only way to move the stamp, and it
+refuses four things: a payload that is the committed oracle again (told apart
+by the `capturedAt` every run writes), a capture whose build no longer matches
+the compiled sources (`mdev run` launches the binary that is there and does
+not rebuild), a capture that read a different tree than the one being stamped
+(every run records a digest of what it loaded, which needs
+`--bypass-ecmascript-acl`), and a capture that could not record what it read
+at all.
 _Avoid_: runtime API, capture (unqualified)
 
 **Accepted corpus**:

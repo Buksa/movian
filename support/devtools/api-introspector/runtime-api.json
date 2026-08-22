@@ -1567,10 +1567,10 @@
       "type": "object"
     }
   },
-  "capturedAt": 1787374911106,
+  "capturedAt": 1787406255102,
   "globalSettingsError": null,
   "inputs": {
-    "digest": "2865adb257f404f416beecd8c3e27a8be4fe4acacea3d064c48db6e5f8ce6412",
+    "digest": "9ea957877cf33fc7bf7c32056856ca842769ac0018f0558067b6071590ea50b0",
     "files": {
       "res/ecmascript/legacy/api-v1.js": "ff3bc1f704125fc3fddc1cb4ddd032577f22b35bc5729e470a915bffd9c8635a",
       "res/ecmascript/modules/fs.js": "57b8f284517c9408b38eae2f6d4f9d56def540dfc5dabe43b35292dbd3f7420f",
@@ -1619,7 +1619,7 @@
       "src/ecmascript/es_subtitles.c": "4564703cccfac8c218563fc92eb4353ce97f5c62e7de9da1d8307b90acc79b8e",
       "src/ecmascript/es_timer.c": "9f16b4c0c770171625f709bad659cf170cbef06b2ab6801171a874b25698d30a",
       "src/ecmascript/es_websocket.c": "bec99ef07cfba36091465266853bac309553baddc3c6ca5618bd2810d0d936d5",
-      "support/devtools/api-introspector/introspector.js": "0bb812d1fc170f835b8c72983eb51c54e6fd0bd95acab4694e716b954bb57c70",
+      "support/devtools/api-introspector/introspector.js": "3c6b12a46f2340f910749a80c658ec64eca88f0eda84be9a0ed5d7258665a337",
       "support/devtools/api-introspector/plugin.json": "10125b05a633d255b651b202965eff05638065c89fc7b4936a3fdea288a0e767"
     },
     "version": 1
@@ -1680,6 +1680,32 @@
     "showtime/xmlrpc"
   ],
   "movianVersion": "5.0.1017.gf1c26",
+  "runtimeInputs": {
+    "plugin/introspector.js": "aecec8b780f2b2cada519e585b046664dbfafdf0ceb39491df39073a648d1ae9",
+    "plugin/plugin.json": "fd18086f0d952ee9ef1391ac3f443bb53a7b4f994063c9c6675f560852812e85",
+    "res/ecmascript/legacy/api-v1.js": "01c872e89b9a086d6da502d522f9daa29ba51620647b94c8f0a6a60d2747203f",
+    "res/ecmascript/modules/fs.js": "58de36e3f4c3fe6c2e6e3169f6182a2dbbda6c2bec45316f5f8797df3f4ef685",
+    "res/ecmascript/modules/http.js": "71346599978188addbffa1beb1b80d4039df2b740c4bba8e74c591883697b7ef",
+    "res/ecmascript/modules/https.js": "cfae49944c32fff5b77865de28cced583ca58c1a6ce5c83604cebe4937b6354e",
+    "res/ecmascript/modules/movian/html.js": "a707d47da3909abf27e67cea38a16817a87b662ec9bc23e4e52a8452d15cf1f5",
+    "res/ecmascript/modules/movian/http.js": "3b290410d22dddb1f03e701b756e55891b2ffbeab46ee3665700a316415a4b6d",
+    "res/ecmascript/modules/movian/itemhook.js": "216246244e04fb78312f4875298cab3a39a83a460e7e9d1bdaf59a4a9c9303ef",
+    "res/ecmascript/modules/movian/page.js": "ed7944b108d4a5e9239aa117b1234f00ea8367d03e322d5108b1ca89dadd2686",
+    "res/ecmascript/modules/movian/popup.js": "a66c8f6e7f98b38221c994929a0266d9757c8898e7d1d77b26830f2aa3546b7d",
+    "res/ecmascript/modules/movian/prop.js": "5ba253d171eae4aaefddbe09c0e0faf1fa53f0cda02d378075fcaa32b2eb7ff0",
+    "res/ecmascript/modules/movian/service.js": "37f6833df41fda1f8f28f3930c5e83a18c96fc1cee6dc66b96e86eb33e8abeee",
+    "res/ecmascript/modules/movian/settings.js": "6e5119406a7be436c8253ff9a8fac7ea6b1866c629a3d1ccf5357c0a5eb31e58",
+    "res/ecmascript/modules/movian/sqlite.js": "4f6fc04b357d6cdc61570b866f8e1908ed3f4e7bf103528d0c8538d0ca42e559",
+    "res/ecmascript/modules/movian/store.js": "10890fc9a9c0b21cc8929efd3c6678e1e5ff1f696c57dd95ad0abdb6ea6977a2",
+    "res/ecmascript/modules/movian/subtitles.js": "1ec2e9525234df0fabadbf089c8f0e7a7930a657a6d11f8f046bda177b5544f8",
+    "res/ecmascript/modules/movian/videoscrobbler.js": "2d7bbb4a4fab2f0803a7d7e72874066eb132fb6d877732d06f0a61d93ef73412",
+    "res/ecmascript/modules/movian/xml.js": "56e98e19af44d8ada25f2b1d228319b0966b58d39839b54e3cd0aab6ebb9021b",
+    "res/ecmascript/modules/movian/xmlrpc.js": "f068fcd0542b605c874bc609d4368a62ba6a3579cbfbac9ef23eb74a4b89bd96",
+    "res/ecmascript/modules/querystring.js": "3c2f41d248c2a1049bd83c0f17178ee44a5ec442d0da39d966fd802a54f3147f",
+    "res/ecmascript/modules/url.js": "b329b2d0c1bf1f871eeaab49f49db0a16d574fdba6b2330b6862b63216464d15",
+    "res/ecmascript/modules/websocket.js": "367c2a2ec5bea152619f41681cfe5c6287b30f37492545ce24893a45fbd058ca"
+  },
+  "runtimeInputsError": null,
   "tier1": {
     "fs": {
       "functionExports": {

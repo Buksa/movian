@@ -110,6 +110,29 @@ class CommentStrippingRefusals(unittest.TestCase):
         kept = gen._js_hash_text("var q = f(a) / b / c;\nvar y = 2;")
         self.assertIn("var y = 2;", kept)
 
+    def test_regex_after_a_labelled_jump(self):
+        # `break outer` puts a LABEL where the keyword was, so the word
+        # immediately before the regex is not the one on the allow-list.
+        for keyword in ("break", "continue"):
+            kept = gen._js_hash_text(
+                "%s outer\n/x[/*]y/.test(v);\nexports.stillHere = 1;"
+                % keyword)
+            self.assertIn("exports.stillHere", kept, keyword)
+
+    def test_unicode_line_terminators_end_a_line_comment(self):
+        # Duktape treats U+2028 and U+2029 as line terminators
+        # (duktape.c:10493-10494), so the code after one is live and must
+        # not be read as part of the comment before it.
+        for separator in ("\u2028", "\u2029"):
+            kept = gen._js_hash_text("// note%sexports.a = 1;" % separator)
+            self.assertIn("exports.a", kept, repr(separator))
+
+    def test_unicode_line_terminators_separate_statements(self):
+        for separator in ("\u2028", "\u2029"):
+            self.assertNotEqual(
+                gen._js_hash_text("// n%sexports.a = 1;" % separator),
+                gen._js_hash_text("// n%sexports.b = 1;" % separator))
+
     def test_whitespace_inside_a_string_is_content(self):
         # `exports["a  b"]` and `exports["a b"]` declare different members.
         self.assertNotEqual(gen._js_hash_text('exports["a  b"] = 1;'),
@@ -144,7 +167,8 @@ class StripperOverTheRealInputs(unittest.TestCase):
     def _inputs(self):
         paths = []
         for pattern in gen.RUNTIME_ORACLE_INPUT_GLOBS:
-            paths.extend(sorted(REPO_ROOT.glob(pattern)))
+            paths.extend(path for path in sorted(REPO_ROOT.glob(pattern))
+                         if gen._is_oracle_input(path))
         return paths
 
     def test_every_input_is_covered(self):
@@ -164,13 +188,52 @@ class StripperOverTheRealInputs(unittest.TestCase):
                      "support/devtools/api-introspector/plugin.json"):
             self.assertIn(name, stamped)
 
+    def test_every_loadable_plugin_file_is_stamped(self):
+        # es_modsearch() tries the plugin directory before the core module
+        # tree, so anything loadable there can shadow a core module.
+        stamped = set(gen.runtime_oracle_input_digests())
+        for path in sorted(gen.INTROSPECTOR_DIR.rglob("*")):
+            if path.suffix not in (".js", ".json") or not path.is_file():
+                continue
+            name = path.relative_to(REPO_ROOT).as_posix()
+            if path.name == gen.RUNTIME_ORACLE_PATH.name:
+                self.assertNotIn(name, stamped)
+            else:
+                self.assertIn(name, stamped)
+
+    def test_a_new_plugin_module_enters_the_stamp(self):
+        # The previous test only walks files that exist, and today the
+        # plugin directory holds exactly the two the glob used to name --
+        # so it passes whether the glob is a pattern or a list. This one
+        # creates the third file, which is the case the pattern is for:
+        # a url.js here shadows the core module for the introspector's own
+        # require(), and the stamp has to notice it arriving.
+        shadow = gen.INTROSPECTOR_DIR / "url.js"
+        name = shadow.relative_to(REPO_ROOT).as_posix()
+        self.assertNotIn(name, gen.runtime_oracle_input_digests())
+        try:
+            shadow.write_text("exports.format = function(){};\n",
+                              encoding="utf-8")
+            self.assertIn(name, gen.runtime_oracle_input_digests())
+        finally:
+            shadow.unlink(missing_ok=True)
+
+    def test_the_oracle_is_not_stamped_into_its_own_stamp(self):
+        # It sits in the plugin directory and matches the json glob. Writing
+        # the file changes the digest that was just written, so including it
+        # could never converge.
+        self.assertNotIn(
+            gen.RUNTIME_ORACLE_PATH.relative_to(REPO_ROOT).as_posix(),
+            gen.runtime_oracle_input_digests())
+
     def test_compiled_and_runtime_inputs_are_disjoint_and_complete(self):
         compiled = {path.relative_to(REPO_ROOT).as_posix()
                     for pattern in gen.RUNTIME_ORACLE_COMPILED_GLOBS
                     for path in REPO_ROOT.glob(pattern)}
         runtime = {path.relative_to(REPO_ROOT).as_posix()
                    for pattern in gen.RUNTIME_ORACLE_RUNTIME_GLOBS
-                   for path in REPO_ROOT.glob(pattern)}
+                   for path in REPO_ROOT.glob(pattern)
+                   if gen._is_oracle_input(path)}
         self.assertEqual(compiled & runtime, set())
         self.assertEqual(compiled | runtime,
                          set(gen.runtime_oracle_input_digests()))
@@ -394,6 +457,52 @@ class Adoption(unittest.TestCase):
                 gen.runtime_oracle_build_mismatch(version), [])
         finally:
             victim.write_text(original, encoding="utf-8")
+
+    def test_the_committed_oracle_read_this_tree(self):
+        import json
+        oracle = json.loads(
+            gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(
+            gen.runtime_oracle_read_mismatch(
+                oracle.get("runtimeInputs"),
+                oracle.get("runtimeInputsError")),
+            [])
+
+    def test_a_capture_that_could_not_read_is_refused(self):
+        # A plugin's fs access is ACL-limited to its own directory, so
+        # without --bypass-ecmascript-acl the run cannot enumerate the core
+        # modules. Recording that is the point: a partial map would have
+        # looked like a successful capture.
+        self.assertTrue(gen.runtime_oracle_read_mismatch(None, "denied"))
+        self.assertTrue(gen.runtime_oracle_read_mismatch(None, None))
+        self.assertTrue(gen.runtime_oracle_read_mismatch({}, None))
+
+    def test_a_file_edited_after_the_capture_is_named(self):
+        import json
+        recorded = dict(json.loads(
+            gen.RUNTIME_ORACLE_PATH.read_text())["runtimeInputs"])
+        victim = "res/ecmascript/modules/movian/sqlite.js"
+        recorded[victim] = "0" * 64
+        reasons = gen.runtime_oracle_read_mismatch(recorded, None)
+        self.assertEqual(
+            reasons, ["%s differs from the copy the capture read" % victim])
+
+    def test_a_file_the_capture_never_read_is_named(self):
+        # The shadowing case: a module dropped into the plugin directory
+        # after the run would be loaded by a fresh one and was not by this.
+        import json
+        recorded = dict(json.loads(
+            gen.RUNTIME_ORACLE_PATH.read_text())["runtimeInputs"])
+        shadow = gen.INTROSPECTOR_DIR / "url.js"
+        try:
+            shadow.write_text("exports.format = function(){};\n",
+                              encoding="utf-8")
+            reasons = gen.runtime_oracle_read_mismatch(recorded, None)
+            self.assertTrue(
+                any("api-introspector/url.js is here and the capture never"
+                    in reason for reason in reasons), reasons)
+        finally:
+            shadow.unlink(missing_ok=True)
 
     def test_a_capture_without_a_capturedat_is_refused(self):
         import json

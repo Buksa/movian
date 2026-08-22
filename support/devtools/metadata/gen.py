@@ -108,14 +108,22 @@ RUNTIME_ORACLE_RUNTIME_GLOBS = (
     # bootstrap: flipping it to apiversion 2 changes what was observed while
     # every other input stays byte-identical.
     "res/ecmascript/legacy/api-v1.js",
-    "support/devtools/api-introspector/plugin.json",
-    "support/devtools/api-introspector/introspector.js",
+    # Every loadable file in the plugin directory, not just these two:
+    # es_modsearch() tries the plugin directory BEFORE
+    # dataroot://res/ecmascript/modules (ecmascript.c:443-452), so a url.js
+    # dropped next to the introspector shadows the core module for its own
+    # require() and changes what the capture sees.
+    "support/devtools/api-introspector/**/*.js",
+    "support/devtools/api-introspector/**/*.json",
 )
+INTROSPECTOR_DIR = (
+    REPO_ROOT / "support" / "devtools" / "api-introspector")
 RUNTIME_ORACLE_INPUT_GLOBS = (
     RUNTIME_ORACLE_RUNTIME_GLOBS + RUNTIME_ORACLE_COMPILED_GLOBS)
 RUNTIME_ORACLE_RECAPTURE = (
     "recapture in the checkout that owns build.debug:\n"
-    "    mdev run -p support/devtools/api-introspector --name introspect\n"
+    "    mdev run -p support/devtools/api-introspector --name introspect \\\n"
+    "        --extra-flags --bypass-ecmascript-acl\n"
     "    mdev open introspect:page\n"
     "  then adopt the payload printed after the route opened:\n"
     "    gen.py --adopt-oracle <captured.json>")
@@ -132,6 +140,14 @@ _JS_REGEX_KEYWORDS = frozenset((
     # only ever be right.
     "break", "continue", "debugger",
 ))
+# `break outer` and `continue outer` put a LABEL where the keyword was, so
+# the word before it is what says a statement just ended.
+_JS_LABELLED_JUMPS = frozenset(("break", "continue"))
+# Duktape treats U+2028 and U+2029 as line terminators
+# (ext/duktape/duktape.c:10493-10494), so a line comment ends at one and a
+# regex literal cannot cross one. Scanning for LF alone reads the live code
+# after a separator as part of the comment before it.
+_JS_LINE_TERMINATORS = "\n\u2028\u2029"
 # A `)` that closes one of these closes a CONDITION, and a regex may follow
 # it: `if (ready) /x[/*]y/.test(s)` is legal. Reading that `/` as division
 # lets the `/*` inside the character class open a comment that runs to the
@@ -139,6 +155,17 @@ _JS_REGEX_KEYWORDS = frozenset((
 # the hash and leaves a stale oracle accepted. Every other `)` ends a call or
 # a grouping, where `/` is division.
 _JS_CONDITION_KEYWORDS = frozenset(("if", "while", "for", "with"))
+
+
+def _js_next_terminator(source: str, start: int) -> int:
+    """Index of the next JavaScript line terminator at or after `start`, or
+    -1. LF is not the only one; see _JS_LINE_TERMINATORS."""
+    best = -1
+    for char in _JS_LINE_TERMINATORS:
+        found = source.find(char, start)
+        if found >= 0 and (best < 0 or found < best):
+            best = found
+    return best
 
 
 def _js_regex_end(source: str, start: int) -> int:
@@ -153,7 +180,7 @@ def _js_regex_end(source: str, start: int) -> int:
         if char == "\\":
             index += 2
             continue
-        if char == "\n":
+        if char in _JS_LINE_TERMINATORS:
             return start
         if in_class:
             if char == "]":
@@ -186,7 +213,9 @@ def _js_spans(source: str) -> list[tuple[str, str]]:
     index = 0
     length = len(source)
     prev = ""
+    word = ""
     prev_word = ""
+    prev_word2 = ""
     code_start = 0
     # The word before each open paren, so a `)` knows whether it closed a
     # condition.
@@ -209,17 +238,17 @@ def _js_spans(source: str) -> list[tuple[str, str]]:
                 if current == char:
                     cursor += 1
                     break
-                if current == "\n" and char != "`":
+                if current in _JS_LINE_TERMINATORS and char != "`":
                     break
                 cursor += 1
             flush(index)
             spans.append(("literal", source[index:cursor]))
             code_start = cursor
-            prev, prev_word = char, ""
+            prev, word, prev_word = char, "", ""
             index = cursor
             continue
         if char == "/" and index + 1 < length and source[index + 1] == "/":
-            newline = source.find("\n", index)
+            newline = _js_next_terminator(source, index)
             stop = length if newline < 0 else newline
             flush(index)
             spans.append(("comment", source[index:stop]))
@@ -234,33 +263,41 @@ def _js_spans(source: str) -> list[tuple[str, str]]:
             code_start = stop
             index = stop
             continue
-        if char == "/" and _js_regex_allowed(prev, prev_word, closed_word):
+        if char == "/" and _js_regex_allowed(
+                prev, word or prev_word,
+                prev_word if word else prev_word2, closed_word):
             stop = _js_regex_end(source, index)
             if stop > index:
                 flush(index)
                 spans.append(("literal", source[index:stop]))
                 code_start = stop
-                prev, prev_word = "/", ""
+                prev, word, prev_word = "/", "", ""
                 index = stop
                 continue
         if char == "(":
-            paren_words.append(prev_word)
+            paren_words.append(word or prev_word)
         elif char == ")":
             closed_word = paren_words.pop() if paren_words else ""
+        # A word ends at anything that is not a word character, whitespace
+        # included: `break outer` is two words, and gluing them across the
+        # space hid the label case entirely.
+        if char.isalnum() or char in "_$":
+            word += char
+        else:
+            if word:
+                prev_word2, prev_word = prev_word, word
+                word = ""
+            if not char.isspace():
+                prev_word2, prev_word = "", ""
         if not char.isspace():
-            if char.isalnum() or char in "_$":
-                prev_word = (
-                    prev_word + char
-                    if prev.isalnum() or prev in "_$" else char)
-            else:
-                prev_word = ""
             prev = char
         index += 1
     flush(length)
     return spans
 
 
-def _js_regex_allowed(prev: str, prev_word: str, closed_word: str) -> bool:
+def _js_regex_allowed(prev: str, prev_word: str, prev_word2: str,
+                      closed_word: str) -> bool:
     if prev == "":
         return True
     if prev == ")":
@@ -268,7 +305,8 @@ def _js_regex_allowed(prev: str, prev_word: str, closed_word: str) -> bool:
     if prev == "]":
         return False
     if prev.isalnum() or prev in "_$":
-        return prev_word in _JS_REGEX_KEYWORDS
+        return (prev_word in _JS_REGEX_KEYWORDS
+                or prev_word2 in _JS_LABELLED_JUMPS)
     # `}` ends a block (regex legal after it) or an object literal (division
     # legal, and absurd). Reading it as a regex start is the safe half: a
     # span wrongly taken for a regex is copied out verbatim, which can only
@@ -312,10 +350,19 @@ def _js_hash_text(source: str) -> str:
             out.append(span)
             continue
         if kind == "comment":
-            span = " " + "\n" * span.count("\n")
+            span = " " + "\n" * sum(span.count(char)
+                                    for char in _JS_LINE_TERMINATORS)
+        span = re.sub(r"[\u2028\u2029]", "\n", span)
         span = re.sub(r"[^\S\n]+", " ", span)
-        out.append(re.sub(r" ?\n[\s\n]*", "\n", span))
+        out.append(re.sub(r" ?\n\s*", "\n", span))
     return "".join(out).strip()
+
+
+def _is_oracle_input(path: Path) -> bool:
+    # The oracle itself lives in the plugin directory and is matched by the
+    # `**/*.json` glob. Stamping it into its own stamp cannot converge:
+    # writing the file changes the digest that was just written.
+    return path.is_file() and path.name != RUNTIME_ORACLE_PATH.name
 
 
 def runtime_oracle_input_digests(
@@ -325,7 +372,7 @@ def runtime_oracle_input_digests(
     digests: dict[str, str] = {}
     for pattern in RUNTIME_ORACLE_INPUT_GLOBS:
         for path in sorted(base.glob(pattern)):
-            if not path.is_file():
+            if not _is_oracle_input(path):
                 continue
             digests[path.relative_to(base).as_posix()] = hashlib.sha256(
                 _js_hash_text(path.read_text(encoding="utf-8"))
@@ -5434,6 +5481,59 @@ def runtime_oracle_build_mismatch(version: Any) -> list[str]:
     return reasons
 
 
+def runtime_oracle_read_mismatch(recorded: Any, error: Any) -> list[str]:
+    """Reasons the tree differs from the one the capture actually read.
+
+    The `inputs` stamp is computed at adoption time, so on its own it binds
+    the oracle to the tree it is committed with rather than to the tree it
+    was captured from -- and those are routinely different checkouts, since
+    the run happens where build.debug lives and the adoption happens in a
+    worktree. This compares against what the run recorded reading.
+
+    Raw bytes, not the comment-insensitive digest: capture and adoption are
+    meant to be the same tree minutes apart, so there is nothing to be
+    tolerant of, and tolerance here would only widen the gap.
+    """
+    if error:
+        return ["the capture could not record what it read: %s" % error]
+    if not isinstance(recorded, dict) or not recorded:
+        return ["the capture does not record what it read"]
+
+    def resolve(name: str) -> Path | None:
+        if name.startswith("plugin/"):
+            return INTROSPECTOR_DIR / name[len("plugin/"):]
+        if name.startswith("res/"):
+            return REPO_ROOT / name
+        return None
+
+    reasons = []
+    seen: set[Path] = set()
+    for name in sorted(recorded):
+        path = resolve(name)
+        if path is None:
+            reasons.append("capture recorded an unplaceable input %r" % name)
+            continue
+        if not path.is_file():
+            reasons.append("%s was read by the capture and is not here"
+                           % name)
+            continue
+        seen.add(path)
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != recorded[name]:
+            reasons.append("%s differs from the copy the capture read"
+                           % name)
+    # The other direction: a file this tree has and the capture never saw is
+    # a module the run could not have observed.
+    for pattern in ("res/ecmascript/modules/**/*.js",
+                    "support/devtools/api-introspector/**/*.js",
+                    "support/devtools/api-introspector/**/*.json"):
+        for path in sorted(REPO_ROOT.glob(pattern)):
+            if _is_oracle_input(path) and path not in seen:
+                reasons.append("%s is here and the capture never read it"
+                               % path.relative_to(REPO_ROOT).as_posix())
+    return reasons
+
+
 def cmd_adopt_oracle(args: argparse.Namespace) -> int:
     """Stamp a fresh capture with the tree it was captured from and commit it
     as the oracle.
@@ -5490,6 +5590,16 @@ def cmd_adopt_oracle(args: argparse.Namespace) -> int:
         for reason in mismatch:
             print("  %s" % reason, file=sys.stderr)
         print("  rebuild, recapture, and adopt that.", file=sys.stderr)
+        return 1
+    unread = runtime_oracle_read_mismatch(
+        payload.get("runtimeInputs"), payload.get("runtimeInputsError"))
+    if unread:
+        print("gen.py: the capture read a different tree than the one being "
+              "stamped, so the stamp would describe sources it never saw:",
+              file=sys.stderr)
+        for reason in unread:
+            print("  %s" % reason, file=sys.stderr)
+        print("  recapture against this tree.", file=sys.stderr)
         return 1
     digests = runtime_oracle_input_digests()
     payload["inputs"] = {
