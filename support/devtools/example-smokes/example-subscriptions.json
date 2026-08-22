@@ -1,0 +1,22 @@
+{
+  "name": "example-subscriptions",
+  "describe": "Asserts the route opens with its title. The route arrives through plugin.addURI; the plugin's prop subscriptions create no node of their own and are not observed here.",
+  "needs": {
+    "binary": "build.debug/movian",
+    "plugin": "../../../plugin_examples/subscriptions"
+  },
+  "steps": [
+    {
+      "do": "health"
+    },
+    {
+      "do": "open",
+      "url": "example:subscriptions:"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "Hello"
+    }
+  ]
+}

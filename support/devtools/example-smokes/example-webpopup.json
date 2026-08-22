@@ -1,0 +1,22 @@
+{
+  "name": "example-webpopup",
+  "describe": "The web-popup development route opens. The absent title is asserted, not just remarked on: it is the property that used to make mdev call this page unready.",
+  "needs": {
+    "binary": "build.debug/movian",
+    "plugin": "../../../plugin_examples/webpopupplugin"
+  },
+  "steps": [
+    {
+      "do": "health"
+    },
+    {
+      "do": "open",
+      "url": "devplug:webtest"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "absent": true
+    }
+  ]
+}

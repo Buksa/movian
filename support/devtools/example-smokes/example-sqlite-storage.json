@@ -1,0 +1,27 @@
+{
+  "name": "example-sqlite-storage",
+  "describe": "The store opens and its two entries render.",
+  "needs": {
+    "binary": "build.debug/movian",
+    "plugin": "../../../plugin_examples/02-intermediate/03-sqlite-storage"
+  },
+  "steps": [
+    {
+      "do": "health"
+    },
+    {
+      "do": "open",
+      "url": "example:storage:"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "Storage Demo"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/nodes",
+      "equals": 2
+    }
+  ]
+}

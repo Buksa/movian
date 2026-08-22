@@ -1,0 +1,27 @@
+{
+  "name": "example-http-json-api",
+  "describe": "The mock API page renders its three items.",
+  "needs": {
+    "binary": "build.debug/movian",
+    "plugin": "../../../plugin_examples/02-intermediate/01-http-json-api"
+  },
+  "steps": [
+    {
+      "do": "health"
+    },
+    {
+      "do": "open",
+      "url": "example:api:popular"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "Popular Videos"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/nodes",
+      "equals": 3
+    }
+  ]
+}

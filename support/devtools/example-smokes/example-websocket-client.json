@@ -1,0 +1,27 @@
+{
+  "name": "example-websocket-client",
+  "describe": "Asserts the menu page renders. It does NOT exercise the socket: connecting is bound to an action, and no step activates it.",
+  "needs": {
+    "binary": "build.debug/movian",
+    "plugin": "../../../plugin_examples/03-advanced/01-websocket-client"
+  },
+  "steps": [
+    {
+      "do": "health"
+    },
+    {
+      "do": "open",
+      "url": "example:websocket:"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "WebSocket Demo"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/nodes",
+      "equals": 2
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "example-listx-cloner",
+  "describe": "The service this plugin registers appears in the service list. NOTE this asserts the registration itself, not the route: opening the URL the service advertises passes with service.create() deleted, because the route is registered independently.",
+  "needs": {
+    "binary": "build.debug/movian",
+    "plugin": "../../../plugin_examples/listx_cloner"
+  },
+  "steps": [
+    {
+      "do": "health"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/services/all/plugin:example_listx_cloner@dev/title",
+      "equals": "list_x Cloner Example"
+    }
+  ]
+}

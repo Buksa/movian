@@ -1,0 +1,22 @@
+{
+  "name": "example-music",
+  "describe": "Asserts the route opens with its title. The route comes from plugin.addURI rather than page.Route -- context for the reader, not something these steps distinguish.",
+  "needs": {
+    "binary": "build.debug/movian",
+    "plugin": "../../../plugin_examples/music"
+  },
+  "steps": [
+    {
+      "do": "health"
+    },
+    {
+      "do": "open",
+      "url": "example:music:"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "Music examples"
+    }
+  ]
+}

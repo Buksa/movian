@@ -1017,6 +1017,69 @@ def _run_one(
     return False, wedge, transcript, bundle
 
 
+def _ensure_running_with(instance_name: str, plugins: list[str]) -> Instance:
+    """A live instance carrying exactly the plugins this run needs.
+
+    `harness.ensure_running()` reuses a live instance AS IS and says so in
+    its docstring -- "does not restart it even if `plugins` differs" -- which
+    is right for `mdev preview`, whose instance is always the viewpreview one.
+    It is wrong here. Smokes each declare their own `needs.plugin`, so running
+    two of them in succession silently gave the second the FIRST one's
+    plugins: the route was never registered, the page came up `openerror`,
+    and the failure looked like the smoke's own assertion (movian#182's
+    neighbour, found while running the plugin_examples corpus).
+
+    So reconcile: if the live instance was launched with a different plugin
+    set, stop it and launch the one this run asked for.
+    """
+    inst = Instance(instance_name)
+    if inst.live_pid() is not None:
+        state = inst.load_state() or {}
+        running = harness.plugin_dirs_from_argv(state.get("argv") or [])
+        if sorted(running) != sorted(plugins):
+            # Name the difference, not the sizes. "holds 1, needs 1" is
+            # what this printed when the counts matched and the plugins did
+            # not, which tells a reader nothing about why it relaunched.
+            dropped = sorted(set(running) - set(plugins))
+            added = sorted(set(plugins) - set(running))
+            print("smoke: relaunching %r -- %s" % (
+                instance_name,
+                "; ".join(filter(None, [
+                    "dropping " + ", ".join(dropped) if dropped else "",
+                    "adding " + ", ".join(added) if added else ""]))),
+                file=sys.stderr)
+            pid = inst.live_pid()
+            if pid is not None:
+                outcome = harness.kill_owned_pid(inst, pid)
+                if outcome == "still-alive":
+                    raise MdevError(
+                        "cannot relaunch %r for a different plugin set: "
+                        "pid %d still alive after SIGKILL"
+                        % (instance_name, pid))
+                state = inst.load_state() or {}
+                state.pop("pid", None)
+                inst._write_state(state)
+                # A killed Movian does not release the GLX context the moment
+                # kill_owned_pid() returns, and a replacement started before
+                # it does comes up with GLW never dispatching a frame -- which
+                # the health step then reports as a missing framerate.
+                # Measured: usable framerate arrives 3.1-5.5s into a cold
+                # start when the previous process is really gone, and not at
+                # all within 20s when it is not.
+                #
+                # So wait for the pid to disappear rather than sleeping a
+                # guessed interval, then give the display server a moment.
+                deadline = time.monotonic() + 15.0
+                while time.monotonic() < deadline and harness.pid_is_movian(pid):
+                    time.sleep(0.2)
+                if harness.pid_is_movian(pid):
+                    raise MdevError(
+                        "cannot relaunch %r: pid %d is still a live movian "
+                        "15s after SIGKILL" % (instance_name, pid))
+                time.sleep(1.5)
+    return harness.ensure_running(instance_name, plugins)
+
+
 def run(
     definitions: list[dict[str, Any]],
     target: str,
@@ -1025,7 +1088,7 @@ def run(
 ) -> tuple[int, dict[str, Any], str]:
     selected = select_definitions(definitions, target)
     plugins = _plugins_for(selected)
-    inst = harness.ensure_running(instance_name, plugins)
+    inst = _ensure_running_with(instance_name, plugins)
 
     results = []
     bundles = []
