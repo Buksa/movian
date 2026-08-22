@@ -5409,7 +5409,10 @@ def runtime_oracle_build_mismatch(version: Any) -> list[str]:
         ["git", "rev-parse", "--verify", "--quiet", revision + "^{commit}"],
         cwd=str(REPO_ROOT), capture_output=True, text=True)
     if resolved.returncode != 0:
-        return ["build %s is not a commit in this repository" % revision]
+        # `--verify` also fails when a short revision matches more than one
+        # object, which is the right answer: an identity that names two
+        # commits proves nothing about either.
+        return ["build %s is not one commit in this repository" % revision]
     reasons = []
     for pattern in RUNTIME_ORACLE_COMPILED_GLOBS:
         for path in sorted(REPO_ROOT.glob(pattern)):

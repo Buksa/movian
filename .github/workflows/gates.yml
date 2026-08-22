@@ -50,9 +50,18 @@ jobs:
           version=$(python3 -c "import json;print(json.load(open('support/devtools/api-introspector/runtime-api.json')).get('movianVersion') or '')")
           echo "oracle build: ${version:-<none>}"
           revision=${version##*.g}
-          if [ -n "$revision" ] && [ "$revision" != "$version" ]; then
-            git fetch --no-tags --depth=1 origin "$revision"
+          if [ -z "$revision" ] || [ "$revision" = "$version" ]; then
+            echo "no build revision in the version string" >&2
+            exit 1
           fi
+          # `git fetch` takes a full SHA or a ref name, never an
+          # abbreviation, and the version string carries `git describe`'s
+          # short form. Expand it against the API first.
+          full=$(gh api "repos/$GITHUB_REPOSITORY/commits/$revision" --jq .sha)
+          echo "expanded $revision -> $full"
+          git fetch --no-tags --depth=1 origin "$full"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - uses: actions/setup-python@v5
         with:
