@@ -42,12 +42,14 @@ not what `Function.length` reports at runtime — every native callable reports
 **Oracle**:
 `support/devtools/api-introspector/runtime-api.json` — a captured dump of what
 a running Movian actually exposes. A snapshot, not a live query, and therefore
-only as good as its **stamp**: an `inputs` block recording a digest of every
-file the capture was taken from, with comments and indentation excluded so the
-stamp goes red when a member could have moved and not when a docblock did.
-`gen.py --check` refuses an unstamped or stale oracle rather than comparing
-against it; `gen.py --adopt-oracle` is the only way to move the stamp, and it
-takes a fresh capture, never the file already on disk.
+only as good as its **stamp**: an `inputs` block digesting all 47 files the
+capture was taken from — the CommonJS modules, the C the natives are
+registered in, and the introspector — with comments and whitespace between
+tokens excluded, so the stamp goes red when a member could have moved and not
+when a docblock did. `gen.py --check` refuses an unstamped or stale oracle
+rather than comparing against it. `gen.py --adopt-oracle` is the only way to
+move the stamp, it takes a fresh capture, and it tells one from a copy of the
+committed file by the `capturedAt` every run writes.
 _Avoid_: runtime API, capture (unqualified)
 
 **Accepted corpus**:

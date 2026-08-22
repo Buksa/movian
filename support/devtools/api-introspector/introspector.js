@@ -987,6 +987,12 @@ function emitPayload(complete) {
         JSON.stringify({
     version: 2,
     tier3PageOpened: !!complete,
+    // What separates a fresh capture from a copy of the committed oracle.
+    // Two runs never agree on it, so `--adopt-oracle` can refuse the file
+    // already on disk without also refusing a genuine recapture that
+    // happened to observe the same API -- which is what an
+    // implementation-only change to a module produces.
+    capturedAt: Date.now(),
     modules: moduleNames,
     before: before,
     tier1: tier1,

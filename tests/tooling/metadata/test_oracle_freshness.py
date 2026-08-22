@@ -17,7 +17,7 @@ refuse and, just as importantly, what it must NOT refuse: a stamp that goes
 red on a reindent or a comment makes a recapture -- a built Movian, a run, a
 live route -- the price of editing a docblock, and the first person to pay it
 twice will delete the check. #212 added 231 lines of JSDoc across 16 of the
-20 modules it covers and moved no member; under a byte-level stamp that
+20 CommonJS modules it covers and moved no member; under a byte stamp that
 commit alone would have demanded one.
 
 The stripper's error directions are not symmetric and the tests are weighted
@@ -93,6 +93,33 @@ class CommentStrippingRefusals(unittest.TestCase):
         kept = gen._js_hash_text("if (a) return /x[/*]y/.test(b);\nvar y = 2;")
         self.assertIn("var y = 2;", kept)
 
+    def test_regex_directly_after_a_condition_is_not_division(self):
+        # `if (c) /re/.test(s)` with no `return` between them. Reading the
+        # `/` as division lets the `/*` in the character class open a comment
+        # that runs to the next `*/` -- here, past the end of the file. The
+        # first version of this scanner did exactly that and swallowed
+        # everything after the condition, which is a hash that agrees with a
+        # tree it never saw.
+        kept = gen._js_hash_text(
+            "if (condition) /x[/*]y/.test(value);\nexports.stillHere = 1;")
+        self.assertIn("exports.stillHere", kept)
+
+    def test_division_after_a_call_is_still_division(self):
+        # The other half of the same rule: `)` that closes a CALL is followed
+        # by division, and reading it as a regex would swallow the statement.
+        kept = gen._js_hash_text("var q = f(a) / b / c;\nvar y = 2;")
+        self.assertIn("var y = 2;", kept)
+
+    def test_whitespace_inside_a_string_is_content(self):
+        # `exports["a  b"]` and `exports["a b"]` declare different members.
+        self.assertNotEqual(gen._js_hash_text('exports["a  b"] = 1;'),
+                            gen._js_hash_text('exports["a b"] = 1;'))
+
+    def test_whitespace_inside_a_regex_is_content(self):
+        # An introspector regex can change what it matches by a space alone.
+        self.assertNotEqual(gen._js_hash_text("var r = /a  b/;"),
+                            gen._js_hash_text("var r = /a b/;"))
+
     def test_division_is_not_read_as_a_regex(self):
         # `a / b / c` after an identifier is division; reading the span as a
         # regex would swallow the `;` and everything to the next `/`.
@@ -111,7 +138,67 @@ class StripperOverTheRealInputs(unittest.TestCase):
         return paths
 
     def test_every_input_is_covered(self):
-        self.assertEqual(len(self._inputs()), 21)
+        # 20 CommonJS modules, the 26 C files the natives are registered in,
+        # and the introspector. The C half matters: 18 of the 52 modules the
+        # oracle observes are `native/*`, so a stamp over the JS alone
+        # guards half of what the cross-check covers.
+        self.assertEqual(len(self._inputs()), 47)
+
+    def test_the_native_sources_are_stamped(self):
+        stamped = gen.runtime_oracle_input_digests()
+        registering = {
+            path.relative_to(REPO_ROOT).as_posix()
+            for path in (REPO_ROOT / "src" / "ecmascript").rglob("*.c")
+            if "duk_function_list_entry" in path.read_text(
+                encoding="utf-8", errors="replace")}
+        self.assertTrue(registering)
+        self.assertTrue(registering <= set(stamped),
+                        sorted(registering - set(stamped)))
+
+    def test_c_sources_lose_no_code(self):
+        # C has no regex literals, so the regex heuristic is the one part of
+        # the scanner that could misfire on it. Checked against a stripper
+        # that knows only strings and comments: any disagreement is the
+        # heuristic eating C.
+        def plain(source):
+            out, index, length = [], 0, len(source)
+            while index < length:
+                char = source[index]
+                if char in "\"'":
+                    cursor = index + 1
+                    while cursor < length:
+                        if source[cursor] == "\\":
+                            cursor += 2
+                            continue
+                        if source[cursor] == char:
+                            cursor += 1
+                            break
+                        cursor += 1
+                    out.append(source[index:cursor])
+                    index = cursor
+                    continue
+                if source.startswith("//", index):
+                    stop = source.find("\n", index)
+                    index = length if stop < 0 else stop
+                    out.append(" ")
+                    continue
+                if source.startswith("/*", index):
+                    stop = source.find("*/", index + 2)
+                    index = length if stop < 0 else stop + 2
+                    out.append(" ")
+                    continue
+                out.append(char)
+                index += 1
+            return " ".join("".join(out).split())
+
+        checked = 0
+        for path in sorted((REPO_ROOT / "src" / "ecmascript").rglob("*.c")):
+            source = path.read_text(encoding="utf-8", errors="replace")
+            self.assertEqual(
+                " ".join(gen._js_code_only(source).split()),
+                plain(source), str(path))
+            checked += 1
+        self.assertGreater(checked, 20)
 
     def test_output_is_a_subsequence_of_the_input(self):
         for path in self._inputs():
@@ -173,6 +260,49 @@ class Freshness(unittest.TestCase):
         moved = dict(self.current)
         moved[sorted(moved)[-1]] = "0" * 64
         self.assertNotEqual(first, gen.runtime_oracle_inputs_digest(moved))
+
+
+class Adoption(unittest.TestCase):
+    """Moving the stamp takes a run, not an edit."""
+
+    def test_the_committed_oracle_records_its_capture(self):
+        import json
+        oracle = json.loads(
+            gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
+        self.assertIsInstance(oracle.get("capturedAt"), (int, float))
+
+    def test_re_adopting_the_committed_oracle_is_refused(self):
+        import json
+        import subprocess
+        import tempfile
+        before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+            handle.write(json.dumps(json.loads(before)))
+            handle.flush()
+            result = subprocess.run(
+                ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
+                capture_output=True, text=True, cwd=str(REPO_ROOT))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("same capturedAt", result.stderr)
+        # The refusal must come before the write.
+        self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
+
+    def test_a_capture_without_a_capturedat_is_refused(self):
+        import json
+        import subprocess
+        import tempfile
+        payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        payload.pop("capturedAt", None)
+        before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+            handle.write(json.dumps(payload))
+            handle.flush()
+            result = subprocess.run(
+                ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
+                capture_output=True, text=True, cwd=str(REPO_ROOT))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("capturedAt", result.stderr)
+        self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
 
 
 class Floor(unittest.TestCase):

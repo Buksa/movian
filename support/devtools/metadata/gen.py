@@ -86,6 +86,14 @@ RUNTIME_ORACLE_INPUTS_VERSION = 1
 # can move the answer, and nothing else can.
 RUNTIME_ORACLE_INPUT_GLOBS = (
     "res/ecmascript/modules/**/*.js",
+    # 18 of the 52 modules the oracle observes are `native/*`, registered
+    # from these files. Leaving them out left the stamp guarding half of
+    # what the cross-check covers: a native registered in a shape the C
+    # scanner does not read is absent from the artifact, absent from a
+    # capture that predates it, and -- without this -- absent from the
+    # freshness key too. That is the same blind spot in the other language.
+    "src/ecmascript/**/*.c",
+    "src/ecmascript/**/*.h",
     "support/devtools/api-introspector/introspector.js",
 )
 RUNTIME_ORACLE_RECAPTURE = (
@@ -96,26 +104,19 @@ RUNTIME_ORACLE_RECAPTURE = (
     "    gen.py --adopt-oracle <captured.json>")
 
 # `/` begins a regex literal after these words and division after any other
-# identifier. Without the distinction `return /a\/b/` reads as a division
+# identifier. Without the distinction `return /a\\/b/` reads as a division
 # followed by a comment.
 _JS_REGEX_KEYWORDS = frozenset((
     "return", "typeof", "instanceof", "in", "of", "new", "delete", "void",
     "throw", "case", "do", "else", "yield", "await",
 ))
-
-
-def _js_regex_allowed(prev: str, prev_word: str) -> bool:
-    if prev == "":
-        return True
-    if prev in ")]":
-        return False
-    if prev.isalnum() or prev in "_$":
-        return prev_word in _JS_REGEX_KEYWORDS
-    # `}` ends a block (regex legal after it) or an object literal (division
-    # legal, and absurd). Reading it as a regex start is the safe half: a
-    # span wrongly taken for a regex is copied out verbatim, which can only
-    # keep a comment, never drop code.
-    return True
+# A `)` that closes one of these closes a CONDITION, and a regex may follow
+# it: `if (ready) /x[/*]y/.test(s)` is legal. Reading that `/` as division
+# lets the `/*` inside the character class open a comment that runs to the
+# next `*/` -- possibly the end of the file -- which deletes real code from
+# the hash and leaves a stale oracle accepted. Every other `)` ends a call or
+# a grouping, where `/` is division.
+_JS_CONDITION_KEYWORDS = frozenset(("if", "while", "for", "with"))
 
 
 def _js_regex_end(source: str, start: int) -> int:
@@ -146,28 +147,34 @@ def _js_regex_end(source: str, start: int) -> int:
     return start
 
 
-def _js_code_only(source: str) -> str:
-    """`source` with its comments removed and everything else byte-identical.
+def _js_spans(source: str) -> list[tuple[str, str]]:
+    """`source` split into ("code" | "literal" | "comment", text) spans.
 
-    Why not hash the file. The stamp has to go red exactly when the surface
-    the oracle observed could have moved, and a byte hash also goes red on a
-    comment: #212 added 231 lines of JSDoc across 16 of these 20 modules and
-    moved no member. Under a byte stamp that commit demands a live Movian, a
-    run and a route to restate an unchanged answer -- the "key over too much"
-    failure, met on the last commit to touch these files.
+    One scanner, because the three questions are the same question: a `//`
+    means a comment only where a string, a template or a regex is not already
+    open. Callers decide what to do with each kind; getting the split wrong
+    in the literal direction deletes real code, which is the failure that
+    passes green.
 
-    A comment cannot declare a member, so dropping comments cannot hide a
-    surface change. Nothing else is normalized; two files differing only in
-    indentation are meant to hash apart. String and regex literals are
-    tracked because a `//` inside either is not a comment, and mistaking one
-    for a comment deletes real code from the hash -- the single error
-    direction that fails green.
+    C is scanned by the same routine. Its comment and string syntax is the
+    same, it has no regex literals, and the regex heuristic cannot lose code
+    on it: a span wrongly taken for a regex is emitted verbatim.
     """
-    out: list[str] = []
+    spans: list[tuple[str, str]] = []
     index = 0
     length = len(source)
     prev = ""
     prev_word = ""
+    code_start = 0
+    # The word before each open paren, so a `)` knows whether it closed a
+    # condition.
+    paren_words: list[str] = []
+    closed_word = ""
+
+    def flush(stop: int) -> None:
+        if stop > code_start:
+            spans.append(("code", source[code_start:stop]))
+
     while index < length:
         char = source[index]
         if char in "\"'`":
@@ -183,30 +190,41 @@ def _js_code_only(source: str) -> str:
                 if current == "\n" and char != "`":
                     break
                 cursor += 1
-            out.append(source[index:cursor])
+            flush(index)
+            spans.append(("literal", source[index:cursor]))
+            code_start = cursor
             prev, prev_word = char, ""
             index = cursor
             continue
         if char == "/" and index + 1 < length and source[index + 1] == "/":
             newline = source.find("\n", index)
-            index = length if newline < 0 else newline
+            stop = length if newline < 0 else newline
+            flush(index)
+            spans.append(("comment", source[index:stop]))
+            code_start = stop
+            index = stop
             continue
         if char == "/" and index + 1 < length and source[index + 1] == "*":
             close = source.find("*/", index + 2)
             stop = length if close < 0 else close + 2
-            # A space so `a/*x*/b` cannot hash as `ab`; the newlines because
-            # dropping them would join two statements that ASI kept apart.
-            out.append(" " + "\n" * source.count("\n", index, stop))
+            flush(index)
+            spans.append(("comment", source[index:stop]))
+            code_start = stop
             index = stop
             continue
-        if char == "/" and _js_regex_allowed(prev, prev_word):
+        if char == "/" and _js_regex_allowed(prev, prev_word, closed_word):
             stop = _js_regex_end(source, index)
             if stop > index:
-                out.append(source[index:stop])
+                flush(index)
+                spans.append(("literal", source[index:stop]))
+                code_start = stop
                 prev, prev_word = "/", ""
                 index = stop
                 continue
-        out.append(char)
+        if char == "(":
+            paren_words.append(prev_word)
+        elif char == ")":
+            closed_word = paren_words.pop() if paren_words else ""
         if not char.isspace():
             if char.isalnum() or char in "_$":
                 prev_word = (
@@ -216,22 +234,66 @@ def _js_code_only(source: str) -> str:
                 prev_word = ""
             prev = char
         index += 1
+    flush(length)
+    return spans
+
+
+def _js_regex_allowed(prev: str, prev_word: str, closed_word: str) -> bool:
+    if prev == "":
+        return True
+    if prev == ")":
+        return closed_word in _JS_CONDITION_KEYWORDS
+    if prev == "]":
+        return False
+    if prev.isalnum() or prev in "_$":
+        return prev_word in _JS_REGEX_KEYWORDS
+    # `}` ends a block (regex legal after it) or an object literal (division
+    # legal, and absurd). Reading it as a regex start is the safe half: a
+    # span wrongly taken for a regex is copied out verbatim, which can only
+    # keep a comment, never drop code.
+    return True
+
+
+def _js_code_only(source: str) -> str:
+    """`source` with its comments removed and everything else byte-identical.
+
+    A comment becomes a space plus its newlines: the space so `a/*x*/b`
+    cannot read as `ab`, the newlines because dropping them would join two
+    statements that ASI kept apart.
+    """
+    out = []
+    for kind, span in _js_spans(source):
+        if kind == "comment":
+            out.append(" " + "\n" * span.count("\n"))
+        else:
+            out.append(span)
     return "".join(out)
 
 
 def _js_hash_text(source: str) -> str:
     """The text the freshness stamp is taken over.
 
-    Comments are gone, horizontal whitespace inside a line is collapsed and
-    blank lines are dropped -- re-indenting a module cannot move a member any
-    more than commenting it can, and leaving either in makes the stamp go red
-    for nothing. Newlines between real lines are KEPT: automatic semicolon
-    insertion reads them, so `return\n  x` and `return x` are different
-    programs and must hash apart.
+    Comments are gone and whitespace BETWEEN tokens is normalized --
+    re-indenting a module cannot move a member any more than commenting it
+    can, and leaving either in makes the stamp go red for nothing. Two
+    things are deliberately not normalized:
+
+    - whitespace INSIDE a string, template or regex, because it is content:
+      `exports["a  b"]` and `exports["a b"]` declare different members, and
+      an introspector regex can change what it matches by a space alone;
+    - newlines between lines of code, because automatic semicolon insertion
+      reads them, so `return\n  x` and `return x` are different programs.
     """
-    lines = [" ".join(line.split())
-             for line in _js_code_only(source).split("\n")]
-    return "\n".join(line for line in lines if line)
+    out = []
+    for kind, span in _js_spans(source):
+        if kind == "literal":
+            out.append(span)
+            continue
+        if kind == "comment":
+            span = " " + "\n" * span.count("\n")
+        span = re.sub(r"[^\S\n]+", " ", span)
+        out.append(re.sub(r" ?\n[\s\n]*", "\n", span))
+    return "".join(out).strip()
 
 
 def runtime_oracle_input_digests(
@@ -5334,17 +5396,25 @@ def cmd_adopt_oracle(args: argparse.Namespace) -> int:
         print("gen.py: capture is the partial load-time payload; adopt the "
               "one printed after opening introspect:page", file=sys.stderr)
         return 1
+    captured_at = payload.get("capturedAt")
+    if not isinstance(captured_at, (int, float)):
+        print("gen.py: capture carries no capturedAt; it predates the "
+              "freshness work or is not a capture at all", file=sys.stderr)
+        return 1
+    # Freshness is a property of the RUN, not of what the run saw. An
+    # implementation-only change to a module moves the stamp and moves no
+    # member, so the honest recapture that follows it is byte-identical to
+    # the committed oracle -- rejecting on content would leave that gate red
+    # with no way to clear it. `capturedAt` separates the two cases: no two
+    # runs share it, and a copy of the committed file cannot invent one.
     if RUNTIME_ORACLE_PATH.is_file():
         current = json.loads(
             RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
-        without_stamp = {key: value for key, value in current.items()
-                         if key != "inputs"}
-        if without_stamp == {key: value for key, value in payload.items()
-                             if key != "inputs"}:
-            print("gen.py: this capture is the committed oracle again. "
-                  "Re-stamping it would certify the old observations against "
-                  "a tree they did not come from -- run the capture.",
-                  file=sys.stderr)
+        if current.get("capturedAt") == captured_at:
+            print("gen.py: this capture is the committed oracle again -- "
+                  "same capturedAt. Re-stamping it would certify old "
+                  "observations against a tree they did not come from; run "
+                  "the capture.", file=sys.stderr)
             return 1
     digests = runtime_oracle_input_digests()
     payload["inputs"] = {
