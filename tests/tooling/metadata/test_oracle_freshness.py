@@ -552,6 +552,43 @@ class Recipe(unittest.TestCase):
                          "SRCS-$(CONFIG_GUMBO)")
         self.assertEqual(selection["src/ecmascript/es_fs.c"], "SRCS")
 
+    def test_a_source_moved_into_a_make_conditional_changes_its_gate(self):
+        # `SRCS-$(CONFIG_X) +=` is one way to make a source conditional; a
+        # bare `SRCS +=` inside `ifeq (...) ... endif` is another, and the
+        # recipe already uses it (Makefile:283-285). Reading only the
+        # variable name makes the two indistinguishable.
+        text = self._makefile()
+        moved = text.replace(
+            "SRCS-$(CONFIG_SQLITE) += src/ecmascript/es_sqlite.c",
+            "ifeq ($(CONFIG_FOO),yes)\n"
+            "SRCS += src/ecmascript/es_sqlite.c\n"
+            "endif")
+        selection = gen.makefile_ecmascript_selection(moved)
+        self.assertEqual(selection["src/ecmascript/es_sqlite.c"],
+                         "SRCS under ifeq ($(CONFIG_FOO),yes)")
+        self.assertTrue(gen.selection_mismatch(
+            selection, gen.makefile_ecmascript_selection(text), "abc1234"))
+
+    def test_a_conditional_closes_at_its_endif(self):
+        selection = gen.makefile_ecmascript_selection(
+            "ifeq ($(A),yes)\n"
+            "SRCS += src/ecmascript/inside.c\n"
+            "endif\n"
+            "SRCS += src/ecmascript/outside.c\n")
+        self.assertEqual(selection["src/ecmascript/inside.c"],
+                         "SRCS under ifeq ($(A),yes)")
+        self.assertEqual(selection["src/ecmascript/outside.c"], "SRCS")
+
+    def test_the_else_branch_is_not_the_if_branch(self):
+        selection = gen.makefile_ecmascript_selection(
+            "ifeq ($(A),yes)\n"
+            "SRCS += src/ecmascript/yes.c\n"
+            "else\n"
+            "SRCS += src/ecmascript/no.c\n"
+            "endif\n")
+        self.assertNotEqual(selection["src/ecmascript/yes.c"],
+                            selection["src/ecmascript/no.c"])
+
     def test_a_blind_parser_is_a_problem_not_a_pass(self):
         # A parser that stops matching returns an empty selection, and an
         # empty selection compares equal to another empty one -- green
@@ -605,13 +642,63 @@ class ModuleCensus(unittest.TestCase):
     the scanner cannot read, missing from the artifact too. Two blind sides
     agree about nothing."""
 
-    def _observed(self):
+    def _oracle(self):
         import json
         return json.loads(
-            gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))["modules"]
+            gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
 
-    def test_the_committed_capture_loaded_everything_this_tree_has(self):
-        self.assertEqual(gen.runtime_oracle_census(self._observed()), [])
+    def test_the_committed_capture_walked_everything_this_tree_has(self):
+        self.assertEqual(gen.runtime_oracle_census(self._oracle()), [])
+
+    def test_the_census_asks_what_was_walked_not_what_was_attempted(self):
+        # `modules` is the list of names the run TRIED, and the introspector
+        # builds it by walking the same directory this census walks -- so
+        # comparing the two could not disagree. A module that failed to load
+        # is in `modules`, in `loadErrors`, and has no members at all; for a
+        # module the static scanner also cannot read there is then nothing
+        # left to compare, and the gate would pass on a capture that saw
+        # nothing.
+        import copy
+        oracle = copy.deepcopy(self._oracle())
+        oracle["loadErrors"] = {"movian/page": "Error: boom"}
+        problems = gen.runtime_oracle_census(oracle)
+        self.assertTrue(any("could not load it" in problem
+                            for problem in problems), problems)
+
+    def test_a_module_the_capture_did_not_walk_fails(self):
+        import copy
+        oracle = copy.deepcopy(self._oracle())
+        oracle["tier1"]["movian/page"] = {"status": "unavailable"}
+        problems = gen.runtime_oracle_census(oracle)
+        self.assertTrue(any("did not walk it (unavailable)" in problem
+                            for problem in problems), problems)
+
+    def test_an_oracle_without_tier1_fails(self):
+        import copy
+        oracle = copy.deepcopy(self._oracle())
+        oracle.pop("tier1")
+        self.assertTrue(gen.runtime_oracle_census(oracle))
+
+    def test_a_registration_this_census_cannot_read_fails(self):
+        # `#define NAME "probe"` then `ES_MODULE(NAME, ...)`. The artifact
+        # scanner cannot name it either, and natives are not files to
+        # discover, so all three sides would be blind at once.
+        victim = REPO_ROOT / "src" / "ecmascript" / "es_fs.c"
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(
+                original + '\n#define PROBE_NAME "probe"\n'
+                           'ES_MODULE(PROBE_NAME, fnlist_fs);\n',
+                encoding="utf-8")
+            self.assertTrue(gen.unresolved_native_registrations())
+            problems = gen.runtime_oracle_census(self._oracle())
+            self.assertTrue(any("cannot read" in problem
+                                for problem in problems), problems)
+        finally:
+            victim.write_text(original, encoding="utf-8")
+
+    def test_no_registration_is_unresolved_today(self):
+        self.assertEqual(gen.unresolved_native_registrations(), [])
 
     def test_every_module_file_is_expected_with_its_alias(self):
         expected = gen.expected_runtime_modules()
@@ -632,7 +719,7 @@ class ModuleCensus(unittest.TestCase):
         try:
             probe.write_text("exports['probe' + 'Fn'] = function(){};\n",
                              encoding="utf-8")
-            problems = gen.runtime_oracle_census(self._observed())
+            problems = gen.runtime_oracle_census(self._oracle())
             self.assertTrue(
                 any("movian/probe exists" in problem for problem in problems),
                 problems)
@@ -648,7 +735,7 @@ class ModuleCensus(unittest.TestCase):
         try:
             victim.write_text(original + '\nES_MODULE("probe", fnlist_fs);\n',
                               encoding="utf-8")
-            problems = gen.runtime_oracle_census(self._observed())
+            problems = gen.runtime_oracle_census(self._oracle())
             self.assertTrue(
                 any("native/probe exists" in problem for problem in problems),
                 problems)
@@ -656,8 +743,10 @@ class ModuleCensus(unittest.TestCase):
             victim.write_text(original, encoding="utf-8")
 
     def test_a_module_nothing_provides_fails(self):
-        problems = gen.runtime_oracle_census(
-            self._observed() + ["movian/ghost"])
+        import copy
+        oracle = copy.deepcopy(self._oracle())
+        oracle["modules"] = oracle["modules"] + ["movian/ghost"]
+        problems = gen.runtime_oracle_census(oracle)
         self.assertTrue(any("movian/ghost was loaded" in problem
                             for problem in problems), problems)
 
@@ -679,9 +768,9 @@ class ModuleCensus(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("could not enumerate the module files", output)
 
-    def test_a_capture_that_lists_no_modules_fails(self):
+    def test_a_capture_that_is_not_an_oracle_fails(self):
         self.assertTrue(gen.runtime_oracle_census(None))
-        self.assertTrue(gen.runtime_oracle_census("not a list"))
+        self.assertTrue(gen.runtime_oracle_census("not an object"))
 
 
 class Floor(unittest.TestCase):

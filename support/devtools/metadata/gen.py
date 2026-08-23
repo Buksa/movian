@@ -3975,7 +3975,14 @@ def _runtime_oracle_floor_problems(
     return problems
 
 
-_ES_MODULE_RE = re.compile(r'ES_MODULE\(\s*"([^"]+)"')
+_ES_MODULE_RE = re.compile(r'ES_MODULE\s*\(\s*"([^"]+)"')
+# Every invocation, literal name or not. A registration written as
+# `ES_MODULE(MODULE_NAME, ...)` after a #define is a real native module that
+# the regex above cannot name -- and neither can the artifact scanner, nor
+# the capture, since natives are not files to discover. All three blind is
+# the shape this work exists to refuse, so an invocation that cannot be
+# resolved is reported rather than skipped.
+_ES_MODULE_ANY_RE = re.compile(r'ES_MODULE\s*\(')
 
 
 def expected_runtime_modules() -> dict[str, str]:
@@ -4003,25 +4010,67 @@ def expected_runtime_modules() -> dict[str, str]:
             expected["showtime/" + name[len("movian/"):]] = (
                 "the showtime alias of a module file")
     for path in sorted((REPO_ROOT / "src" / "ecmascript").rglob("*.c")):
-        for name in _ES_MODULE_RE.findall(
-                path.read_text(encoding="utf-8", errors="replace")):
+        source = path.read_text(encoding="utf-8", errors="replace")
+        for name in _ES_MODULE_RE.findall(source):
             expected["native/" + name] = (
                 "ES_MODULE in %s" % path.relative_to(REPO_ROOT).as_posix())
     return expected
 
 
-def runtime_oracle_census(observed: Any) -> list[str]:
+def unresolved_native_registrations() -> list[str]:
+    """`ES_MODULE(...)` invocations whose name is not a literal."""
+    unresolved = []
+    for path in sorted((REPO_ROOT / "src" / "ecmascript").rglob("*.c")):
+        source = path.read_text(encoding="utf-8", errors="replace")
+        extra = (len(_ES_MODULE_ANY_RE.findall(source))
+                 - len(_ES_MODULE_RE.findall(source)))
+        if extra > 0:
+            unresolved.append(
+                "%s registers %d native module(s) under a name this census "
+                "cannot read; nothing else can read it either"
+                % (path.relative_to(REPO_ROOT).as_posix(), extra))
+    return unresolved
+
+
+def runtime_oracle_census(oracle: Any) -> list[str]:
+    """Every module this tree provides, against what the capture OBSERVED.
+
+    Not against `modules`, which is the list of names the run attempted: the
+    introspector now builds that by walking the same directory this function
+    walks, so comparing the two would be a check whose sides cannot disagree
+    -- the tautology the whole runtime-oracle line exists to remove. A module
+    whose `require()` threw is in `modules` and in `loadErrors`, with a
+    `tier1` record of `unavailable` and no members at all, and for a module
+    the static scanner also cannot read there is then nothing left to
+    compare. So the question asked here is whether the capture WALKED it.
+    """
+    if not isinstance(oracle, dict):
+        return ["the oracle is not a JSON object"]
+    tier1 = oracle.get("tier1")
+    if not isinstance(tier1, dict):
+        return ["the oracle records no tier1, so nothing says what it "
+                "actually walked"]
+    load_errors = oracle.get("loadErrors")
+    load_errors = load_errors if isinstance(load_errors, dict) else {}
+    walked = {name for name, record in tier1.items()
+              if isinstance(record, dict) and record.get("status") == "walked"}
+
     expected = expected_runtime_modules()
-    if not isinstance(observed, list):
-        return ["the oracle does not list the modules it loaded"]
-    seen = set(observed)
-    problems = ["%s exists (%s) and the capture never loaded it"
-                % (name, reason)
-                for name, reason in sorted(expected.items())
-                if name not in seen]
+    problems = []
+    for name, reason in sorted(expected.items()):
+        if name in load_errors:
+            problems.append("%s exists (%s) and the capture could not load "
+                            "it: %s" % (name, reason, load_errors[name]))
+        elif name not in walked:
+            status = (tier1.get(name) or {}).get("status", "never attempted")
+            problems.append("%s exists (%s) and the capture did not walk it "
+                            "(%s)" % (name, reason, status))
+    attempted = oracle.get("modules")
+    seen = walked | (set(attempted) if isinstance(attempted, list) else set())
     problems.extend(
         "%s was loaded by the capture and nothing in this tree provides it"
         % name for name in sorted(seen - set(expected)))
+    problems.extend(unresolved_native_registrations())
     return problems
 
 
@@ -4596,7 +4645,7 @@ def _check_runtime_oracle(
         entry["module"], entry["shape"], entry["member"]))
     unreachable.sort(key=lambda entry: (
         entry["module"], entry["shape"], entry["member"]))
-    floor_problems = runtime_oracle_census(oracle.get("modules"))
+    floor_problems = runtime_oracle_census(oracle)
     if oracle.get("moduleDiscoveryError"):
         floor_problems.append(
             "the capture could not enumerate the module files: %s"
@@ -5508,6 +5557,16 @@ def format_diff(diff: dict[str, Any]) -> list[str]:
 # selection is stable while the file around it moves.
 _MAKEFILE_SRCS_RE = re.compile(r"^\s*(SRCS(?:-[^\s+=]+)?)\s*\+?=")
 _MAKEFILE_ES_SOURCE_RE = re.compile(r"src/ecmascript/[A-Za-z0-9_./-]+\.c")
+# `SRCS-$(CONFIG_X) +=` is one way to make a source conditional. A bare
+# `SRCS +=` inside `ifeq (...) ... endif` is another, and the recipe already
+# uses it (Makefile:283-285). Reading only the variable name makes those two
+# forms indistinguishable, so a source moved from unconditional into an
+# `ifeq` block would compile in one configuration and not another with every
+# compared value unchanged.
+_MAKEFILE_COND_RE = re.compile(
+    r"^\s*(ifeq|ifneq|ifdef|ifndef)\b\s*(.*)$")
+_MAKEFILE_ELSE_RE = re.compile(r"^\s*else\b\s*(.*)$")
+_MAKEFILE_ENDIF_RE = re.compile(r"^\s*endif\b")
 
 
 def makefile_ecmascript_selection(text: str) -> dict[str, str]:
@@ -5516,12 +5575,29 @@ def makefile_ecmascript_selection(text: str) -> dict[str, str]:
     different toggle reads as a change."""
     selection: dict[str, str] = {}
     gate: str | None = None
+    conditions: list[str] = []
     for line in text.split("\n"):
-        opener = _MAKEFILE_SRCS_RE.match(line)
+        opener = _MAKEFILE_COND_RE.match(line)
         if opener:
-            gate = opener.group(1)
+            conditions.append("%s %s" % (opener.group(1),
+                                         " ".join(opener.group(2).split())))
+        elif _MAKEFILE_ENDIF_RE.match(line):
+            if conditions:
+                conditions.pop()
+        else:
+            branch = _MAKEFILE_ELSE_RE.match(line)
+            if branch and conditions:
+                rest = " ".join(branch.group(1).split())
+                conditions[-1] = ("else %s" % rest if rest
+                                  else "else of %s" % conditions[-1])
+        assignment = _MAKEFILE_SRCS_RE.match(line)
+        if assignment:
+            gate = assignment.group(1)
         for path in _MAKEFILE_ES_SOURCE_RE.findall(line):
-            selection[path] = gate or "?"
+            where = gate or "?"
+            if conditions:
+                where += " under " + " & ".join(conditions)
+            selection[path] = where
         if gate is not None and not line.rstrip().endswith("\\"):
             gate = None
     return selection
