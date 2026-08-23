@@ -727,6 +727,24 @@ class Recipe(unittest.TestCase):
         self.assertEqual(selection["src/ecmascript/z.c"],
                          "SRCS under ifeq ($(A),y)")
 
+    def test_every_make_assignment_operator_is_recognised(self):
+        # `=`, `+=`, `:=`, `::=`, `?=` and `!=` are all assignments. Reading
+        # only two left a source under the gate `?`, which compares equal to
+        # the same `?` after the variable was renamed.
+        for operator in (":=", "?=", "!=", "::=", "+=", "="):
+            selection = gen.makefile_ecmascript_selection(
+                "SRCS %s src/ecmascript/p.c\n" % operator)
+            self.assertEqual(selection.get("src/ecmascript/p.c"), "SRCS",
+                             operator)
+
+    def test_an_unclassified_source_is_a_problem(self):
+        selection = gen.makefile_ecmascript_selection(
+            "OTHER := src/ecmascript/p.c\n")
+        self.assertEqual(selection["src/ecmascript/p.c"], "?")
+        self.assertTrue(any("no assignment the parser recognises" in problem
+                            for problem in
+                            gen._selection_problems(selection)))
+
     def test_a_blind_parser_is_a_problem_not_a_pass(self):
         # A parser that stops matching returns an empty selection, and an
         # empty selection compares equal to another empty one -- green
@@ -737,7 +755,7 @@ class Recipe(unittest.TestCase):
         here = gen.makefile_ecmascript_selection(self._makefile())
         there = dict(here)
         here.pop("src/ecmascript/es_fs.c")
-        reasons = gen.selection_mismatch(here, there, "abc1234")
+        reasons = gen.selection_mismatch(here, there, "build abc1234")
         self.assertEqual(
             reasons,
             ["src/ecmascript/es_fs.c was compiled into build abc1234 and the"
@@ -747,7 +765,7 @@ class Recipe(unittest.TestCase):
         here = gen.makefile_ecmascript_selection(self._makefile())
         there = dict(here)
         there.pop("src/ecmascript/es_fs.c")
-        reasons = gen.selection_mismatch(here, there, "abc1234")
+        reasons = gen.selection_mismatch(here, there, "build abc1234")
         self.assertTrue(any("is compiled now" in reason
                             for reason in reasons), reasons)
 
@@ -757,7 +775,7 @@ class Recipe(unittest.TestCase):
         here = gen.makefile_ecmascript_selection(self._makefile())
         there = dict(here)
         there["src/ecmascript/es_sqlite.c"] = "SRCS"
-        reasons = gen.selection_mismatch(here, there, "abc1234")
+        reasons = gen.selection_mismatch(here, there, "build abc1234")
         self.assertEqual(
             reasons,
             ["src/ecmascript/es_sqlite.c moved from SRCS to"
@@ -765,7 +783,7 @@ class Recipe(unittest.TestCase):
 
     def test_an_unchanged_recipe_reports_nothing(self):
         here = gen.makefile_ecmascript_selection(self._makefile())
-        self.assertEqual(gen.selection_mismatch(here, dict(here), "abc"), [])
+        self.assertEqual(gen.selection_mismatch(here, dict(here), "build abc"), [])
 
     def test_a_source_the_recipe_stops_naming_is_a_problem(self):
         selection = gen.makefile_ecmascript_selection(self._makefile())
@@ -773,6 +791,84 @@ class Recipe(unittest.TestCase):
         problems = gen._selection_problems(selection)
         self.assertTrue(any("es_fs.c" in problem for problem in problems),
                         problems)
+
+
+class StampedRecipe(unittest.TestCase):
+    """The recipe travels with the capture, so every run rechecks it.
+
+    Comparing it only at adoption would bind it to that moment and nothing
+    after: a later commit could drop a source from SRCS, or move it behind
+    another gate, without touching a .c or the oracle, and every check would
+    stay green while the next binary omits the API the artifact advertises.
+    """
+
+    def _stamped(self):
+        import json
+        oracle = json.loads(
+            gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
+        return oracle["inputs"].get("selection")
+
+    def test_the_committed_stamp_carries_the_recipe(self):
+        stamped = self._stamped()
+        self.assertIsInstance(stamped, dict)
+        self.assertEqual(
+            stamped,
+            gen.makefile_ecmascript_selection(
+                (REPO_ROOT / "Makefile").read_text(encoding="utf-8")))
+
+    def test_adoption_writes_the_recipe_into_the_stamp(self):
+        # Checking the committed stamp is not the same as checking that
+        # adoption produces one: renaming the key in cmd_adopt_oracle left
+        # every other test green.
+        import json
+        import subprocess
+        import tempfile
+        payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        payload["capturedAt"] = payload["capturedAt"] + 3000
+        payload.pop("inputs", None)
+        before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+                handle.write(json.dumps(payload))
+                handle.flush()
+                result = subprocess.run(
+                    ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
+                    capture_output=True, text=True, cwd=str(REPO_ROOT))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            written = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+            self.assertEqual(
+                written["inputs"]["selection"],
+                gen.makefile_ecmascript_selection(
+                    (REPO_ROOT / "Makefile").read_text(encoding="utf-8")))
+        finally:
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
+
+    def test_a_recipe_change_after_adoption_is_caught(self):
+        import json
+        artifact = json.loads(gen.ARTIFACT_PATH.read_text(encoding="utf-8"))
+        oracle = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        makefile = REPO_ROOT / "Makefile"
+        original = makefile.read_text(encoding="utf-8")
+        try:
+            makefile.write_text(
+                original.replace("\tsrc/ecmascript/es_fs.c \\\n", ""),
+                encoding="utf-8")
+            ok, output, _report = gen._check_runtime_oracle(artifact, oracle)
+            self.assertFalse(ok)
+            self.assertIn("es_fs.c", output)
+        finally:
+            makefile.write_text(original, encoding="utf-8")
+
+    def test_a_stamp_without_a_recipe_is_refused(self):
+        import copy
+        import json
+        artifact = json.loads(gen.ARTIFACT_PATH.read_text(encoding="utf-8"))
+        oracle = copy.deepcopy(
+            json.loads(gen.RUNTIME_ORACLE_PATH.read_text()))
+        oracle["inputs"].pop("selection")
+        ok, output, _report = gen._check_runtime_oracle(artifact, oracle)
+        self.assertFalse(ok)
+        self.assertIn("records no recipe selection", output)
 
 
 class ModuleCensus(unittest.TestCase):

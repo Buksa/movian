@@ -1567,10 +1567,10 @@
       "type": "object"
     }
   },
-  "capturedAt": 1787515033891,
+  "capturedAt": 1787525492034,
   "globalSettingsError": null,
   "inputs": {
-    "digest": "eed44028602e06bff7f7b3da185b70425b046d56e6b5f60c3d8f182da377e61e",
+    "digest": "35343b60db8aabf78eecd0bf4a2db0106c6e71802de7149f890526ce4c6cfed9",
     "files": {
       "res/ecmascript/legacy/api-v1.js": "ff3bc1f704125fc3fddc1cb4ddd032577f22b35bc5729e470a915bffd9c8635a",
       "res/ecmascript/modules/fs.js": "57b8f284517c9408b38eae2f6d4f9d56def540dfc5dabe43b35292dbd3f7420f",
@@ -1619,8 +1619,35 @@
       "src/ecmascript/es_subtitles.c": "4564703cccfac8c218563fc92eb4353ce97f5c62e7de9da1d8307b90acc79b8e",
       "src/ecmascript/es_timer.c": "9f16b4c0c770171625f709bad659cf170cbef06b2ab6801171a874b25698d30a",
       "src/ecmascript/es_websocket.c": "bec99ef07cfba36091465266853bac309553baddc3c6ca5618bd2810d0d936d5",
-      "support/devtools/api-introspector/introspector.js": "f46b8400ad1d36854558651795357044dc988981742ef901903dd2a41cea03b4",
+      "support/devtools/api-introspector/introspector.js": "127f1d4784db9525a05bb91b7793dd2f3873e634ad2175f20d0f9e44d8817c5a",
       "support/devtools/api-introspector/plugin.json": "10125b05a633d255b651b202965eff05638065c89fc7b4936a3fdea288a0e767"
+    },
+    "selection": {
+      "src/ecmascript/ecmascript.c": "SRCS",
+      "src/ecmascript/es_console.c": "SRCS",
+      "src/ecmascript/es_crypto.c": "SRCS",
+      "src/ecmascript/es_faprovider.c": "SRCS",
+      "src/ecmascript/es_fs.c": "SRCS",
+      "src/ecmascript/es_gumbo.c": "SRCS-$(CONFIG_GUMBO)",
+      "src/ecmascript/es_hook.c": "SRCS",
+      "src/ecmascript/es_htsmsg.c": "SRCS",
+      "src/ecmascript/es_io.c": "SRCS",
+      "src/ecmascript/es_kvstore.c": "SRCS",
+      "src/ecmascript/es_metadata.c": "SRCS-$(CONFIG_METADATA)",
+      "src/ecmascript/es_misc.c": "SRCS",
+      "src/ecmascript/es_native_obj.c": "SRCS",
+      "src/ecmascript/es_prop.c": "SRCS",
+      "src/ecmascript/es_root.c": "SRCS",
+      "src/ecmascript/es_route.c": "SRCS",
+      "src/ecmascript/es_scrobble.c": "SRCS",
+      "src/ecmascript/es_searcher.c": "SRCS",
+      "src/ecmascript/es_service.c": "SRCS",
+      "src/ecmascript/es_sqlite.c": "SRCS-$(CONFIG_SQLITE)",
+      "src/ecmascript/es_stats.c": "SRCS",
+      "src/ecmascript/es_string.c": "SRCS",
+      "src/ecmascript/es_subtitles.c": "SRCS",
+      "src/ecmascript/es_timer.c": "SRCS",
+      "src/ecmascript/es_websocket.c": "SRCS"
     },
     "version": 1
   },
@@ -1682,7 +1709,7 @@
   ],
   "movianVersion": "5.0.1017.gf1c26",
   "runtimeInputs": {
-    "plugin/introspector.js": "2719c0573371ab12279d6e5140ef969dc35929f08b74be449b3218899457dc53",
+    "plugin/introspector.js": "0eaf25c0033b8d2b9b2f537d1c3436aee9a9740852f9a569877432ca31405808",
     "plugin/plugin.json": "fd18086f0d952ee9ef1391ac3f443bb53a7b4f994063c9c6675f560852812e85",
     "res/ecmascript/legacy/api-v1.js": "01c872e89b9a086d6da502d522f9daa29ba51620647b94c8f0a6a60d2747203f",
     "res/ecmascript/modules/fs.js": "58de36e3f4c3fe6c2e6e3169f6182a2dbbda6c2bec45316f5f8797df3f4ef685",

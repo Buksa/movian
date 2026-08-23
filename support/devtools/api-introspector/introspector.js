@@ -82,6 +82,11 @@ function discoverFileModules() {
   // generator's rglob already sees the file. A cap here and no cap there
   // means the census reports a module the capture cannot reach and no
   // recapture can clear it.
+  // Ask the filesystem what an entry is instead of reading its name. A
+  // directory called `vendor.js` is a legal layout -- es_modsearch loads
+  // `vendor.js/helper` by joining the id onto the module root -- and
+  // classifying by suffix would treat it as a module file and never look
+  // inside, leaving a module the generator expects and no capture can reach.
   function walk(url, prefix, isRoot, name) {
     var names;
     try {
@@ -91,22 +96,19 @@ function discoverFileModules() {
         throw new Error('cannot list ' + url + ' -- ' + error +
                         ' (run movian with --bypass-ecmascript-acl)');
       }
-      // A `.js` file is not a directory and fails here every time, which is
-      // why this is not simply fatal. An entry with no extension is meant to
-      // be one, and skipping it silently drops every module beneath it --
-      // the capture then reports fewer modules with nothing saying why.
-      if (name.indexOf('.') < 0) {
-        throw new Error('cannot list ' + url + ' -- ' + error);
+      if (/\.js$/.test(name)) {
+        // Not a directory: an ordinary module file.
+        found.push(prefix.slice(0, -(name.length + 1)) + name.slice(0, -3));
+        return;
       }
-      return;
+      // Meant to be a directory and unreadable. Skipping it silently drops
+      // every module beneath it, and the capture then reports fewer modules
+      // with nothing saying why.
+      throw new Error('cannot list ' + url + ' -- ' + error);
     }
     for (var i = 0; i < names.length; i++) {
-      var name = names[i];
-      if (/\.js$/.test(name)) {
-        found.push(prefix + name.slice(0, -3));
-      } else {
-        walk(url + '/' + name, prefix + name + '/', false, name);
-      }
+      var entry = names[i];
+      walk(url + '/' + entry, prefix + entry + '/', false, entry);
     }
   }
   walk('dataroot://res/ecmascript/modules', '', true, '');
@@ -1095,49 +1097,50 @@ function digestOf(path) {
   return hexOf(crypto.hashFinalize(handle));
 }
 
-function collectInputs(url, prefix, into, required) {
+function collectInputs(url, prefix, into, required, name) {
   var names;
   try {
     names = require('fs').readdirSync(url);
   } catch (error) {
-    // A child that is not a directory is expected. A ROOT that cannot be
-    // scanned is not, and swallowing it is how this returned two files and
-    // looked like it had worked: a plugin's fs access is ACL-limited to its
-    // own directory (es_fs.c:100-106), so the core module tree needs
-    // --bypass-ecmascript-acl and says so instead of quietly recording less.
+    // A ROOT that cannot be scanned is fatal, and swallowing it is how this
+    // once returned two files and looked like it had worked: a plugin's fs
+    // access is ACL-limited to its own directory (es_fs.c:100-106), so the
+    // core module tree needs --bypass-ecmascript-acl and says so.
     if (required) {
       throw new Error('cannot read ' + url + ' -- ' + error +
                       ' (run movian with --bypass-ecmascript-acl)');
     }
+    // Not a directory. Whether it is an input is decided here, by what it
+    // turned out to be, not by what its name looks like -- a directory
+    // called `vendor.js` is a legal layout and must be descended into.
+    if (/\.(js|json)$/.test(name)) {
+      into[prefix.slice(0, -(name.length + 1)) + name] = digestOf(url);
+    }
     return;
   }
   for (var i = 0; i < names.length; i++) {
-    var name = names[i];
-    var child = url + '/' + name;
-    if (name === 'runtime-api.json') {
+    var entry = names[i];
+    if (entry === 'runtime-api.json') {
       // The oracle itself. Recording it would compare a capture-time digest
       // against a file adoption is about to rewrite.
       continue;
     }
-    if (/\.(js|json)$/.test(name)) {
-      into[prefix + name] = digestOf(child);
-    } else {
-      collectInputs(child, prefix + name + '/', into, false);
-    }
+    collectInputs(url + '/' + entry, prefix + entry + '/', into, false,
+                  entry);
   }
 }
 
 function runtimeInputs() {
   var found = {};
   collectInputs('dataroot://res/ecmascript/modules',
-                'res/ecmascript/modules/', found, true);
+                'res/ecmascript/modules/', found, true, '');
   found['res/ecmascript/legacy/api-v1.js'] =
     digestOf('dataroot://res/ecmascript/legacy/api-v1.js');
   if (!(typeof Plugin === 'object' && Plugin && Plugin.path)) {
     throw new Error('Plugin.path is not set, so the plugin directory that '
                     + 'shadows core modules cannot be enumerated');
   }
-  collectInputs(Plugin.path, 'plugin/', found, true);
+  collectInputs(Plugin.path, 'plugin/', found, true, '');
   return found;
 }
 

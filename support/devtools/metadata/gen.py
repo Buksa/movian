@@ -4300,6 +4300,14 @@ def _check_runtime_oracle(
         }
         return False, _format_runtime_oracle_report(report), report
     stale = runtime_oracle_stale_inputs(stamp.get("files"))
+    stamped_selection = stamp.get("selection")
+    if not isinstance(stamped_selection, dict):
+        stale = stale + ["the stamp records no recipe selection"]
+    else:
+        stale = stale + selection_mismatch(
+            makefile_ecmascript_selection(
+                (REPO_ROOT / "Makefile").read_text(encoding="utf-8")),
+            stamped_selection, "the recipe this oracle was stamped against")
     if stale:
         report = {
             "status": "failed",
@@ -5675,7 +5683,11 @@ def format_diff(diff: dict[str, Any]) -> list[str]:
 # touches. Measured before choosing: 18 commits changed `Makefile` since
 # 2026-05-01 and NONE of them touched a line naming an ecmascript source. The
 # selection is stable while the file around it moves.
-_MAKEFILE_SRCS_RE = re.compile(r"^\s*(SRCS(?:-[^\s+=]+)?)\s*\+?=")
+# `=`, `+=`, `:=`, `::=`, `?=` and `!=` are all assignments GNU Make accepts.
+# Reading only two of them left a source recorded under the gate `?`, which
+# compares equal to the same `?` after the variable was renamed.
+_MAKEFILE_SRCS_RE = re.compile(
+    r"^\s*(SRCS(?:-[^\s+:?!=]+)?)\s*(?:\+|:|::|\?|!)?=")
 _MAKEFILE_ES_SOURCE_RE = re.compile(r"src/ecmascript/[A-Za-z0-9_./-]+\.c")
 # `SRCS-$(CONFIG_X) +=` is one way to make a source conditional. A bare
 # `SRCS +=` inside `ifeq (...) ... endif` is another, and the recipe already
@@ -5746,7 +5758,7 @@ def makefile_ecmascript_selection(text: str) -> dict[str, str]:
 
 
 def selection_mismatch(here: dict[str, str], there: dict[str, str],
-                       revision: str) -> list[str]:
+                       source: str) -> list[str]:
     """How the recipe now differs from the recipe that built `revision`.
 
     The gate matters as much as the membership: a source moved from `SRCS` to
@@ -5755,15 +5767,15 @@ def selection_mismatch(here: dict[str, str], there: dict[str, str],
     """
     reasons = []
     for name in sorted(set(there) - set(here)):
-        reasons.append("%s was compiled into build %s and the recipe no "
-                       "longer names it" % (name, revision))
+        reasons.append("%s was compiled into %s and the recipe no longer "
+                       "names it" % (name, source))
     for name in sorted(set(here) - set(there)):
-        reasons.append("%s is compiled now and build %s did not have it"
-                       % (name, revision))
+        reasons.append("%s is compiled now and %s did not have it"
+                       % (name, source))
     for name in sorted(set(here) & set(there)):
         if here[name] != there[name]:
-            reasons.append("%s moved from %s to %s since build %s"
-                           % (name, there[name], here[name], revision))
+            reasons.append("%s moved from %s to %s since %s"
+                           % (name, there[name], here[name], source))
     return reasons
 
 
@@ -5775,6 +5787,12 @@ def _selection_problems(selection: dict[str, str]) -> list[str]:
     if not selection:
         return ["no ecmascript source is named in the Makefile, so the "
                 "recipe parser has gone blind"]
+    unclassified = ["%s is named by no assignment the parser recognises, so "
+                    "nothing records whether it is compiled" % name
+                    for name, where in sorted(selection.items())
+                    if "?" in where.split(" under ")[0]]
+    if unclassified:
+        return unclassified
     on_disk = {path.relative_to(REPO_ROOT).as_posix()
                for path in (REPO_ROOT / "src" / "ecmascript").rglob("*.c")}
     return ["%s exists and the recipe never names it" % name
@@ -5813,7 +5831,8 @@ def runtime_oracle_build_mismatch(version: Any) -> list[str]:
         reasons.append("build %s has no Makefile to compare" % revision)
     else:
         reasons += selection_mismatch(
-            here, makefile_ecmascript_selection(built.stdout), revision)
+            here, makefile_ecmascript_selection(built.stdout),
+            "build %s" % revision)
     for pattern in RUNTIME_ORACLE_COMPILED_GLOBS:
         for path in sorted(REPO_ROOT.glob(pattern)):
             if not path.is_file():
@@ -5983,6 +6002,13 @@ def cmd_adopt_oracle(args: argparse.Namespace) -> int:
         "version": RUNTIME_ORACLE_INPUTS_VERSION,
         "digest": runtime_oracle_inputs_digest(digests),
         "files": digests,
+        # The recipe travels with the capture. Comparing it only here would
+        # bind it to the moment of adoption and nothing after: a later commit
+        # could drop a source from SRCS, or move it behind another gate,
+        # without touching a .c or the oracle, and every check would stay
+        # green while the next binary omits the API the artifact advertises.
+        "selection": makefile_ecmascript_selection(
+            (REPO_ROOT / "Makefile").read_text(encoding="utf-8")),
     }
     RUNTIME_ORACLE_PATH.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
