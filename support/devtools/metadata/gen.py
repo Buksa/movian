@@ -4038,6 +4038,26 @@ def unresolved_native_registrations() -> list[str]:
     return unresolved
 
 
+def shadowing_plugin_modules() -> list[str]:
+    """Files in the introspector directory whose module id is a core one.
+
+    es_modsearch tries the plugin directory first (ecmascript.c:443-452), so
+    such a file is what `require()` returns -- the capture would then be
+    describing the plugin's copy while the artifact describes the core
+    module, under the same name and with nothing saying so.
+    """
+    core = set(expected_runtime_modules())
+    shadows = []
+    for path in sorted(INTROSPECTOR_DIR.rglob("*.js")):
+        module_id = path.relative_to(INTROSPECTOR_DIR).as_posix()[:-len(".js")]
+        if module_id in core:
+            shadows.append(
+                "%s shadows the core module %s; the capture would describe "
+                "this file under that name"
+                % (path.relative_to(REPO_ROOT).as_posix(), module_id))
+    return shadows
+
+
 def runtime_oracle_census(oracle: Any) -> list[str]:
     """Every module this tree provides, against what the capture OBSERVED.
 
@@ -4082,6 +4102,7 @@ def runtime_oracle_census(oracle: Any) -> list[str]:
         "%s was loaded by the capture and nothing in this tree provides it"
         % name for name in sorted(seen - set(expected)))
     problems.extend(unresolved_native_registrations())
+    problems.extend(shadowing_plugin_modules())
     return problems
 
 
@@ -5595,13 +5616,18 @@ def makefile_ecmascript_selection(text: str) -> dict[str, str]:
     different toggle reads as a change."""
     selection: dict[str, str] = {}
     gate: str | None = None
-    conditions: list[str] = []
+    # Each level is (the `if` that opened it, the branch now in effect). The
+    # opener is kept because `else ifeq ($(B),yes)` only takes effect when
+    # the OUTER predicate was false -- dropping it makes two recipes with
+    # different outer conditions read identically.
+    conditions: list[tuple[str, str]] = []
     for raw in text.split("\n"):
         line = _makefile_uncommented(raw)
         opener = _MAKEFILE_COND_RE.match(line)
         if opener:
-            conditions.append("%s %s" % (opener.group(1),
-                                         " ".join(opener.group(2).split())))
+            conditions.append(
+                ("%s %s" % (opener.group(1),
+                            " ".join(opener.group(2).split())), ""))
         elif _MAKEFILE_ENDIF_RE.match(line):
             if conditions:
                 conditions.pop()
@@ -5609,15 +5635,17 @@ def makefile_ecmascript_selection(text: str) -> dict[str, str]:
             branch = _MAKEFILE_ELSE_RE.match(line)
             if branch and conditions:
                 rest = " ".join(branch.group(1).split())
-                conditions[-1] = ("else %s" % rest if rest
-                                  else "else of %s" % conditions[-1])
+                conditions[-1] = (conditions[-1][0],
+                                  rest if rest else "else")
         assignment = _MAKEFILE_SRCS_RE.match(line)
         if assignment:
             gate = assignment.group(1)
         for path in _MAKEFILE_ES_SOURCE_RE.findall(line):
             where = gate or "?"
             if conditions:
-                where += " under " + " & ".join(conditions)
+                where += " under " + " & ".join(
+                    opener if not branch else "not(%s) %s" % (opener, branch)
+                    for opener, branch in conditions)
             selection[path] = where
         if gate is not None and not line.rstrip().endswith("\\"):
             gate = None
@@ -5822,6 +5850,11 @@ def cmd_adopt_oracle(args: argparse.Namespace) -> int:
         for reason in mismatch:
             print("  %s" % reason, file=sys.stderr)
         print("  rebuild, recapture, and adopt that.", file=sys.stderr)
+        return 1
+    if payload.get("moduleDiscoveryError"):
+        print("gen.py: the capture could not enumerate the module files, so "
+              "it cannot say it saw them all: %s"
+              % payload["moduleDiscoveryError"], file=sys.stderr)
         return 1
     unread = runtime_oracle_read_mismatch(
         payload.get("runtimeInputs"), payload.get("runtimeInputsError"))

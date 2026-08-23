@@ -384,10 +384,13 @@ class Adoption(unittest.TestCase):
             result = subprocess.run(
                 ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
                 capture_output=True, text=True, cwd=str(REPO_ROOT))
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("same capturedAt", result.stderr)
-        # The refusal must come before the write.
-        self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
+        try:
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("same capturedAt", result.stderr)
+            # The refusal must come before the write.
+            self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
+        finally:
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
 
     def _build_revision(self):
         """The commit the committed oracle was captured from, skipping if
@@ -512,6 +515,34 @@ class Adoption(unittest.TestCase):
         finally:
             shadow.unlink(missing_ok=True)
 
+    def test_a_capture_whose_discovery_failed_is_not_adopted(self):
+        # --check rejects it, but adoption used not to: the committed oracle
+        # would be overwritten by a payload the very next check refuses.
+        import json
+        import subprocess
+        import tempfile
+        payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        payload["capturedAt"] = payload["capturedAt"] + 1000
+        payload["moduleDiscoveryError"] = "Error: cannot list dataroot://..."
+        before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+                handle.write(json.dumps(payload))
+                handle.flush()
+                result = subprocess.run(
+                    ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
+                    capture_output=True, text=True, cwd=str(REPO_ROOT))
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("could not enumerate", result.stderr)
+            self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
+        finally:
+            # Asserting the file is untouched is not the same as leaving it
+            # untouched: when the guard being tested is broken, adoption
+            # SUCCEEDS and the committed oracle is overwritten before the
+            # assertion runs. Restoring is what keeps this test from
+            # corrupting the tree exactly when it is doing its job.
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
+
     def test_a_capture_without_a_capturedat_is_refused(self):
         import json
         import subprocess
@@ -525,9 +556,12 @@ class Adoption(unittest.TestCase):
             result = subprocess.run(
                 ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
                 capture_output=True, text=True, cwd=str(REPO_ROOT))
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("capturedAt", result.stderr)
-        self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
+        try:
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("capturedAt", result.stderr)
+            self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
+        finally:
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
 
 
 class Recipe(unittest.TestCase):
@@ -609,6 +643,27 @@ class Recipe(unittest.TestCase):
         selection = gen.makefile_ecmascript_selection(
             "SRCS += src/ecmascript/es_fs.c # why this one\n")
         self.assertEqual(selection, {"src/ecmascript/es_fs.c": "SRCS"})
+
+    def test_an_else_if_keeps_the_predicate_it_is_the_else_of(self):
+        # `else ifeq ($(B),yes)` takes effect only when the OUTER predicate
+        # was false, so two recipes whose outer conditions differ select the
+        # source under different circumstances even though the inner text is
+        # identical.
+        outer_a = ("ifeq ($(CONFIG_A),yes)\n"
+                   "SRCS += src/ecmascript/x.c\n"
+                   "else ifeq ($(CONFIG_B),yes)\n"
+                   "SRCS += src/ecmascript/y.c\n"
+                   "endif\n")
+        outer_c = outer_a.replace("CONFIG_A", "CONFIG_C")
+        self.assertNotEqual(
+            gen.makefile_ecmascript_selection(outer_a)["src/ecmascript/y.c"],
+            gen.makefile_ecmascript_selection(outer_c)["src/ecmascript/y.c"])
+
+    def test_a_plain_if_carries_no_negation(self):
+        selection = gen.makefile_ecmascript_selection(
+            "ifeq ($(A),y)\nSRCS += src/ecmascript/z.c\nendif\n")
+        self.assertEqual(selection["src/ecmascript/z.c"],
+                         "SRCS under ifeq ($(A),y)")
 
     def test_a_blind_parser_is_a_problem_not_a_pass(self):
         # A parser that stops matching returns an empty selection, and an
@@ -745,6 +800,26 @@ class ModuleCensus(unittest.TestCase):
             self.assertEqual(gen.unresolved_native_registrations(), [])
         finally:
             victim.write_text(original, encoding="utf-8")
+
+    def test_nothing_shadows_a_core_module_today(self):
+        self.assertEqual(gen.shadowing_plugin_modules(), [])
+
+    def test_a_plugin_file_taking_a_core_module_id_fails(self):
+        # es_modsearch tries the plugin directory first, so `url.js` here is
+        # what require('url') returns -- the capture would describe this file
+        # while the artifact describes the core module, under one name.
+        shadow = gen.INTROSPECTOR_DIR / "url.js"
+        try:
+            shadow.write_text("exports.format = function(){};\n",
+                              encoding="utf-8")
+            problems = gen.shadowing_plugin_modules()
+            self.assertTrue(any("shadows the core module url" in problem
+                                for problem in problems), problems)
+            self.assertTrue(any("shadows the core module url" in problem
+                                for problem in gen.runtime_oracle_census(
+                                    self._oracle())))
+        finally:
+            shadow.unlink(missing_ok=True)
 
     def test_no_registration_is_unresolved_today(self):
         self.assertEqual(gen.unresolved_native_registrations(), [])
