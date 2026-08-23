@@ -4020,12 +4020,63 @@ def expected_runtime_modules() -> dict[str, str]:
         # this tree does not register and the census goes red on a correct
         # runtime. The same rule as the recipe parser, in the other language;
         # the stripper is the one already checked against these 26 files.
-        source = _js_code_only(
+        names, _unreadable = _c_registrations(
             path.read_text(encoding="utf-8", errors="replace"))
-        for name in _ES_MODULE_RE.findall(source):
+        for name in names:
             expected["native/" + name] = (
                 "ES_MODULE in %s" % path.relative_to(REPO_ROOT).as_posix())
     return expected
+
+
+def duplicate_native_registrations() -> list[str]:
+    """One native name registered from two files.
+
+    The dict in expected_runtime_modules() keeps whichever came last, so the
+    provenance in every later message would name the wrong file. Saying so is
+    cheaper than reading a misleading diagnostic.
+    """
+    seen: dict[str, str] = {}
+    duplicates = []
+    for path in sorted(ECMASCRIPT_DIR.glob("es_*.c")):
+        name_of_file = path.relative_to(REPO_ROOT).as_posix()
+        names, _unreadable = _c_registrations(
+            path.read_text(encoding="utf-8", errors="replace"))
+        for name in names:
+            if name in seen:
+                duplicates.append(
+                    "native/%s is registered in both %s and %s"
+                    % (name, seen[name], name_of_file))
+            else:
+                seen[name] = name_of_file
+    return duplicates
+
+
+def _c_registrations(source: str) -> tuple[list[str], int]:
+    """Literal `ES_MODULE` names, and how many invocations were unreadable.
+
+    Comments are removed and a match beginning inside a string literal is
+    discarded. The asymmetry is the reason: a quote inside a C string is
+    escaped, so the NAME reader -- which needs an unescaped quote after the
+    paren -- cannot be fooled by `"ES_MODULE(\\"x\\", f)"`. The invocation
+    COUNTER can, since `ES_MODULE(` needs no quote at all, and it would then
+    report an unreadable registration in a file that registers nothing.
+    """
+    code = _js_code_only(source)
+    literal_ranges = []
+    offset = 0
+    for kind, span in _js_spans(code):
+        if kind == "literal":
+            literal_ranges.append((offset, offset + len(span)))
+        offset += len(span)
+
+    def in_literal(index: int) -> bool:
+        return any(start < index < stop for start, stop in literal_ranges)
+
+    names = [match.group(1) for match in _ES_MODULE_RE.finditer(code)
+             if not in_literal(match.start())]
+    total = sum(1 for match in _ES_MODULE_ANY_RE.finditer(code)
+                if not in_literal(match.start()))
+    return names, total - len(names)
 
 
 def native_registrations_out_of_scope() -> list[str]:
@@ -4041,15 +4092,13 @@ def native_registrations_out_of_scope() -> list[str]:
     for path in sorted(ECMASCRIPT_DIR.rglob("*.c")):
         if path.parent == ECMASCRIPT_DIR and path.name.startswith("es_"):
             continue
-        source = _js_code_only(
+        names, extra = _c_registrations(
             path.read_text(encoding="utf-8", errors="replace"))
-        for name in _ES_MODULE_RE.findall(source):
+        for name in names:
             out.append(
                 "%s registers native/%s, which build_native_modules() never "
                 "reads -- it opens es_*.c only"
                 % (path.relative_to(REPO_ROOT).as_posix(), name))
-        extra = (len(_ES_MODULE_ANY_RE.findall(source))
-                 - len(_ES_MODULE_RE.findall(source)))
         if extra > 0:
             out.append("%s registers %d native module(s) outside the "
                        "artifact scanner's reach"
@@ -4061,10 +4110,8 @@ def unresolved_native_registrations() -> list[str]:
     """`ES_MODULE(...)` invocations whose name is not a literal."""
     unresolved = []
     for path in sorted(ECMASCRIPT_DIR.glob("es_*.c")):
-        source = _js_code_only(
+        _names, extra = _c_registrations(
             path.read_text(encoding="utf-8", errors="replace"))
-        extra = (len(_ES_MODULE_ANY_RE.findall(source))
-                 - len(_ES_MODULE_RE.findall(source)))
         if extra > 0:
             unresolved.append(
                 "%s registers %d native module(s) under a name this census "
@@ -4163,6 +4210,7 @@ def runtime_oracle_census(oracle: Any,
         "%s was loaded by the capture and nothing in this tree provides it"
         % name for name in sorted(seen - set(expected)))
     problems.extend(unresolved_native_registrations())
+    problems.extend(duplicate_native_registrations())
     problems.extend(native_registrations_out_of_scope())
     problems.extend(shadowing_plugin_modules())
     problems.extend(_modules_missing_from_artifact(expected, artifact))

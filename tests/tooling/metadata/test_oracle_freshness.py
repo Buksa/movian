@@ -783,7 +783,8 @@ class Recipe(unittest.TestCase):
 
     def test_an_unchanged_recipe_reports_nothing(self):
         here = gen.makefile_ecmascript_selection(self._makefile())
-        self.assertEqual(gen.selection_mismatch(here, dict(here), "build abc"), [])
+        self.assertEqual(
+            gen.selection_mismatch(here, dict(here), "build abc"), [])
 
     def test_a_source_the_recipe_stops_naming_is_a_problem(self):
         selection = gen.makefile_ecmascript_selection(self._makefile())
@@ -1086,6 +1087,36 @@ class ModuleCensus(unittest.TestCase):
             self.assertNotIn("native/probe", gen.expected_runtime_modules())
             self.assertEqual(gen.unresolved_native_registrations(), [])
             self.assertEqual(gen.native_registrations_out_of_scope(), [])
+        finally:
+            victim.write_text(original, encoding="utf-8")
+
+    def test_a_registration_inside_a_c_string_is_text(self):
+        # The name reader cannot be fooled -- it needs an unescaped quote
+        # after the paren and a quote inside a C string is escaped. The
+        # invocation COUNTER can be, since `ES_MODULE(` needs no quote, and
+        # it would then report an unreadable registration in a file that
+        # registers nothing. Both halves are asserted because only the
+        # second one actually needs the guard.
+        names, unreadable = gen._c_registrations(
+            'const char *s = "ES_MODULE(\\"phantom\\", f);";\n'
+            'ES_MODULE("real", fnlist);\n')
+        self.assertEqual(names, ["real"])
+        self.assertEqual(unreadable, 0)
+
+    def test_no_native_name_is_registered_twice_today(self):
+        self.assertEqual(gen.duplicate_native_registrations(), [])
+
+    def test_one_name_registered_from_two_files_is_reported(self):
+        # The expectation dict keeps whichever came last, so every later
+        # message would name the wrong file.
+        victim = REPO_ROOT / "src" / "ecmascript" / "es_fs.c"
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(original + '\nES_MODULE("crypto", fnlist_fs);\n',
+                              encoding="utf-8")
+            problems = gen.duplicate_native_registrations()
+            self.assertTrue(any("native/crypto is registered in both" in p
+                                for p in problems), problems)
         finally:
             victim.write_text(original, encoding="utf-8")
 
