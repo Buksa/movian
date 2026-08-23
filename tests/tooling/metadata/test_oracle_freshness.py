@@ -524,6 +524,10 @@ class Adoption(unittest.TestCase):
         payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
         payload["capturedAt"] = payload["capturedAt"] + 1000
         payload["moduleDiscoveryError"] = "Error: cannot list dataroot://..."
+        # Deliberately unresolvable, to pin the ORDER: what the capture says
+        # about itself is checked before anything that needs git history, so
+        # this test means the same thing in a shallow clone.
+        payload["movianVersion"] = "5.0.1017.gdeadbee"
         before = gen.RUNTIME_ORACLE_PATH.read_bytes()
         try:
             with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
@@ -541,6 +545,32 @@ class Adoption(unittest.TestCase):
             # SUCCEEDS and the committed oracle is overwritten before the
             # assertion runs. Restoring is what keeps this test from
             # corrupting the tree exactly when it is doing its job.
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
+
+    def test_a_capture_the_census_rejects_is_not_adopted(self):
+        # Adoption used to write a payload that the very next --check
+        # refuses. Discovery succeeding is not the same as every module
+        # loading.
+        import json
+        import subprocess
+        import tempfile
+        payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        payload["capturedAt"] = payload["capturedAt"] + 2000
+        payload.pop("inputs", None)
+        payload["loadErrors"] = {"movian/page": "Error: boom"}
+        payload["movianVersion"] = "5.0.1017.gdeadbee"
+        before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+                handle.write(json.dumps(payload))
+                handle.flush()
+                result = subprocess.run(
+                    ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
+                    capture_output=True, text=True, cwd=str(REPO_ROOT))
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("does not account for the modules", result.stderr)
+            self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
+        finally:
             gen.RUNTIME_ORACLE_PATH.write_bytes(before)
 
     def test_a_capture_without_a_capturedat_is_refused(self):
@@ -658,6 +688,38 @@ class Recipe(unittest.TestCase):
         self.assertNotEqual(
             gen.makefile_ecmascript_selection(outer_a)["src/ecmascript/y.c"],
             gen.makefile_ecmascript_selection(outer_c)["src/ecmascript/y.c"])
+
+    def test_a_final_else_keeps_the_whole_chain(self):
+        # `ifeq A / else ifeq B / else`: the last branch takes effect only
+        # when BOTH A and B were false, so changing B changes what the final
+        # else compiles.
+        chain = ("ifeq ($(A),y)\n"
+                 "SRCS += src/ecmascript/x.c\n"
+                 "else ifeq ($(B),y)\n"
+                 "SRCS += src/ecmascript/y.c\n"
+                 "else\n"
+                 "SRCS += src/ecmascript/z.c\n"
+                 "endif\n")
+        first = gen.makefile_ecmascript_selection(chain)
+        second = gen.makefile_ecmascript_selection(
+            chain.replace("$(B),y", "$(B),no"))
+        self.assertNotEqual(first["src/ecmascript/z.c"],
+                            second["src/ecmascript/z.c"])
+
+    def test_every_occurrence_of_a_source_is_kept(self):
+        # A source named in two mutually exclusive branches is compiled
+        # under either; keeping only the last hides a change to the other.
+        both = ("ifeq ($(A),y)\n"
+                "SRCS += src/ecmascript/d.c\n"
+                "else\n"
+                "SRCS += src/ecmascript/d.c\n"
+                "endif\n")
+        first = gen.makefile_ecmascript_selection(both)
+        second = gen.makefile_ecmascript_selection(
+            both.replace("ifeq ($(A),y)", "ifeq ($(C),y)"))
+        self.assertIn(" | ", first["src/ecmascript/d.c"])
+        self.assertNotEqual(first["src/ecmascript/d.c"],
+                            second["src/ecmascript/d.c"])
 
     def test_a_plain_if_carries_no_negation(self):
         selection = gen.makefile_ecmascript_selection(
@@ -847,6 +909,28 @@ class ModuleCensus(unittest.TestCase):
                                     self._oracle())))
         finally:
             shadow.unlink(missing_ok=True)
+
+    def test_nothing_registers_outside_the_artifact_scanner_today(self):
+        self.assertEqual(gen.native_registrations_out_of_scope(), [])
+
+    def test_a_registration_the_artifact_scanner_cannot_see_fails(self):
+        # `build_native_modules()` opens `es_*.c` and nothing else, so a
+        # module registered in `ecmascript.c` is real at runtime and absent
+        # from the artifact forever.
+        victim = REPO_ROOT / "src" / "ecmascript" / "ecmascript.c"
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(
+                original + '\nES_MODULE("probe", fnlist_probe);\n',
+                encoding="utf-8")
+            problems = gen.native_registrations_out_of_scope()
+            self.assertTrue(any("never reads" in problem
+                                for problem in problems), problems)
+            self.assertNotIn("native/probe", gen.expected_runtime_modules())
+            self.assertTrue(any("never reads" in problem for problem in
+                                gen.runtime_oracle_census(self._oracle())))
+        finally:
+            victim.write_text(original, encoding="utf-8")
 
     def test_no_registration_is_unresolved_today(self):
         self.assertEqual(gen.unresolved_native_registrations(), [])

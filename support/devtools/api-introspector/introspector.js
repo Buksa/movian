@@ -82,7 +82,7 @@ function discoverFileModules() {
   // generator's rglob already sees the file. A cap here and no cap there
   // means the census reports a module the capture cannot reach and no
   // recapture can clear it.
-  function walk(url, prefix, isRoot) {
+  function walk(url, prefix, isRoot, name) {
     var names;
     try {
       names = require('fs').readdirSync(url);
@@ -91,6 +91,13 @@ function discoverFileModules() {
         throw new Error('cannot list ' + url + ' -- ' + error +
                         ' (run movian with --bypass-ecmascript-acl)');
       }
+      // A `.js` file is not a directory and fails here every time, which is
+      // why this is not simply fatal. An entry with no extension is meant to
+      // be one, and skipping it silently drops every module beneath it --
+      // the capture then reports fewer modules with nothing saying why.
+      if (name.indexOf('.') < 0) {
+        throw new Error('cannot list ' + url + ' -- ' + error);
+      }
       return;
     }
     for (var i = 0; i < names.length; i++) {
@@ -98,11 +105,11 @@ function discoverFileModules() {
       if (/\.js$/.test(name)) {
         found.push(prefix + name.slice(0, -3));
       } else {
-        walk(url + '/' + name, prefix + name + '/', false);
+        walk(url + '/' + name, prefix + name + '/', false, name);
       }
     }
   }
-  walk('dataroot://res/ecmascript/modules', '', true);
+  walk('dataroot://res/ecmascript/modules', '', true, '');
   var aliases = [];
   for (var j = 0; j < found.length; j++) {
     if (found[j].indexOf('movian/') === 0) {

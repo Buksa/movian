@@ -4009,7 +4009,11 @@ def expected_runtime_modules() -> dict[str, str]:
             # under showtime/* as a separate instance.
             expected["showtime/" + name[len("movian/"):]] = (
                 "the showtime alias of a module file")
-    for path in sorted((REPO_ROOT / "src" / "ecmascript").rglob("*.c")):
+    # The same files build_native_modules() reads. A registration outside
+    # that scope can never reach the artifact, so expecting it here would be
+    # a permanent red; `native_registrations_out_of_scope()` reports it as
+    # what it is instead.
+    for path in sorted(ECMASCRIPT_DIR.glob("es_*.c")):
         # Comments first, or `/* ES_MODULE("dead", ...) */` becomes a module
         # this tree does not register and the census goes red on a correct
         # runtime. The same rule as the recipe parser, in the other language;
@@ -4022,10 +4026,39 @@ def expected_runtime_modules() -> dict[str, str]:
     return expected
 
 
+def native_registrations_out_of_scope() -> list[str]:
+    """Registrations in a file the artifact scanner never opens.
+
+    `build_native_modules()` reads `es_*.c` and nothing else, so a module
+    registered in `ecmascript.c` is real at runtime and absent from the
+    artifact forever -- the two-blind-sides shape again, with the blindness
+    coming from a scope mismatch between two scanners rather than from
+    syntax.
+    """
+    out = []
+    for path in sorted(ECMASCRIPT_DIR.rglob("*.c")):
+        if path.parent == ECMASCRIPT_DIR and path.name.startswith("es_"):
+            continue
+        source = _js_code_only(
+            path.read_text(encoding="utf-8", errors="replace"))
+        for name in _ES_MODULE_RE.findall(source):
+            out.append(
+                "%s registers native/%s, which build_native_modules() never "
+                "reads -- it opens es_*.c only"
+                % (path.relative_to(REPO_ROOT).as_posix(), name))
+        extra = (len(_ES_MODULE_ANY_RE.findall(source))
+                 - len(_ES_MODULE_RE.findall(source)))
+        if extra > 0:
+            out.append("%s registers %d native module(s) outside the "
+                       "artifact scanner's reach"
+                       % (path.relative_to(REPO_ROOT).as_posix(), extra))
+    return out
+
+
 def unresolved_native_registrations() -> list[str]:
     """`ES_MODULE(...)` invocations whose name is not a literal."""
     unresolved = []
-    for path in sorted((REPO_ROOT / "src" / "ecmascript").rglob("*.c")):
+    for path in sorted(ECMASCRIPT_DIR.glob("es_*.c")):
         source = _js_code_only(
             path.read_text(encoding="utf-8", errors="replace"))
         extra = (len(_ES_MODULE_ANY_RE.findall(source))
@@ -4127,6 +4160,7 @@ def runtime_oracle_census(oracle: Any) -> list[str]:
         "%s was loaded by the capture and nothing in this tree provides it"
         % name for name in sorted(seen - set(expected)))
     problems.extend(unresolved_native_registrations())
+    problems.extend(native_registrations_out_of_scope())
     problems.extend(shadowing_plugin_modules())
     return problems
 
@@ -5639,20 +5673,21 @@ def makefile_ecmascript_selection(text: str) -> dict[str, str]:
     """Each ecmascript source the recipe names, mapped to the variable that
     names it -- `SRCS` or `SRCS-$(CONFIG_X)`, so a source moving behind a
     different toggle reads as a change."""
-    selection: dict[str, str] = {}
+    occurrences: dict[str, list[str]] = {}
     gate: str | None = None
-    # Each level is (the `if` that opened it, the branch now in effect). The
-    # opener is kept because `else ifeq ($(B),yes)` only takes effect when
-    # the OUTER predicate was false -- dropping it makes two recipes with
-    # different outer conditions read identically.
-    conditions: list[tuple[str, str]] = []
+    # Each level is the chain of predicates tried at it: the `if`, then each
+    # `else if`, then a bare `else`. The whole chain is kept because a branch
+    # takes effect only when every predicate before it was false -- dropping
+    # any of them makes two recipes that compile different things read
+    # identically.
+    conditions: list[list[str]] = []
     for raw in text.split("\n"):
         line = _makefile_uncommented(raw)
         opener = _MAKEFILE_COND_RE.match(line)
         if opener:
             conditions.append(
-                ("%s %s" % (opener.group(1),
-                            " ".join(opener.group(2).split())), ""))
+                ["%s %s" % (opener.group(1),
+                            " ".join(opener.group(2).split()))])
         elif _MAKEFILE_ENDIF_RE.match(line):
             if conditions:
                 conditions.pop()
@@ -5660,8 +5695,7 @@ def makefile_ecmascript_selection(text: str) -> dict[str, str]:
             branch = _MAKEFILE_ELSE_RE.match(line)
             if branch and conditions:
                 rest = " ".join(branch.group(1).split())
-                conditions[-1] = (conditions[-1][0],
-                                  rest if rest else "else")
+                conditions[-1].append(rest if rest else "else")
         assignment = _MAKEFILE_SRCS_RE.match(line)
         if assignment:
             gate = assignment.group(1)
@@ -5669,12 +5703,17 @@ def makefile_ecmascript_selection(text: str) -> dict[str, str]:
             where = gate or "?"
             if conditions:
                 where += " under " + " & ".join(
-                    opener if not branch else "not(%s) %s" % (opener, branch)
-                    for opener, branch in conditions)
-            selection[path] = where
+                    chain[-1] if len(chain) == 1 else
+                    "not(%s) %s" % (" ".join(chain[:-1]), chain[-1])
+                    for chain in conditions)
+            # Every occurrence, not the last one: a source named in two
+            # mutually exclusive branches is compiled under either, and
+            # keeping only one hides a change to the other.
+            occurrences.setdefault(path, []).append(where)
         if gate is not None and not line.rstrip().endswith("\\"):
             gate = None
-    return selection
+    return {path: " | ".join(sorted(where))
+            for path, where in occurrences.items()}
 
 
 def selection_mismatch(here: dict[str, str], there: dict[str, str],
@@ -5867,6 +5906,23 @@ def cmd_adopt_oracle(args: argparse.Namespace) -> int:
                   "observations against a tree they did not come from; run "
                   "the capture.", file=sys.stderr)
             return 1
+    # Before anything that needs git history: whether the capture is even
+    # internally sound. Ordering matters twice over -- a shallow clone
+    # cannot resolve a build revision, and a payload that failed to look
+    # should be refused for that, not for a lookup that could not run.
+    if payload.get("moduleDiscoveryError"):
+        print("gen.py: the capture could not enumerate the module files, so "
+              "it cannot say it saw them all: %s"
+              % payload["moduleDiscoveryError"], file=sys.stderr)
+        return 1
+    census = runtime_oracle_census(payload)
+    if census:
+        print("gen.py: this capture does not account for the modules this "
+              "tree provides, and --check would refuse it straight after "
+              "adoption:", file=sys.stderr)
+        for problem in census:
+            print("  %s" % problem, file=sys.stderr)
+        return 1
     mismatch = runtime_oracle_build_mismatch(payload.get("movianVersion"))
     if mismatch:
         print("gen.py: the capture came from a build that does not match "
@@ -5875,11 +5931,6 @@ def cmd_adopt_oracle(args: argparse.Namespace) -> int:
         for reason in mismatch:
             print("  %s" % reason, file=sys.stderr)
         print("  rebuild, recapture, and adopt that.", file=sys.stderr)
-        return 1
-    if payload.get("moduleDiscoveryError"):
-        print("gen.py: the capture could not enumerate the module files, so "
-              "it cannot say it saw them all: %s"
-              % payload["moduleDiscoveryError"], file=sys.stderr)
         return 1
     unread = runtime_oracle_read_mismatch(
         payload.get("runtimeInputs"), payload.get("runtimeInputsError"))
