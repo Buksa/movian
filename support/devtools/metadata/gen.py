@@ -4091,7 +4091,8 @@ def shadowing_plugin_modules() -> list[str]:
     return shadows
 
 
-def runtime_oracle_census(oracle: Any) -> list[str]:
+def runtime_oracle_census(oracle: Any,
+                          artifact: Any = None) -> list[str]:
     """Every module this tree provides, against what the capture OBSERVED.
 
     Not against `modules`, which is the list of names the run attempted: the
@@ -4162,7 +4163,33 @@ def runtime_oracle_census(oracle: Any) -> list[str]:
     problems.extend(unresolved_native_registrations())
     problems.extend(native_registrations_out_of_scope())
     problems.extend(shadowing_plugin_modules())
+    problems.extend(_modules_missing_from_artifact(expected, artifact))
     return problems
+
+
+def _modules_missing_from_artifact(expected: dict[str, str],
+                                   artifact: Any) -> list[str]:
+    """Every module this tree provides must also be IN the artifact.
+
+    Aligning the two ES_MODULE regexes instead would be the wrong repair: the
+    census would then read the C exactly as `build_native_modules()` does,
+    and a registration syntax neither understands would be missing from both
+    with nothing left to disagree. Two independent readings that must agree
+    is the point; this says so out loud rather than relying on the members
+    happening to differ.
+
+    `showtime/*` is excluded because the artifact deliberately carries no
+    record for an alias -- es_modsearch resolves it to the movian/* file.
+    """
+    if not isinstance(artifact, dict):
+        return ["the census was not given an artifact to compare against"]
+    present = {module.get("name")
+               for module in artifact.get("js", {}).get("modules", [])
+               if isinstance(module, dict)}
+    return ["%s exists (%s) and the artifact has no record of it, so two "
+            "readings of this tree disagree" % (name, expected[name])
+            for name in sorted(expected)
+            if not name.startswith("showtime/") and name not in present]
 
 
 def _format_runtime_oracle_report(
@@ -4736,7 +4763,7 @@ def _check_runtime_oracle(
         entry["module"], entry["shape"], entry["member"]))
     unreachable.sort(key=lambda entry: (
         entry["module"], entry["shape"], entry["member"]))
-    floor_problems = runtime_oracle_census(oracle)
+    floor_problems = runtime_oracle_census(oracle, artifact)
     if oracle.get("moduleDiscoveryError"):
         floor_problems.append(
             "the capture could not enumerate the module files: %s"
@@ -5915,7 +5942,14 @@ def cmd_adopt_oracle(args: argparse.Namespace) -> int:
               "it cannot say it saw them all: %s"
               % payload["moduleDiscoveryError"], file=sys.stderr)
         return 1
-    census = runtime_oracle_census(payload)
+    try:
+        committed_artifact = json.loads(
+            ARTIFACT_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        print("gen.py: cannot read %s to check the capture against: %s"
+              % (ARTIFACT_PATH, error), file=sys.stderr)
+        return 1
+    census = runtime_oracle_census(payload, committed_artifact)
     if census:
         print("gen.py: this capture does not account for the modules this "
               "tree provides, and --check would refuse it straight after "

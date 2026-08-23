@@ -785,8 +785,13 @@ class ModuleCensus(unittest.TestCase):
         return json.loads(
             gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
 
+    def _artifact(self):
+        import json
+        return json.loads(gen.ARTIFACT_PATH.read_text(encoding="utf-8"))
+
     def test_the_committed_capture_walked_everything_this_tree_has(self):
-        self.assertEqual(gen.runtime_oracle_census(self._oracle()), [])
+        self.assertEqual(
+            gen.runtime_oracle_census(self._oracle(), self._artifact()), [])
 
     def test_the_census_asks_what_was_walked_not_what_was_attempted(self):
         # `modules` is the list of names the run TRIED, and the introspector
@@ -799,7 +804,7 @@ class ModuleCensus(unittest.TestCase):
         import copy
         oracle = copy.deepcopy(self._oracle())
         oracle["loadErrors"] = {"movian/page": "Error: boom"}
-        problems = gen.runtime_oracle_census(oracle)
+        problems = gen.runtime_oracle_census(oracle, self._artifact())
         self.assertTrue(any("could not load it" in problem
                             for problem in problems), problems)
 
@@ -811,7 +816,8 @@ class ModuleCensus(unittest.TestCase):
         import copy
         oracle = copy.deepcopy(self._oracle())
         oracle["tier1"]["url"] = {"status": "not-applicable"}
-        self.assertEqual(gen.runtime_oracle_census(oracle), [])
+        self.assertEqual(
+            gen.runtime_oracle_census(oracle, self._artifact()), [])
 
     def test_a_record_claiming_a_walk_must_carry_one(self):
         # `{"status": "walked"}` is a claim of observation with none in it.
@@ -824,7 +830,7 @@ class ModuleCensus(unittest.TestCase):
         for name in ("http", "url", "movian/settings"):
             oracle = copy.deepcopy(self._oracle())
             oracle["tier1"][name] = {"status": "walked"}
-            problems = gen.runtime_oracle_census(oracle)
+            problems = gen.runtime_oracle_census(oracle, self._artifact())
             self.assertTrue(
                 any("carries no functionExports" in problem
                     for problem in problems), (name, problems))
@@ -836,7 +842,7 @@ class ModuleCensus(unittest.TestCase):
         import copy
         oracle = copy.deepcopy(self._oracle())
         oracle["tier1"]["fs"] = "unavailable"
-        problems = gen.runtime_oracle_census(oracle)
+        problems = gen.runtime_oracle_census(oracle, self._artifact())
         self.assertTrue(any("not an object" in problem
                             for problem in problems), problems)
 
@@ -844,7 +850,7 @@ class ModuleCensus(unittest.TestCase):
         import copy
         oracle = copy.deepcopy(self._oracle())
         oracle["tier1"]["movian/page"] = {"status": "unavailable"}
-        problems = gen.runtime_oracle_census(oracle)
+        problems = gen.runtime_oracle_census(oracle, self._artifact())
         self.assertTrue(any("did not walk it (unavailable)" in problem
                             for problem in problems), problems)
 
@@ -852,7 +858,7 @@ class ModuleCensus(unittest.TestCase):
         import copy
         oracle = copy.deepcopy(self._oracle())
         oracle.pop("tier1")
-        self.assertTrue(gen.runtime_oracle_census(oracle))
+        self.assertTrue(gen.runtime_oracle_census(oracle, self._artifact()))
 
     def test_a_registration_this_census_cannot_read_fails(self):
         # `#define NAME "probe"` then `ES_MODULE(NAME, ...)`. The artifact
@@ -866,7 +872,8 @@ class ModuleCensus(unittest.TestCase):
                            'ES_MODULE(PROBE_NAME, fnlist_fs);\n',
                 encoding="utf-8")
             self.assertTrue(gen.unresolved_native_registrations())
-            problems = gen.runtime_oracle_census(self._oracle())
+            problems = gen.runtime_oracle_census(
+                self._oracle(), self._artifact())
             self.assertTrue(any("cannot read" in problem
                                 for problem in problems), problems)
         finally:
@@ -913,6 +920,42 @@ class ModuleCensus(unittest.TestCase):
     def test_nothing_registers_outside_the_artifact_scanner_today(self):
         self.assertEqual(gen.native_registrations_out_of_scope(), [])
 
+    def test_an_expected_module_absent_from_the_artifact_fails(self):
+        # `ES_MODULE ("probe", ...)` -- valid C, a space before the paren --
+        # is read by the census and not by build_native_modules(), whose
+        # regex anchors at the line start with no space. Aligning the two
+        # regexes would be the wrong repair: the census would then read the
+        # C exactly as the artifact scanner does and a syntax neither
+        # understands would be missing from both. Two independent readings
+        # that must agree is the point.
+        import copy
+        victim = REPO_ROOT / "src" / "ecmascript" / "es_fs.c"
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(
+                original + '\nES_MODULE ("probe", fnlist_probe);\n',
+                encoding="utf-8")
+            oracle = copy.deepcopy(self._oracle())
+            oracle["modules"] = oracle["modules"] + ["native/probe"]
+            oracle["tier1"]["native/probe"] = {"status": "walked",
+                                               "functionExports": {}}
+            problems = gen.runtime_oracle_census(oracle, self._artifact())
+            self.assertTrue(
+                any("the artifact has no record of it" in problem
+                    for problem in problems), problems)
+        finally:
+            victim.write_text(original, encoding="utf-8")
+
+    def test_the_showtime_aliases_are_not_expected_in_the_artifact(self):
+        # The artifact carries no record for an alias; es_modsearch resolves
+        # it to the movian/* file. Requiring one would be 14 false failures.
+        problems = gen.runtime_oracle_census(self._oracle(), self._artifact())
+        self.assertEqual(problems, [])
+
+    def test_the_census_without_an_artifact_refuses(self):
+        # Rather than skipping the comparison it cannot make.
+        self.assertTrue(gen.runtime_oracle_census(self._oracle()))
+
     def test_a_registration_the_artifact_scanner_cannot_see_fails(self):
         # `build_native_modules()` opens `es_*.c` and nothing else, so a
         # module registered in `ecmascript.c` is real at runtime and absent
@@ -928,7 +971,8 @@ class ModuleCensus(unittest.TestCase):
                                 for problem in problems), problems)
             self.assertNotIn("native/probe", gen.expected_runtime_modules())
             self.assertTrue(any("never reads" in problem for problem in
-                                gen.runtime_oracle_census(self._oracle())))
+                                gen.runtime_oracle_census(
+                                    self._oracle(), self._artifact())))
         finally:
             victim.write_text(original, encoding="utf-8")
 
@@ -954,7 +998,8 @@ class ModuleCensus(unittest.TestCase):
         try:
             probe.write_text("exports['probe' + 'Fn'] = function(){};\n",
                              encoding="utf-8")
-            problems = gen.runtime_oracle_census(self._oracle())
+            problems = gen.runtime_oracle_census(
+                self._oracle(), self._artifact())
             self.assertTrue(
                 any("movian/probe exists" in problem for problem in problems),
                 problems)
@@ -970,7 +1015,8 @@ class ModuleCensus(unittest.TestCase):
         try:
             victim.write_text(original + '\nES_MODULE("probe", fnlist_fs);\n',
                               encoding="utf-8")
-            problems = gen.runtime_oracle_census(self._oracle())
+            problems = gen.runtime_oracle_census(
+                self._oracle(), self._artifact())
             self.assertTrue(
                 any("native/probe exists" in problem for problem in problems),
                 problems)
@@ -981,7 +1027,7 @@ class ModuleCensus(unittest.TestCase):
         import copy
         oracle = copy.deepcopy(self._oracle())
         oracle["modules"] = oracle["modules"] + ["movian/ghost"]
-        problems = gen.runtime_oracle_census(oracle)
+        problems = gen.runtime_oracle_census(oracle, self._artifact())
         self.assertTrue(any("movian/ghost was loaded" in problem
                             for problem in problems), problems)
 
@@ -1004,8 +1050,9 @@ class ModuleCensus(unittest.TestCase):
         self.assertIn("could not enumerate the module files", output)
 
     def test_a_capture_that_is_not_an_oracle_fails(self):
-        self.assertTrue(gen.runtime_oracle_census(None))
-        self.assertTrue(gen.runtime_oracle_census("not an object"))
+        self.assertTrue(gen.runtime_oracle_census(None, self._artifact()))
+        self.assertTrue(
+            gen.runtime_oracle_census("not an object", self._artifact()))
 
 
 class Floor(unittest.TestCase):
