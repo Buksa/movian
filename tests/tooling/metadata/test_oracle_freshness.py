@@ -728,6 +728,24 @@ class ModuleCensus(unittest.TestCase):
         finally:
             victim.write_text(original, encoding="utf-8")
 
+    def test_a_commented_out_registration_is_not_a_module(self):
+        # The mirror of the Makefile-comment rule, in the other language:
+        # `/* ES_MODULE("dead", ...) */` registers nothing, and expecting it
+        # makes the census go red on a correct runtime.
+        victim = REPO_ROOT / "src" / "ecmascript" / "es_fs.c"
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(
+                original + '\n/* ES_MODULE("dead", fnlist_fs); */\n'
+                           '// ES_MODULE("alsodead", fnlist_fs);\n',
+                encoding="utf-8")
+            expected = gen.expected_runtime_modules()
+            self.assertNotIn("native/dead", expected)
+            self.assertNotIn("native/alsodead", expected)
+            self.assertEqual(gen.unresolved_native_registrations(), [])
+        finally:
+            victim.write_text(original, encoding="utf-8")
+
     def test_no_registration_is_unresolved_today(self):
         self.assertEqual(gen.unresolved_native_registrations(), [])
 

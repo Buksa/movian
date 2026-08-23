@@ -4010,7 +4010,12 @@ def expected_runtime_modules() -> dict[str, str]:
             expected["showtime/" + name[len("movian/"):]] = (
                 "the showtime alias of a module file")
     for path in sorted((REPO_ROOT / "src" / "ecmascript").rglob("*.c")):
-        source = path.read_text(encoding="utf-8", errors="replace")
+        # Comments first, or `/* ES_MODULE("dead", ...) */` becomes a module
+        # this tree does not register and the census goes red on a correct
+        # runtime. The same rule as the recipe parser, in the other language;
+        # the stripper is the one already checked against these 26 files.
+        source = _js_code_only(
+            path.read_text(encoding="utf-8", errors="replace"))
         for name in _ES_MODULE_RE.findall(source):
             expected["native/" + name] = (
                 "ES_MODULE in %s" % path.relative_to(REPO_ROOT).as_posix())
@@ -4021,7 +4026,8 @@ def unresolved_native_registrations() -> list[str]:
     """`ES_MODULE(...)` invocations whose name is not a literal."""
     unresolved = []
     for path in sorted((REPO_ROOT / "src" / "ecmascript").rglob("*.c")):
-        source = path.read_text(encoding="utf-8", errors="replace")
+        source = _js_code_only(
+            path.read_text(encoding="utf-8", errors="replace"))
         extra = (len(_ES_MODULE_ANY_RE.findall(source))
                  - len(_ES_MODULE_RE.findall(source)))
         if extra > 0:
