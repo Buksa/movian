@@ -4082,18 +4082,43 @@ def runtime_oracle_census(oracle: Any) -> list[str]:
     # loaded fine, no object to walk. Treating that as unobserved would make
     # the gate permanently red for a valid module, and the artifact records
     # no members for it either, so there is nothing being hidden.
-    loaded = {"walked", "not-applicable"}
-    walked = {name for name, record in tier1.items()
-              if isinstance(record, dict) and record.get("status") in loaded}
+    #
+    # A record claiming `walked` must also CARRY the walk. A bare
+    # `{"status": "walked"}` is a claim of observation with none in it, and
+    # for a module whose shapes are reached through tier2/tier3 rather than
+    # tier1 -- http, movian/settings, url -- nothing downstream notices the
+    # loss. Measured: gutting tier1 for movian/sqlite or movian/page fails
+    # the member comparison; gutting it for those three did not.
+    walked = set()
+    malformed = []
+    for name, record in tier1.items():
+        if not isinstance(record, dict):
+            malformed.append("%s has a tier1 record that is not an object"
+                             % name)
+            continue
+        status = record.get("status")
+        if status == "not-applicable":
+            walked.add(name)
+        elif status == "walked":
+            if isinstance(record.get("functionExports"), dict):
+                walked.add(name)
+            else:
+                malformed.append(
+                    "%s claims a walk and carries no functionExports, so the "
+                    "record says it looked and shows nothing for it" % name)
 
     expected = expected_runtime_modules()
-    problems = []
+    problems = list(malformed)
     for name, reason in sorted(expected.items()):
         if name in load_errors:
             problems.append("%s exists (%s) and the capture could not load "
                             "it: %s" % (name, reason, load_errors[name]))
         elif name not in walked:
-            status = (tier1.get(name) or {}).get("status", "never attempted")
+            record = tier1.get(name)
+            status = (record.get("status", "no status")
+                      if isinstance(record, dict) else
+                      "never attempted" if record is None else
+                      "a malformed record")
             problems.append("%s exists (%s) and the capture did not walk it "
                             "(%s)" % (name, reason, status))
     attempted = oracle.get("modules")

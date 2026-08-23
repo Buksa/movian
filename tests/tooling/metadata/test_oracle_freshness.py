@@ -751,6 +751,33 @@ class ModuleCensus(unittest.TestCase):
         oracle["tier1"]["url"] = {"status": "not-applicable"}
         self.assertEqual(gen.runtime_oracle_census(oracle), [])
 
+    def test_a_record_claiming_a_walk_must_carry_one(self):
+        # `{"status": "walked"}` is a claim of observation with none in it.
+        # For modules whose shapes are reached through tier2/tier3 rather
+        # than tier1 -- http, movian/settings, url -- nothing downstream
+        # notices the loss, so the census is the only barrier. Measured:
+        # gutting tier1 for movian/sqlite or movian/page does fail the
+        # member comparison; for these three it did not.
+        import copy
+        for name in ("http", "url", "movian/settings"):
+            oracle = copy.deepcopy(self._oracle())
+            oracle["tier1"][name] = {"status": "walked"}
+            problems = gen.runtime_oracle_census(oracle)
+            self.assertTrue(
+                any("carries no functionExports" in problem
+                    for problem in problems), (name, problems))
+
+    def test_a_malformed_record_is_reported_not_raised(self):
+        # A record that is not an object at all. Reporting it keeps the gate
+        # a gate; raising turns a corrupt oracle into a traceback whose
+        # meaning depends on the harness.
+        import copy
+        oracle = copy.deepcopy(self._oracle())
+        oracle["tier1"]["fs"] = "unavailable"
+        problems = gen.runtime_oracle_census(oracle)
+        self.assertTrue(any("not an object" in problem
+                            for problem in problems), problems)
+
     def test_a_module_the_capture_did_not_walk_fails(self):
         import copy
         oracle = copy.deepcopy(self._oracle())
