@@ -979,14 +979,126 @@ tier3 = {
 // time the tier3 page has not been opened, so its members are unattempted.
 // They carried the SAME marker, which made "extract the unique marker" a
 // coin flip -- and the documented procedure (run, then read the log without
+// ---------------------------------------------------------------------------
+// What this run actually read.
+//
+// The stamp gen.py writes is computed at ADOPTION time from whatever tree is
+// on disk then. That binds the oracle to the tree it is committed with, not
+// to the tree it was captured from -- and those differ whenever a capture is
+// carried between checkouts, which is the normal case here: the run happens
+// where build.debug lives and the adoption happens in the worktree. Edit a
+// module in between, or adopt a capture taken from a slightly different
+// checkout, and the old observations get stamped against sources they never
+// saw.
+//
+// So the run records the identity of every file it could have loaded, and
+// adoption refuses unless they still match byte for byte. Raw digests, not
+// the comment-insensitive ones gen.py uses for staleness: capture and
+// adoption are meant to be the same tree, minutes apart, so there is nothing
+// to be tolerant of.
+//
+// Enumerating the plugin directory rather than naming its files is the point
+// of doing it here: es_modsearch() tries the plugin directory BEFORE
+// dataroot://res/ecmascript/modules (ecmascript.c:443-452), so dropping a
+// url.js next to this file would silently shadow the core module for every
+// require() below.
+function hexOf(buffer) {
+  var bytes = new Uint8Array(buffer);
+  var out = '';
+  for (var i = 0; i < bytes.length; i++) {
+    var part = bytes[i].toString(16);
+    out += part.length === 1 ? '0' + part : part;
+  }
+  return out;
+}
+
+function digestOf(path) {
+  var crypto = require('native/crypto');
+  var handle = crypto.hashCreate('sha256');
+  crypto.hashUpdate(handle, require('fs').readFileSync(path).valueOf());
+  return hexOf(crypto.hashFinalize(handle));
+}
+
+function collectInputs(url, prefix, into, depth, required) {
+  var names;
+  try {
+    names = require('fs').readdirSync(url);
+  } catch (error) {
+    // A child that is not a directory is expected. A ROOT that cannot be
+    // scanned is not, and swallowing it is how this returned two files and
+    // looked like it had worked: a plugin's fs access is ACL-limited to its
+    // own directory (es_fs.c:100-106), so the core module tree needs
+    // --bypass-ecmascript-acl and says so instead of quietly recording less.
+    if (required) {
+      throw new Error('cannot read ' + url + ' -- ' + error +
+                      ' (run movian with --bypass-ecmascript-acl)');
+    }
+    return;
+  }
+  for (var i = 0; i < names.length; i++) {
+    var name = names[i];
+    var child = url + '/' + name;
+    if (name === 'runtime-api.json') {
+      // The oracle itself. Recording it would compare a capture-time digest
+      // against a file adoption is about to rewrite.
+      continue;
+    }
+    if (/\.(js|json)$/.test(name)) {
+      into[prefix + name] = digestOf(child);
+    } else if (depth > 0) {
+      collectInputs(child, prefix + name + '/', into, depth - 1, false);
+    }
+  }
+}
+
+function runtimeInputs() {
+  var found = {};
+  collectInputs('dataroot://res/ecmascript/modules',
+                'res/ecmascript/modules/', found, 2, true);
+  found['res/ecmascript/legacy/api-v1.js'] =
+    digestOf('dataroot://res/ecmascript/legacy/api-v1.js');
+  if (!(typeof Plugin === 'object' && Plugin && Plugin.path)) {
+    throw new Error('Plugin.path is not set, so the plugin directory that '
+                    + 'shadows core modules cannot be enumerated');
+  }
+  collectInputs(Plugin.path, 'plugin/', found, 1, true);
+  return found;
+}
+
+
 // opening the route) reached only the partial one. The complete payload owns
 // the documented marker; the partial one is labelled as what it is.
 function emitPayload(complete) {
+  var runtimeInputsResult = null;
+  var runtimeInputsError = null;
+  try {
+    runtimeInputsResult = runtimeInputs();
+  } catch (error) {
+    // Recorded, never swallowed: adoption refuses a capture that cannot say
+    // what it read, which is the honest outcome when this fails.
+    runtimeInputsError = '' + error;
+  }
   print((complete ? 'MOVIAN_API_INTROSPECTOR_JSON='
                   : 'MOVIAN_API_INTROSPECTOR_PARTIAL_JSON=') +
         JSON.stringify({
     version: 2,
     tier3PageOpened: !!complete,
+    // What separates a fresh capture from a copy of the committed oracle.
+    // Two runs never agree on it, so `--adopt-oracle` can refuse the file
+    // already on disk without also refusing a genuine recapture that
+    // happened to observe the same API -- which is what an
+    // implementation-only change to a module produces.
+    capturedAt: Date.now(),
+    // Which BUILD answered. `mdev run` launches the binary that is there; it
+    // does not rebuild. So a native registration can change in the C while
+    // the running binary still reports the old surface, and stamping that
+    // payload against the new sources certifies a reading nothing produced.
+    // Adoption resolves this string back to a commit and refuses unless the
+    // compiled sources there match the tree being stamped.
+    movianVersion: (typeof Core === 'object' && Core)
+                     ? Core.currentVersionString : null,
+    runtimeInputs: runtimeInputsResult,
+    runtimeInputsError: runtimeInputsError,
     modules: moduleNames,
     before: before,
     tier1: tier1,

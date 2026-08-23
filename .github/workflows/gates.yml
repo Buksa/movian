@@ -38,6 +38,31 @@ jobs:
           # shallow-clone tricks beyond the default.
           submodules: false
 
+      # The oracle records the build that produced it, and one test checks
+      # that build's compiled sources against this tree. The default checkout
+      # is shallow, so that commit is usually absent and the check would
+      # degrade to a skip -- a guard that never runs. Fetching exactly the
+      # one commit costs almost nothing and keeps it a real check. It fails
+      # loudly if the commit is gone, which is itself worth knowing: it means
+      # the committed oracle can no longer be traced to a build.
+      - name: Fetch the commit the oracle was captured from
+        run: |
+          version=$(python3 -c "import json;print(json.load(open('support/devtools/api-introspector/runtime-api.json')).get('movianVersion') or '')")
+          echo "oracle build: ${version:-<none>}"
+          revision=${version##*.g}
+          if [ -z "$revision" ] || [ "$revision" = "$version" ]; then
+            echo "no build revision in the version string" >&2
+            exit 1
+          fi
+          # `git fetch` takes a full SHA or a ref name, never an
+          # abbreviation, and the version string carries `git describe`'s
+          # short form. Expand it against the API first.
+          full=$(gh api "repos/$GITHUB_REPOSITORY/commits/$revision" --jq .sha)
+          echo "expanded $revision -> $full"
+          git fetch --no-tags --depth=1 origin "$full"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - uses: actions/setup-python@v5
         with:
           # gen.py uses PEP 604 unions and 3.10+ syntax throughout.
