@@ -123,15 +123,23 @@ class CommentStrippingRefusals(unittest.TestCase):
         # Duktape treats U+2028 and U+2029 as line terminators
         # (duktape.c:10493-10494), so the code after one is live and must
         # not be read as part of the comment before it.
-        for separator in ("\u2028", "\u2029"):
+        # CR belongs in the same set on its own: a CR-only source is valid
+        # JavaScript, not a stray Windows artefact.
+        for separator in ("\r", "\u2028", "\u2029"):
             kept = gen._js_hash_text("// note%sexports.a = 1;" % separator)
             self.assertIn("exports.a", kept, repr(separator))
 
     def test_unicode_line_terminators_separate_statements(self):
-        for separator in ("\u2028", "\u2029"):
+        for separator in ("\r", "\u2028", "\u2029"):
             self.assertNotEqual(
                 gen._js_hash_text("// n%sexports.a = 1;" % separator),
                 gen._js_hash_text("// n%sexports.b = 1;" % separator))
+
+    def test_crlf_hashes_the_same_as_lf(self):
+        # The other direction: CR being a terminator must not make a file
+        # with Windows endings look like a different program.
+        self.assertEqual(gen._js_hash_text("var a = 1;\r\nvar b = 2;"),
+                         gen._js_hash_text("var a = 1;\nvar b = 2;"))
 
     def test_whitespace_inside_a_string_is_content(self):
         # `exports["a  b"]` and `exports["a b"]` declare different members.

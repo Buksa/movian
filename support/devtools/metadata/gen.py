@@ -143,11 +143,15 @@ _JS_REGEX_KEYWORDS = frozenset((
 # `break outer` and `continue outer` put a LABEL where the keyword was, so
 # the word before it is what says a statement just ended.
 _JS_LABELLED_JUMPS = frozenset(("break", "continue"))
-# Duktape treats U+2028 and U+2029 as line terminators
-# (ext/duktape/duktape.c:10493-10494), so a line comment ends at one and a
-# regex literal cannot cross one. Scanning for LF alone reads the live code
-# after a separator as part of the comment before it.
-_JS_LINE_TERMINATORS = "\n\u2028\u2029"
+# The four LineTerminator code points. CR is one of them on its own -- a
+# CR-only file is not a Windows artefact but valid JavaScript -- and Duktape
+# also treats U+2028 and U+2029 as terminators
+# (ext/duktape/duktape.c:10493-10494). A line comment ends at any of them and
+# a regex literal crosses none. Scanning for LF alone reads the live code
+# after one as part of the comment before it, which is the whole file in a
+# CR-only source. CRLF still hashes the same as LF: the run of terminators
+# collapses to a single newline either way.
+_JS_LINE_TERMINATORS = "\n\r\u2028\u2029"
 # A `)` that closes one of these closes a CONDITION, and a regex may follow
 # it: `if (ready) /x[/*]y/.test(s)` is legal. Reading that `/` as division
 # lets the `/*` inside the character class open a comment that runs to the
@@ -352,7 +356,7 @@ def _js_hash_text(source: str) -> str:
         if kind == "comment":
             span = " " + "\n" * sum(span.count(char)
                                     for char in _JS_LINE_TERMINATORS)
-        span = re.sub(r"[\u2028\u2029]", "\n", span)
+        span = re.sub(r"[\r\u2028\u2029]", "\n", span)
         span = re.sub(r"[^\S\n]+", " ", span)
         out.append(re.sub(r" ?\n\s*", "\n", span))
     return "".join(out).strip()
