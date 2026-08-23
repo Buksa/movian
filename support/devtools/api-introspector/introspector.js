@@ -77,12 +77,17 @@ var knownModuleNames = [
 // cross-check agrees about nothing.
 function discoverFileModules() {
   var found = [];
-  function walk(url, prefix, depth) {
+  // No depth cap. es_modsearch joins a slash-separated id onto the module
+  // root, so `movian/media/providers/local` is a loadable module, and the
+  // generator's rglob already sees the file. A cap here and no cap there
+  // means the census reports a module the capture cannot reach and no
+  // recapture can clear it.
+  function walk(url, prefix, isRoot) {
     var names;
     try {
       names = require('fs').readdirSync(url);
     } catch (error) {
-      if (depth === 2) {
+      if (isRoot) {
         throw new Error('cannot list ' + url + ' -- ' + error +
                         ' (run movian with --bypass-ecmascript-acl)');
       }
@@ -92,12 +97,12 @@ function discoverFileModules() {
       var name = names[i];
       if (/\.js$/.test(name)) {
         found.push(prefix + name.slice(0, -3));
-      } else if (depth > 0) {
-        walk(url + '/' + name, prefix + name + '/', depth - 1);
+      } else {
+        walk(url + '/' + name, prefix + name + '/', false);
       }
     }
   }
-  walk('dataroot://res/ecmascript/modules', '', 2);
+  walk('dataroot://res/ecmascript/modules', '', true);
   var aliases = [];
   for (var j = 0; j < found.length; j++) {
     if (found[j].indexOf('movian/') === 0) {
@@ -1083,7 +1088,7 @@ function digestOf(path) {
   return hexOf(crypto.hashFinalize(handle));
 }
 
-function collectInputs(url, prefix, into, depth, required) {
+function collectInputs(url, prefix, into, required) {
   var names;
   try {
     names = require('fs').readdirSync(url);
@@ -1109,8 +1114,8 @@ function collectInputs(url, prefix, into, depth, required) {
     }
     if (/\.(js|json)$/.test(name)) {
       into[prefix + name] = digestOf(child);
-    } else if (depth > 0) {
-      collectInputs(child, prefix + name + '/', into, depth - 1, false);
+    } else {
+      collectInputs(child, prefix + name + '/', into, false);
     }
   }
 }
@@ -1118,14 +1123,14 @@ function collectInputs(url, prefix, into, depth, required) {
 function runtimeInputs() {
   var found = {};
   collectInputs('dataroot://res/ecmascript/modules',
-                'res/ecmascript/modules/', found, 2, true);
+                'res/ecmascript/modules/', found, true);
   found['res/ecmascript/legacy/api-v1.js'] =
     digestOf('dataroot://res/ecmascript/legacy/api-v1.js');
   if (!(typeof Plugin === 'object' && Plugin && Plugin.path)) {
     throw new Error('Plugin.path is not set, so the plugin directory that '
                     + 'shadows core modules cannot be enumerated');
   }
-  collectInputs(Plugin.path, 'plugin/', found, 1, true);
+  collectInputs(Plugin.path, 'plugin/', found, true);
   return found;
 }
 

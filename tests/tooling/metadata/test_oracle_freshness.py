@@ -589,6 +589,27 @@ class Recipe(unittest.TestCase):
         self.assertNotEqual(selection["src/ecmascript/yes.c"],
                             selection["src/ecmascript/no.c"])
 
+    def test_a_commented_out_source_is_not_selected(self):
+        # GNU Make omits it; reading the pathname anyway keeps a source in
+        # the selection that the next build will not compile, and the
+        # comparison then finds nothing to report.
+        text = self._makefile()
+        commented = text.replace("\tsrc/ecmascript/es_fs.c \\",
+                                 "#\tsrc/ecmascript/es_fs.c \\")
+        self.assertNotEqual(commented, text)
+        selection = gen.makefile_ecmascript_selection(commented)
+        self.assertNotIn("src/ecmascript/es_fs.c", selection)
+        self.assertTrue(gen.selection_mismatch(
+            selection, gen.makefile_ecmascript_selection(text), "abc1234"))
+
+    def test_a_trailing_comment_does_not_drop_the_source(self):
+        # The other direction of the same rule: stripping must remove the
+        # comment, not the line. Over-stripping would leave a compiled source
+        # unnamed, which reads as a recipe that dropped it.
+        selection = gen.makefile_ecmascript_selection(
+            "SRCS += src/ecmascript/es_fs.c # why this one\n")
+        self.assertEqual(selection, {"src/ecmascript/es_fs.c": "SRCS"})
+
     def test_a_blind_parser_is_a_problem_not_a_pass(self):
         # A parser that stops matching returns an empty selection, and an
         # empty selection compares equal to another empty one -- green
@@ -664,6 +685,16 @@ class ModuleCensus(unittest.TestCase):
         problems = gen.runtime_oracle_census(oracle)
         self.assertTrue(any("could not load it" in problem
                             for problem in problems), problems)
+
+    def test_a_primitive_export_counts_as_observed(self):
+        # `exports = null` or a string loads fine and has no object to walk;
+        # the introspector records `not-applicable`. Calling that unobserved
+        # would make the gate permanently red for a valid module, and the
+        # artifact records no members for it either.
+        import copy
+        oracle = copy.deepcopy(self._oracle())
+        oracle["tier1"]["url"] = {"status": "not-applicable"}
+        self.assertEqual(gen.runtime_oracle_census(oracle), [])
 
     def test_a_module_the_capture_did_not_walk_fails(self):
         import copy

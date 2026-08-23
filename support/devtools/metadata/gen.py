@@ -4052,8 +4052,13 @@ def runtime_oracle_census(oracle: Any) -> list[str]:
                 "actually walked"]
     load_errors = oracle.get("loadErrors")
     load_errors = load_errors if isinstance(load_errors, dict) else {}
+    # `not-applicable` is what a module exporting null or a primitive gets:
+    # loaded fine, no object to walk. Treating that as unobserved would make
+    # the gate permanently red for a valid module, and the artifact records
+    # no members for it either, so there is nothing being hidden.
+    loaded = {"walked", "not-applicable"}
     walked = {name for name, record in tier1.items()
-              if isinstance(record, dict) and record.get("status") == "walked"}
+              if isinstance(record, dict) and record.get("status") in loaded}
 
     expected = expected_runtime_modules()
     problems = []
@@ -5567,6 +5572,15 @@ _MAKEFILE_COND_RE = re.compile(
     r"^\s*(ifeq|ifneq|ifdef|ifndef)\b\s*(.*)$")
 _MAKEFILE_ELSE_RE = re.compile(r"^\s*else\b\s*(.*)$")
 _MAKEFILE_ENDIF_RE = re.compile(r"^\s*endif\b")
+# A commented-out continuation line still contains the pathname, and reading
+# it keeps a source in the selection that the next build will not compile.
+# Over-stripping is the safe direction: a path wrongly dropped leaves the
+# file on disk with nothing naming it, which `_selection_problems` reports.
+_MAKEFILE_COMMENT_RE = re.compile(r"(?<!\\)#.*$")
+
+
+def _makefile_uncommented(line: str) -> str:
+    return _MAKEFILE_COMMENT_RE.sub("", line)
 
 
 def makefile_ecmascript_selection(text: str) -> dict[str, str]:
@@ -5576,7 +5590,8 @@ def makefile_ecmascript_selection(text: str) -> dict[str, str]:
     selection: dict[str, str] = {}
     gate: str | None = None
     conditions: list[str] = []
-    for line in text.split("\n"):
+    for raw in text.split("\n"):
+        line = _makefile_uncommented(raw)
         opener = _MAKEFILE_COND_RE.match(line)
         if opener:
             conditions.append("%s %s" % (opener.group(1),
