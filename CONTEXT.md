@@ -58,6 +58,13 @@ not rebuild), a capture that read a different tree than the one being stamped
 (every run records a digest of what it loaded, which needs
 `--bypass-ecmascript-acl`), and a capture that could not record what it read
 at all.
+
+The build identity is the **selection**, not the Makefile: which `.c` files
+the recipe names and the `CONFIG_*` gate each sits behind, so dropping one or
+moving it behind another toggle is caught while an unrelated packaging edit is
+not. And `--check` takes a **census** — every module file, its `showtime/`
+alias, and every `ES_MODULE(...)` in the C must appear in what the capture
+loaded, so a module nobody listed cannot be invisible to both sides at once.
 _Avoid_: runtime API, capture (unqualified)
 
 **Accepted corpus**:

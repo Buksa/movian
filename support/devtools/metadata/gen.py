@@ -3975,6 +3975,56 @@ def _runtime_oracle_floor_problems(
     return problems
 
 
+_ES_MODULE_RE = re.compile(r'ES_MODULE\(\s*"([^"]+)"')
+
+
+def expected_runtime_modules() -> dict[str, str]:
+    """Every module the runtime must be able to load, and where that is
+    known from.
+
+    The capture used to inspect a hand-written list, so a module nobody added
+    to it was unobserved -- and in syntax the static scanner cannot read, it
+    was missing from the artifact too. Both sides blind, and a cross-check
+    between two blind sides agrees about nothing.
+
+    Discovery in the introspector closes that going forward; this closes it
+    from the other end, where no build is needed, so a capture that stops
+    seeing a module cannot pass here either.
+    """
+    expected: dict[str, str] = {}
+    modules_dir = REPO_ROOT / "res" / "ecmascript" / "modules"
+    for path in sorted(modules_dir.rglob("*.js")):
+        name = path.relative_to(modules_dir).as_posix()[:-len(".js")]
+        expected[name] = "a module file"
+        if name.startswith("movian/"):
+            # es_modsearch rewrites the prefix unconditionally
+            # (ecmascript.c:435-439), so every movian/* module is reachable
+            # under showtime/* as a separate instance.
+            expected["showtime/" + name[len("movian/"):]] = (
+                "the showtime alias of a module file")
+    for path in sorted((REPO_ROOT / "src" / "ecmascript").rglob("*.c")):
+        for name in _ES_MODULE_RE.findall(
+                path.read_text(encoding="utf-8", errors="replace")):
+            expected["native/" + name] = (
+                "ES_MODULE in %s" % path.relative_to(REPO_ROOT).as_posix())
+    return expected
+
+
+def runtime_oracle_census(observed: Any) -> list[str]:
+    expected = expected_runtime_modules()
+    if not isinstance(observed, list):
+        return ["the oracle does not list the modules it loaded"]
+    seen = set(observed)
+    problems = ["%s exists (%s) and the capture never loaded it"
+                % (name, reason)
+                for name, reason in sorted(expected.items())
+                if name not in seen]
+    problems.extend(
+        "%s was loaded by the capture and nothing in this tree provides it"
+        % name for name in sorted(seen - set(expected)))
+    return problems
+
+
 def _format_runtime_oracle_report(
         report: dict[str, Any]) -> str:
     status = report.get("status")
@@ -4546,7 +4596,12 @@ def _check_runtime_oracle(
         entry["module"], entry["shape"], entry["member"]))
     unreachable.sort(key=lambda entry: (
         entry["module"], entry["shape"], entry["member"]))
-    floor_problems = _runtime_oracle_floor_problems(
+    floor_problems = runtime_oracle_census(oracle.get("modules"))
+    if oracle.get("moduleDiscoveryError"):
+        floor_problems.append(
+            "the capture could not enumerate the module files: %s"
+            % oracle["moduleDiscoveryError"])
+    floor_problems += _runtime_oracle_floor_problems(
         matches, unreachable, len(expected), len(plugin_supplied))
     agreed = not drift and not missing_modules and not floor_problems
     report = {
@@ -5441,6 +5496,73 @@ def format_diff(diff: dict[str, Any]) -> list[str]:
     return lines
 
 
+# Which .c files the build actually compiles is a fact about the RECIPE, and
+# the recipe is not in the sources. Dropping `es_fs.c` from SRCS, or moving it
+# behind a different CONFIG gate, changes what the binary exposes while every
+# .c and .h stays byte-identical.
+#
+# The key is the SELECTION, not the file. Hashing `Makefile` would be the "key
+# over too much" trap in its worst form -- one file every part of the project
+# touches. Measured before choosing: 18 commits changed `Makefile` since
+# 2026-05-01 and NONE of them touched a line naming an ecmascript source. The
+# selection is stable while the file around it moves.
+_MAKEFILE_SRCS_RE = re.compile(r"^\s*(SRCS(?:-[^\s+=]+)?)\s*\+?=")
+_MAKEFILE_ES_SOURCE_RE = re.compile(r"src/ecmascript/[A-Za-z0-9_./-]+\.c")
+
+
+def makefile_ecmascript_selection(text: str) -> dict[str, str]:
+    """Each ecmascript source the recipe names, mapped to the variable that
+    names it -- `SRCS` or `SRCS-$(CONFIG_X)`, so a source moving behind a
+    different toggle reads as a change."""
+    selection: dict[str, str] = {}
+    gate: str | None = None
+    for line in text.split("\n"):
+        opener = _MAKEFILE_SRCS_RE.match(line)
+        if opener:
+            gate = opener.group(1)
+        for path in _MAKEFILE_ES_SOURCE_RE.findall(line):
+            selection[path] = gate or "?"
+        if gate is not None and not line.rstrip().endswith("\\"):
+            gate = None
+    return selection
+
+
+def selection_mismatch(here: dict[str, str], there: dict[str, str],
+                       revision: str) -> list[str]:
+    """How the recipe now differs from the recipe that built `revision`.
+
+    The gate matters as much as the membership: a source moved from `SRCS` to
+    `SRCS-$(CONFIG_X)` is compiled in one configuration and not another, and
+    the file it names has not changed a byte.
+    """
+    reasons = []
+    for name in sorted(set(there) - set(here)):
+        reasons.append("%s was compiled into build %s and the recipe no "
+                       "longer names it" % (name, revision))
+    for name in sorted(set(here) - set(there)):
+        reasons.append("%s is compiled now and build %s did not have it"
+                       % (name, revision))
+    for name in sorted(set(here) & set(there)):
+        if here[name] != there[name]:
+            reasons.append("%s moved from %s to %s since build %s"
+                           % (name, there[name], here[name], revision))
+    return reasons
+
+
+def _selection_problems(selection: dict[str, str]) -> list[str]:
+    """The extractor's own floor. A parser that stops matching returns an
+    empty selection and would make this whole comparison vacuous -- green
+    because it read nothing, which is the failure this file exists to close.
+    """
+    if not selection:
+        return ["no ecmascript source is named in the Makefile, so the "
+                "recipe parser has gone blind"]
+    on_disk = {path.relative_to(REPO_ROOT).as_posix()
+               for path in (REPO_ROOT / "src" / "ecmascript").rglob("*.c")}
+    return ["%s exists and the recipe never names it" % name
+            for name in sorted(on_disk - set(selection))]
+
+
 def runtime_oracle_build_mismatch(version: Any) -> list[str]:
     """Reasons the build that produced a capture does not match this tree.
 
@@ -5464,7 +5586,16 @@ def runtime_oracle_build_mismatch(version: Any) -> list[str]:
         # object, which is the right answer: an identity that names two
         # commits proves nothing about either.
         return ["build %s is not one commit in this repository" % revision]
-    reasons = []
+    here = makefile_ecmascript_selection(
+        (REPO_ROOT / "Makefile").read_text(encoding="utf-8"))
+    reasons = _selection_problems(here)
+    built = subprocess.run(["git", "show", "%s:Makefile" % revision],
+                           cwd=str(REPO_ROOT), capture_output=True, text=True)
+    if built.returncode != 0:
+        reasons.append("build %s has no Makefile to compare" % revision)
+    else:
+        reasons += selection_mismatch(
+            here, makefile_ecmascript_selection(built.stdout), revision)
     for pattern in RUNTIME_ORACLE_COMPILED_GLOBS:
         for path in sorted(REPO_ROOT.glob(pattern)):
             if not path.is_file():

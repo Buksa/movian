@@ -3,7 +3,15 @@
  * Keep this file ES5.1: it is loaded by Duktape, not Node.
  */
 
-var moduleNames = [
+// What this capture has always inspected, kept as a literal in its original
+// order because require() order is observable -- a module can mutate
+// another's cached exports, and `movian/settings` does. Discovery only
+// APPENDS, so today's tree observes exactly what it did before.
+//
+// Native modules cannot be discovered: they are registered from C
+// (`ES_MODULE(...)`) rather than loaded from a file, and the runtime exposes
+// no registry to enumerate. gen.py cross-checks that set against the C.
+var knownModuleNames = [
   'fs',
   'http',
   'https',
@@ -57,6 +65,62 @@ var moduleNames = [
   'showtime/xml',
   'showtime/xmlrpc'
 ];
+
+// Every module file that exists, plus the `showtime/` alias of each
+// `movian/` one -- es_modsearch rewrites that prefix unconditionally
+// (ecmascript.c:435-439), so the alias resolves to the same file through a
+// separate module instance.
+//
+// This is what lets a recapture SEE a module nobody listed. Without it a new
+// file is invisible to the capture and, in syntax the static scanner cannot
+// read, invisible to the artifact too -- both sides blind, and the
+// cross-check agrees about nothing.
+function discoverFileModules() {
+  var found = [];
+  function walk(url, prefix, depth) {
+    var names;
+    try {
+      names = require('fs').readdirSync(url);
+    } catch (error) {
+      if (depth === 2) {
+        throw new Error('cannot list ' + url + ' -- ' + error +
+                        ' (run movian with --bypass-ecmascript-acl)');
+      }
+      return;
+    }
+    for (var i = 0; i < names.length; i++) {
+      var name = names[i];
+      if (/\.js$/.test(name)) {
+        found.push(prefix + name.slice(0, -3));
+      } else if (depth > 0) {
+        walk(url + '/' + name, prefix + name + '/', depth - 1);
+      }
+    }
+  }
+  walk('dataroot://res/ecmascript/modules', '', 2);
+  var aliases = [];
+  for (var j = 0; j < found.length; j++) {
+    if (found[j].indexOf('movian/') === 0) {
+      aliases.push('showtime/' + found[j].slice('movian/'.length));
+    }
+  }
+  return found.concat(aliases);
+}
+
+var moduleNames = knownModuleNames.slice();
+var moduleDiscoveryError = null;
+try {
+  var discovered = discoverFileModules();
+  for (var d = 0; d < discovered.length; d++) {
+    if (moduleNames.indexOf(discovered[d]) < 0) {
+      moduleNames.push(discovered[d]);
+    }
+  }
+} catch (error) {
+  // Recorded rather than swallowed: a capture that could not look is not a
+  // capture that found nothing, and gen.py refuses to adopt it.
+  moduleDiscoveryError = '' + error;
+}
 
 function describeMember(value) {
   var type = typeof value;
@@ -1099,6 +1163,7 @@ function emitPayload(complete) {
                      ? Core.currentVersionString : null,
     runtimeInputs: runtimeInputsResult,
     runtimeInputsError: runtimeInputsError,
+    moduleDiscoveryError: moduleDiscoveryError,
     modules: moduleNames,
     before: before,
     tier1: tier1,

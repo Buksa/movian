@@ -1567,10 +1567,10 @@
       "type": "object"
     }
   },
-  "capturedAt": 1787406255102,
+  "capturedAt": 1787459415612,
   "globalSettingsError": null,
   "inputs": {
-    "digest": "9ea957877cf33fc7bf7c32056856ca842769ac0018f0558067b6071590ea50b0",
+    "digest": "89359ac910c6645337298ea136bec53d9cd572caed3dc81ec9ff31afb1a0cbbc",
     "files": {
       "res/ecmascript/legacy/api-v1.js": "ff3bc1f704125fc3fddc1cb4ddd032577f22b35bc5729e470a915bffd9c8635a",
       "res/ecmascript/modules/fs.js": "57b8f284517c9408b38eae2f6d4f9d56def540dfc5dabe43b35292dbd3f7420f",
@@ -1619,12 +1619,13 @@
       "src/ecmascript/es_subtitles.c": "4564703cccfac8c218563fc92eb4353ce97f5c62e7de9da1d8307b90acc79b8e",
       "src/ecmascript/es_timer.c": "9f16b4c0c770171625f709bad659cf170cbef06b2ab6801171a874b25698d30a",
       "src/ecmascript/es_websocket.c": "bec99ef07cfba36091465266853bac309553baddc3c6ca5618bd2810d0d936d5",
-      "support/devtools/api-introspector/introspector.js": "3c6b12a46f2340f910749a80c658ec64eca88f0eda84be9a0ed5d7258665a337",
+      "support/devtools/api-introspector/introspector.js": "be6582d5709c3781881716236357eb0f28b3c5cb164073a9373ef72cdce3630a",
       "support/devtools/api-introspector/plugin.json": "10125b05a633d255b651b202965eff05638065c89fc7b4936a3fdea288a0e767"
     },
     "version": 1
   },
   "loadErrors": {},
+  "moduleDiscoveryError": null,
   "modules": [
     "fs",
     "http",
@@ -1681,7 +1682,7 @@
   ],
   "movianVersion": "5.0.1017.gf1c26",
   "runtimeInputs": {
-    "plugin/introspector.js": "aecec8b780f2b2cada519e585b046664dbfafdf0ceb39491df39073a648d1ae9",
+    "plugin/introspector.js": "45501f4592020d194bda7e4e52716d749ccc8bc8a9d354b6eb3b4200a41d7587",
     "plugin/plugin.json": "fd18086f0d952ee9ef1391ac3f443bb53a7b4f994063c9c6675f560852812e85",
     "res/ecmascript/legacy/api-v1.js": "01c872e89b9a086d6da502d522f9daa29ba51620647b94c8f0a6a60d2747203f",
     "res/ecmascript/modules/fs.js": "58de36e3f4c3fe6c2e6e3169f6182a2dbbda6c2bec45316f5f8797df3f4ef685",

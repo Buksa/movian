@@ -530,6 +530,160 @@ class Adoption(unittest.TestCase):
         self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
 
 
+class Recipe(unittest.TestCase):
+    """Which sources the build compiles is a fact about the Makefile, and the
+    Makefile is not in the sources."""
+
+    def _makefile(self):
+        return (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+
+    def test_the_recipe_names_every_ecmascript_source_on_disk(self):
+        selection = gen.makefile_ecmascript_selection(self._makefile())
+        on_disk = {path.relative_to(REPO_ROOT).as_posix()
+                   for path in (REPO_ROOT / "src" / "ecmascript").rglob("*.c")}
+        self.assertEqual(on_disk - set(selection), set())
+        self.assertEqual(set(selection) - on_disk, set())
+
+    def test_the_gate_each_source_sits_behind_is_recorded(self):
+        selection = gen.makefile_ecmascript_selection(self._makefile())
+        self.assertEqual(selection["src/ecmascript/es_sqlite.c"],
+                         "SRCS-$(CONFIG_SQLITE)")
+        self.assertEqual(selection["src/ecmascript/es_gumbo.c"],
+                         "SRCS-$(CONFIG_GUMBO)")
+        self.assertEqual(selection["src/ecmascript/es_fs.c"], "SRCS")
+
+    def test_a_blind_parser_is_a_problem_not_a_pass(self):
+        # A parser that stops matching returns an empty selection, and an
+        # empty selection compares equal to another empty one -- green
+        # because it read nothing, which is the failure this file is about.
+        self.assertTrue(gen._selection_problems({}))
+
+    def test_a_source_dropped_since_the_build_is_reported(self):
+        here = gen.makefile_ecmascript_selection(self._makefile())
+        there = dict(here)
+        here.pop("src/ecmascript/es_fs.c")
+        reasons = gen.selection_mismatch(here, there, "abc1234")
+        self.assertEqual(
+            reasons,
+            ["src/ecmascript/es_fs.c was compiled into build abc1234 and the"
+             " recipe no longer names it"])
+
+    def test_a_source_added_since_the_build_is_reported(self):
+        here = gen.makefile_ecmascript_selection(self._makefile())
+        there = dict(here)
+        there.pop("src/ecmascript/es_fs.c")
+        reasons = gen.selection_mismatch(here, there, "abc1234")
+        self.assertTrue(any("is compiled now" in reason
+                            for reason in reasons), reasons)
+
+    def test_a_source_that_changed_gate_is_reported(self):
+        # The sharpest case: membership is identical and the file has not
+        # changed a byte, but it is now compiled in a different configuration.
+        here = gen.makefile_ecmascript_selection(self._makefile())
+        there = dict(here)
+        there["src/ecmascript/es_sqlite.c"] = "SRCS"
+        reasons = gen.selection_mismatch(here, there, "abc1234")
+        self.assertEqual(
+            reasons,
+            ["src/ecmascript/es_sqlite.c moved from SRCS to"
+             " SRCS-$(CONFIG_SQLITE) since build abc1234"])
+
+    def test_an_unchanged_recipe_reports_nothing(self):
+        here = gen.makefile_ecmascript_selection(self._makefile())
+        self.assertEqual(gen.selection_mismatch(here, dict(here), "abc"), [])
+
+    def test_a_source_the_recipe_stops_naming_is_a_problem(self):
+        selection = gen.makefile_ecmascript_selection(self._makefile())
+        selection.pop("src/ecmascript/es_fs.c")
+        problems = gen._selection_problems(selection)
+        self.assertTrue(any("es_fs.c" in problem for problem in problems),
+                        problems)
+
+
+class ModuleCensus(unittest.TestCase):
+    """A module nobody listed was unobserved by the capture and, in syntax
+    the scanner cannot read, missing from the artifact too. Two blind sides
+    agree about nothing."""
+
+    def _observed(self):
+        import json
+        return json.loads(
+            gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))["modules"]
+
+    def test_the_committed_capture_loaded_everything_this_tree_has(self):
+        self.assertEqual(gen.runtime_oracle_census(self._observed()), [])
+
+    def test_every_module_file_is_expected_with_its_alias(self):
+        expected = gen.expected_runtime_modules()
+        self.assertIn("movian/page", expected)
+        self.assertIn("showtime/page", expected)
+        self.assertIn("fs", expected)
+        self.assertNotIn("showtime/fs", expected)
+
+    def test_natives_come_from_the_c_registrations(self):
+        expected = gen.expected_runtime_modules()
+        natives = {name for name in expected if name.startswith("native/")}
+        self.assertIn("native/fs", natives)
+        self.assertTrue(expected["native/fs"].startswith("ES_MODULE in "))
+
+    def test_a_new_module_file_the_capture_never_loaded_fails(self):
+        probe = (REPO_ROOT / "res" / "ecmascript" / "modules" / "movian"
+                 / "probe.js")
+        try:
+            probe.write_text("exports['probe' + 'Fn'] = function(){};\n",
+                             encoding="utf-8")
+            problems = gen.runtime_oracle_census(self._observed())
+            self.assertTrue(
+                any("movian/probe exists" in problem for problem in problems),
+                problems)
+            self.assertTrue(
+                any("showtime/probe exists" in problem
+                    for problem in problems), problems)
+        finally:
+            probe.unlink(missing_ok=True)
+
+    def test_a_new_native_registration_the_capture_never_loaded_fails(self):
+        victim = REPO_ROOT / "src" / "ecmascript" / "es_fs.c"
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(original + '\nES_MODULE("probe", fnlist_fs);\n',
+                              encoding="utf-8")
+            problems = gen.runtime_oracle_census(self._observed())
+            self.assertTrue(
+                any("native/probe exists" in problem for problem in problems),
+                problems)
+        finally:
+            victim.write_text(original, encoding="utf-8")
+
+    def test_a_module_nothing_provides_fails(self):
+        problems = gen.runtime_oracle_census(
+            self._observed() + ["movian/ghost"])
+        self.assertTrue(any("movian/ghost was loaded" in problem
+                            for problem in problems), problems)
+
+    def test_a_capture_that_could_not_enumerate_fails_the_check(self):
+        # The capture records the failure rather than a short list. It has to
+        # reach the verdict, or a run that could not look would pass as a run
+        # that found nothing.
+        import copy
+        import json
+        oracle = json.loads(
+            gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
+        artifact = json.loads(
+            gen.ARTIFACT_PATH.read_text(encoding="utf-8"))
+        ok, _out, _report = gen._check_runtime_oracle(artifact, oracle)
+        self.assertTrue(ok)
+        blinded = copy.deepcopy(oracle)
+        blinded["moduleDiscoveryError"] = "Error: cannot list dataroot://..."
+        ok, output, _report = gen._check_runtime_oracle(artifact, blinded)
+        self.assertFalse(ok)
+        self.assertIn("could not enumerate the module files", output)
+
+    def test_a_capture_that_lists_no_modules_fails(self):
+        self.assertTrue(gen.runtime_oracle_census(None))
+        self.assertTrue(gen.runtime_oracle_census("not a list"))
+
+
 class Floor(unittest.TestCase):
     """The floor exists because an oracle that observed nothing scored
     perfectly. Each case is a way of scoring well by observing less."""
