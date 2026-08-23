@@ -3975,14 +3975,16 @@ def _runtime_oracle_floor_problems(
     return problems
 
 
-_ES_MODULE_RE = re.compile(r'ES_MODULE\s*\(\s*"([^"]+)"')
+# The lookbehind matters: without it `MY_ES_MODULE(...)` reads as a
+# registration, inventing a module or an unresolved one.
+_ES_MODULE_RE = re.compile(r'(?<![A-Za-z0-9_])ES_MODULE\s*\(\s*"([^"]+)"')
 # Every invocation, literal name or not. A registration written as
 # `ES_MODULE(MODULE_NAME, ...)` after a #define is a real native module that
 # the regex above cannot name -- and neither can the artifact scanner, nor
 # the capture, since natives are not files to discover. All three blind is
 # the shape this work exists to refuse, so an invocation that cannot be
 # resolved is reported rather than skipped.
-_ES_MODULE_ANY_RE = re.compile(r'ES_MODULE\s*\(')
+_ES_MODULE_ANY_RE = re.compile(r'(?<![A-Za-z0-9_])ES_MODULE\s*\(')
 
 
 def expected_runtime_modules() -> dict[str, str]:

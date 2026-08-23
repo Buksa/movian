@@ -976,6 +976,23 @@ class ModuleCensus(unittest.TestCase):
         finally:
             victim.write_text(original, encoding="utf-8")
 
+    def test_a_macro_ending_in_es_module_is_not_a_registration(self):
+        # `MY_ES_MODULE(...)` is a different macro. Without an identifier
+        # boundary it reads as a registration and invents a module, or an
+        # unresolved one -- a red on a tree that registers nothing.
+        victim = REPO_ROOT / "src" / "ecmascript" / "es_fs.c"
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(
+                original + '\nMY_ES_MODULE("probe", fnlist_fs);\n'
+                           'MY_ES_MODULE(OTHER_NAME, fnlist_fs);\n',
+                encoding="utf-8")
+            self.assertNotIn("native/probe", gen.expected_runtime_modules())
+            self.assertEqual(gen.unresolved_native_registrations(), [])
+            self.assertEqual(gen.native_registrations_out_of_scope(), [])
+        finally:
+            victim.write_text(original, encoding="utf-8")
+
     def test_no_registration_is_unresolved_today(self):
         self.assertEqual(gen.unresolved_native_registrations(), [])
 
