@@ -4004,6 +4004,12 @@ def expected_runtime_modules() -> dict[str, str]:
     modules_dir = REPO_ROOT / "res" / "ecmascript" / "modules"
     for path in sorted(modules_dir.rglob("*.js")):
         name = path.relative_to(modules_dir).as_posix()[:-len(".js")]
+        if name.startswith("showtime/"):
+            # Unreachable by construction, and reported as such by
+            # `unreachable_module_files()`. Recording it here would collapse
+            # it into the alias of the same name and certify a file nothing
+            # can load as observed.
+            continue
         expected[name] = "a module file"
         if name.startswith("movian/"):
             # es_modsearch rewrites the prefix unconditionally
@@ -4077,6 +4083,24 @@ def _c_registrations(source: str) -> tuple[list[str], int]:
     total = sum(1 for match in _ES_MODULE_ANY_RE.finditer(code)
                 if not in_literal(match.start()))
     return names, total - len(names)
+
+
+def unreachable_module_files() -> list[str]:
+    """Module files under `showtime/`, which nothing can load.
+
+    es_modsearch rewrites the `showtime/` prefix to `movian/` BEFORE it
+    resolves a path (ecmascript.c:435-439), so `showtime/probe.js` on disk is
+    never reached -- `require('showtime/probe')` returns `movian/probe.js`.
+    The namespace belongs to the aliases, and a file placed in it collapses
+    into the alias of the same name: one expected entry for two things, with
+    the capture observing only one of them.
+    """
+    modules_dir = REPO_ROOT / "res" / "ecmascript" / "modules"
+    return ["%s cannot be loaded: es_modsearch rewrites showtime/ to movian/ "
+            "before resolving a path, so require('%s') returns the movian "
+            "file" % (path.relative_to(REPO_ROOT).as_posix(),
+                      path.relative_to(modules_dir).as_posix()[:-len(".js")])
+            for path in sorted((modules_dir / "showtime").rglob("*.js"))]
 
 
 def native_registrations_out_of_scope() -> list[str]:
@@ -4213,6 +4237,7 @@ def runtime_oracle_census(oracle: Any,
     problems.extend(duplicate_native_registrations())
     problems.extend(native_registrations_out_of_scope())
     problems.extend(shadowing_plugin_modules())
+    problems.extend(unreachable_module_files())
     problems.extend(_modules_missing_from_artifact(expected, artifact))
     return problems
 

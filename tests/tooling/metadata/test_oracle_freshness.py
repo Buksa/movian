@@ -994,6 +994,32 @@ class ModuleCensus(unittest.TestCase):
         finally:
             victim.write_text(original, encoding="utf-8")
 
+    def test_nothing_is_unreachable_today(self):
+        self.assertEqual(gen.unreachable_module_files(), [])
+
+    def test_a_file_in_the_alias_namespace_is_rejected(self):
+        # es_modsearch rewrites `showtime/` to `movian/` before resolving a
+        # path, so `showtime/probe.js` on disk can never be loaded. Recording
+        # it as a module file collapsed it into the alias of the same name --
+        # one expected entry for two things, with the capture observing only
+        # one of them, and the census reporting nothing.
+        directory = (REPO_ROOT / "res" / "ecmascript" / "modules"
+                     / "showtime")
+        probe = directory / "probe.js"
+        try:
+            directory.mkdir(exist_ok=True)
+            probe.write_text("exports.a = function(){};\n", encoding="utf-8")
+            self.assertIsNone(
+                gen.expected_runtime_modules().get("showtime/probe"))
+            problems = gen.runtime_oracle_census(
+                self._oracle(), self._artifact())
+            self.assertTrue(any("cannot be loaded" in problem
+                                for problem in problems), problems)
+        finally:
+            probe.unlink(missing_ok=True)
+            if directory.is_dir() and not any(directory.iterdir()):
+                directory.rmdir()
+
     def test_nothing_shadows_a_core_module_today(self):
         self.assertEqual(gen.shadowing_plugin_modules(), [])
 
