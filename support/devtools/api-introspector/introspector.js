@@ -75,13 +75,39 @@ var knownModuleNames = [
 // file is invisible to the capture and, in syntax the static scanner cannot
 // read, invisible to the artifact too -- both sides blind, and the
 // cross-check agrees about nothing.
+// es_modsearch resolves a module by building its path in `char path[512]`
+// with snprintf (ecmascript.c:411,449), which truncates in silence -- so an
+// id that does not fit resolves to a path that is not the file, and the
+// module cannot be loaded whatever it contains. gen.py applies the same
+// arithmetic in `module_id_fits_resolver()`: two different bounds would make
+// the census expect a module the capture cannot reach, and no recapture
+// could ever clear that.
+//
+// The bound is also the only thing that terminates these walks. fs_scandir
+// classifies entries with stat(), not lstat() (fa_fs.c:137-142), so a
+// directory symlink pointing back at an ancestor reads as an ordinary
+// directory and the recursion descends through it forever. Refusing here
+// names the cause; a stack overflow does not, and a depth cap would quietly
+// truncate the walk -- which is the failure this capture exists to refuse.
+var MODSEARCH_PATH_SIZE = 512;
+
+function refuseUnaddressablePath(url) {
+  if ((url + '.js').length >= MODSEARCH_PATH_SIZE) {
+    throw new Error('cannot address ' + url + ' -- es_modsearch builds a ' +
+                    'module path in ' + MODSEARCH_PATH_SIZE + ' bytes and ' +
+                    'truncates silently past that. A directory symlink ' +
+                    'pointing back at an ancestor produces this.');
+  }
+}
+
 function discoverFileModules() {
   var found = [];
   // No depth cap. es_modsearch joins a slash-separated id onto the module
   // root, so `movian/media/providers/local` is a loadable module, and the
   // generator's rglob already sees the file. A cap here and no cap there
   // means the census reports a module the capture cannot reach and no
-  // recapture can clear it.
+  // recapture can clear it. The one bound is the resolver's own, which the
+  // generator applies too -- see `refuseUnaddressablePath` above.
   // Ask the filesystem what an entry is instead of reading its name. A
   // directory called `vendor.js` is a legal layout -- es_modsearch loads
   // `vendor.js/helper` by joining the id onto the module root -- and
@@ -89,6 +115,7 @@ function discoverFileModules() {
   // inside, leaving a module the generator expects and no capture can reach.
   function walk(url, prefix, isRoot, name) {
     var names;
+    refuseUnaddressablePath(url);
     try {
       names = require('fs').readdirSync(url);
     } catch (error) {
@@ -1099,6 +1126,7 @@ function digestOf(path) {
 
 function collectInputs(url, prefix, into, required, name) {
   var names;
+  refuseUnaddressablePath(url);
   try {
     names = require('fs').readdirSync(url);
   } catch (error) {

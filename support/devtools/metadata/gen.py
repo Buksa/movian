@@ -3987,6 +3987,43 @@ _ES_MODULE_RE = re.compile(r'(?<![A-Za-z0-9_])ES_MODULE\s*\(\s*"([^"]+)"')
 _ES_MODULE_ANY_RE = re.compile(r'(?<![A-Za-z0-9_])ES_MODULE\s*\(')
 
 
+# es_modsearch intercepts two prefixes BEFORE it resolves any path
+# (ecmascript.c:418-439). `native/*` is answered out of the registration list
+# and errors if the name is not there -- the filesystem is never consulted at
+# all. `showtime/*` is rewritten to `movian/*` and the rewritten id is what
+# gets resolved. A file under either prefix is therefore not a module, no
+# matter what it contains.
+_INTERCEPTED_MODULE_PREFIXES = {
+    "native/": "es_modsearch answers native/* out of the registration list "
+               "without ever resolving a path",
+    "showtime/": "es_modsearch rewrites showtime/ to movian/ before "
+                 "resolving a path",
+}
+# `char path[512]` in es_modsearch, filled by snprintf -- which truncates in
+# silence, so a longer id resolves to a path that is not the file and the
+# module simply fails to load.
+MODSEARCH_PATH_SIZE = 512
+_MODSEARCH_PATH_FORMAT = "dataroot://res/ecmascript/modules/%s.js"
+
+
+def _intercepted_prefix(name: str) -> str | None:
+    for prefix in _INTERCEPTED_MODULE_PREFIXES:
+        if name.startswith(prefix):
+            return prefix
+    return None
+
+
+def module_id_fits_resolver(name: str) -> bool:
+    """Whether es_modsearch can build this module's path without truncating.
+
+    The same arithmetic on both sides: the walk in the introspector refuses
+    to descend past it, and the census reports a file beyond it. Two
+    different bounds would make the generator expect a module the capture
+    cannot reach, which no recapture could ever clear.
+    """
+    return len(_MODSEARCH_PATH_FORMAT % name) < MODSEARCH_PATH_SIZE
+
+
 def expected_runtime_modules() -> dict[str, str]:
     """Every module the runtime must be able to load, and where that is
     known from.
@@ -4004,11 +4041,14 @@ def expected_runtime_modules() -> dict[str, str]:
     modules_dir = REPO_ROOT / "res" / "ecmascript" / "modules"
     for path in sorted(modules_dir.rglob("*.js")):
         name = path.relative_to(modules_dir).as_posix()[:-len(".js")]
-        if name.startswith("showtime/"):
+        if _intercepted_prefix(name) is not None \
+                or not module_id_fits_resolver(name):
             # Unreachable by construction, and reported as such by
             # `unreachable_module_files()`. Recording it here would collapse
-            # it into the alias of the same name and certify a file nothing
-            # can load as observed.
+            # it into the native module or the alias of the same name and
+            # certify a file nothing can load as observed -- or, where there
+            # is nothing to collapse into, report that the capture failed to
+            # walk a file no capture could ever reach.
             continue
         expected[name] = "a module file"
         if name.startswith("movian/"):
@@ -4057,17 +4097,78 @@ def duplicate_native_registrations() -> list[str]:
     return duplicates
 
 
+# `#if 0` is how C comments out code that contains comments, and the compiler
+# registers nothing inside it -- so a registration there is not a module, in
+# exactly the way `/* ES_MODULE(...) */` is not. Only literal `0` and `1` are
+# decided here: evaluating a macro condition needs the build's own
+# preprocessing, and a registration behind one stays in the scan, where it is
+# reported rather than quietly dropped.
+#
+# Anchored at the start of a line, which is where the C preprocessor requires
+# a directive, so `"#if 0"` inside a string literal is not mistaken for one.
+_C_IF_RE = re.compile(r"^[ \t]*#[ \t]*(if|ifdef|ifndef)\b[ \t]*(.*)$")
+_C_ELIF_RE = re.compile(r"^[ \t]*#[ \t]*elif\b[ \t]*(.*)$")
+_C_ELSE_RE = re.compile(r"^[ \t]*#[ \t]*else\b")
+_C_ENDIF_RE = re.compile(r"^[ \t]*#[ \t]*endif\b")
+
+
+def _c_active_code(code: str) -> str:
+    """`code` with the branches the preprocessor provably discards removed.
+
+    Each dropped line becomes an empty one, so a directive can never join two
+    lines that were apart -- the same rule the comment stripper follows, for
+    the same reason.
+    """
+    # Per level: whether this branch emits, whether the chain is decidable at
+    # all, and whether some earlier branch already won.
+    levels: list[list[bool]] = []
+    out = []
+    for line in code.split("\n"):
+        opener = _C_IF_RE.match(line)
+        directive = True
+        if opener:
+            condition = opener.group(2).strip()
+            if opener.group(1) == "if" and condition in ("0", "1"):
+                taken = condition == "1"
+                levels.append([taken, True, taken])
+            else:
+                levels.append([True, False, True])
+        elif _C_ELIF_RE.match(line) and levels:
+            condition = _C_ELIF_RE.match(line).group(1).strip()
+            live, decidable, taken = levels[-1]
+            if decidable and condition in ("0", "1"):
+                live = not taken and condition == "1"
+                levels[-1] = [live, True, taken or live]
+            else:
+                # An arm nobody can evaluate makes the whole chain
+                # undecidable: keeping the earlier verdict would drop a
+                # branch that may well be the live one.
+                levels[-1] = [True, False, True]
+        elif _C_ELSE_RE.match(line) and levels:
+            live, decidable, taken = levels[-1]
+            levels[-1] = [not decidable or not taken, decidable, True]
+        elif _C_ENDIF_RE.match(line):
+            if levels:
+                levels.pop()
+        else:
+            directive = False
+        emit = all(level[0] for level in levels)
+        out.append("" if directive or not emit else line)
+    return "\n".join(out)
+
+
 def _c_registrations(source: str) -> tuple[list[str], int]:
     """Literal `ES_MODULE` names, and how many invocations were unreadable.
 
-    Comments are removed and a match beginning inside a string literal is
-    discarded. The asymmetry is the reason: a quote inside a C string is
-    escaped, so the NAME reader -- which needs an unescaped quote after the
-    paren -- cannot be fooled by `"ES_MODULE(\\"x\\", f)"`. The invocation
-    COUNTER can, since `ES_MODULE(` needs no quote at all, and it would then
-    report an unreadable registration in a file that registers nothing.
+    Comments and provably-dead preprocessor branches are removed, and a match
+    beginning inside a string literal is discarded. The asymmetry is the
+    reason for that last one: a quote inside a C string is escaped, so the
+    NAME reader -- which needs an unescaped quote after the paren -- cannot
+    be fooled by `"ES_MODULE(\\"x\\", f)"`. The invocation COUNTER can, since
+    `ES_MODULE(` needs no quote at all, and it would then report an
+    unreadable registration in a file that registers nothing.
     """
-    code = _js_code_only(source)
+    code = _c_active_code(_js_code_only(source))
     literal_ranges = []
     offset = 0
     for kind, span in _js_spans(code):
@@ -4086,21 +4187,35 @@ def _c_registrations(source: str) -> tuple[list[str], int]:
 
 
 def unreachable_module_files() -> list[str]:
-    """Module files under `showtime/`, which nothing can load.
+    """Module files no `require` can reach, and why.
 
-    es_modsearch rewrites the `showtime/` prefix to `movian/` BEFORE it
-    resolves a path (ecmascript.c:435-439), so `showtime/probe.js` on disk is
-    never reached -- `require('showtime/probe')` returns `movian/probe.js`.
-    The namespace belongs to the aliases, and a file placed in it collapses
-    into the alias of the same name: one expected entry for two things, with
-    the capture observing only one of them.
+    Two ways a file on disk is not a module. It sits under a prefix
+    es_modsearch answers before it resolves any path, or its id is longer
+    than the buffer the resolver builds the path in. Either way the file is
+    not what `require` returns, and recording it as a module collapses it
+    into whatever does answer that name -- one expected entry for two things,
+    with the capture observing only one of them. Where there is nothing to
+    collapse into, the census would instead report that the capture did not
+    walk it, sending the reader to fix a capture that is behaving correctly.
     """
     modules_dir = REPO_ROOT / "res" / "ecmascript" / "modules"
-    return ["%s cannot be loaded: es_modsearch rewrites showtime/ to movian/ "
-            "before resolving a path, so require('%s') returns the movian "
-            "file" % (path.relative_to(REPO_ROOT).as_posix(),
-                      path.relative_to(modules_dir).as_posix()[:-len(".js")])
-            for path in sorted((modules_dir / "showtime").rglob("*.js"))]
+    problems = []
+    for path in sorted(modules_dir.rglob("*.js")):
+        name = path.relative_to(modules_dir).as_posix()[:-len(".js")]
+        where = path.relative_to(REPO_ROOT).as_posix()
+        prefix = _intercepted_prefix(name)
+        if prefix is not None:
+            problems.append(
+                "%s cannot be loaded: %s, so require('%s') does not return "
+                "this file" % (where, _INTERCEPTED_MODULE_PREFIXES[prefix],
+                               name))
+        elif not module_id_fits_resolver(name):
+            problems.append(
+                "%s cannot be loaded: the id is %d characters and "
+                "es_modsearch builds the path in %d bytes, so require('%s') "
+                "looks for a truncated path"
+                % (where, len(name), MODSEARCH_PATH_SIZE, name))
+    return problems
 
 
 def native_registrations_out_of_scope() -> list[str]:
@@ -4373,14 +4488,19 @@ def _check_runtime_oracle(
         }
         return False, _format_runtime_oracle_report(report), report
     stale = runtime_oracle_stale_inputs(stamp.get("files"))
+    recipe = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    here = makefile_ecmascript_selection(recipe)
+    # The floor belongs on this path too. A transformation the parser cannot
+    # follow leaves the selection byte-identical, so comparing it against the
+    # stamp agrees -- the tautology, one level up.
+    stale = stale + _selection_problems(here, recipe)
     stamped_selection = stamp.get("selection")
     if not isinstance(stamped_selection, dict):
         stale = stale + ["the stamp records no recipe selection"]
     else:
         stale = stale + selection_mismatch(
-            makefile_ecmascript_selection(
-                (REPO_ROOT / "Makefile").read_text(encoding="utf-8")),
-            stamped_selection, "the recipe this oracle was stamped against")
+            here, stamped_selection,
+            "the recipe this oracle was stamped against")
     if stale:
         report = {
             "status": "failed",
@@ -5852,7 +5972,133 @@ def selection_mismatch(here: dict[str, str], there: dict[str, str],
     return reasons
 
 
-def _selection_problems(selection: dict[str, str]) -> list[str]:
+# Names in `$(...)` vary with the configuration, so a variable is tracked by
+# the shape of its name.
+_MAKEFILE_EXPANSION_RE = re.compile(r"[$][({][^)}]*[)}]")
+_MAKEFILE_ASSIGN_RE = re.compile(
+    r"^\s*([A-Za-z0-9_][A-Za-z0-9_$(){}.-]*)\s*(?:\+|:|::|\?|!)?=(.*)$")
+# The head of an expansion is a function call only when a word follows it:
+# `$(sort $(SRCS))` calls `sort`, `$(SRCS-yes)` reads a variable.
+_MAKEFILE_CALL_RE = re.compile(r"[$][({]\s*([a-z][a-z0-9-]*)[ \t]")
+# One word in, one word out: `sort` reorders and drops duplicates of the same
+# source, and nothing else in this recipe touches the list at all. The list
+# is deliberately this short. A function the parser has never seen is
+# reported rather than assumed harmless, and adding one here is a decision
+# somebody has to write down.
+_MAKEFILE_MEMBERSHIP_PRESERVING = frozenset({"sort"})
+
+
+def _makefile_variable_shape(name: str) -> str:
+    return _MAKEFILE_EXPANSION_RE.sub("*", name)
+
+
+def _makefile_reference_re(shape: str) -> re.Pattern[str]:
+    return re.compile(r"[$][({]\s*"
+                      + re.escape(shape).replace("\\*", "[^)}\\s]*")
+                      + r"[):}\s]")
+
+
+def makefile_source_variables(text: str) -> set[str]:
+    """`SRCS`, its per-configuration siblings, and every variable the recipe
+    derives from one of them.
+
+    The selection is read from the text, so it is only as good as the
+    assumption that the text is the whole story. It stops being so one hop
+    away: `SSRCS = $(sort $(SRCS))` carries every source into a name the
+    parser was not watching, and a transformation applied THERE is invisible
+    to a scan that only looks at `SRCS`. Measured on this recipe the chain is
+    six hops long -- SRCS, SSRCS, OBJS4, OBJS3, OBJS2, OBJS, DEPS -- and
+    every one of them is either `sort` or a substitution reference.
+    """
+    lines = [_makefile_uncommented(line) for line in text.split("\n")]
+    tracked = {shape for shape in
+               (_makefile_variable_shape(match.group(1))
+                for match in map(_MAKEFILE_ASSIGN_RE.match, lines) if match)
+               if shape == "SRCS" or shape.startswith("SRCS-")}
+    grew = True
+    while grew:
+        grew = False
+        for line in lines:
+            assignment = _MAKEFILE_ASSIGN_RE.match(line)
+            if not assignment:
+                continue
+            name = _makefile_variable_shape(assignment.group(1))
+            if name in tracked:
+                continue
+            if any(_makefile_reference_re(shape).search(assignment.group(2))
+                   for shape in tracked):
+                tracked.add(name)
+                grew = True
+    return tracked
+
+
+def makefile_selection_transformations(text: str) -> list[str]:
+    """Every place the recipe reshapes a source list in a way a textual scan
+    cannot follow.
+
+    `makefile_ecmascript_selection()` records the pathnames it SEES. A
+    removal need not name one: `SRCS := $(filter-out %/es_fs.c,$(SRCS))`
+    drops a source while leaving the selection it reads byte-identical, so
+    the recipe compares equal to the recipe that built the binary and a stale
+    oracle passes on a tree whose next binary has lost `native/fs`.
+
+    Evaluating Make is not on the table -- that needs Make. What is on the
+    table is knowing when the parser is out of its depth and saying so.
+    """
+    # Keyed by the line and the function, so an assignment that also passes
+    # the variable in -- the shape of `SRCS := $(filter-out ...,$(SRCS))` --
+    # is one finding rather than two readings of it.
+    problems: dict[tuple[int, str], str] = {}
+    tracked = sorted(makefile_source_variables(text))
+    references = [(shape, _makefile_reference_re(shape)) for shape in tracked]
+    for number, raw in enumerate(text.split("\n"), 1):
+        line = _makefile_uncommented(raw)
+        assignment = _MAKEFILE_ASSIGN_RE.match(line)
+        if assignment and _makefile_variable_shape(
+                assignment.group(1)) in tracked:
+            for call in _MAKEFILE_CALL_RE.findall(assignment.group(2)):
+                if call not in _MAKEFILE_MEMBERSHIP_PRESERVING:
+                    problems[(number, call)] = (
+                        "Makefile:%d assigns %s through $(%s ...), which the "
+                        "recipe parser cannot evaluate, so a source it "
+                        "removes stays in the selection"
+                        % (number, assignment.group(1), call))
+        for shape, reference in references:
+            for match in reference.finditer(line):
+                for call in _makefile_enclosing_calls(line, match.start()):
+                    if call in _MAKEFILE_MEMBERSHIP_PRESERVING:
+                        continue
+                    problems.setdefault((number, call), (
+                        "Makefile:%d passes %s through $(%s ...), which the "
+                        "recipe parser cannot evaluate, so a source it "
+                        "removes stays in the selection"
+                        % (number, shape, call)))
+    return [problems[key] for key in sorted(problems)]
+
+
+def _makefile_enclosing_calls(line: str, index: int) -> list[str]:
+    """The function calls an expansion at `index` sits inside.
+
+    Counted by matching parens rather than by looking left for a function
+    name: `$(sort $(A)) $(SRCS)` would otherwise report `SRCS` as sorted.
+    """
+    stack: list[str | None] = []
+    position = 0
+    while position < index:
+        char = line[position]
+        if char == "$" and position + 1 < len(line) \
+                and line[position + 1] in "({":
+            call = _MAKEFILE_CALL_RE.match(line, position)
+            stack.append(call.group(1) if call else None)
+            position += 2
+            continue
+        if char in ")}" and stack:
+            stack.pop()
+        position += 1
+    return [call for call in stack if call is not None]
+
+
+def _selection_problems(selection: dict[str, str], text: str) -> list[str]:
     """The extractor's own floor. A parser that stops matching returns an
     empty selection and would make this whole comparison vacuous -- green
     because it read nothing, which is the failure this file exists to close.
@@ -5860,6 +6106,9 @@ def _selection_problems(selection: dict[str, str]) -> list[str]:
     if not selection:
         return ["no ecmascript source is named in the Makefile, so the "
                 "recipe parser has gone blind"]
+    reshaped = makefile_selection_transformations(text)
+    if reshaped:
+        return reshaped
     unclassified = ["%s is named by no assignment the parser recognises, so "
                     "nothing records whether it is compiled" % name
                     for name, where in sorted(selection.items())
@@ -5895,9 +6144,9 @@ def runtime_oracle_build_mismatch(version: Any) -> list[str]:
         # object, which is the right answer: an identity that names two
         # commits proves nothing about either.
         return ["build %s is not one commit in this repository" % revision]
-    here = makefile_ecmascript_selection(
-        (REPO_ROOT / "Makefile").read_text(encoding="utf-8"))
-    reasons = _selection_problems(here)
+    recipe = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    here = makefile_ecmascript_selection(recipe)
+    reasons = _selection_problems(here, recipe)
     built = subprocess.run(["git", "show", "%s:Makefile" % revision],
                            cwd=str(REPO_ROOT), capture_output=True, text=True)
     if built.returncode != 0:
