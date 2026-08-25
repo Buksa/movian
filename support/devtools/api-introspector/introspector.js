@@ -92,7 +92,13 @@ var knownModuleNames = [
 var MODSEARCH_PATH_SIZE = 512;
 
 function refuseUnaddressablePath(url) {
-  if ((url + '.js').length >= MODSEARCH_PATH_SIZE) {
+  // A leaf already carries `.js`; a directory does not, and every module
+  // under it will. Appending one unconditionally made this bound three bytes
+  // tighter than the resolver's own and refused a 474-character id the
+  // runtime loads without trouble -- the generator said it fit, this said it
+  // did not, and no capture could satisfy both.
+  var resolved = url.slice(-3) === '.js' ? url : url + '.js';
+  if (resolved.length >= MODSEARCH_PATH_SIZE) {
     throw new Error('cannot address ' + url + ' -- es_modsearch builds a ' +
                     'module path in ' + MODSEARCH_PATH_SIZE + ' bytes and ' +
                     'truncates silently past that. A directory symlink ' +
@@ -926,12 +932,19 @@ function describeModule(value) {
   return result;
 }
 
-var before = {};
-var tier1 = {};
-var tier2 = {};
-var tier3 = {};
-var moduleRefs = {};
-var loadErrors = {};
+// Keyed by module name, and a module name comes off the filesystem. Duktape
+// implements the `Object.prototype.__proto__` setter (duktape.c:33224), so
+// `tier1['__proto__'] = record` on an ordinary object reassigns the
+// prototype and creates no own property: `require('__proto__')` would
+// succeed, its record would vanish from the payload, and the census would
+// reject every capture with nothing to point at. A null prototype has no
+// such setter to inherit.
+var before = Object.create(null);
+var tier1 = Object.create(null);
+var tier2 = Object.create(null);
+var tier3 = Object.create(null);
+var moduleRefs = Object.create(null);
+var loadErrors = Object.create(null);
 var i;
 var name;
 var settings;

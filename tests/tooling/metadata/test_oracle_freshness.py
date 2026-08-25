@@ -822,10 +822,14 @@ class RecipeTransformations(unittest.TestCase):
              "SSRCS"])
 
     def test_a_filter_out_that_names_no_path_is_reported(self):
-        # The measured case: `es_fs.c` stays in the selection, the recipes
-        # compare equal, and the next binary has no `native/fs`.
+        # The measured case: `es_fs.c` stays in the selection while Make
+        # drops it, and the next binary has no `native/fs`. Modelling
+        # replacement (below) now also empties the selection for the `:=`
+        # spelling, which is loud in its own way -- but it says every source
+        # was dropped when only one was, and an appending spelling moves the
+        # selection not at all. The report is what names the real thing.
         recipe = self._makefile() + \
-            "\nSRCS := $(filter-out %/es_fs.c,$(SRCS))\n"
+            "\nSRCS += $(filter-out %/es_fs.c,$(SRCS))\n"
         selection = gen.makefile_ecmascript_selection(recipe)
         self.assertEqual(selection["src/ecmascript/es_fs.c"], "SRCS")
         self.assertEqual(
@@ -873,6 +877,63 @@ class RecipeTransformations(unittest.TestCase):
             "\nSRCS := $(filter-out %/es_fs.c,$(SRCS))\n"
         self.assertEqual(
             len(gen.makefile_selection_transformations(recipe)), 1)
+
+    def test_a_replacement_discards_what_the_variable_held(self):
+        # `+=` accumulates, `=` throws the list away. Reading only the
+        # variable name made the two identical, so turning a late `SRCS +=`
+        # into `SRCS =` -- which drops every source named above it -- gave a
+        # byte-identical selection and no mismatch at all.
+        appended = ("SRCS += src/ecmascript/es_a.c\n"
+                    "SRCS += src/ecmascript/es_b.c\n")
+        replaced = ("SRCS += src/ecmascript/es_a.c\n"
+                    "SRCS = src/ecmascript/es_b.c\n")
+        before = gen.makefile_ecmascript_selection(appended)
+        after = gen.makefile_ecmascript_selection(replaced)
+        self.assertEqual(sorted(before), ["src/ecmascript/es_a.c",
+                                          "src/ecmascript/es_b.c"])
+        self.assertEqual(sorted(after), ["src/ecmascript/es_b.c"])
+        self.assertEqual(
+            gen.selection_mismatch(after, before, "the build"),
+            ["src/ecmascript/es_a.c was compiled into the build and the "
+             "recipe no longer names it"])
+
+    def test_every_replacing_operator_discards(self):
+        for operator in ("=", ":=", "::=", "!="):
+            selection = gen.makefile_ecmascript_selection(
+                "SRCS += src/ecmascript/es_a.c\n"
+                "SRCS %s src/ecmascript/es_b.c\n" % operator)
+            self.assertEqual(sorted(selection), ["src/ecmascript/es_b.c"],
+                             operator)
+
+    def test_a_replacement_clears_a_conditional_append_above_it(self):
+        # Make discards the whole value, including what a branch added.
+        selection = gen.makefile_ecmascript_selection(
+            "ifeq ($(A),y)\nSRCS += src/ecmascript/es_a.c\nendif\n"
+            "SRCS = src/ecmascript/es_b.c\n")
+        self.assertEqual(sorted(selection), ["src/ecmascript/es_b.c"])
+
+    def test_a_conditional_replacement_is_reported_not_modelled(self):
+        # It replaces in one configuration and not another, and the scan
+        # records one selection -- so it says so instead of picking.
+        recipe = self._makefile() + \
+            "\nifeq ($(A),y)\nSRCS := src/ecmascript/es_z.c\nendif\n"
+        self.assertTrue(
+            any("inside a conditional" in problem for problem in
+                gen.makefile_selection_transformations(recipe)),
+            gen.makefile_selection_transformations(recipe))
+
+    def test_a_conditional_append_is_still_ordinary(self):
+        recipe = self._makefile() + \
+            "\nifeq ($(A),y)\nSRCS += src/ecmascript/es_z.c\nendif\n"
+        self.assertEqual(gen.makefile_selection_transformations(recipe), [])
+
+    def test_assign_if_unset_is_reported(self):
+        # `?=` does nothing when the variable is already set, and the scan
+        # cannot know which it is.
+        recipe = self._makefile() + "\nSRCS ?= src/ecmascript/es_z.c\n"
+        self.assertTrue(
+            any("?=" in problem for problem in
+                gen.makefile_selection_transformations(recipe)))
 
     def test_every_run_refuses_a_recipe_the_parser_cannot_follow(self):
         # Not only adoption. The stamped selection compares equal to a recipe
@@ -1089,6 +1150,64 @@ class ReservedNamespaces(unittest.TestCase):
                 gen.unreachable_module_files())
         finally:
             self._remove(probe)
+
+    def test_the_largest_addressable_id_is_accepted_by_both_sides(self):
+        # The introspector checked `url + '.js'` at a leaf whose url already
+        # ended in `.js`, making its bound three bytes tighter than the
+        # resolver's: the generator said a 474-character id fit, the capture
+        # refused to walk it, and no capture could satisfy both.
+        longest = "movian/" + "a" * 467
+        self.assertEqual(len(gen._MODSEARCH_PATH_FORMAT % longest),
+                         gen.MODSEARCH_PATH_SIZE - 1)
+        self.assertTrue(gen.module_id_fits_resolver(longest))
+        source = (gen.INTROSPECTOR_DIR / "introspector.js").read_text(
+            encoding="utf-8")
+        self.assertIn("url.slice(-3) === '.js' ? url : url + '.js'", source)
+
+    def test_a_module_name_cannot_poison_a_payload_map(self):
+        # Module names come off the filesystem, and Duktape implements the
+        # `Object.prototype.__proto__` setter (duktape.c:33224): on an
+        # ordinary object `tier1['__proto__'] = record` reassigns the
+        # prototype and creates no own property, so `require('__proto__')`
+        # would succeed while its record vanished from the payload.
+        source = (gen.INTROSPECTOR_DIR / "introspector.js").read_text(
+            encoding="utf-8")
+        for maker in ("var before", "var tier1", "var tier2", "var tier3",
+                      "var moduleRefs", "var loadErrors"):
+            self.assertIn("%s = Object.create(null);" % maker, source)
+
+    def test_no_directory_symlink_in_the_walked_trees(self):
+        self.assertEqual(gen.symlinked_directories(), [])
+
+    def test_a_directory_symlink_is_reported_before_it_diverges(self):
+        # The capture descends it -- fs_scandir classifies with stat(), not
+        # lstat() -- and Python's glob does not, so the module beneath it is
+        # loaded by the runtime, absent from the census, absent from the
+        # stamped inputs and absent from the artifact. Every honest capture
+        # becomes inadmissible with nothing saying why.
+        import os
+        modules = REPO_ROOT / "res" / "ecmascript" / "modules"
+        real = modules / "movian" / "realdir"
+        link = modules / "movian" / "linked"
+        try:
+            real.mkdir(parents=True, exist_ok=True)
+            (real / "probe.js").write_text("exports.a = function(){};\n",
+                                           encoding="utf-8")
+            os.symlink(real, link, target_is_directory=True)
+            self.assertIsNone(
+                gen.expected_runtime_modules().get("movian/linked/probe"))
+            problems = gen.runtime_oracle_census(
+                self._oracle(), self._artifact())
+            self.assertTrue(
+                any("directory symlink" in problem for problem in problems),
+                problems)
+        finally:
+            if link.is_symlink():
+                link.unlink()
+            (real / "probe.js").unlink(missing_ok=True)
+            if real.is_dir():
+                real.rmdir()
+        self.assertEqual(gen.symlinked_directories(), [])
 
     def test_the_resolver_bound_is_the_one_the_introspector_uses(self):
         # Two different bounds would make the census expect a module the

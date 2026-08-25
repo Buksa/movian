@@ -4218,6 +4218,39 @@ def unreachable_module_files() -> list[str]:
     return problems
 
 
+def symlinked_directories() -> list[str]:
+    """Directory symlinks in the trees both readers walk.
+
+    The capture asks the filesystem what an entry is, and fs_scandir
+    classifies with stat(), not lstat() (fa_fs.c:137-142), so it descends a
+    symlinked directory and `require()` loads what it finds beneath. Python's
+    `glob` never descends one. The two readings of the same tree then differ
+    in three places at once: the census sees a module the capture loaded and
+    nothing provides, and the file is missing from the stamped inputs and
+    from the artifact -- so every honest capture is inadmissible, with
+    nothing in the message about why.
+
+    Reproduced: with `movian/linked -> movian/realdir`, `rglob` yields only
+    `movian/realdir/probe.js` while the runtime can load
+    `movian/linked/probe`.
+
+    Nothing in this tree is a symlink. Following them here means teaching
+    three enumerations to do it with cycle detection, for a layout nobody
+    uses; saying so is one place, and it fails loud instead of diverging.
+    """
+    problems = []
+    for root in (REPO_ROOT / "res" / "ecmascript" / "modules",
+                 INTROSPECTOR_DIR):
+        for path in sorted(root.rglob("*")):
+            if path.is_symlink() and path.is_dir():
+                problems.append(
+                    "%s is a directory symlink: the capture descends it and "
+                    "this generator does not, so the two readings of this "
+                    "tree cannot agree"
+                    % path.relative_to(REPO_ROOT).as_posix())
+    return problems
+
+
 def native_registrations_out_of_scope() -> list[str]:
     """Registrations in a file the artifact scanner never opens.
 
@@ -4353,6 +4386,7 @@ def runtime_oracle_census(oracle: Any,
     problems.extend(native_registrations_out_of_scope())
     problems.extend(shadowing_plugin_modules())
     problems.extend(unreachable_module_files())
+    problems.extend(symlinked_directories())
     problems.extend(_modules_missing_from_artifact(expected, artifact))
     return problems
 
@@ -5880,7 +5914,14 @@ def format_diff(diff: dict[str, Any]) -> list[str]:
 # Reading only two of them left a source recorded under the gate `?`, which
 # compares equal to the same `?` after the variable was renamed.
 _MAKEFILE_SRCS_RE = re.compile(
-    r"^\s*(SRCS(?:-[^\s+:?!=]+)?)\s*(?:\+|:|::|\?|!)?=")
+    r"^\s*(SRCS(?:-[^\s+:?!=]+)?)\s*(\+|::|:|\?|!)?=")
+# `+=` accumulates; `=`, `:=`, `::=` and `!=` REPLACE, discarding everything
+# the variable held. Reading only the variable name made the two
+# indistinguishable, so turning a late `SRCS +=` into `SRCS =` -- which drops
+# every source named above it -- produced a byte-identical selection and no
+# mismatch at all. `?=` is neither: it assigns only if the variable is unset,
+# which a textual scan cannot know, so it is reported instead of guessed.
+_MAKEFILE_REPLACING_OPERATORS = frozenset({None, ":", "::", "!"})
 _MAKEFILE_ES_SOURCE_RE = re.compile(r"src/ecmascript/[A-Za-z0-9_./-]+\.c")
 # `SRCS-$(CONFIG_X) +=` is one way to make a source conditional. A bare
 # `SRCS +=` inside `ifeq (...) ... endif` is another, and the recipe already
@@ -5933,6 +5974,20 @@ def makefile_ecmascript_selection(text: str) -> dict[str, str]:
         assignment = _MAKEFILE_SRCS_RE.match(line)
         if assignment:
             gate = assignment.group(1)
+            if assignment.group(2) in _MAKEFILE_REPLACING_OPERATORS \
+                    and not conditions:
+                # Make throws away everything this variable held, including
+                # what a conditional branch above added to it. An assignment
+                # inside a conditional replaces only in that configuration,
+                # which this scan cannot model -- `makefile_selection_
+                # transformations()` reports that case rather than guessing.
+                for path, where in list(occurrences.items()):
+                    kept = [entry for entry in where
+                            if entry.split(" under ")[0] != gate]
+                    if kept:
+                        occurrences[path] = kept
+                    else:
+                        del occurrences[path]
         for path in _MAKEFILE_ES_SOURCE_RE.findall(line):
             where = gate or "?"
             if conditions:
@@ -6051,8 +6106,29 @@ def makefile_selection_transformations(text: str) -> list[str]:
     problems: dict[tuple[int, str], str] = {}
     tracked = sorted(makefile_source_variables(text))
     references = [(shape, _makefile_reference_re(shape)) for shape in tracked]
+    conditions = 0
     for number, raw in enumerate(text.split("\n"), 1):
         line = _makefile_uncommented(raw)
+        if _MAKEFILE_COND_RE.match(line):
+            conditions += 1
+        elif _MAKEFILE_ENDIF_RE.match(line):
+            conditions = max(0, conditions - 1)
+        source_assignment = _MAKEFILE_SRCS_RE.match(line)
+        if source_assignment:
+            operator = source_assignment.group(2)
+            if operator == "?":
+                problems[(number, "?=")] = (
+                    "Makefile:%d assigns %s with ?=, which takes effect only "
+                    "if the variable is unset -- the scan cannot tell which, "
+                    "so it cannot say whether these sources are compiled"
+                    % (number, source_assignment.group(1)))
+            elif operator in _MAKEFILE_REPLACING_OPERATORS and conditions:
+                problems[(number, "conditional-replace")] = (
+                    "Makefile:%d replaces %s inside a conditional, which "
+                    "discards its earlier contents in that configuration "
+                    "only -- the scan records one selection and cannot say "
+                    "which configuration it is"
+                    % (number, source_assignment.group(1)))
         assignment = _MAKEFILE_ASSIGN_RE.match(line)
         if assignment and _makefile_variable_shape(
                 assignment.group(1)) in tracked:
