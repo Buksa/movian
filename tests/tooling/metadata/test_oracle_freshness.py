@@ -896,6 +896,59 @@ class RecipeTransformations(unittest.TestCase):
         self.assertEqual(path.read_bytes(), before)
 
 
+class RecaptureInstruction(unittest.TestCase):
+    """The way out of a stale oracle is a printed command, so the command has
+    to be one mdev accepts.
+
+    It was not. `--extra-flags --bypass-ecmascript-acl` is not an argument
+    `mdev run` defines, and following the instruction verbatim produced a
+    usage error; the `mdev open` line named no instance, so it addressed the
+    default one rather than the instance the line above had just started. A
+    check nobody can act on is a check that fails closed forever.
+    """
+
+    def _commands(self):
+        import shlex
+        text = gen.RUNTIME_ORACLE_RECAPTURE.replace("\\\n", " ")
+        return [shlex.split(line)[1:]
+                for line in text.split("\n")
+                if line.strip().startswith("mdev ")]
+
+    def _parser(self):
+        import sys
+        devtools = (REPO_ROOT / "support" / "devtools").as_posix()
+        if devtools not in sys.path:
+            sys.path.insert(0, devtools)
+        from mdevlib import cli
+        return cli.build_parser()
+
+    def test_every_printed_command_is_one_mdev_accepts(self):
+        parser = self._parser()
+        for command in self._commands():
+            # parse_args exits the process on a bad argument, which is
+            # exactly the outcome being tested for.
+            try:
+                parser.parse_args(command)
+            except SystemExit as error:
+                self.fail("mdev rejects %r (exit %s)"
+                          % (" ".join(command), error.code))
+
+    def test_the_two_commands_address_the_same_instance(self):
+        parser = self._parser()
+        names = {parser.parse_args(command).name
+                 for command in self._commands()}
+        self.assertEqual(len(names), 1, names)
+
+    def test_the_capture_needs_the_flag_it_asks_for(self):
+        # Not decoration: es_fs.c:filename_is_allowed limits a plugin's `fs`
+        # reads to its own directory, and the walk covers the core module
+        # tree. Without it the capture records a discovery error and adoption
+        # refuses -- which is how the missing flag stayed invisible.
+        run = [command for command in self._commands()
+               if command[0] == "run"][0]
+        self.assertTrue(self._parser().parse_args(run).bypass_ecmascript_acl)
+
+
 class Preprocessor(unittest.TestCase):
     """`#if 0` is how C comments out code that already contains comments.
 

@@ -123,8 +123,8 @@ RUNTIME_ORACLE_INPUT_GLOBS = (
 RUNTIME_ORACLE_RECAPTURE = (
     "recapture in the checkout that owns build.debug:\n"
     "    mdev run -p support/devtools/api-introspector --name introspect \\\n"
-    "        --extra-flags --bypass-ecmascript-acl\n"
-    "    mdev open introspect:page\n"
+    "        --bypass-ecmascript-acl\n"
+    "    mdev open --name introspect introspect:page\n"
     "  then adopt the payload printed after the route opened:\n"
     "    gen.py --adopt-oracle <captured.json>")
 
