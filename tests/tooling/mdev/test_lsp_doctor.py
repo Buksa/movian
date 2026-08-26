@@ -81,6 +81,10 @@ class AnalyzerFreshness(unittest.TestCase):
 
     def _tree(self, stack) -> Path:
         root = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+        outside = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+        self._outside = outside / "system-header.h"
+        self._outside.write_text("/* not in the repository */\n",
+                                 encoding="utf-8")
         (root / "Makefile").write_text(REAL_MAKEFILE, encoding="utf-8")
         header = root / self.HEADER
         header.parent.mkdir(parents=True, exist_ok=True)
@@ -92,12 +96,16 @@ class AnalyzerFreshness(unittest.TestCase):
             if not name.endswith(".c"):
                 continue
             # What `-MD -MP` writes: the object, its source, one in-repo
-            # header, and a system header that must not be picked up.
+            # header, and one outside the repository that must not be picked
+            # up. The outside one is a real file this test can age, because
+            # /usr/include cannot be touched and a stand-in that is merely
+            # old proves nothing.
             depfile = root / "build.debug" / (name[:-len(".c")] + ".d")
             depfile.parent.mkdir(parents=True, exist_ok=True)
             depfile.write_text(
-                "%s.o: \\\n %s \\\n %s \\\n /usr/include/stdio.h\n\n"
-                "%s:\n" % (name[:-len(".c")], root / name, header, header),
+                "%s.o: \\\n %s \\\n %s \\\n %s\n\n"
+                "%s:\n" % (name[:-len(".c")], root / name, header,
+                            self._outside, header),
                 encoding="utf-8")
         binary = root / "build.debug" / "movian-analyze"
         binary.parent.mkdir(parents=True, exist_ok=True)
@@ -185,13 +193,16 @@ class AnalyzerFreshness(unittest.TestCase):
             self.assertFalse(ok, message)
             self.assertIn(script, message)
 
-    def test_a_system_header_is_not_an_input(self):
+    def test_a_header_outside_the_repository_is_not_an_input(self):
         # /usr/include moves when the distribution says so, and a check that
-        # fires on that is the check nobody reads.
-        import contextlib
+        # fires on that is the check nobody reads. Aged past the binary on
+        # purpose: a stand-in that is merely old would pass either way.
+        import contextlib, os
         with contextlib.ExitStack() as stack:
             self._tree(stack)
-            self.assertTrue(lspdoctor._check_analyzer()[0])
+            os.utime(self._outside, (2_100_000_000, 2_100_000_000))
+            ok, message = lspdoctor._check_analyzer()
+            self.assertTrue(ok, message)
 
     def test_a_missing_depfile_is_not_read_as_nothing_changed(self):
         import contextlib
@@ -226,6 +237,60 @@ class AnalyzerFreshness(unittest.TestCase):
                                   side_effect=AssertionError("ran make")))
             self.assertTrue(lspdoctor._check_analyzer()[0])
             self.assertFalse(run.called)
+
+
+class MetadataTimeout(unittest.TestCase):
+    """Measured on bba50466b: `gen.py --check` exits 0 in 36 s in WSL and
+    85 s on the stand. The bound was 30 s, so this check reported "could not
+    run" on a healthy tree, everywhere, always."""
+
+    def test_the_bound_is_above_every_measured_runtime(self):
+        self.assertGreaterEqual(lspdoctor.METADATA_CHECK_TIMEOUT, 4 * 85)
+
+    def _run(self, **kwargs):
+        return mock.patch.object(subprocess, "run", **kwargs)
+
+    def test_a_timeout_claims_nothing_about_the_tree(self):
+        expired = subprocess.TimeoutExpired(cmd="gen.py", timeout=360)
+        with self._run(side_effect=expired):
+            ok, message = lspdoctor._check_metadata()
+        self.assertFalse(ok)
+        self.assertIn("UNKNOWN", message)
+        self.assertNotIn("stale", message)
+        self.assertNotIn("failed", message)
+
+    def test_a_real_failure_still_reads_as_a_failure(self):
+        done = subprocess.CompletedProcess(["gen.py"], 1, "", "")
+        with self._run(return_value=done):
+            ok, message = lspdoctor._check_metadata()
+        self.assertFalse(ok)
+        self.assertIn("failed", message)
+        self.assertNotIn("UNKNOWN", message)
+
+    def test_drift_is_named_as_drift(self):
+        done = subprocess.CompletedProcess(
+            ["gen.py"], 1, "METADATA DRIFT: something moved", "")
+        with self._run(return_value=done):
+            ok, message = lspdoctor._check_metadata()
+        self.assertFalse(ok)
+        self.assertIn("stale", message)
+
+    def test_success_reports_how_close_the_bound_is(self):
+        # How the next person sees the bound tightening before it starts
+        # failing again, which is what nobody could see the first time.
+        done = subprocess.CompletedProcess(["gen.py"], 0, "", "")
+        with self._run(return_value=done):
+            ok, message = lspdoctor._check_metadata()
+        self.assertTrue(ok)
+        self.assertIn("checked in", message)
+        self.assertIn("allowed", message)
+
+    def test_a_missing_interpreter_is_not_a_timeout(self):
+        with self._run(side_effect=OSError("no such file")):
+            ok, message = lspdoctor._check_metadata()
+        self.assertFalse(ok)
+        self.assertIn("could not be started", message)
+        self.assertNotIn("UNKNOWN", message)
 
 
 if __name__ == "__main__":

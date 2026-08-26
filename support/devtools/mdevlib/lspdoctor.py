@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 from typing import Any
 
 
@@ -204,27 +205,56 @@ def _check_analyzer() -> tuple[bool, str]:
                   "all %d inputs it is built from" % len(inputs))
 
 
+# `gen.py --check` grew: it now compiles the tsc positive and negative
+# fixtures, the generated-dts fixtures, every plugin example against its own
+# apiversion, and 20 core modules. The old 30-second bound was below its
+# runtime on every machine here -- measured on bba50466b, 36 s in WSL and
+# 85 s on the Debian stand, both exiting 0 -- so this line was permanently
+# red, and red with "could not run", which is the one thing it must not say
+# about a check that ran and passed.
+#
+# 360 s is roughly four times the slowest of those two, chosen so a machine
+# well slower than the stand still gets a verdict rather than a timeout. The
+# elapsed time is reported on success too: that is how the next person sees
+# the bound tightening before it starts failing again.
+METADATA_CHECK_TIMEOUT = 360.0
+
+
 def _check_metadata() -> tuple[bool, str]:
     generator = REPOSITORY_ROOT / "support" / "devtools" / "metadata" / "gen.py"
+    started = time.monotonic()
     try:
         completed = subprocess.run(
             [sys.executable, str(generator), "--check"],
             cwd=REPOSITORY_ROOT,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=METADATA_CHECK_TIMEOUT,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, "gen.py --check could not run: %s" % exc
+    except subprocess.TimeoutExpired:
+        # Deliberately not phrased as a verdict on the tree. Nothing was
+        # learned about freshness here, and saying so is different from
+        # saying the metadata is stale.
+        return False, ("gen.py --check did not finish within %ds, so "
+                       "freshness is UNKNOWN -- this says nothing about the "
+                       "tree; run python3 "
+                       "support/devtools/metadata/gen.py --check by hand"
+                       % METADATA_CHECK_TIMEOUT)
+    except OSError as exc:
+        return False, "gen.py --check could not be started: %s" % exc
+    elapsed = time.monotonic() - started
     if completed.returncode:
         combined = completed.stdout + completed.stderr
         if "METADATA DRIFT" in combined:
             return False, ("generated/movian-metadata.json is stale; run "
                            "python3 support/devtools/metadata/gen.py")
-        return False, ("gen.py --check failed; run python3 "
-                       "support/devtools/metadata/gen.py --check")
-    return True, "generated/movian-metadata.json is fresh"
+        return False, ("gen.py --check failed in %.0fs; run python3 "
+                       "support/devtools/metadata/gen.py --check"
+                       % elapsed)
+    return True, ("generated/movian-metadata.json is fresh (checked in "
+                  "%.0fs of %ds allowed)" % (elapsed,
+                                             METADATA_CHECK_TIMEOUT))
 
 
 def _load_lsp_client() -> type[Any]:
