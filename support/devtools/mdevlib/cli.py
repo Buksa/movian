@@ -78,8 +78,10 @@ def cmd_run(args: argparse.Namespace) -> int:
             json.dumps(flags), encoding="utf-8"
         )
 
-    argv = harness.build_argv(inst, args.plugin, args.skin,
-                           args.libav_log, args.start_url)
+    argv = harness.build_argv(
+        inst, args.plugin, args.skin, args.libav_log, args.start_url,
+        extra_flags=(["--bypass-ecmascript-acl"]
+                     if args.bypass_ecmascript_acl else None))
     state = harness.launch(inst, argv)
     emit(args, state,
          "started %s pid=%d port=%d log=%s"
@@ -652,6 +654,14 @@ def build_parser() -> argparse.ArgumentParser:
                      help="seed <persistent>/settings/dev before launch")
     run.add_argument("--libav-log", action="store_true",
                      help="pass --libav-log to movian")
+    # The documented oracle recapture needs it: the ecmascript file ACL
+    # (es_fs.c:filename_is_allowed) limits a plugin's `fs` reads to its own
+    # directory, and the introspector has to walk the core module tree. The
+    # instruction printed by `gen.py --check` named a flag `mdev run` did not
+    # accept, so following it exactly produced a usage error.
+    run.add_argument("--bypass-ecmascript-acl", action="store_true",
+                     help="lift the plugin fs ACL (core flag; needed to walk "
+                          "the core module tree from a dev plugin)")
     run.add_argument("--force", action="store_true",
                      help="restart the instance this state dir owns; "
                           "never kills foreign pids")

@@ -3,7 +3,15 @@
  * Keep this file ES5.1: it is loaded by Duktape, not Node.
  */
 
-var moduleNames = [
+// What this capture has always inspected, kept as a literal in its original
+// order because require() order is observable -- a module can mutate
+// another's cached exports, and `movian/settings` does. Discovery only
+// APPENDS, so today's tree observes exactly what it did before.
+//
+// Native modules cannot be discovered: they are registered from C
+// (`ES_MODULE(...)`) rather than loaded from a file, and the runtime exposes
+// no registry to enumerate. gen.py cross-checks that set against the C.
+var knownModuleNames = [
   'fs',
   'http',
   'https',
@@ -57,6 +65,109 @@ var moduleNames = [
   'showtime/xml',
   'showtime/xmlrpc'
 ];
+
+// Every module file that exists, plus the `showtime/` alias of each
+// `movian/` one -- es_modsearch rewrites that prefix unconditionally
+// (ecmascript.c:435-439), so the alias resolves to the same file through a
+// separate module instance.
+//
+// This is what lets a recapture SEE a module nobody listed. Without it a new
+// file is invisible to the capture and, in syntax the static scanner cannot
+// read, invisible to the artifact too -- both sides blind, and the
+// cross-check agrees about nothing.
+// es_modsearch resolves a module by building its path in `char path[512]`
+// with snprintf (ecmascript.c:411,449), which truncates in silence -- so an
+// id that does not fit resolves to a path that is not the file, and the
+// module cannot be loaded whatever it contains. gen.py applies the same
+// arithmetic in `module_id_fits_resolver()`: two different bounds would make
+// the census expect a module the capture cannot reach, and no recapture
+// could ever clear that.
+//
+// The bound is also the only thing that terminates these walks. fs_scandir
+// classifies entries with stat(), not lstat() (fa_fs.c:137-142), so a
+// directory symlink pointing back at an ancestor reads as an ordinary
+// directory and the recursion descends through it forever. Refusing here
+// names the cause; a stack overflow does not, and a depth cap would quietly
+// truncate the walk -- which is the failure this capture exists to refuse.
+var MODSEARCH_PATH_SIZE = 512;
+
+function refuseUnaddressablePath(url) {
+  // A leaf already carries `.js`; a directory does not, and every module
+  // under it will. Appending one unconditionally made this bound three bytes
+  // tighter than the resolver's own and refused a 474-character id the
+  // runtime loads without trouble -- the generator said it fit, this said it
+  // did not, and no capture could satisfy both.
+  var resolved = url.slice(-3) === '.js' ? url : url + '.js';
+  if (resolved.length >= MODSEARCH_PATH_SIZE) {
+    throw new Error('cannot address ' + url + ' -- es_modsearch builds a ' +
+                    'module path in ' + MODSEARCH_PATH_SIZE + ' bytes and ' +
+                    'truncates silently past that. A directory symlink ' +
+                    'pointing back at an ancestor produces this.');
+  }
+}
+
+function discoverFileModules() {
+  var found = [];
+  // No depth cap. es_modsearch joins a slash-separated id onto the module
+  // root, so `movian/media/providers/local` is a loadable module, and the
+  // generator's rglob already sees the file. A cap here and no cap there
+  // means the census reports a module the capture cannot reach and no
+  // recapture can clear it. The one bound is the resolver's own, which the
+  // generator applies too -- see `refuseUnaddressablePath` above.
+  // Ask the filesystem what an entry is instead of reading its name. A
+  // directory called `vendor.js` is a legal layout -- es_modsearch loads
+  // `vendor.js/helper` by joining the id onto the module root -- and
+  // classifying by suffix would treat it as a module file and never look
+  // inside, leaving a module the generator expects and no capture can reach.
+  function walk(url, prefix, isRoot, name) {
+    var names;
+    refuseUnaddressablePath(url);
+    try {
+      names = require('fs').readdirSync(url);
+    } catch (error) {
+      if (isRoot) {
+        throw new Error('cannot list ' + url + ' -- ' + error +
+                        ' (run movian with --bypass-ecmascript-acl)');
+      }
+      if (/\.js$/.test(name)) {
+        // Not a directory: an ordinary module file.
+        found.push(prefix.slice(0, -(name.length + 1)) + name.slice(0, -3));
+        return;
+      }
+      // Meant to be a directory and unreadable. Skipping it silently drops
+      // every module beneath it, and the capture then reports fewer modules
+      // with nothing saying why.
+      throw new Error('cannot list ' + url + ' -- ' + error);
+    }
+    for (var i = 0; i < names.length; i++) {
+      var entry = names[i];
+      walk(url + '/' + entry, prefix + entry + '/', false, entry);
+    }
+  }
+  walk('dataroot://res/ecmascript/modules', '', true, '');
+  var aliases = [];
+  for (var j = 0; j < found.length; j++) {
+    if (found[j].indexOf('movian/') === 0) {
+      aliases.push('showtime/' + found[j].slice('movian/'.length));
+    }
+  }
+  return found.concat(aliases);
+}
+
+var moduleNames = knownModuleNames.slice();
+var moduleDiscoveryError = null;
+try {
+  var discovered = discoverFileModules();
+  for (var d = 0; d < discovered.length; d++) {
+    if (moduleNames.indexOf(discovered[d]) < 0) {
+      moduleNames.push(discovered[d]);
+    }
+  }
+} catch (error) {
+  // Recorded rather than swallowed: a capture that could not look is not a
+  // capture that found nothing, and gen.py refuses to adopt it.
+  moduleDiscoveryError = '' + error;
+}
 
 function describeMember(value) {
   var type = typeof value;
@@ -821,12 +932,19 @@ function describeModule(value) {
   return result;
 }
 
-var before = {};
-var tier1 = {};
-var tier2 = {};
-var tier3 = {};
-var moduleRefs = {};
-var loadErrors = {};
+// Keyed by module name, and a module name comes off the filesystem. Duktape
+// implements the `Object.prototype.__proto__` setter (duktape.c:33224), so
+// `tier1['__proto__'] = record` on an ordinary object reassigns the
+// prototype and creates no own property: `require('__proto__')` would
+// succeed, its record would vanish from the payload, and the census would
+// reject every capture with nothing to point at. A null prototype has no
+// such setter to inherit.
+var before = Object.create(null);
+var tier1 = Object.create(null);
+var tier2 = Object.create(null);
+var tier3 = Object.create(null);
+var moduleRefs = Object.create(null);
+var loadErrors = Object.create(null);
 var i;
 var name;
 var settings;
@@ -1019,49 +1137,51 @@ function digestOf(path) {
   return hexOf(crypto.hashFinalize(handle));
 }
 
-function collectInputs(url, prefix, into, depth, required) {
+function collectInputs(url, prefix, into, required, name) {
   var names;
+  refuseUnaddressablePath(url);
   try {
     names = require('fs').readdirSync(url);
   } catch (error) {
-    // A child that is not a directory is expected. A ROOT that cannot be
-    // scanned is not, and swallowing it is how this returned two files and
-    // looked like it had worked: a plugin's fs access is ACL-limited to its
-    // own directory (es_fs.c:100-106), so the core module tree needs
-    // --bypass-ecmascript-acl and says so instead of quietly recording less.
+    // A ROOT that cannot be scanned is fatal, and swallowing it is how this
+    // once returned two files and looked like it had worked: a plugin's fs
+    // access is ACL-limited to its own directory (es_fs.c:100-106), so the
+    // core module tree needs --bypass-ecmascript-acl and says so.
     if (required) {
       throw new Error('cannot read ' + url + ' -- ' + error +
                       ' (run movian with --bypass-ecmascript-acl)');
     }
+    // Not a directory. Whether it is an input is decided here, by what it
+    // turned out to be, not by what its name looks like -- a directory
+    // called `vendor.js` is a legal layout and must be descended into.
+    if (/\.(js|json)$/.test(name)) {
+      into[prefix.slice(0, -(name.length + 1)) + name] = digestOf(url);
+    }
     return;
   }
   for (var i = 0; i < names.length; i++) {
-    var name = names[i];
-    var child = url + '/' + name;
-    if (name === 'runtime-api.json') {
+    var entry = names[i];
+    if (entry === 'runtime-api.json') {
       // The oracle itself. Recording it would compare a capture-time digest
       // against a file adoption is about to rewrite.
       continue;
     }
-    if (/\.(js|json)$/.test(name)) {
-      into[prefix + name] = digestOf(child);
-    } else if (depth > 0) {
-      collectInputs(child, prefix + name + '/', into, depth - 1, false);
-    }
+    collectInputs(url + '/' + entry, prefix + entry + '/', into, false,
+                  entry);
   }
 }
 
 function runtimeInputs() {
   var found = {};
   collectInputs('dataroot://res/ecmascript/modules',
-                'res/ecmascript/modules/', found, 2, true);
+                'res/ecmascript/modules/', found, true, '');
   found['res/ecmascript/legacy/api-v1.js'] =
     digestOf('dataroot://res/ecmascript/legacy/api-v1.js');
   if (!(typeof Plugin === 'object' && Plugin && Plugin.path)) {
     throw new Error('Plugin.path is not set, so the plugin directory that '
                     + 'shadows core modules cannot be enumerated');
   }
-  collectInputs(Plugin.path, 'plugin/', found, 1, true);
+  collectInputs(Plugin.path, 'plugin/', found, true, '');
   return found;
 }
 
@@ -1099,6 +1219,7 @@ function emitPayload(complete) {
                      ? Core.currentVersionString : null,
     runtimeInputs: runtimeInputsResult,
     runtimeInputsError: runtimeInputsError,
+    moduleDiscoveryError: moduleDiscoveryError,
     modules: moduleNames,
     before: before,
     tier1: tier1,

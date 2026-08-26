@@ -384,10 +384,13 @@ class Adoption(unittest.TestCase):
             result = subprocess.run(
                 ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
                 capture_output=True, text=True, cwd=str(REPO_ROOT))
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("same capturedAt", result.stderr)
-        # The refusal must come before the write.
-        self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
+        try:
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("same capturedAt", result.stderr)
+            # The refusal must come before the write.
+            self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
+        finally:
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
 
     def _build_revision(self):
         """The commit the committed oracle was captured from, skipping if
@@ -512,6 +515,64 @@ class Adoption(unittest.TestCase):
         finally:
             shadow.unlink(missing_ok=True)
 
+    def test_a_capture_whose_discovery_failed_is_not_adopted(self):
+        # --check rejects it, but adoption used not to: the committed oracle
+        # would be overwritten by a payload the very next check refuses.
+        import json
+        import subprocess
+        import tempfile
+        payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        payload["capturedAt"] = payload["capturedAt"] + 1000
+        payload["moduleDiscoveryError"] = "Error: cannot list dataroot://..."
+        # Deliberately unresolvable, to pin the ORDER: what the capture says
+        # about itself is checked before anything that needs git history, so
+        # this test means the same thing in a shallow clone.
+        payload["movianVersion"] = "5.0.1017.gdeadbee"
+        before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+                handle.write(json.dumps(payload))
+                handle.flush()
+                result = subprocess.run(
+                    ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
+                    capture_output=True, text=True, cwd=str(REPO_ROOT))
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("could not enumerate", result.stderr)
+            self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
+        finally:
+            # Asserting the file is untouched is not the same as leaving it
+            # untouched: when the guard being tested is broken, adoption
+            # SUCCEEDS and the committed oracle is overwritten before the
+            # assertion runs. Restoring is what keeps this test from
+            # corrupting the tree exactly when it is doing its job.
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
+
+    def test_a_capture_the_census_rejects_is_not_adopted(self):
+        # Adoption used to write a payload that the very next --check
+        # refuses. Discovery succeeding is not the same as every module
+        # loading.
+        import json
+        import subprocess
+        import tempfile
+        payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        payload["capturedAt"] = payload["capturedAt"] + 2000
+        payload.pop("inputs", None)
+        payload["loadErrors"] = {"movian/page": "Error: boom"}
+        payload["movianVersion"] = "5.0.1017.gdeadbee"
+        before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+                handle.write(json.dumps(payload))
+                handle.flush()
+                result = subprocess.run(
+                    ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
+                    capture_output=True, text=True, cwd=str(REPO_ROOT))
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("does not account for the modules", result.stderr)
+            self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
+        finally:
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
+
     def test_a_capture_without_a_capturedat_is_refused(self):
         import json
         import subprocess
@@ -525,9 +586,1077 @@ class Adoption(unittest.TestCase):
             result = subprocess.run(
                 ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
                 capture_output=True, text=True, cwd=str(REPO_ROOT))
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("capturedAt", result.stderr)
-        self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
+        try:
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("capturedAt", result.stderr)
+            self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
+        finally:
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
+
+
+class Recipe(unittest.TestCase):
+    """Which sources the build compiles is a fact about the Makefile, and the
+    Makefile is not in the sources."""
+
+    def _makefile(self):
+        return (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+
+    def test_the_recipe_names_every_ecmascript_source_on_disk(self):
+        selection = gen.makefile_ecmascript_selection(self._makefile())
+        on_disk = {path.relative_to(REPO_ROOT).as_posix()
+                   for path in (REPO_ROOT / "src" / "ecmascript").rglob("*.c")}
+        self.assertEqual(on_disk - set(selection), set())
+        self.assertEqual(set(selection) - on_disk, set())
+
+    def test_the_gate_each_source_sits_behind_is_recorded(self):
+        selection = gen.makefile_ecmascript_selection(self._makefile())
+        self.assertEqual(selection["src/ecmascript/es_sqlite.c"],
+                         "SRCS-$(CONFIG_SQLITE)")
+        self.assertEqual(selection["src/ecmascript/es_gumbo.c"],
+                         "SRCS-$(CONFIG_GUMBO)")
+        self.assertEqual(selection["src/ecmascript/es_fs.c"], "SRCS")
+
+    def test_a_source_moved_into_a_make_conditional_changes_its_gate(self):
+        # `SRCS-$(CONFIG_X) +=` is one way to make a source conditional; a
+        # bare `SRCS +=` inside `ifeq (...) ... endif` is another, and the
+        # recipe already uses it (Makefile:283-285). Reading only the
+        # variable name makes the two indistinguishable.
+        text = self._makefile()
+        moved = text.replace(
+            "SRCS-$(CONFIG_SQLITE) += src/ecmascript/es_sqlite.c",
+            "ifeq ($(CONFIG_FOO),yes)\n"
+            "SRCS += src/ecmascript/es_sqlite.c\n"
+            "endif")
+        selection = gen.makefile_ecmascript_selection(moved)
+        self.assertEqual(selection["src/ecmascript/es_sqlite.c"],
+                         "SRCS under ifeq ($(CONFIG_FOO),yes)")
+        self.assertTrue(gen.selection_mismatch(
+            selection, gen.makefile_ecmascript_selection(text), "abc1234"))
+
+    def test_a_conditional_closes_at_its_endif(self):
+        selection = gen.makefile_ecmascript_selection(
+            "ifeq ($(A),yes)\n"
+            "SRCS += src/ecmascript/inside.c\n"
+            "endif\n"
+            "SRCS += src/ecmascript/outside.c\n")
+        self.assertEqual(selection["src/ecmascript/inside.c"],
+                         "SRCS under ifeq ($(A),yes)")
+        self.assertEqual(selection["src/ecmascript/outside.c"], "SRCS")
+
+    def test_the_else_branch_is_not_the_if_branch(self):
+        selection = gen.makefile_ecmascript_selection(
+            "ifeq ($(A),yes)\n"
+            "SRCS += src/ecmascript/yes.c\n"
+            "else\n"
+            "SRCS += src/ecmascript/no.c\n"
+            "endif\n")
+        self.assertNotEqual(selection["src/ecmascript/yes.c"],
+                            selection["src/ecmascript/no.c"])
+
+    def test_a_commented_out_source_is_not_selected(self):
+        # GNU Make omits it; reading the pathname anyway keeps a source in
+        # the selection that the next build will not compile, and the
+        # comparison then finds nothing to report.
+        text = self._makefile()
+        commented = text.replace("\tsrc/ecmascript/es_fs.c \\",
+                                 "#\tsrc/ecmascript/es_fs.c \\")
+        self.assertNotEqual(commented, text)
+        selection = gen.makefile_ecmascript_selection(commented)
+        self.assertNotIn("src/ecmascript/es_fs.c", selection)
+        self.assertTrue(gen.selection_mismatch(
+            selection, gen.makefile_ecmascript_selection(text), "abc1234"))
+
+    def test_a_trailing_comment_does_not_drop_the_source(self):
+        # The other direction of the same rule: stripping must remove the
+        # comment, not the line. Over-stripping would leave a compiled source
+        # unnamed, which reads as a recipe that dropped it.
+        selection = gen.makefile_ecmascript_selection(
+            "SRCS += src/ecmascript/es_fs.c # why this one\n")
+        self.assertEqual(selection, {"src/ecmascript/es_fs.c": "SRCS"})
+
+    def test_an_else_if_keeps_the_predicate_it_is_the_else_of(self):
+        # `else ifeq ($(B),yes)` takes effect only when the OUTER predicate
+        # was false, so two recipes whose outer conditions differ select the
+        # source under different circumstances even though the inner text is
+        # identical.
+        outer_a = ("ifeq ($(CONFIG_A),yes)\n"
+                   "SRCS += src/ecmascript/x.c\n"
+                   "else ifeq ($(CONFIG_B),yes)\n"
+                   "SRCS += src/ecmascript/y.c\n"
+                   "endif\n")
+        outer_c = outer_a.replace("CONFIG_A", "CONFIG_C")
+        self.assertNotEqual(
+            gen.makefile_ecmascript_selection(outer_a)["src/ecmascript/y.c"],
+            gen.makefile_ecmascript_selection(outer_c)["src/ecmascript/y.c"])
+
+    def test_a_final_else_keeps_the_whole_chain(self):
+        # `ifeq A / else ifeq B / else`: the last branch takes effect only
+        # when BOTH A and B were false, so changing B changes what the final
+        # else compiles.
+        chain = ("ifeq ($(A),y)\n"
+                 "SRCS += src/ecmascript/x.c\n"
+                 "else ifeq ($(B),y)\n"
+                 "SRCS += src/ecmascript/y.c\n"
+                 "else\n"
+                 "SRCS += src/ecmascript/z.c\n"
+                 "endif\n")
+        first = gen.makefile_ecmascript_selection(chain)
+        second = gen.makefile_ecmascript_selection(
+            chain.replace("$(B),y", "$(B),no"))
+        self.assertNotEqual(first["src/ecmascript/z.c"],
+                            second["src/ecmascript/z.c"])
+
+    def test_every_occurrence_of_a_source_is_kept(self):
+        # A source named in two mutually exclusive branches is compiled
+        # under either; keeping only the last hides a change to the other.
+        both = ("ifeq ($(A),y)\n"
+                "SRCS += src/ecmascript/d.c\n"
+                "else\n"
+                "SRCS += src/ecmascript/d.c\n"
+                "endif\n")
+        first = gen.makefile_ecmascript_selection(both)
+        second = gen.makefile_ecmascript_selection(
+            both.replace("ifeq ($(A),y)", "ifeq ($(C),y)"))
+        self.assertIn(" | ", first["src/ecmascript/d.c"])
+        self.assertNotEqual(first["src/ecmascript/d.c"],
+                            second["src/ecmascript/d.c"])
+
+    def test_a_plain_if_carries_no_negation(self):
+        selection = gen.makefile_ecmascript_selection(
+            "ifeq ($(A),y)\nSRCS += src/ecmascript/z.c\nendif\n")
+        self.assertEqual(selection["src/ecmascript/z.c"],
+                         "SRCS under ifeq ($(A),y)")
+
+    def test_every_make_assignment_operator_is_recognised(self):
+        # `=`, `+=`, `:=`, `::=`, `?=` and `!=` are all assignments. Reading
+        # only two left a source under the gate `?`, which compares equal to
+        # the same `?` after the variable was renamed.
+        for operator in (":=", "?=", "!=", "::=", "+=", "="):
+            selection = gen.makefile_ecmascript_selection(
+                "SRCS %s src/ecmascript/p.c\n" % operator)
+            self.assertEqual(selection.get("src/ecmascript/p.c"), "SRCS",
+                             operator)
+
+    def test_an_unclassified_source_is_a_problem(self):
+        selection = gen.makefile_ecmascript_selection(
+            "OTHER := src/ecmascript/p.c\n")
+        self.assertEqual(selection["src/ecmascript/p.c"], "?")
+        self.assertTrue(any("no assignment the parser recognises" in problem
+                            for problem in gen._selection_problems(
+                                selection, "OTHER := src/ecmascript/p.c\n")))
+
+    def test_a_blind_parser_is_a_problem_not_a_pass(self):
+        # A parser that stops matching returns an empty selection, and an
+        # empty selection compares equal to another empty one -- green
+        # because it read nothing, which is the failure this file is about.
+        self.assertTrue(gen._selection_problems({}, self._makefile()))
+
+    def test_a_source_dropped_since_the_build_is_reported(self):
+        here = gen.makefile_ecmascript_selection(self._makefile())
+        there = dict(here)
+        here.pop("src/ecmascript/es_fs.c")
+        reasons = gen.selection_mismatch(here, there, "build abc1234")
+        self.assertEqual(
+            reasons,
+            ["src/ecmascript/es_fs.c was compiled into build abc1234 and the"
+             " recipe no longer names it"])
+
+    def test_a_source_added_since_the_build_is_reported(self):
+        here = gen.makefile_ecmascript_selection(self._makefile())
+        there = dict(here)
+        there.pop("src/ecmascript/es_fs.c")
+        reasons = gen.selection_mismatch(here, there, "build abc1234")
+        self.assertTrue(any("is compiled now" in reason
+                            for reason in reasons), reasons)
+
+    def test_a_source_that_changed_gate_is_reported(self):
+        # The sharpest case: membership is identical and the file has not
+        # changed a byte, but it is now compiled in a different configuration.
+        here = gen.makefile_ecmascript_selection(self._makefile())
+        there = dict(here)
+        there["src/ecmascript/es_sqlite.c"] = "SRCS"
+        reasons = gen.selection_mismatch(here, there, "build abc1234")
+        self.assertEqual(
+            reasons,
+            ["src/ecmascript/es_sqlite.c moved from SRCS to"
+             " SRCS-$(CONFIG_SQLITE) since build abc1234"])
+
+    def test_an_unchanged_recipe_reports_nothing(self):
+        here = gen.makefile_ecmascript_selection(self._makefile())
+        self.assertEqual(
+            gen.selection_mismatch(here, dict(here), "build abc"), [])
+
+    def test_a_source_the_recipe_stops_naming_is_a_problem(self):
+        selection = gen.makefile_ecmascript_selection(self._makefile())
+        selection.pop("src/ecmascript/es_fs.c")
+        problems = gen._selection_problems(selection, self._makefile())
+        self.assertTrue(any("es_fs.c" in problem for problem in problems),
+                        problems)
+
+
+class RecipeTransformations(unittest.TestCase):
+    """A removal need not name a pathname.
+
+    `makefile_ecmascript_selection()` records the paths it SEES, so a recipe
+    that drops a source through a Make expression leaves the selection
+    byte-identical -- it compares equal to the recipe that built the binary
+    and a stale oracle keeps passing on a tree whose next binary has lost the
+    module. Evaluating Make needs Make; knowing when the parser is out of its
+    depth does not.
+    """
+
+    def _makefile(self):
+        return (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+
+    def test_this_recipe_reshapes_nothing_the_parser_cannot_follow(self):
+        self.assertEqual(
+            gen.makefile_selection_transformations(self._makefile()), [])
+
+    def test_the_source_list_reaches_six_further_names(self):
+        # The reason the check is not just about `SRCS`: every source travels
+        # into names the scan was not watching, and a transformation applied
+        # to any of them is equally invisible.
+        self.assertEqual(
+            sorted(gen.makefile_source_variables(self._makefile())),
+            ["DEPS", "OBJS", "OBJS2", "OBJS3", "OBJS4", "SRCS", "SRCS-*",
+             "SSRCS"])
+
+    def test_a_filter_out_that_names_no_path_is_reported(self):
+        # The measured case: `es_fs.c` stays in the selection while Make
+        # drops it, and the next binary has no `native/fs`. Modelling
+        # replacement (below) now also empties the selection for the `:=`
+        # spelling, which is loud in its own way -- but it says every source
+        # was dropped when only one was, and an appending spelling moves the
+        # selection not at all. The report is what names the real thing.
+        recipe = self._makefile() + \
+            "\nSRCS += $(filter-out %/es_fs.c,$(SRCS))\n"
+        selection = gen.makefile_ecmascript_selection(recipe)
+        self.assertEqual(selection["src/ecmascript/es_fs.c"], "SRCS")
+        self.assertEqual(
+            gen.selection_mismatch(
+                selection,
+                gen.makefile_ecmascript_selection(self._makefile()),
+                "the build"),
+            [])
+        self.assertTrue(
+            any("filter-out" in problem for problem in
+                gen._selection_problems(selection, recipe)),
+            gen._selection_problems(selection, recipe))
+
+    def test_a_transformation_one_hop_away_is_reported(self):
+        # `SSRCS` is not `SRCS`, and it carries every source.
+        recipe = self._makefile() + \
+            "\nSSRCS := $(filter-out %/es_fs.c,$(SSRCS))\n"
+        self.assertTrue(
+            any("SSRCS" in problem for problem in
+                gen.makefile_selection_transformations(recipe)))
+
+    def test_an_assignment_from_a_function_is_reported(self):
+        # Nothing here mentions a tracked variable on the right, so the
+        # dataflow rule alone would miss it.
+        recipe = self._makefile() + "\nSRCS := $(shell cat more.mk)\n"
+        self.assertTrue(
+            any("shell" in problem for problem in
+                gen.makefile_selection_transformations(recipe)))
+
+    def test_a_membership_preserving_function_is_not_reported(self):
+        # `sort` is what this recipe actually uses. Reporting it would make
+        # the check permanently red on a correct tree, which is the other way
+        # to be useless.
+        recipe = self._makefile() + "\nSRCS += $(sort $(SRCS-yes))\n"
+        self.assertEqual(gen.makefile_selection_transformations(recipe), [])
+
+    def test_the_enclosing_call_is_found_by_parens_not_by_looking_left(self):
+        # `$(sort $(A)) $(SRCS)` has a function name to the left of `$(SRCS)`
+        # and does not pass it through anything.
+        recipe = self._makefile() + "\nFOO := $(sort $(A)) $(SRCS)\n"
+        self.assertEqual(gen.makefile_selection_transformations(recipe), [])
+
+    def test_one_finding_per_place_not_one_per_reading(self):
+        recipe = self._makefile() + \
+            "\nSRCS := $(filter-out %/es_fs.c,$(SRCS))\n"
+        self.assertEqual(
+            len(gen.makefile_selection_transformations(recipe)), 1)
+
+    def test_a_replacement_discards_what_the_variable_held(self):
+        # `+=` accumulates, `=` throws the list away. Reading only the
+        # variable name made the two identical, so turning a late `SRCS +=`
+        # into `SRCS =` -- which drops every source named above it -- gave a
+        # byte-identical selection and no mismatch at all.
+        appended = ("SRCS += src/ecmascript/es_a.c\n"
+                    "SRCS += src/ecmascript/es_b.c\n")
+        replaced = ("SRCS += src/ecmascript/es_a.c\n"
+                    "SRCS = src/ecmascript/es_b.c\n")
+        before = gen.makefile_ecmascript_selection(appended)
+        after = gen.makefile_ecmascript_selection(replaced)
+        self.assertEqual(sorted(before), ["src/ecmascript/es_a.c",
+                                          "src/ecmascript/es_b.c"])
+        self.assertEqual(sorted(after), ["src/ecmascript/es_b.c"])
+        self.assertEqual(
+            gen.selection_mismatch(after, before, "the build"),
+            ["src/ecmascript/es_a.c was compiled into the build and the "
+             "recipe no longer names it"])
+
+    def test_every_replacing_operator_discards(self):
+        for operator in ("=", ":=", "::=", "!="):
+            selection = gen.makefile_ecmascript_selection(
+                "SRCS += src/ecmascript/es_a.c\n"
+                "SRCS %s src/ecmascript/es_b.c\n" % operator)
+            self.assertEqual(sorted(selection), ["src/ecmascript/es_b.c"],
+                             operator)
+
+    def test_a_replacement_clears_a_conditional_append_above_it(self):
+        # Make discards the whole value, including what a branch added.
+        selection = gen.makefile_ecmascript_selection(
+            "ifeq ($(A),y)\nSRCS += src/ecmascript/es_a.c\nendif\n"
+            "SRCS = src/ecmascript/es_b.c\n")
+        self.assertEqual(sorted(selection), ["src/ecmascript/es_b.c"])
+
+    def test_a_conditional_replacement_is_reported_not_modelled(self):
+        # It replaces in one configuration and not another, and the scan
+        # records one selection -- so it says so instead of picking.
+        recipe = self._makefile() + \
+            "\nifeq ($(A),y)\nSRCS := src/ecmascript/es_z.c\nendif\n"
+        self.assertTrue(
+            any("inside a conditional" in problem for problem in
+                gen.makefile_selection_transformations(recipe)),
+            gen.makefile_selection_transformations(recipe))
+
+    def test_a_conditional_append_is_still_ordinary(self):
+        recipe = self._makefile() + \
+            "\nifeq ($(A),y)\nSRCS += src/ecmascript/es_z.c\nendif\n"
+        self.assertEqual(gen.makefile_selection_transformations(recipe), [])
+
+    def test_assign_if_unset_is_reported(self):
+        # `?=` does nothing when the variable is already set, and the scan
+        # cannot know which it is.
+        recipe = self._makefile() + "\nSRCS ?= src/ecmascript/es_z.c\n"
+        self.assertTrue(
+            any("?=" in problem for problem in
+                gen.makefile_selection_transformations(recipe)))
+
+    def test_every_run_refuses_a_recipe_the_parser_cannot_follow(self):
+        # Not only adoption. The stamped selection compares equal to a recipe
+        # that reshapes the list, because reshaping does not change the text
+        # the scan reads -- the tautology one level up, and `--check` is
+        # where a tree drifts into it.
+        import json
+        path = REPO_ROOT / "Makefile"
+        before = path.read_bytes()
+        try:
+            path.write_bytes(
+                before + b"\nSRCS := $(filter-out %/es_fs.c,$(SRCS))\n")
+            ok, out, _report = gen._check_runtime_oracle(
+                json.loads(gen.ARTIFACT_PATH.read_text(encoding="utf-8")),
+                json.loads(
+                    gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8")))
+            self.assertFalse(ok)
+            self.assertIn("filter-out", out)
+        finally:
+            path.write_bytes(before)
+        self.assertEqual(path.read_bytes(), before)
+
+
+class RecaptureInstruction(unittest.TestCase):
+    """The way out of a stale oracle is a printed command, so the command has
+    to be one mdev accepts.
+
+    It was not. `--extra-flags --bypass-ecmascript-acl` is not an argument
+    `mdev run` defines, and following the instruction verbatim produced a
+    usage error; the `mdev open` line named no instance, so it addressed the
+    default one rather than the instance the line above had just started. A
+    check nobody can act on is a check that fails closed forever.
+    """
+
+    def _commands(self):
+        import shlex
+        text = gen.RUNTIME_ORACLE_RECAPTURE.replace("\\\n", " ")
+        return [shlex.split(line)[1:]
+                for line in text.split("\n")
+                if line.strip().startswith("mdev ")]
+
+    def _parser(self):
+        import sys
+        devtools = (REPO_ROOT / "support" / "devtools").as_posix()
+        if devtools not in sys.path:
+            sys.path.insert(0, devtools)
+        from mdevlib import cli
+        return cli.build_parser()
+
+    def test_every_printed_command_is_one_mdev_accepts(self):
+        parser = self._parser()
+        for command in self._commands():
+            # parse_args exits the process on a bad argument, which is
+            # exactly the outcome being tested for.
+            try:
+                parser.parse_args(command)
+            except SystemExit as error:
+                self.fail("mdev rejects %r (exit %s)"
+                          % (" ".join(command), error.code))
+
+    def test_the_two_commands_address_the_same_instance(self):
+        parser = self._parser()
+        names = {parser.parse_args(command).name
+                 for command in self._commands()}
+        self.assertEqual(len(names), 1, names)
+
+    def test_the_capture_needs_the_flag_it_asks_for(self):
+        # Not decoration: es_fs.c:filename_is_allowed limits a plugin's `fs`
+        # reads to its own directory, and the walk covers the core module
+        # tree. Without it the capture records a discovery error and adoption
+        # refuses -- which is how the missing flag stayed invisible.
+        run = [command for command in self._commands()
+               if command[0] == "run"][0]
+        self.assertTrue(self._parser().parse_args(run).bypass_ecmascript_acl)
+
+
+class Preprocessor(unittest.TestCase):
+    """`#if 0` is how C comments out code that already contains comments.
+
+    The compiler registers nothing inside it, so a registration there is not
+    a module -- in exactly the way `/* ES_MODULE(...) */` is not. Reading it
+    as one makes every fresh capture fail to load a name that does not exist,
+    and no recapture can ever clear that.
+    """
+
+    def test_a_registration_in_a_dead_branch_is_not_a_module(self):
+        self.assertEqual(
+            gen._c_registrations('#if 0\nES_MODULE("dead", f);\n#endif\n'
+                                 'ES_MODULE("alive", f);\n'),
+            (["alive"], 0))
+
+    def test_the_live_arm_of_a_dead_branch_survives(self):
+        for source, expected in (
+                ('#if 0\nES_MODULE("d", f);\n#else\n'
+                 'ES_MODULE("live", f);\n#endif\n', ["live"]),
+                ('#if 1\nES_MODULE("live", f);\n#else\n'
+                 'ES_MODULE("d", f);\n#endif\n', ["live"]),
+                ('#if 0\nES_MODULE("d", f);\n#elif 1\n'
+                 'ES_MODULE("live", f);\n#else\n'
+                 'ES_MODULE("d2", f);\n#endif\n', ["live"])):
+            self.assertEqual(gen._c_registrations(source)[0], expected,
+                             source)
+
+    def test_a_dead_branch_takes_its_nested_conditionals_with_it(self):
+        self.assertEqual(
+            gen._c_registrations(
+                '#if 0\n#ifdef FOO\nES_MODULE("d", f);\n#endif\n#endif\n'
+                'ES_MODULE("live", f);\n')[0],
+            ["live"])
+
+    def test_a_condition_nobody_can_evaluate_keeps_both_arms(self):
+        # Deciding it would need the build's own preprocessing. Keeping the
+        # registration means it is reported rather than quietly dropped,
+        # which is the safe direction for a scan that cannot know.
+        self.assertEqual(
+            sorted(gen._c_registrations(
+                '#if 0\nES_MODULE("d", f);\n#elif ENABLE_X\n'
+                'ES_MODULE("maybe", f);\n#else\n'
+                'ES_MODULE("other", f);\n#endif\n')[0]),
+            ["maybe", "other"])
+
+    def test_a_directive_inside_a_string_is_not_a_directive(self):
+        # Anchored at the start of a line, which is where C requires one.
+        self.assertEqual(
+            gen._c_registrations('const char *s = "#if 0";\n'
+                                 'ES_MODULE("live", f);\n')[0],
+            ["live"])
+
+    def test_no_registration_in_this_tree_is_conditional(self):
+        # If one ever is, the census goes red until somebody decides what it
+        # means -- so this records that today none of them are.
+        for path in sorted(gen.ECMASCRIPT_DIR.glob("es_*.c")):
+            source = path.read_text(encoding="utf-8", errors="replace")
+            self.assertEqual(
+                gen._c_registrations(source),
+                gen._c_registrations(gen._c_active_code(source)),
+                path.name)
+
+
+class ReservedNamespaces(unittest.TestCase):
+    """Two prefixes es_modsearch answers before it resolves any path, and one
+    length past which it cannot resolve one at all."""
+
+    def _oracle(self):
+        import json
+        return json.loads(
+            gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
+
+    def _artifact(self):
+        import json
+        return json.loads(gen.ARTIFACT_PATH.read_text(encoding="utf-8"))
+
+    def _probe(self, relative):
+        path = (REPO_ROOT / "res" / "ecmascript" / "modules" / relative)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("exports.a = function(){};\n", encoding="utf-8")
+        return path
+
+    def _remove(self, path):
+        path.unlink(missing_ok=True)
+        directory = path.parent
+        modules = REPO_ROOT / "res" / "ecmascript" / "modules"
+        while directory != modules and directory.is_dir() \
+                and not any(directory.iterdir()):
+            directory.rmdir()
+            directory = directory.parent
+
+    def test_nothing_in_this_tree_is_unreachable(self):
+        self.assertEqual(gen.unreachable_module_files(), [])
+
+    def test_a_file_that_collides_with_a_native_module_is_reported(self):
+        # The sharpest one. `native/fs` is a real registration, so the file's
+        # entry was overwritten by it -- one expected entry for two things,
+        # the capture observing the C module, and nothing reported at all.
+        probe = self._probe("native/fs.js")
+        try:
+            self.assertEqual(gen.expected_runtime_modules()["native/fs"],
+                             "ES_MODULE in src/ecmascript/es_fs.c")
+            problems = gen.runtime_oracle_census(
+                self._oracle(), self._artifact())
+            self.assertTrue(
+                any("native/fs.js cannot be loaded" in problem
+                    for problem in problems), problems)
+        finally:
+            self._remove(probe)
+
+    def test_a_file_in_the_native_namespace_is_reported_for_what_it_is(self):
+        # With nothing to collide with, the census used to say the capture
+        # had not walked it -- sending the reader to fix a capture that was
+        # behaving correctly.
+        probe = self._probe("native/nope.js")
+        try:
+            self.assertIsNone(
+                gen.expected_runtime_modules().get("native/nope"))
+            problems = gen.runtime_oracle_census(
+                self._oracle(), self._artifact())
+            self.assertTrue(
+                any("without ever resolving a path" in problem
+                    for problem in problems), problems)
+            self.assertFalse(
+                any("did not walk it" in problem for problem in problems),
+                problems)
+        finally:
+            self._remove(probe)
+
+    def test_an_id_too_long_for_the_resolver_is_reported(self):
+        # snprintf into `char path[512]` truncates in silence, so the module
+        # simply never loads and no capture can be made to see it.
+        probe = self._probe("movian/" + "d/" * 240 + "deep.js")
+        try:
+            self.assertTrue(
+                any("truncated path" in problem
+                    for problem in gen.unreachable_module_files()),
+                gen.unreachable_module_files())
+        finally:
+            self._remove(probe)
+
+    def test_the_largest_addressable_id_is_accepted_by_both_sides(self):
+        # The introspector checked `url + '.js'` at a leaf whose url already
+        # ended in `.js`, making its bound three bytes tighter than the
+        # resolver's: the generator said a 474-character id fit, the capture
+        # refused to walk it, and no capture could satisfy both.
+        longest = "movian/" + "a" * 467
+        self.assertEqual(len(gen._MODSEARCH_PATH_FORMAT % longest),
+                         gen.MODSEARCH_PATH_SIZE - 1)
+        self.assertTrue(gen.module_id_fits_resolver(longest))
+        source = (gen.INTROSPECTOR_DIR / "introspector.js").read_text(
+            encoding="utf-8")
+        self.assertIn("url.slice(-3) === '.js' ? url : url + '.js'", source)
+
+    def test_a_module_name_cannot_poison_a_payload_map(self):
+        # Module names come off the filesystem, and Duktape implements the
+        # `Object.prototype.__proto__` setter (duktape.c:33224): on an
+        # ordinary object `tier1['__proto__'] = record` reassigns the
+        # prototype and creates no own property, so `require('__proto__')`
+        # would succeed while its record vanished from the payload.
+        source = (gen.INTROSPECTOR_DIR / "introspector.js").read_text(
+            encoding="utf-8")
+        for maker in ("var before", "var tier1", "var tier2", "var tier3",
+                      "var moduleRefs", "var loadErrors"):
+            self.assertIn("%s = Object.create(null);" % maker, source)
+
+    def test_no_directory_symlink_in_the_walked_trees(self):
+        self.assertEqual(gen.symlinked_directories(), [])
+
+    def test_a_directory_symlink_is_reported_before_it_diverges(self):
+        # The capture descends it -- fs_scandir classifies with stat(), not
+        # lstat() -- and Python's glob does not, so the module beneath it is
+        # loaded by the runtime, absent from the census, absent from the
+        # stamped inputs and absent from the artifact. Every honest capture
+        # becomes inadmissible with nothing saying why.
+        import os
+        modules = REPO_ROOT / "res" / "ecmascript" / "modules"
+        real = modules / "movian" / "realdir"
+        link = modules / "movian" / "linked"
+        try:
+            real.mkdir(parents=True, exist_ok=True)
+            (real / "probe.js").write_text("exports.a = function(){};\n",
+                                           encoding="utf-8")
+            os.symlink(real, link, target_is_directory=True)
+            self.assertIsNone(
+                gen.expected_runtime_modules().get("movian/linked/probe"))
+            problems = gen.runtime_oracle_census(
+                self._oracle(), self._artifact())
+            self.assertTrue(
+                any("directory symlink" in problem for problem in problems),
+                problems)
+        finally:
+            if link.is_symlink():
+                link.unlink()
+            (real / "probe.js").unlink(missing_ok=True)
+            if real.is_dir():
+                real.rmdir()
+        self.assertEqual(gen.symlinked_directories(), [])
+
+    def test_the_resolver_bound_is_the_one_the_introspector_uses(self):
+        # Two different bounds would make the census expect a module the
+        # capture cannot reach, and no recapture could clear it.
+        source = (gen.INTROSPECTOR_DIR / "introspector.js").read_text(
+            encoding="utf-8")
+        self.assertIn("var MODSEARCH_PATH_SIZE = %d;"
+                      % gen.MODSEARCH_PATH_SIZE, source)
+        # And that both walks actually consult it. The bound is what
+        # terminates them: fs_scandir classifies with stat(), not lstat()
+        # (fa_fs.c:137-142), so a directory symlink pointing back at an
+        # ancestor reads as an ordinary directory and the recursion descends
+        # through it until the interpreter stack gives out -- measured, and
+        # the error it raised then said only "cannot list", which sends the
+        # reader after an ACL problem that is not there.
+        self.assertEqual(source.count("refuseUnaddressablePath(url);"), 2)
+        self.assertTrue(gen.module_id_fits_resolver("movian/" + "a" * 467))
+        self.assertFalse(gen.module_id_fits_resolver("movian/" + "a" * 468))
+
+
+class StampedRecipe(unittest.TestCase):
+    """The recipe travels with the capture, so every run rechecks it.
+
+    Comparing it only at adoption would bind it to that moment and nothing
+    after: a later commit could drop a source from SRCS, or move it behind
+    another gate, without touching a .c or the oracle, and every check would
+    stay green while the next binary omits the API the artifact advertises.
+    """
+
+    def _stamped(self):
+        import json
+        oracle = json.loads(
+            gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
+        return oracle["inputs"].get("selection")
+
+    def test_the_committed_stamp_carries_the_recipe(self):
+        stamped = self._stamped()
+        self.assertIsInstance(stamped, dict)
+        self.assertEqual(
+            stamped,
+            gen.makefile_ecmascript_selection(
+                (REPO_ROOT / "Makefile").read_text(encoding="utf-8")))
+
+    def test_adoption_writes_the_recipe_into_the_stamp(self):
+        # Checking the committed stamp is not the same as checking that
+        # adoption produces one: renaming the key in cmd_adopt_oracle left
+        # every other test green.
+        import json
+        import subprocess
+        import tempfile
+        payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        payload["capturedAt"] = payload["capturedAt"] + 3000
+        payload.pop("inputs", None)
+        before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+                handle.write(json.dumps(payload))
+                handle.flush()
+                result = subprocess.run(
+                    ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
+                    capture_output=True, text=True, cwd=str(REPO_ROOT))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            written = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+            self.assertEqual(
+                written["inputs"]["selection"],
+                gen.makefile_ecmascript_selection(
+                    (REPO_ROOT / "Makefile").read_text(encoding="utf-8")))
+        finally:
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
+
+    def test_a_recipe_change_after_adoption_is_caught(self):
+        import json
+        artifact = json.loads(gen.ARTIFACT_PATH.read_text(encoding="utf-8"))
+        oracle = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        makefile = REPO_ROOT / "Makefile"
+        original = makefile.read_text(encoding="utf-8")
+        try:
+            makefile.write_text(
+                original.replace("\tsrc/ecmascript/es_fs.c \\\n", ""),
+                encoding="utf-8")
+            ok, output, _report = gen._check_runtime_oracle(artifact, oracle)
+            self.assertFalse(ok)
+            self.assertIn("es_fs.c", output)
+        finally:
+            makefile.write_text(original, encoding="utf-8")
+
+    def test_a_stamp_without_a_recipe_is_refused(self):
+        import copy
+        import json
+        artifact = json.loads(gen.ARTIFACT_PATH.read_text(encoding="utf-8"))
+        oracle = copy.deepcopy(
+            json.loads(gen.RUNTIME_ORACLE_PATH.read_text()))
+        oracle["inputs"].pop("selection")
+        ok, output, _report = gen._check_runtime_oracle(artifact, oracle)
+        self.assertFalse(ok)
+        self.assertIn("records no recipe selection", output)
+
+
+class ModuleCensus(unittest.TestCase):
+    """A module nobody listed was unobserved by the capture and, in syntax
+    the scanner cannot read, missing from the artifact too. Two blind sides
+    agree about nothing."""
+
+    def _oracle(self):
+        import json
+        return json.loads(
+            gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
+
+    def _artifact(self):
+        import json
+        return json.loads(gen.ARTIFACT_PATH.read_text(encoding="utf-8"))
+
+    def test_the_committed_capture_walked_everything_this_tree_has(self):
+        self.assertEqual(
+            gen.runtime_oracle_census(self._oracle(), self._artifact()), [])
+
+    def test_the_census_asks_what_was_walked_not_what_was_attempted(self):
+        # `modules` is the list of names the run TRIED, and the introspector
+        # builds it by walking the same directory this census walks -- so
+        # comparing the two could not disagree. A module that failed to load
+        # is in `modules`, in `loadErrors`, and has no members at all; for a
+        # module the static scanner also cannot read there is then nothing
+        # left to compare, and the gate would pass on a capture that saw
+        # nothing.
+        import copy
+        oracle = copy.deepcopy(self._oracle())
+        oracle["loadErrors"] = {"movian/page": "Error: boom"}
+        problems = gen.runtime_oracle_census(oracle, self._artifact())
+        self.assertTrue(any("could not load it" in problem
+                            for problem in problems), problems)
+
+    def test_a_primitive_export_counts_as_observed(self):
+        # `exports = null` or a string loads fine and has no object to walk;
+        # the introspector records `not-applicable`. Calling that unobserved
+        # would make the gate permanently red for a valid module, and the
+        # artifact records no members for it either.
+        import copy
+        oracle = copy.deepcopy(self._oracle())
+        oracle["tier1"]["url"] = {"status": "not-applicable"}
+        self.assertEqual(
+            gen.runtime_oracle_census(oracle, self._artifact()), [])
+
+    def test_a_record_claiming_a_walk_must_carry_one(self):
+        # `{"status": "walked"}` is a claim of observation with none in it.
+        # For modules whose shapes are reached through tier2/tier3 rather
+        # than tier1 -- http, movian/settings, url -- nothing downstream
+        # notices the loss, so the census is the only barrier. Measured:
+        # gutting tier1 for movian/sqlite or movian/page does fail the
+        # member comparison; for these three it did not.
+        import copy
+        for name in ("http", "url", "movian/settings"):
+            oracle = copy.deepcopy(self._oracle())
+            oracle["tier1"][name] = {"status": "walked"}
+            problems = gen.runtime_oracle_census(oracle, self._artifact())
+            self.assertTrue(
+                any("carries no functionExports" in problem
+                    for problem in problems), (name, problems))
+
+    def test_a_malformed_record_is_reported_not_raised(self):
+        # A record that is not an object at all. Reporting it keeps the gate
+        # a gate; raising turns a corrupt oracle into a traceback whose
+        # meaning depends on the harness.
+        import copy
+        oracle = copy.deepcopy(self._oracle())
+        oracle["tier1"]["fs"] = "unavailable"
+        problems = gen.runtime_oracle_census(oracle, self._artifact())
+        self.assertTrue(any("not an object" in problem
+                            for problem in problems), problems)
+
+    def test_a_module_the_capture_did_not_walk_fails(self):
+        import copy
+        oracle = copy.deepcopy(self._oracle())
+        oracle["tier1"]["movian/page"] = {"status": "unavailable"}
+        problems = gen.runtime_oracle_census(oracle, self._artifact())
+        self.assertTrue(any("did not walk it (unavailable)" in problem
+                            for problem in problems), problems)
+
+    def test_an_oracle_without_tier1_fails(self):
+        import copy
+        oracle = copy.deepcopy(self._oracle())
+        oracle.pop("tier1")
+        self.assertTrue(gen.runtime_oracle_census(oracle, self._artifact()))
+
+    def test_a_registration_this_census_cannot_read_fails(self):
+        # `#define NAME "probe"` then `ES_MODULE(NAME, ...)`. The artifact
+        # scanner cannot name it either, and natives are not files to
+        # discover, so all three sides would be blind at once.
+        victim = REPO_ROOT / "src" / "ecmascript" / "es_fs.c"
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(
+                original + '\n#define PROBE_NAME "probe"\n'
+                           'ES_MODULE(PROBE_NAME, fnlist_fs);\n',
+                encoding="utf-8")
+            self.assertTrue(gen.unresolved_native_registrations())
+            problems = gen.runtime_oracle_census(
+                self._oracle(), self._artifact())
+            self.assertTrue(any("cannot read" in problem
+                                for problem in problems), problems)
+        finally:
+            victim.write_text(original, encoding="utf-8")
+
+    def test_a_commented_out_registration_is_not_a_module(self):
+        # The mirror of the Makefile-comment rule, in the other language:
+        # `/* ES_MODULE("dead", ...) */` registers nothing, and expecting it
+        # makes the census go red on a correct runtime.
+        victim = REPO_ROOT / "src" / "ecmascript" / "es_fs.c"
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(
+                original + '\n/* ES_MODULE("dead", fnlist_fs); */\n'
+                           '// ES_MODULE("alsodead", fnlist_fs);\n',
+                encoding="utf-8")
+            expected = gen.expected_runtime_modules()
+            self.assertNotIn("native/dead", expected)
+            self.assertNotIn("native/alsodead", expected)
+            self.assertEqual(gen.unresolved_native_registrations(), [])
+        finally:
+            victim.write_text(original, encoding="utf-8")
+
+    def test_nothing_is_unreachable_today(self):
+        self.assertEqual(gen.unreachable_module_files(), [])
+
+    def test_a_file_in_the_alias_namespace_is_rejected(self):
+        # es_modsearch rewrites `showtime/` to `movian/` before resolving a
+        # path, so `showtime/probe.js` on disk can never be loaded. Recording
+        # it as a module file collapsed it into the alias of the same name --
+        # one expected entry for two things, with the capture observing only
+        # one of them, and the census reporting nothing.
+        directory = (REPO_ROOT / "res" / "ecmascript" / "modules"
+                     / "showtime")
+        probe = directory / "probe.js"
+        try:
+            directory.mkdir(exist_ok=True)
+            probe.write_text("exports.a = function(){};\n", encoding="utf-8")
+            self.assertIsNone(
+                gen.expected_runtime_modules().get("showtime/probe"))
+            problems = gen.runtime_oracle_census(
+                self._oracle(), self._artifact())
+            self.assertTrue(any("cannot be loaded" in problem
+                                for problem in problems), problems)
+        finally:
+            probe.unlink(missing_ok=True)
+            if directory.is_dir() and not any(directory.iterdir()):
+                directory.rmdir()
+
+    def test_nothing_shadows_a_core_module_today(self):
+        self.assertEqual(gen.shadowing_plugin_modules(), [])
+
+    def test_a_plugin_file_taking_a_core_module_id_fails(self):
+        # es_modsearch tries the plugin directory first, so `url.js` here is
+        # what require('url') returns -- the capture would describe this file
+        # while the artifact describes the core module, under one name.
+        shadow = gen.INTROSPECTOR_DIR / "url.js"
+        try:
+            shadow.write_text("exports.format = function(){};\n",
+                              encoding="utf-8")
+            problems = gen.shadowing_plugin_modules()
+            self.assertTrue(any("shadows the core module url" in problem
+                                for problem in problems), problems)
+            self.assertTrue(any("shadows the core module url" in problem
+                                for problem in gen.runtime_oracle_census(
+                                    self._oracle())))
+        finally:
+            shadow.unlink(missing_ok=True)
+
+    def test_nothing_registers_outside_the_artifact_scanner_today(self):
+        self.assertEqual(gen.native_registrations_out_of_scope(), [])
+
+    def test_an_expected_module_absent_from_the_artifact_fails(self):
+        # `ES_MODULE ("probe", ...)` -- valid C, a space before the paren --
+        # is read by the census and not by build_native_modules(), whose
+        # regex anchors at the line start with no space. Aligning the two
+        # regexes would be the wrong repair: the census would then read the
+        # C exactly as the artifact scanner does and a syntax neither
+        # understands would be missing from both. Two independent readings
+        # that must agree is the point.
+        import copy
+        victim = REPO_ROOT / "src" / "ecmascript" / "es_fs.c"
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(
+                original + '\nES_MODULE ("probe", fnlist_probe);\n',
+                encoding="utf-8")
+            oracle = copy.deepcopy(self._oracle())
+            oracle["modules"] = oracle["modules"] + ["native/probe"]
+            oracle["tier1"]["native/probe"] = {"status": "walked",
+                                               "functionExports": {}}
+            problems = gen.runtime_oracle_census(oracle, self._artifact())
+            self.assertTrue(
+                any("the artifact has no record of it" in problem
+                    for problem in problems), problems)
+        finally:
+            victim.write_text(original, encoding="utf-8")
+
+    def test_the_showtime_aliases_are_not_expected_in_the_artifact(self):
+        # The artifact carries no record for an alias; es_modsearch resolves
+        # it to the movian/* file. Requiring one would be 14 false failures.
+        problems = gen.runtime_oracle_census(self._oracle(), self._artifact())
+        self.assertEqual(problems, [])
+
+    def test_the_census_without_an_artifact_refuses(self):
+        # Rather than skipping the comparison it cannot make.
+        self.assertTrue(gen.runtime_oracle_census(self._oracle()))
+
+    def test_a_registration_the_artifact_scanner_cannot_see_fails(self):
+        # `build_native_modules()` opens `es_*.c` and nothing else, so a
+        # module registered in `ecmascript.c` is real at runtime and absent
+        # from the artifact forever.
+        victim = REPO_ROOT / "src" / "ecmascript" / "ecmascript.c"
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(
+                original + '\nES_MODULE("probe", fnlist_probe);\n',
+                encoding="utf-8")
+            problems = gen.native_registrations_out_of_scope()
+            self.assertTrue(any("never reads" in problem
+                                for problem in problems), problems)
+            self.assertNotIn("native/probe", gen.expected_runtime_modules())
+            self.assertTrue(any("never reads" in problem for problem in
+                                gen.runtime_oracle_census(
+                                    self._oracle(), self._artifact())))
+        finally:
+            victim.write_text(original, encoding="utf-8")
+
+    def test_a_macro_ending_in_es_module_is_not_a_registration(self):
+        # `MY_ES_MODULE(...)` is a different macro. Without an identifier
+        # boundary it reads as a registration and invents a module, or an
+        # unresolved one -- a red on a tree that registers nothing.
+        victim = REPO_ROOT / "src" / "ecmascript" / "es_fs.c"
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(
+                original + '\nMY_ES_MODULE("probe", fnlist_fs);\n'
+                           'MY_ES_MODULE(OTHER_NAME, fnlist_fs);\n',
+                encoding="utf-8")
+            self.assertNotIn("native/probe", gen.expected_runtime_modules())
+            self.assertEqual(gen.unresolved_native_registrations(), [])
+            self.assertEqual(gen.native_registrations_out_of_scope(), [])
+        finally:
+            victim.write_text(original, encoding="utf-8")
+
+    def test_a_registration_inside_a_c_string_is_text(self):
+        # The name reader cannot be fooled -- it needs an unescaped quote
+        # after the paren and a quote inside a C string is escaped. The
+        # invocation COUNTER can be, since `ES_MODULE(` needs no quote, and
+        # it would then report an unreadable registration in a file that
+        # registers nothing. Both halves are asserted because only the
+        # second one actually needs the guard.
+        names, unreadable = gen._c_registrations(
+            'const char *s = "ES_MODULE(\\"phantom\\", f);";\n'
+            'ES_MODULE("real", fnlist);\n')
+        self.assertEqual(names, ["real"])
+        self.assertEqual(unreadable, 0)
+
+    def test_no_native_name_is_registered_twice_today(self):
+        self.assertEqual(gen.duplicate_native_registrations(), [])
+
+    def test_one_name_registered_from_two_files_is_reported(self):
+        # The expectation dict keeps whichever came last, so every later
+        # message would name the wrong file.
+        victim = REPO_ROOT / "src" / "ecmascript" / "es_fs.c"
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(original + '\nES_MODULE("crypto", fnlist_fs);\n',
+                              encoding="utf-8")
+            problems = gen.duplicate_native_registrations()
+            self.assertTrue(any("native/crypto is registered in both" in p
+                                for p in problems), problems)
+        finally:
+            victim.write_text(original, encoding="utf-8")
+
+    def test_no_registration_is_unresolved_today(self):
+        self.assertEqual(gen.unresolved_native_registrations(), [])
+
+    def test_every_module_file_is_expected_with_its_alias(self):
+        expected = gen.expected_runtime_modules()
+        self.assertIn("movian/page", expected)
+        self.assertIn("showtime/page", expected)
+        self.assertIn("fs", expected)
+        self.assertNotIn("showtime/fs", expected)
+
+    def test_natives_come_from_the_c_registrations(self):
+        expected = gen.expected_runtime_modules()
+        natives = {name for name in expected if name.startswith("native/")}
+        self.assertIn("native/fs", natives)
+        self.assertTrue(expected["native/fs"].startswith("ES_MODULE in "))
+
+    def test_a_new_module_file_the_capture_never_loaded_fails(self):
+        probe = (REPO_ROOT / "res" / "ecmascript" / "modules" / "movian"
+                 / "probe.js")
+        try:
+            probe.write_text("exports['probe' + 'Fn'] = function(){};\n",
+                             encoding="utf-8")
+            problems = gen.runtime_oracle_census(
+                self._oracle(), self._artifact())
+            self.assertTrue(
+                any("movian/probe exists" in problem for problem in problems),
+                problems)
+            self.assertTrue(
+                any("showtime/probe exists" in problem
+                    for problem in problems), problems)
+        finally:
+            probe.unlink(missing_ok=True)
+
+    def test_a_new_native_registration_the_capture_never_loaded_fails(self):
+        victim = REPO_ROOT / "src" / "ecmascript" / "es_fs.c"
+        original = victim.read_text(encoding="utf-8")
+        try:
+            victim.write_text(original + '\nES_MODULE("probe", fnlist_fs);\n',
+                              encoding="utf-8")
+            problems = gen.runtime_oracle_census(
+                self._oracle(), self._artifact())
+            self.assertTrue(
+                any("native/probe exists" in problem for problem in problems),
+                problems)
+        finally:
+            victim.write_text(original, encoding="utf-8")
+
+    def test_a_module_nothing_provides_fails(self):
+        import copy
+        oracle = copy.deepcopy(self._oracle())
+        oracle["modules"] = oracle["modules"] + ["movian/ghost"]
+        problems = gen.runtime_oracle_census(oracle, self._artifact())
+        self.assertTrue(any("movian/ghost was loaded" in problem
+                            for problem in problems), problems)
+
+    def test_a_capture_that_could_not_enumerate_fails_the_check(self):
+        # The capture records the failure rather than a short list. It has to
+        # reach the verdict, or a run that could not look would pass as a run
+        # that found nothing.
+        import copy
+        import json
+        oracle = json.loads(
+            gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
+        artifact = json.loads(
+            gen.ARTIFACT_PATH.read_text(encoding="utf-8"))
+        ok, _out, _report = gen._check_runtime_oracle(artifact, oracle)
+        self.assertTrue(ok)
+        blinded = copy.deepcopy(oracle)
+        blinded["moduleDiscoveryError"] = "Error: cannot list dataroot://..."
+        ok, output, _report = gen._check_runtime_oracle(artifact, blinded)
+        self.assertFalse(ok)
+        self.assertIn("could not enumerate the module files", output)
+
+    def test_a_capture_that_is_not_an_oracle_fails(self):
+        self.assertTrue(gen.runtime_oracle_census(None, self._artifact()))
+        self.assertTrue(
+            gen.runtime_oracle_census("not an object", self._artifact()))
 
 
 class Floor(unittest.TestCase):
