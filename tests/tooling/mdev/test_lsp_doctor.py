@@ -214,6 +214,56 @@ class AnalyzerFreshness(unittest.TestCase):
             self.assertIn("cannot tell", message)
             self.assertIn("src/misc/pool.d", message)
 
+    def test_an_empty_depfile_is_not_read_as_no_dependencies(self):
+        # A compile killed part-way writes one. "No prerequisites" and "I
+        # could not read it" are different answers.
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            root = self._tree(stack)
+            (root / "build.debug" / "src" / "misc" / "pool.d").write_text(
+                "", encoding="utf-8")
+            ok, message = lspdoctor._check_analyzer()
+            self.assertFalse(ok, message)
+            self.assertIn("cannot tell", message)
+
+    def test_a_rule_with_no_prerequisites_is_unreadable_too(self):
+        # A truncation that keeps the colon and loses the list. A real
+        # depfile always names at least the source, so an empty list is not
+        # an answer -- and it is the shape an empty-file guard alone misses.
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            root = self._tree(stack)
+            (root / "build.debug" / "src" / "misc" / "pool.d").write_text(
+                "src/misc/pool.o:\n", encoding="utf-8")
+            ok, message = lspdoctor._check_analyzer()
+            self.assertFalse(ok, message)
+            self.assertIn("cannot tell", message)
+
+    def test_a_recorded_input_that_vanished_is_not_skipped(self):
+        # The compiler says the binary depends on it and the tree no longer
+        # has it, so the binary was built from something that is gone.
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            root = self._tree(stack)
+            (root / self.HEADER).unlink()
+            ok, message = lspdoctor._check_analyzer()
+            self.assertFalse(ok, message)
+            self.assertIn("no longer in the tree", message)
+            self.assertIn(self.HEADER, message)
+
+    def test_success_claims_only_what_was_checked(self):
+        # Reading the current object list does not prove it is the list that
+        # produced the binary: adding an already-old object to
+        # MOVIAN_ANALYZE_CORE_OBJS moves no timestamp, and this check cannot
+        # see it. Measured -- so the wording must not say "built from".
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            self._tree(stack)
+            ok, message = lspdoctor._check_analyzer()
+            self.assertTrue(ok, message)
+            self.assertIn("the recipe now names", message)
+            self.assertNotIn("it is built from", message)
+
     def test_a_blind_parser_fails_instead_of_passing(self):
         # Nothing newer than the binary is found when nothing is looked at,
         # so an extractor that stops matching would score perfectly.

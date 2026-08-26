@@ -118,7 +118,11 @@ def _depfile_prerequisites(depfile: Path, root: Path) -> list[str] | None:
     # first colon of the first rule.
     body = text.replace("\\\n", " ").split(":", 1)
     if len(body) != 2:
-        return []
+        # An empty or truncated depfile -- a compile killed part-way writes
+        # one -- has no rule to read. Returning "no prerequisites" would make
+        # it mean "nothing this object depends on changed", which is the
+        # silence this whole check exists to refuse.
+        return None
     for token in body[1].split():
         if token.endswith(":"):
             break
@@ -132,6 +136,10 @@ def _depfile_prerequisites(depfile: Path, root: Path) -> list[str] | None:
         name = relative.as_posix()
         if name not in found:
             found.append(name)
+    if not found:
+        # A rule with a colon and no prerequisites is equally unreadable: the
+        # source itself is always among them in a real depfile.
+        return None
     return found
 
 
@@ -194,15 +202,31 @@ def _check_analyzer() -> tuple[bool, str]:
         return False, ("cannot tell what the analyzer was compiled against: "
                        "no depfile at %s; rebuild with make BUILD=debug "
                        "-j$(nproc) movian-analyze" % ", ".join(unreadable))
+    # A prerequisite the compiler recorded and the tree no longer has means
+    # the binary was built from something that is gone. Skipping it -- which
+    # `is_file()` used to do quietly -- lets an analyzer built from a deleted
+    # header report as fresh.
+    vanished = [name for name in inputs
+                if not (REPOSITORY_ROOT / name).exists()]
+    if vanished:
+        return False, ("the analyzer was compiled against %s, which is no "
+                       "longer in the tree; run make BUILD=debug -j$(nproc) "
+                       "movian-analyze" % ", ".join(sorted(vanished)))
     newer = [name for name in inputs
-             if (REPOSITORY_ROOT / name).is_file()
-             and (REPOSITORY_ROOT / name).stat().st_mtime > built]
+             if (REPOSITORY_ROOT / name).stat().st_mtime > built]
     if newer:
         return False, ("build.debug/movian-analyze is older than %s; run "
                        "make BUILD=debug -j$(nproc) movian-analyze"
                        % ", ".join(sorted(newer)))
+    # "the recipe NOW names", not "it was built from". Reading the current
+    # list does not prove it is the list that produced the binary: adding an
+    # already-old object to MOVIAN_ANALYZE_CORE_OBJS changes what the
+    # analyzer should contain while no timestamp moves, and mtimes cannot see
+    # it. Closing that needs a signature recorded at build time, which is a
+    # Makefile change and out of scope here (movian#225) -- so the message
+    # claims only what was actually checked.
     return True, ("build.debug/movian-analyze is executable and newer than "
-                  "all %d inputs it is built from" % len(inputs))
+                  "all %d inputs the recipe now names" % len(inputs))
 
 
 # `gen.py --check` grew: it now compiles the tsc positive and negative
