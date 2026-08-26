@@ -6,8 +6,10 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
+import time
 from typing import Any
 
 
@@ -43,54 +45,240 @@ def _check_python() -> tuple[bool, str]:
     return True, "%d.%d.%d" % version[:3]
 
 
+# The analyzer links twelve objects, and the Makefile is where that list
+# lives. Reading it here rather than repeating it means the two cannot drift:
+# a source added to the analyzer without this list noticing would make the
+# check pass over an input it never looked at.
+_ANALYZE_OBJ_VARS = ("MOVIAN_ANALYZE_CORE_OBJS", "MOVIAN_ANALYZE_JS_OBJS",
+                     "MOVIAN_ANALYZE_OWN_OBJS")
+_ANALYZE_ASSIGN_RE = re.compile(
+    r"^\s*(%s)\s*(?:\+|::|:|\?|!)?=(.*)$" % "|".join(_ANALYZE_OBJ_VARS))
+_ANALYZE_OBJ_RE = re.compile(r"[$][({](BUILDDIR|MOVIAN_ANALYZE_BUILDDIR)[)}]"
+                             r"/([A-Za-z0-9_./-]+)\.o")
+_ANALYZE_DIR = "support/devtools/analyze"
+# `stubs-auto.c` is regenerated from the objects whenever this script changes
+# (Makefile:1043-1049), and the result is linked in -- so editing it makes the
+# binary stale with no `.c` and no header having moved.
+_ANALYZE_GENERATOR_RE = re.compile(
+    r"[$][({]C[)}]/[$][({]MOVIAN_ANALYZE_DIR[)}]/([A-Za-z0-9_.-]+\.sh)")
+
+
+def analyzer_sources(makefile: str) -> list[str]:
+    """The repo-relative `.c` behind every object the analyzer links.
+
+    `${BUILDDIR}/x.o` is compiled from `x.c` at the repo root;
+    `${MOVIAN_ANALYZE_BUILDDIR}/x.o` from `support/devtools/analyze/x.c`.
+    Continuation lines are followed, because every one of these lists is
+    written across them.
+    """
+    sources: list[str] = []
+    inside = False
+    for raw in makefile.split("\n"):
+        line = re.sub(r"(?<!\\)#.*$", "", raw)
+        if _ANALYZE_ASSIGN_RE.match(line):
+            inside = True
+        elif not inside:
+            continue
+        for where, stem in _ANALYZE_OBJ_RE.findall(line):
+            source = ("%s/%s.c" % (_ANALYZE_DIR, stem)
+                      if where == "MOVIAN_ANALYZE_BUILDDIR" else
+                      "%s.c" % stem)
+            if source not in sources:
+                sources.append(source)
+        if not line.rstrip().endswith("\\"):
+            inside = False
+    for name in _ANALYZE_GENERATOR_RE.findall(makefile):
+        script = "%s/%s" % (_ANALYZE_DIR, name)
+        if script not in sources:
+            sources.append(script)
+    return sources
+
+
+def _depfile_prerequisites(depfile: Path, root: Path) -> list[str] | None:
+    """Every in-repo file the compiler recorded this object as depending on.
+
+    `-MD -MP` writes the real answer at compile time, headers included, so
+    there is no second list here to drift from the first. None when the
+    depfile is absent: the object was built without it or the build directory
+    was cleaned, and "I could not tell" is not "nothing changed".
+
+    Prerequisites outside the repository -- /usr/include and the like -- are
+    left out on purpose. A libc upgrade does make `make` want to relink, but
+    it is not what a developer edits, and a check that fires on it is the
+    check nobody reads. The question here is whether YOUR sources moved under
+    the binary.
+    """
+    try:
+        text = depfile.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    found = []
+    # `target: a b \\\n c` plus the `-MP` phony `header.h:` lines, which
+    # carry no prerequisites and are skipped by taking only what follows the
+    # first colon of the first rule.
+    body = text.replace("\\\n", " ").split(":", 1)
+    if len(body) != 2:
+        # An empty or truncated depfile -- a compile killed part-way writes
+        # one -- has no rule to read. Returning "no prerequisites" would make
+        # it mean "nothing this object depends on changed", which is the
+        # silence this whole check exists to refuse.
+        return None
+    for token in body[1].split():
+        if token.endswith(":"):
+            break
+        candidate = Path(token)
+        if not candidate.is_absolute():
+            candidate = root / token
+        try:
+            relative = candidate.resolve().relative_to(root.resolve())
+        except ValueError:
+            continue
+        name = relative.as_posix()
+        if name not in found:
+            found.append(name)
+    if not found:
+        # A rule with a colon and no prerequisites is equally unreadable: the
+        # source itself is always among them in a real depfile.
+        return None
+    return found
+
+
 def _check_analyzer() -> tuple[bool, str]:
     analyzer = REPOSITORY_ROOT / "build.debug" / "movian-analyze"
     if not analyzer.is_file() or not os.access(analyzer, os.X_OK):
         return False, ("build.debug/movian-analyze is not an executable "
                        "file; run ./support/configure-linux-debug.sh && "
                        "make BUILD=debug -j$(nproc) movian-analyze")
+    # `make -q` answers "would make do any work?", which is a far broader
+    # question than "is this binary newer than what it was built from". Every
+    # object depends on `Makefile`, so a checkout that merely touched that
+    # file -- a branch switch does -- made make want to recompile all ten and
+    # the doctor call a working analyzer stale. Measured in a checkout whose
+    # twelve analyzer sources were all older than the binary: `make
+    # BUILD=debug -q movian-analyze` still exited 1, make's own reason being
+    # `Prerequisite 'Makefile' is newer than target .../pool.o`. The
+    # parse-time EXTDEPS gate (Makefile:46-52) is a second way in, needing no
+    # rebuild of anything the analyzer uses.
     try:
-        completed = subprocess.run(
-            ["make", "BUILD=debug", "-q", "movian-analyze"],
-            cwd=REPOSITORY_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False, ("make BUILD=debug -q movian-analyze could not run; "
-                       "run ./support/configure-linux-debug.sh")
-    if completed.returncode == 1:
-        return False, ("build.debug/movian-analyze is stale; run make "
-                       "BUILD=debug -j$(nproc) movian-analyze")
-    if completed.returncode:
-        return False, ("make BUILD=debug -q movian-analyze failed; run "
-                       "./support/configure-linux-debug.sh")
-    return True, "build.debug/movian-analyze is executable and up to date"
+        makefile = (REPOSITORY_ROOT / "Makefile").read_text(encoding="utf-8")
+    except OSError as exc:
+        return False, ("cannot read the Makefile to learn what the analyzer "
+                       "is built from: %s" % exc)
+    sources = analyzer_sources(makefile)
+    if not sources:
+        # A parser that stops matching finds nothing newer and passes -- green
+        # because it looked at no inputs, which is the failure this check
+        # exists to avoid.
+        return False, ("the Makefile names no analyzer objects, so this "
+                       "check has gone blind; expected %s"
+                       % ", ".join(_ANALYZE_OBJ_VARS))
+    built = analyzer.stat().st_mtime
+    missing = [name for name in sources
+               if not (REPOSITORY_ROOT / name).is_file()]
+    if missing:
+        return False, ("the Makefile names analyzer inputs that are not on "
+                       "disk: %s" % ", ".join(missing))
+    # The headers each object was actually compiled against, from the
+    # depfiles `-MD -MP` wrote at compile time. Comparing only the `.c` files
+    # would miss an edit to `glw_view.h`, which relinks the analyzer and
+    # changes what it does.
+    inputs = list(sources)
+    unreadable = []
+    for name in sources:
+        if not name.endswith(".c"):
+            continue
+        depfile = REPOSITORY_ROOT / "build.debug" / (name[:-len(".c")] + ".d")
+        prerequisites = _depfile_prerequisites(depfile, REPOSITORY_ROOT)
+        if prerequisites is None:
+            unreadable.append(depfile.relative_to(REPOSITORY_ROOT).as_posix())
+            continue
+        for prerequisite in prerequisites:
+            if prerequisite not in inputs:
+                inputs.append(prerequisite)
+    if unreadable:
+        # Silently comparing against the `.c` files alone would answer a
+        # narrower question than the one asked, which is the defect this
+        # check was rewritten to stop making.
+        return False, ("cannot tell what the analyzer was compiled against: "
+                       "no depfile at %s; rebuild with make BUILD=debug "
+                       "-j$(nproc) movian-analyze" % ", ".join(unreadable))
+    # A prerequisite the compiler recorded and the tree no longer has means
+    # the binary was built from something that is gone. Skipping it -- which
+    # `is_file()` used to do quietly -- lets an analyzer built from a deleted
+    # header report as fresh.
+    vanished = [name for name in inputs
+                if not (REPOSITORY_ROOT / name).exists()]
+    if vanished:
+        return False, ("the analyzer was compiled against %s, which is no "
+                       "longer in the tree; run make BUILD=debug -j$(nproc) "
+                       "movian-analyze" % ", ".join(sorted(vanished)))
+    newer = [name for name in inputs
+             if (REPOSITORY_ROOT / name).stat().st_mtime > built]
+    if newer:
+        return False, ("build.debug/movian-analyze is older than %s; run "
+                       "make BUILD=debug -j$(nproc) movian-analyze"
+                       % ", ".join(sorted(newer)))
+    # "the recipe NOW names", not "it was built from". Reading the current
+    # list does not prove it is the list that produced the binary: adding an
+    # already-old object to MOVIAN_ANALYZE_CORE_OBJS changes what the
+    # analyzer should contain while no timestamp moves, and mtimes cannot see
+    # it. Closing that needs a signature recorded at build time, which is a
+    # Makefile change and out of scope here (movian#225) -- so the message
+    # claims only what was actually checked.
+    return True, ("build.debug/movian-analyze is executable and newer than "
+                  "all %d inputs the recipe now names" % len(inputs))
+
+
+# `gen.py --check` grew: it now compiles the tsc positive and negative
+# fixtures, the generated-dts fixtures, every plugin example against its own
+# apiversion, and 20 core modules. The old 30-second bound was below its
+# runtime on every machine here -- measured on bba50466b, 36 s in WSL and
+# 85 s on the Debian stand, both exiting 0 -- so this line was permanently
+# red, and red with "could not run", which is the one thing it must not say
+# about a check that ran and passed.
+#
+# 360 s is roughly four times the slowest of those two, chosen so a machine
+# well slower than the stand still gets a verdict rather than a timeout. The
+# elapsed time is reported on success too: that is how the next person sees
+# the bound tightening before it starts failing again.
+METADATA_CHECK_TIMEOUT = 360.0
 
 
 def _check_metadata() -> tuple[bool, str]:
     generator = REPOSITORY_ROOT / "support" / "devtools" / "metadata" / "gen.py"
+    started = time.monotonic()
     try:
         completed = subprocess.run(
             [sys.executable, str(generator), "--check"],
             cwd=REPOSITORY_ROOT,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=METADATA_CHECK_TIMEOUT,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return False, "gen.py --check could not run: %s" % exc
+    except subprocess.TimeoutExpired:
+        # Deliberately not phrased as a verdict on the tree. Nothing was
+        # learned about freshness here, and saying so is different from
+        # saying the metadata is stale.
+        return False, ("gen.py --check did not finish within %ds, so "
+                       "freshness is UNKNOWN -- this says nothing about the "
+                       "tree; run python3 "
+                       "support/devtools/metadata/gen.py --check by hand"
+                       % METADATA_CHECK_TIMEOUT)
+    except OSError as exc:
+        return False, "gen.py --check could not be started: %s" % exc
+    elapsed = time.monotonic() - started
     if completed.returncode:
         combined = completed.stdout + completed.stderr
         if "METADATA DRIFT" in combined:
             return False, ("generated/movian-metadata.json is stale; run "
                            "python3 support/devtools/metadata/gen.py")
-        return False, ("gen.py --check failed; run python3 "
-                       "support/devtools/metadata/gen.py --check")
-    return True, "generated/movian-metadata.json is fresh"
+        return False, ("gen.py --check failed in %.0fs; run python3 "
+                       "support/devtools/metadata/gen.py --check"
+                       % elapsed)
+    return True, ("generated/movian-metadata.json is fresh (checked in "
+                  "%.0fs of %ds allowed)" % (elapsed,
+                                             METADATA_CHECK_TIMEOUT))
 
 
 def _load_lsp_client() -> type[Any]:

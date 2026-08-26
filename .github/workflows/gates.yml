@@ -121,6 +121,15 @@ jobs:
           python3 -m unittest discover -s tests/tooling/mdev
           -p 'test_smoke_discovery.py' -v
 
+      # Same reason, same shape: the doctor tests build their trees in
+      # tempfiles and mock the subprocess, so they need no Movian and no
+      # build. Selected by filename for the same reason as the line above --
+      # discovering the directory would drag in the suites that do.
+      - name: mdev lsp doctor rules
+        run: >
+          python3 -m unittest discover -s tests/tooling/mdev
+          -p 'test_lsp_doctor.py' -v
+
   hygiene:
     name: whitespace and merge markers
     runs-on: ubuntu-latest
