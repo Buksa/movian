@@ -63,15 +63,18 @@ _ANALYZE_GENERATOR_RE = re.compile(
     r"[$][({]C[)}]/[$][({]MOVIAN_ANALYZE_DIR[)}]/([A-Za-z0-9_.-]+\.sh)")
 
 
-def analyzer_sources(makefile: str) -> list[str]:
-    """The repo-relative `.c` behind every object the analyzer links.
+def _analyzer_objects(makefile: str) -> list[str]:
+    """Every object the analyzer links, BUILDDIR-relative and extensionless.
 
-    `${BUILDDIR}/x.o` is compiled from `x.c` at the repo root;
-    `${MOVIAN_ANALYZE_BUILDDIR}/x.o` from `support/devtools/analyze/x.c`.
-    Continuation lines are followed, because every one of these lists is
-    written across them.
+    `${BUILDDIR}/x.o` sits at the repo root; `${MOVIAN_ANALYZE_BUILDDIR}/x.o`
+    under `support/devtools/analyze`. Continuation lines are followed,
+    because every one of these lists is written across them.
+
+    One reader for both callers: the source list and the recorded selection
+    are the same objects seen twice, and two copies of this loop would drift
+    into disagreeing about which they are.
     """
-    sources: list[str] = []
+    stems: list[str] = []
     inside = False
     for raw in makefile.split("\n"):
         line = re.sub(r"(?<!\\)#.*$", "", raw)
@@ -80,18 +83,74 @@ def analyzer_sources(makefile: str) -> list[str]:
         elif not inside:
             continue
         for where, stem in _ANALYZE_OBJ_RE.findall(line):
-            source = ("%s/%s.c" % (_ANALYZE_DIR, stem)
-                      if where == "MOVIAN_ANALYZE_BUILDDIR" else
-                      "%s.c" % stem)
-            if source not in sources:
-                sources.append(source)
+            name = ("%s/%s" % (_ANALYZE_DIR, stem)
+                    if where == "MOVIAN_ANALYZE_BUILDDIR" else stem)
+            if name not in stems:
+                stems.append(name)
         if not line.rstrip().endswith("\\"):
             inside = False
+    return stems
+
+
+def analyzer_sources(makefile: str) -> list[str]:
+    """The repo-relative `.c` behind every object the analyzer links, plus
+    the scripts that generate linked code."""
+    sources = ["%s.c" % stem for stem in _analyzer_objects(makefile)]
     for name in _ANALYZE_GENERATOR_RE.findall(makefile):
         script = "%s/%s" % (_ANALYZE_DIR, name)
         if script not in sources:
             sources.append(script)
     return sources
+
+
+# The build records its own object selection INSIDE the binary, and this is
+# the marker it writes (Makefile: MOVIAN_ANALYZE_SELECTION_C). Inside, not
+# beside: a signature in a separate file is orphaned the moment someone copies
+# a binary in, and nothing notices. Linked in, it travels with whatever binary
+# is actually there.
+SELECTION_MARKER = "MOVIAN-ANALYZE-SELECTION-V1"
+_SELECTION_RE = re.compile(
+    (SELECTION_MARKER + r"\[([A-Za-z0-9_./ -]*)\]").encode("ascii"))
+
+
+def selection_marker(objects: list[str]) -> bytes:
+    """The exact bytes the build embeds for this selection.
+
+    The writer is a `printf` in the Makefile, not this function -- nothing
+    here can force them to agree, so
+    `test_the_makefile_writes_the_marker_this_module_reads` renders that
+    recipe and compares. This exists so the tests and the reader share one
+    definition of the format rather than three.
+    """
+    return ("%s[%s]" % (SELECTION_MARKER,
+                        " ".join(sorted(objects)))).encode("ascii")
+
+
+def analyzer_selection(makefile: str) -> list[str]:
+    """The objects the recipe links, relative to BUILDDIR, sorted.
+
+    Objects rather than sources: this is what the build records, and
+    comparing sources would not notice an object added from a source already
+    in the list.
+    """
+    return sorted("%s.o" % stem for stem in _analyzer_objects(makefile))
+
+
+def recorded_selection(binary: Path) -> list[str] | None:
+    """The selection the binary carries, or None when it carries none.
+
+    None is not an empty selection. A binary built before this marker
+    existed, or one produced by another route, simply cannot answer -- and
+    "cannot answer" must not read as "nothing changed".
+    """
+    try:
+        blob = binary.read_bytes()
+    except OSError:
+        return None
+    match = _SELECTION_RE.search(blob)
+    if match is None:
+        return None
+    return sorted(match.group(1).decode("ascii").split())
 
 
 def _depfile_prerequisites(depfile: Path, root: Path) -> list[str] | None:
@@ -222,11 +281,37 @@ def _check_analyzer() -> tuple[bool, str]:
     # list does not prove it is the list that produced the binary: adding an
     # already-old object to MOVIAN_ANALYZE_CORE_OBJS changes what the
     # analyzer should contain while no timestamp moves, and mtimes cannot see
-    # it. Closing that needs a signature recorded at build time, which is a
-    # Makefile change and out of scope here (movian#225) -- so the message
-    # claims only what was actually checked.
-    return True, ("build.debug/movian-analyze is executable and newer than "
-                  "all %d inputs the recipe now names" % len(inputs))
+    # it. The signature below closes that (movian#225).
+    # Everything above compares timestamps, and a timestamp cannot see the
+    # recipe's composition change. Adding an object that already exists and
+    # is older than the binary moves nothing -- yet the binary was linked
+    # before that line existed and provably does not contain it. So the last
+    # word belongs to what the BUILD recorded, not to what the recipe now
+    # says (movian#225).
+    recorded = recorded_selection(analyzer)
+    selection = analyzer_selection(makefile)
+    if recorded is None:
+        return False, ("build.debug/movian-analyze carries no selection "
+                       "signature, so which objects it was linked from is "
+                       "UNKNOWN -- a build predating the signature does "
+                       "this; run make BUILD=debug -j$(nproc) movian-analyze "
+                       "to get one")
+    added = [name for name in selection if name not in recorded]
+    dropped = [name for name in recorded if name not in selection]
+    if added or dropped:
+        parts = []
+        if added:
+            parts.append("the recipe now links %s, which this binary was not "
+                         "built from" % ", ".join(added))
+        if dropped:
+            parts.append("this binary was built from %s, which the recipe no "
+                         "longer links" % ", ".join(dropped))
+        return False, ("build.debug/movian-analyze does not match the "
+                       "recipe: %s; run make BUILD=debug -j$(nproc) "
+                       "movian-analyze" % "; and ".join(parts))
+    return True, ("build.debug/movian-analyze is executable, newer than all "
+                  "%d inputs, and records the %d objects it was built from"
+                  % (len(inputs), len(selection)))
 
 
 # `gen.py --check` grew: it now compiles the tsc positive and negative

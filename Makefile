@@ -1031,6 +1031,18 @@ MOVIAN_ANALYZE_OWN_OBJS = \
 MOVIAN_ANALYZE_STUBS_C = ${MOVIAN_ANALYZE_BUILDDIR}/stubs-auto.c
 MOVIAN_ANALYZE_STUBS_O = ${MOVIAN_ANALYZE_BUILDDIR}/stubs-auto.o
 
+# The selection this binary is linked from, recorded IN the binary (#225).
+# Timestamps cannot see the recipe's composition change: adding an object
+# that already exists and is older than the binary moves nothing, yet the
+# binary was linked before that line existed. Recorded inside rather than in
+# a file beside it, so a copied binary carries its own answer instead of
+# inheriting whatever file was left behind.
+MOVIAN_ANALYZE_SELECTION_C = ${MOVIAN_ANALYZE_BUILDDIR}/selection-auto.c
+MOVIAN_ANALYZE_SELECTION_O = ${MOVIAN_ANALYZE_BUILDDIR}/selection-auto.o
+MOVIAN_ANALYZE_SELECTION = $(sort $(patsubst ${BUILDDIR}/%,%,\
+	${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_JS_OBJS} \
+	${MOVIAN_ANALYZE_OWN_OBJS}))
+
 .PHONY: movian-analyze movian-analyze-corpus
 
 movian-analyze: ${MOVIAN_ANALYZE_BIN}
@@ -1051,8 +1063,21 @@ ${MOVIAN_ANALYZE_STUBS_C}: ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_JS_OBJS}
 ${MOVIAN_ANALYZE_STUBS_O}: ${MOVIAN_ANALYZE_STUBS_C}
 	$(CC) -c -o $@ $<
 
+# Depends on the Makefile because the Makefile IS the selection: change the
+# object lists and this regenerates, which is the whole point.
+# `used` stops the COMPILER dropping a symbol nothing references. It is
+# not proof against `--gc-sections`, which this build does not use; if
+# that changes the marker needs KEEP in the link script instead.
+${MOVIAN_ANALYZE_SELECTION_C}: Makefile
+	@mkdir -p $(dir $@)
+	@printf '__attribute__((used)) const char movian_analyze_selection[] =\n  "MOVIAN-ANALYZE-SELECTION-V1[%s]";\n' "${MOVIAN_ANALYZE_SELECTION}" > $@
+
+${MOVIAN_ANALYZE_SELECTION_O}: ${MOVIAN_ANALYZE_SELECTION_C}
+	$(CC) -c -o $@ $<
+
 ${MOVIAN_ANALYZE_BIN}: ${MOVIAN_ANALYZE_CORE_OBJS} ${MOVIAN_ANALYZE_JS_OBJS} \
-    ${MOVIAN_ANALYZE_OWN_OBJS} ${MOVIAN_ANALYZE_STUBS_O}
+    ${MOVIAN_ANALYZE_OWN_OBJS} ${MOVIAN_ANALYZE_STUBS_O} \
+    ${MOVIAN_ANALYZE_SELECTION_O}
 	$(LINKER) -o $@ $^ -lm -lpthread
 
 movian-analyze-corpus: ${MOVIAN_ANALYZE_BIN}
