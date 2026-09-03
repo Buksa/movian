@@ -109,12 +109,33 @@ class AnalyzerFreshness(unittest.TestCase):
                 encoding="utf-8")
         binary = root / "build.debug" / "movian-analyze"
         binary.parent.mkdir(parents=True, exist_ok=True)
-        binary.write_bytes(b"#!/bin/sh\n")
+        # A real build links the selection in; the fixture does the same, or
+        # every case below would exercise the no-signature branch instead of
+        # the one it is named for.
+        binary.write_bytes(
+            b"#!/bin/sh\n"
+            + lspdoctor.selection_marker(
+                lspdoctor.analyzer_selection(REAL_MAKEFILE)))
         binary.chmod(0o755)
         self._touch(binary, newest=True)
         stack.enter_context(
             mock.patch.object(lspdoctor, "REPOSITORY_ROOT", root))
         return root
+
+    def _add_built_object(self, root: Path, name: str) -> None:
+        """Give the tree a source and depfile, as an already-built
+        object has -- so every timestamp check passes and only the
+        signature can object."""
+        import os
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("/* stand-in */\n", encoding="utf-8")
+        depfile = root / "build.debug" / (name[:-len(".c")] + ".d")
+        depfile.parent.mkdir(parents=True, exist_ok=True)
+        depfile.write_text("%s.o: %s\n" % (name[:-len(".c")], path),
+                           encoding="utf-8")
+        for each in (path, depfile):
+            os.utime(each, (1_000_000_000, 1_000_000_000))
 
     @staticmethod
     def _touch(path: Path, newest: bool) -> None:
@@ -251,18 +272,69 @@ class AnalyzerFreshness(unittest.TestCase):
             self.assertIn("no longer in the tree", message)
             self.assertIn(self.HEADER, message)
 
-    def test_success_claims_only_what_was_checked(self):
-        # Reading the current object list does not prove it is the list that
-        # produced the binary: adding an already-old object to
-        # MOVIAN_ANALYZE_CORE_OBJS moves no timestamp, and this check cannot
-        # see it. Measured -- so the wording must not say "built from".
+    def test_success_claims_exactly_what_was_checked(self):
+        # movian#224 withheld "built from" because reading the current object
+        # list proved nothing about the binary. The binary records its own
+        # selection now (movian#225), so the claim is earned -- and the
+        # message says both halves: the timestamps AND the recorded objects.
         import contextlib
         with contextlib.ExitStack() as stack:
             self._tree(stack)
             ok, message = lspdoctor._check_analyzer()
             self.assertTrue(ok, message)
-            self.assertIn("the recipe now names", message)
-            self.assertNotIn("it is built from", message)
+            self.assertIn("newer than all", message)
+            self.assertIn("records the", message)
+            self.assertIn("built from", message)
+
+    def test_an_object_added_to_the_recipe_flips_the_verdict(self):
+        # The measured case from movian#225: an object that already exists
+        # and is older than the binary. No timestamp moves, no depfile moves,
+        # and the binary provably cannot contain it.
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            root = self._tree(stack)
+            # "an object that already exists and is older than the binary" --
+            # so the source and its depfile are present, and every timestamp
+            # check below passes. Only the signature can see this.
+            self._add_built_object(root, "src/misc/callout.c")
+            makefile = (root / "Makefile").read_text(encoding="utf-8")
+            (root / "Makefile").write_text(
+                makefile.replace("\t${BUILDDIR}/src/misc/buf.o\n",
+                                 "\t${BUILDDIR}/src/misc/buf.o \\\n"
+                                 "\t${BUILDDIR}/src/misc/callout.o\n", 1),
+                encoding="utf-8")
+            ok, message = lspdoctor._check_analyzer()
+            self.assertFalse(ok, message)
+            self.assertIn("src/misc/callout.o", message)
+
+    def test_an_object_dropped_from_the_recipe_flips_it_too(self):
+        # The other direction: the binary contains something the recipe no
+        # longer names.
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            root = self._tree(stack)
+            makefile = (root / "Makefile").read_text(encoding="utf-8")
+            (root / "Makefile").write_text(
+                makefile.replace("\t${BUILDDIR}/src/misc/buf.o\n", "", 1),
+                encoding="utf-8")
+            ok, message = lspdoctor._check_analyzer()
+            self.assertFalse(ok, message)
+            self.assertIn("src/misc/buf.o", message)
+
+    def test_a_binary_without_a_signature_is_unknown_not_fresh(self):
+        # An older build.debug predates the marker. That is neither stale nor
+        # fresh, and saying either would be a claim nothing supports.
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            root = self._tree(stack)
+            binary = root / "build.debug" / "movian-analyze"
+            binary.write_bytes(b"#!/bin/sh\n")
+            binary.chmod(0o755)
+            ok, message = lspdoctor._check_analyzer()
+            self.assertFalse(ok, message)
+            self.assertIn("UNKNOWN", message)
+            self.assertIn("make BUILD=debug", message)
+            self.assertNotIn("older than", message)
 
     def test_a_blind_parser_fails_instead_of_passing(self):
         # Nothing newer than the binary is found when nothing is looked at,
@@ -287,6 +359,88 @@ class AnalyzerFreshness(unittest.TestCase):
                                   side_effect=AssertionError("ran make")))
             self.assertTrue(lspdoctor._check_analyzer()[0])
             self.assertFalse(run.called)
+
+
+class AnalyzerSelectionSignature(unittest.TestCase):
+    """Reading the object list the recipe names NOW is not evidence that it
+    is the list that produced the binary.
+
+    Adding an object that already exists and is older than the binary moves
+    no timestamp and no depfile, so the mtime comparison cannot see it -- and
+    the binary provably cannot contain it, having been linked before the line
+    existed. The build therefore records its own selection INSIDE the binary,
+    where a hand-copied binary carries it along rather than inheriting a
+    stale file left beside it.
+    """
+
+    def test_the_recipe_names_twelve_objects(self):
+        selection = lspdoctor.analyzer_selection(REAL_MAKEFILE)
+        self.assertEqual(len(selection), 12, selection)
+        self.assertIn("src/misc/pool.o", selection)
+        self.assertIn("ext/duktape/duktape.o", selection)
+        self.assertIn("support/devtools/analyze/shim.o", selection)
+        self.assertEqual(selection, sorted(selection))
+
+    def test_the_recorded_selection_is_read_out_of_the_binary(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "movian-analyze"
+            binary.write_bytes(b"\x7fELF junk"
+                               + lspdoctor.selection_marker(["b.o", "a.o"])
+                               + b"more junk")
+            self.assertEqual(lspdoctor.recorded_selection(binary),
+                             ["a.o", "b.o"])
+
+    def test_the_makefile_writes_the_marker_this_module_reads(self):
+        # The writer is a printf in the Makefile and the reader is a regex
+        # here. Nothing but this test stops them drifting apart, and the
+        # drift would be silent: an unreadable marker looks exactly like a
+        # binary that carries none.
+        makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+        line = [row for row in makefile.split("\n")
+                if "MOVIAN-ANALYZE-SELECTION" in row and "printf" in row]
+        self.assertEqual(len(line), 1, line)
+        # Render the recipe the way make would, with a known selection.
+        import re as _re
+        fmt = _re.search(r"printf '(.*)' \"\$\{MOVIAN_ANALYZE_SELECTION\}\"",
+                         line[0])
+        self.assertIsNotNone(fmt, line[0])
+        rendered = (fmt.group(1)
+                    .replace("\\n", "\n")
+                    .replace("%s", "b.o a.o"))
+        recorded = lspdoctor._SELECTION_RE.search(rendered.encode("ascii"))
+        self.assertIsNotNone(recorded, rendered)
+        self.assertEqual(sorted(recorded.group(1).decode().split()),
+                         ["a.o", "b.o"])
+
+    def test_the_signature_object_is_actually_linked(self):
+        # Generating it is not linking it. Drop it from the link line and
+        # every binary carries no marker, so every check answers UNKNOWN --
+        # loud, but the mechanism is off and only this notices.
+        makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+        rule = makefile.split("${MOVIAN_ANALYZE_BIN}: ")[1].split("\n\n")[0]
+        self.assertIn("${MOVIAN_ANALYZE_SELECTION_O}", rule, rule)
+
+    def test_the_recorded_selection_is_built_from_all_three_lists(self):
+        # What the signature describes: the three object variables the
+        # checker also reads. NOT the whole link line -- that additionally
+        # carries `stubs-auto.o` and `selection-auto.o`, both generated from
+        # the selection rather than members of it, so recording them would
+        # make the signature describe itself.
+        makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+        assignment = makefile.split("MOVIAN_ANALYZE_SELECTION = ")[1]
+        assignment = assignment.split("\n\n")[0]
+        self.assertTrue(assignment.startswith("$(sort $(patsubst "
+                                              "${BUILDDIR}/%,%,"), assignment)
+        for var in lspdoctor._ANALYZE_OBJ_VARS:
+            self.assertIn("${%s}" % var, assignment)
+
+    def test_a_binary_with_no_marker_records_nothing(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "movian-analyze"
+            binary.write_bytes(b"\x7fELF with no marker at all")
+            self.assertIsNone(lspdoctor.recorded_selection(binary))
 
 
 class MetadataTimeout(unittest.TestCase):
