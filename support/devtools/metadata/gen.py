@@ -4432,6 +4432,7 @@ def _format_runtime_oracle_report(
     missing_modules = report.get("missingModules", [])
     state = "OK" if (report.get("drift", 0) == 0 and not missing_modules
                      and not report.get("floorProblems")) else "DRIFT"
+    not_compared = report.get("notCompared", [])
     lines = [
         "RUNTIME ORACLE CROSS-CHECK %s" % state,
         "counts: match %d, drift %d, missing-modules %d, plugin-supplied %d,"
@@ -4440,6 +4441,7 @@ def _format_runtime_oracle_report(
          report.get("pluginSupplied", 0),
          report["oracleUnreachable"]),
     ]
+    lines += ["not compared -- %s" % reason for reason in not_compared]
     if missing_modules:
         lines.append(
             "modules the runtime has and the artifact dropped entirely:")
@@ -4528,6 +4530,32 @@ def _check_runtime_oracle(
     # follow leaves the selection byte-identical, so comparing it against the
     # stamp agrees -- the tautology, one level up.
     stale = stale + _selection_problems(here, recipe)
+    # The configuration axis needs a build to disagree with. CI checks out
+    # sources and never builds, so there is no config.h and nothing local
+    # that could contradict the stamp -- reporting that as stale would paint
+    # every CI run red for a hazard that cannot exist there. On a machine
+    # that HAS a build, a reconfigure since adoption is caught here.
+    uncompared: list[str] = []
+    stamped_configuration = stamp.get("configuration")
+    here_configuration = runtime_oracle_configuration()
+    if here_configuration is None:
+        # No build here, so nothing local can contradict the stamp.
+        uncompared.append(
+            "configuration: this checkout has no "
+            "build.<flavour>/config.h, so there is no local build to "
+            "disagree with")
+    elif not isinstance(stamped_configuration, dict):
+        # An oracle stamped before this axis existed. Refusing it would make
+        # every pre-#222 checkout red for a field no adoption could have
+        # written -- but the gap is said out loud rather than skipped in
+        # silence.
+        uncompared.append(
+            "configuration: this oracle was stamped before the "
+            "configuration was recorded; the next adoption covers it")
+    else:
+        stale = stale + configuration_mismatch(
+            here_configuration, stamped_configuration,
+            "the build this oracle was stamped against")
     stamped_selection = stamp.get("selection")
     if not isinstance(stamped_selection, dict):
         stale = stale + ["the stamp records no recipe selection"]
@@ -5010,6 +5038,12 @@ def _check_runtime_oracle(
     agreed = not drift and not missing_modules and not floor_problems
     report = {
         "status": "ok" if agreed else "drift",
+        # Axes this run could not judge. Carried into the report and printed,
+        # because a check that quietly skips an axis reads exactly like one
+        # that checked it and found nothing -- the failure this whole file
+        # exists to refuse. They are notes, not failures: a checkout with no
+        # build has nothing that could contradict the stamp.
+        "notCompared": uncompared,
         "floorProblems": floor_problems,
         "match": matches,
         "drift": len(drift),
@@ -6005,6 +6039,169 @@ def makefile_ecmascript_selection(text: str) -> dict[str, str]:
             for path, where in occurrences.items()}
 
 
+# Configuration moves the native surface on its own. `#if ENABLE_PLUGINS`
+# guards `native/misc.selectView` (es_misc.c:316-318), so flipping one
+# configure flag changes what a plugin can call while every `.c`, every
+# digest and the recipe selection stay byte-identical.
+#
+# The scope is deliberately narrow, and narrow is the whole point: this
+# tree's `config.h` defines dozens of `ENABLE_*` symbols -- 86 when this was
+# measured against a configured checkout -- and exactly three of them
+# are read from `src/ecmascript/**`. Keying over the configuration would be
+# the "key over too much" trap #166 spent four rounds escaping -- red on
+# every unrelated `./configure`. So the scope is measured from the sources
+# rather than declared.
+# Every symbol on the directive line, not the first: `#if ENABLE_A &&
+# ENABLE_B` guards on both, and taking one would leave the other able to
+# change the surface unnoticed -- which is what this scan exists to stop.
+_CONFIG_DIRECTIVE_RE = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef|elif)\b(.*)$",
+                                  re.M)
+_CONFIG_SYMBOL_RE = re.compile(r"\b(ENABLE_[A-Z0-9_]+)")
+# The value is optional: `#define ENABLE_X` defines the macro without one,
+# and reading that as UNSET would report a mismatch against a stamp of "1"
+# for a build that has the macro. Defined-without-a-value is its own answer.
+_CONFIG_DEFINE_RE = re.compile(
+    r"^\s*#\s*define\s+(ENABLE_[A-Z0-9_]+)[ \t]*(\S*)[ \t]*$", re.M)
+# `support/configure.inc:338` sets BUILDDIR=build.${BUILD}; `mdev` uses the
+# debug one and so does the recapture, but a tree configured otherwise owns a
+# build this must not deny.
+BUILD_FLAVOURS = ("build.debug", "build.release")
+
+
+def build_config_path(root: Path | None = None) -> Path | None:
+    """The generated header of whichever build this checkout has, or None."""
+    base = REPO_ROOT if root is None else root
+    for flavour in BUILD_FLAVOURS:
+        candidate = base / flavour / "config.h"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def config_symbols_in(source: str) -> set[str]:
+    """Every `ENABLE_*` a preprocessor directive in `source` branches on.
+
+    All of them on the line, not the first: `#if ENABLE_A && ENABLE_B` guards
+    on both, and taking one would leave the other free to move the surface
+    unnoticed. No such line exists in this tree today, which is exactly why
+    the rule is asserted on text rather than on the tree.
+    """
+    symbols: set[str] = set()
+    for directive in _CONFIG_DIRECTIVE_RE.findall(source):
+        # `#if 0 // TODO: enable ENABLE_FOOBAR later` guards on nothing. The
+        # comment is not the condition, and recording it would put a symbol
+        # nobody branches on into the compared set.
+        condition = re.split(r"//|/\*", directive, maxsplit=1)[0]
+        symbols.update(_CONFIG_SYMBOL_RE.findall(condition))
+    return symbols
+
+
+class BlindConfigurationScan(Exception):
+    """The symbol scan found nothing, which cannot be true of this tree."""
+
+
+def ecmascript_config_symbols() -> list[str]:
+    """The `ENABLE_*` flags the ecmascript sources actually branch on.
+
+    Read from the sources, not from a list here: a new `#if ENABLE_X` added
+    beside a function-list entry has to come into scope by itself, or this
+    check would go on describing the configuration of a previous tree.
+    """
+    symbols: set[str] = set()
+    for path in sorted(ECMASCRIPT_DIR.rglob("*.[ch]")):
+        symbols.update(config_symbols_in(
+            path.read_text(encoding="utf-8", errors="replace")))
+    if not symbols:
+        # Three today, and a scan that finds none has stopped matching rather
+        # than found a tree with no conditionals. Returning an empty set
+        # would make every configuration compare equal to every other -- the
+        # check passing because it looked at nothing.
+        raise BlindConfigurationScan(
+            "no ENABLE_* symbol is read from %s, so the configuration scan "
+            "has gone blind" % ECMASCRIPT_DIR.relative_to(REPO_ROOT))
+    return sorted(symbols)
+
+
+def configuration_values(config: str, symbols: list[str]) -> dict[str, Any]:
+    """What the generated header says each symbol is, `None` when unset.
+
+    `None` is not `"0"`. A configure that stops defining a symbol the
+    sources still read is a different event from one that defines it as
+    false, and both change what the compiler produced.
+    """
+    defined = dict(_CONFIG_DEFINE_RE.findall(config))
+    return {symbol: defined.get(symbol) for symbol in symbols}
+
+
+def runtime_oracle_configuration() -> dict[str, Any] | None:
+    """The configuration this build.debug was generated with, or None.
+
+    None when the header is absent -- an adoption from a tree with no build
+    cannot know what its binary was compiled with, and must say so rather
+    than record an empty configuration that compares equal to anything.
+    """
+    path = build_config_path()
+    if path is None:
+        return None
+    return configuration_values(path.read_text(encoding="utf-8"),
+                                ecmascript_config_symbols())
+
+
+def configuration_predates_binary(root: Path | None = None) -> str | None:
+    """Why this build's binary cannot answer for the current configuration.
+
+    The witness is the BINARY against the generated header, not the capture
+    against the header. Comparing against the capture is defeated by the
+    ordinary case: reconfigure, do NOT rebuild, then capture -- the run is
+    newer than `config.h`, so a capture-based guard passes while the binary
+    that produced it was compiled the previous way, and the stamp would then
+    record values that binary never saw. It also compares a timestamp taken
+    on the capture host against one taken here, which is not a comparison
+    when those are different machines.
+
+    Binary against header has neither problem: both are written by the same
+    machine's build, and `configure` writes the header through
+    `cp_if_changed`, so a no-op reconfigure moves nothing and refuses
+    nothing.
+    """
+    base = REPO_ROOT if root is None else root
+    config = build_config_path(base)
+    if config is None:
+        return None
+    binary = config.parent / "movian"
+    try:
+        built = binary.stat().st_mtime
+    except OSError:
+        return None
+    if config.stat().st_mtime <= built:
+        return None
+    return ("%s was written after %s was linked, so this build predates the "
+            "current configuration and any capture from it does too; rebuild "
+            "and recapture"
+            % (config.relative_to(base).as_posix(),
+               binary.relative_to(base).as_posix()))
+
+
+def configuration_mismatch(here: dict[str, Any], there: dict[str, Any],
+                           source: str) -> list[str]:
+    """How the configuration now differs from the one `source` was built
+    with. Every difference is reported, in either direction."""
+    reasons = []
+    for symbol in sorted(set(here) | set(there)):
+        mine = here.get(symbol)
+        theirs = there.get(symbol)
+        if mine == theirs:
+            continue
+        reasons.append(
+            "%s is %s now and was %s in %s, which changes what the "
+            "ecmascript sources compile to"
+            % (symbol,
+               "unset" if mine is None else mine,
+               "unset" if theirs is None else theirs,
+               source))
+    return reasons
+
+
 def selection_mismatch(here: dict[str, str], there: dict[str, str],
                        source: str) -> list[str]:
     """How the recipe now differs from the recipe that built `revision`.
@@ -6396,6 +6593,20 @@ def cmd_adopt_oracle(args: argparse.Namespace) -> int:
         print("  recapture against this tree.", file=sys.stderr)
         return 1
     digests = runtime_oracle_input_digests()
+    try:
+        adopted_configuration = runtime_oracle_configuration()
+    except BlindConfigurationScan as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    if adopted_configuration is None:
+        print("no build.<flavour>/config.h here, so the configuration this "
+              "capture ran under is unknown; adopt from the checkout that "
+              "owns the build", file=sys.stderr)
+        return 1
+    reconfigured = configuration_predates_binary()
+    if reconfigured is not None:
+        print(reconfigured, file=sys.stderr)
+        return 1
     payload["inputs"] = {
         "version": RUNTIME_ORACLE_INPUTS_VERSION,
         "digest": runtime_oracle_inputs_digest(digests),
@@ -6405,6 +6616,13 @@ def cmd_adopt_oracle(args: argparse.Namespace) -> int:
         # could drop a source from SRCS, or move it behind another gate,
         # without touching a .c or the oracle, and every check would stay
         # green while the next binary omits the API the artifact advertises.
+        # Configuration is a third axis, independent of the sources and of
+        # the recipe: `#if ENABLE_PLUGINS` decides whether
+        # `native/misc.selectView` exists at all, with every .c byte-
+        # identical. Read from the generated header, because the determinant
+        # is what the compiler saw and neither the flags nor config.h are
+        # committed.
+        "configuration": runtime_oracle_configuration(),
         "selection": makefile_ecmascript_selection(
             (REPO_ROOT / "Makefile").read_text(encoding="utf-8")),
     }

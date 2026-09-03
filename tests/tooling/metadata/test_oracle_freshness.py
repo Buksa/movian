@@ -794,6 +794,257 @@ class Recipe(unittest.TestCase):
                         problems)
 
 
+class Configuration(unittest.TestCase):
+    """Configuration moves the native surface with every source byte-identical.
+
+    `#if ENABLE_PLUGINS` guards `native/misc.selectView` (es_misc.c:316-318).
+    Flip that flag and the next build exposes a different surface while the
+    sources, the recipe selection and every digest stay the same -- so a
+    capture from the previous binary could be stamped against a tree whose
+    build no longer matches it.
+    """
+
+    def test_only_flags_the_ecmascript_sources_read_are_in_scope(self):
+        # The whole point is NOT to key over the configuration. This tree's
+        # config.h defines dozens of ENABLE_* symbols (86 when measured in
+        # movian-public-clean); three of them can move the
+        # JS-visible surface, and a change to the other 83 must stay silent.
+        symbols = gen.ecmascript_config_symbols()
+        self.assertEqual(symbols, ["ENABLE_HTTPSERVER", "ENABLE_PLUGINS",
+                                   "ENABLE_WEBPOPUP"], symbols)
+
+    def test_a_flag_only_the_rest_of_the_tree_reads_is_out_of_scope(self):
+        for absent in ("ENABLE_VDPAU", "ENABLE_LIBAV", "ENABLE_GLW"):
+            self.assertNotIn(absent, gen.ecmascript_config_symbols())
+
+    def test_the_values_come_from_the_generated_header(self):
+        config = ("#define ENABLE_PLUGINS 1\n"
+                  "#define ENABLE_WEBPOPUP 0\n"
+                  "#define ENABLE_VDPAU 1\n")
+        self.assertEqual(
+            gen.configuration_values(config, ["ENABLE_PLUGINS",
+                                              "ENABLE_WEBPOPUP",
+                                              "ENABLE_HTTPSERVER"]),
+            {"ENABLE_PLUGINS": "1", "ENABLE_WEBPOPUP": "0",
+             "ENABLE_HTTPSERVER": None})
+
+    def test_a_flag_flip_is_a_mismatch(self):
+        before = {"ENABLE_PLUGINS": "1", "ENABLE_WEBPOPUP": "0"}
+        after = {"ENABLE_PLUGINS": "0", "ENABLE_WEBPOPUP": "0"}
+        reasons = gen.configuration_mismatch(after, before, "the build")
+        self.assertTrue(any("ENABLE_PLUGINS" in reason for reason in reasons),
+                        reasons)
+        self.assertEqual(gen.configuration_mismatch(before, before, "x"), [])
+
+    def test_a_flag_appearing_or_vanishing_is_a_mismatch_too(self):
+        # A configure that stops defining a symbol the sources still read is
+        # the same hazard wearing a different hat.
+        self.assertTrue(gen.configuration_mismatch(
+            {"ENABLE_PLUGINS": None}, {"ENABLE_PLUGINS": "1"}, "the build"))
+        self.assertTrue(gen.configuration_mismatch(
+            {"ENABLE_PLUGINS": "1"}, {"ENABLE_PLUGINS": None}, "the build"))
+
+
+class StampedConfiguration(unittest.TestCase):
+    """The configuration is a third axis, independent of the sources and of
+    the recipe.
+
+    `#if ENABLE_PLUGINS` decides whether `native/misc.selectView` exists
+    (es_misc.c:316-318). Flip it and the next build exposes a different
+    surface with every `.c`, every digest and the recipe selection
+    byte-identical -- so nothing else in this file can see it.
+    """
+
+    def _oracle(self):
+        import json
+        return json.loads(
+            gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
+
+    def _artifact(self):
+        import json
+        return json.loads(gen.ARTIFACT_PATH.read_text(encoding="utf-8"))
+
+    def _tree_with_build(self, directory, config_newer: bool):
+        import os
+        root = Path(directory)
+        (root / "build.debug").mkdir()
+        config = root / "build.debug" / "config.h"
+        binary = root / "build.debug" / "movian"
+        config.write_text("#define ENABLE_PLUGINS 0\n", encoding="utf-8")
+        binary.write_bytes(b"\x7fELF")
+        linked = 1_000_000_000
+        os.utime(binary, (linked, linked))
+        os.utime(config, (linked + (60 if config_newer else -60),) * 2)
+        return root
+
+    def test_a_build_older_than_its_configuration_is_refused(self):
+        # Reconfigure, then do NOT rebuild. Every source, every digest and
+        # the recipe selection are identical, so this is the only witness --
+        # and comparing config.h against the CAPTURE instead of the binary
+        # would pass here, because the capture is newer than both.
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._tree_with_build(directory, config_newer=True)
+            self.assertIsNotNone(gen.configuration_predates_binary(root))
+
+    def test_a_build_newer_than_its_configuration_is_fine(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._tree_with_build(directory, config_newer=False)
+            self.assertIsNone(gen.configuration_predates_binary(root))
+
+    def test_adoption_asks_before_it_stamps(self):
+        # The refusal is worth nothing if the adoption path does not consult
+        # it, and no test here drives cmd_adopt_oracle far enough to reach
+        # this branch without a real build.
+        source = (REPO_ROOT / "support" / "devtools" / "metadata"
+                  / "gen.py").read_text(encoding="utf-8")
+        body = source.split("def cmd_adopt_oracle")[1]
+        self.assertIn("configuration_predates_binary", body)
+
+    def test_a_tree_with_no_build_cannot_refuse_on_that_ground(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertIsNone(
+                gen.configuration_predates_binary(Path(directory)))
+
+    def test_a_release_tree_owns_a_build_too(self):
+        # BUILDDIR is build.${BUILD}; hardcoding build.debug told a
+        # release-configured checkout it did not own the build it owns.
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "build.release").mkdir()
+            (root / "build.release" / "config.h").write_text(
+                "#define ENABLE_PLUGINS 1\n", encoding="utf-8")
+            found = gen.build_config_path(root)
+            self.assertIsNotNone(found)
+            self.assertEqual(found.parent.name, "build.release")
+
+    def test_every_symbol_on_a_directive_counts_not_the_first(self):
+        # `#if ENABLE_A && ENABLE_B` guards on both. No such line is in the
+        # tree today, so this is asserted on text -- otherwise the rule is
+        # unfalsifiable and a regression to first-only would pass.
+        self.assertEqual(
+            gen.config_symbols_in("#if ENABLE_A && ENABLE_B\nx\n#endif\n"),
+            {"ENABLE_A", "ENABLE_B"})
+        self.assertEqual(
+            gen.config_symbols_in("#elif defined(ENABLE_C) || ENABLE_D\n"),
+            {"ENABLE_C", "ENABLE_D"})
+        # and a mention outside a directive is not a guard
+        self.assertEqual(gen.config_symbols_in("/* ENABLE_E */\nENABLE_F;\n"),
+                         set())
+
+    def test_a_blind_symbol_scan_raises_rather_than_compares_nothing(self):
+        # Zero symbols would make every configuration compare equal to every
+        # other -- the check passing because it looked at nothing.
+        from unittest import mock
+        with mock.patch.object(gen, "_CONFIG_SYMBOL_RE",
+                               gen.re.compile(r"\b(NOTHING_MATCHES_THIS)")):
+            with self.assertRaises(gen.BlindConfigurationScan):
+                gen.ecmascript_config_symbols()
+
+    def test_a_flag_flip_since_the_stamp_fails_the_check(self):
+        # The measured case from movian#222.
+        import copy
+        from unittest import mock
+        oracle = copy.deepcopy(self._oracle())
+        oracle.setdefault("inputs", {})["configuration"] = {
+            "ENABLE_PLUGINS": "1"}
+        with mock.patch.object(gen, "runtime_oracle_configuration",
+                               return_value={"ENABLE_PLUGINS": "0"}):
+            ok, out, _report = gen._check_runtime_oracle(self._artifact(),
+                                                        oracle)
+        self.assertFalse(ok)
+        self.assertIn("ENABLE_PLUGINS", out)
+
+    def test_an_axis_that_cannot_be_judged_is_printed_not_swallowed(self):
+        # The reasons were built and discarded, so a run with no build passed
+        # the configuration axis with nothing said -- which reads exactly
+        # like a run that compared it and agreed.
+        import json
+        from unittest import mock
+        artifact = json.loads(gen.ARTIFACT_PATH.read_text(encoding="utf-8"))
+        oracle = json.loads(
+            gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8"))
+        with mock.patch.object(gen, "runtime_oracle_configuration",
+                               return_value=None):
+            ok, out, report = gen._check_runtime_oracle(artifact, oracle)
+        self.assertTrue(ok, out)
+        self.assertTrue(report["notCompared"], report)
+        self.assertIn("not compared", out)
+        self.assertIn("no build", out)
+
+    def test_a_stamp_predating_the_axis_says_so(self):
+        import copy, json
+        from unittest import mock
+        oracle = copy.deepcopy(json.loads(
+            gen.RUNTIME_ORACLE_PATH.read_text(encoding="utf-8")))
+        oracle.get("inputs", {}).pop("configuration", None)
+        with mock.patch.object(gen, "runtime_oracle_configuration",
+                               return_value={"ENABLE_PLUGINS": "1"}):
+            ok, out, _report = gen._check_runtime_oracle(
+                json.loads(gen.ARTIFACT_PATH.read_text(encoding="utf-8")),
+                oracle)
+        self.assertTrue(ok, out)
+        self.assertIn("stamped before the configuration was recorded", out)
+
+    def test_a_valueless_define_is_defined_not_unset(self):
+        # `#define ENABLE_X` with no value defines the macro. Reading it as
+        # unset reports a mismatch against a stamp of "1" for a build that
+        # has it.
+        values = gen.configuration_values("#define ENABLE_PLUGINS\n",
+                                          ["ENABLE_PLUGINS"])
+        self.assertIsNotNone(values["ENABLE_PLUGINS"])
+
+    def test_a_symbol_named_only_in_a_comment_is_not_a_guard(self):
+        self.assertEqual(
+            gen.config_symbols_in("#if 0 // TODO: enable ENABLE_FOOBAR\n"),
+            set())
+        self.assertEqual(
+            gen.config_symbols_in("#if ENABLE_REAL /* not ENABLE_FAKE */\n"),
+            {"ENABLE_REAL"})
+
+    def test_a_blind_scan_during_adoption_is_reported_not_raised(self):
+        source = (REPO_ROOT / "support" / "devtools" / "metadata"
+                  / "gen.py").read_text(encoding="utf-8")
+        body = source.split("def cmd_adopt_oracle")[1]
+        self.assertIn("except BlindConfigurationScan", body)
+
+    def test_an_out_of_scope_flag_never_enters_the_comparison(self):
+        # The other half of the DoD. A flag the ecmascript sources never read
+        # cannot make this red because it is not recorded at all -- 83 of
+        # this tree's ENABLE_* symbols are in that position. Asserted where
+        # it is decided, in the recorded set, because a comparison of two
+        # dicts that never contained it could not have come out differently.
+        symbols = gen.ecmascript_config_symbols()
+        config = ("#define ENABLE_PLUGINS 1\n"
+                  "#define ENABLE_VDPAU 1\n")
+        recorded = gen.configuration_values(config, symbols)
+        self.assertIn("ENABLE_PLUGINS", recorded)
+        self.assertNotIn("ENABLE_VDPAU", recorded)
+        # ...so flipping it changes nothing that is compared.
+        flipped = gen.configuration_values(
+            config.replace("ENABLE_VDPAU 1", "ENABLE_VDPAU 0"), symbols)
+        self.assertEqual(gen.configuration_mismatch(flipped, recorded, "x"),
+                         [])
+
+    def test_a_checkout_with_no_build_does_not_go_red(self):
+        # CI checks out sources and never builds, so there is no config.h and
+        # nothing local that could contradict the stamp. Failing there would
+        # paint every run red for a hazard that cannot exist without a build.
+        import copy
+        from unittest import mock
+        oracle = copy.deepcopy(self._oracle())
+        oracle.setdefault("inputs", {})["configuration"] = {
+            "ENABLE_PLUGINS": "1"}
+        with mock.patch.object(gen, "runtime_oracle_configuration",
+                               return_value=None):
+            ok, out, _report = gen._check_runtime_oracle(self._artifact(),
+                                                        oracle)
+        self.assertTrue(ok, out)
+
+
 class RecipeTransformations(unittest.TestCase):
     """A removal need not name a pathname.
 
@@ -1262,6 +1513,19 @@ class StampedRecipe(unittest.TestCase):
         payload["capturedAt"] = payload["capturedAt"] + 3000
         payload.pop("inputs", None)
         before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+        # Adoption stamps the configuration the capture ran under, so it
+        # needs a generated header. Plant one only when this checkout has no
+        # build of its own -- never touch a real one, and never depend on
+        # what a real one's timestamps happen to be.
+        config = gen.build_config_path()
+        planted = config is None
+        if planted:
+            config = REPO_ROOT / "build.debug" / "config.h"
+            config.parent.mkdir(parents=True, exist_ok=True)
+            config.write_text("#define ENABLE_PLUGINS 1\n"
+                              "#define ENABLE_WEBPOPUP 1\n"
+                              "#define ENABLE_HTTPSERVER 1\n",
+                              encoding="utf-8")
         try:
             with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
                 handle.write(json.dumps(payload))
@@ -1275,8 +1539,17 @@ class StampedRecipe(unittest.TestCase):
                 written["inputs"]["selection"],
                 gen.makefile_ecmascript_selection(
                     (REPO_ROOT / "Makefile").read_text(encoding="utf-8")))
+            # The configuration axis is stamped by the same adoption, and
+            # asserting it on the written file beats grepping gen.py for the
+            # key: this is the artifact a later check will read.
+            self.assertEqual(written["inputs"]["configuration"],
+                             gen.runtime_oracle_configuration())
         finally:
             gen.RUNTIME_ORACLE_PATH.write_bytes(before)
+            if planted:
+                config.unlink(missing_ok=True)
+                if config.parent.exists() and not any(config.parent.iterdir()):
+                    config.parent.rmdir()
 
     def test_a_recipe_change_after_adoption_is_caught(self):
         import json
