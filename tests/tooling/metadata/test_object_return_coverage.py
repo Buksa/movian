@@ -199,6 +199,120 @@ class SyntheticCorpus(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("declined with no reason given", output)
 
+    def test_an_object_returned_by_another_route_is_reported(self) -> None:
+        """The blind spot a census defined by the recogniser's own regex
+        cannot rule out by construction.
+
+        `return {` is the population AND the recogniser's trigger, so a module
+        that returns an object any other way is invisible to both and the gate
+        would print OK over an intact silence. These are notes, not failures:
+        the recogniser does not type them and this change does not start.
+        """
+        for label, source, fragment in [
+            ("parenthesised",
+             "exports.f = function() { return ({a: new Node(x)}); };\n",
+             "parenthesised"),
+            ("ternary",
+             "exports.f = function(t) { return t ? {a: 1} : {b: 2}; };\n",
+             "ternary branches"),
+            ("bound to a local",
+             "exports.f = function() { var o = {a: new Node(x)};"
+             " return o; };\n",
+             "bound to a local"),
+        ]:
+            with self.subTest(label):
+                census = self.census_of(m=source)
+                self.assertEqual([s["status"] for s in census], ["uncovered"])
+                ok, output = self.check_of({}, m=source)
+                self.assertTrue(ok, output)
+                self.assertIn("not covered", output)
+                self.assertIn(fragment, output)
+
+    def test_a_literal_that_is_not_the_returned_value_is_not_reported(
+            self) -> None:
+        """Noise control, pinned.
+
+        A first cut tested `"{" in statement` and flagged all three of these
+        -- `new Proxy({msg: x}, h)` returns a Proxy, and a callback's body
+        brace is not a literal at all. Every one of them is in the real corpus
+        (`movian/xml.js:72,77`, `movian/prop.js:112`), so the gate would have
+        shipped three false notes on day one, and notes that are noise are
+        notes nobody reads.
+        """
+        for label, source in [
+            ("an object literal as a call argument",
+             "exports.f = function(x) { return new Proxy({msg: x}, h); };\n"),
+            ("a callback body brace",
+             "exports.f = function(p, c) { return np.subscribe(p,"
+             " function(t, v) { if (t) return; }); };\n"),
+            ("an ordinary constructed return",
+             "exports.f = function() { var i = new Item(this);"
+             " return i; };\n"),
+        ]:
+            with self.subTest(label):
+                self.assertEqual(self.census_of(m=source), [])
+
+    def test_asi_makes_a_cross_line_return_brace_a_block(self) -> None:
+        """ES5.1 7.9.1, and the reason the two scans had to be unified first.
+
+        `RETURN_OBJECT_RE`'s `\\s*` crosses a newline. The file scan used to
+        search line by line, so `return\\n{` was found in the region, missed
+        by the file scan, and the mismatch was skipped -- the site vanished
+        from the census entirely, not even as unattributed. Unifying the two
+        coordinate systems made it visible, and visible turned out to mean
+        EMITTED: a wrong type, because ASI makes this `return;` and the braces
+        a block. Both halves are pinned here, since fixing only the first is
+        worse than leaving it alone.
+        """
+        source = ("exports.f = function() {\n"
+                  "  return\n"
+                  "{ a: new Node(x) };\n"
+                  "};\n")
+        census = self.census_of(m=source)
+        self.assertEqual([s["status"] for s in census], ["declined"])
+        self.assertIn("ASI", census[0]["reason"])
+        ok, output = self.check_of({}, m=source)
+        self.assertTrue(ok, output)
+
+    def test_a_site_the_two_scans_disagree_about_is_a_failure(self) -> None:
+        """The skipped-mismatch path, forced.
+
+        Unreachable while both scans read the same masked text by the same
+        rule -- which is exactly why it must not be a silent `continue` again.
+        """
+        source = "exports.f = function() { return {a: new Node(x)}; };\n"
+        artifact = {"js": {"modules": [
+            {"name": "movian/m", "exports": [
+                {"name": "f",
+                 "returns": {"kind": "object", "fields": []}}]}]}}
+        real = gen.RETURN_OBJECT_RE
+        try:
+            ok, output = self.check_of(artifact, m=source)
+            self.assertTrue(ok, output)
+            # Make the file scan blind while the region scan still sees it.
+            state = {"file_scan": True}
+
+            class Blinded:
+                """First `finditer` is the file scan; blind only that one."""
+
+                @staticmethod
+                def match(text):
+                    return real.match(text)
+
+                @staticmethod
+                def finditer(text):
+                    if state["file_scan"]:
+                        state["file_scan"] = False
+                        return iter(())
+                    return real.finditer(text)
+
+            gen.RETURN_OBJECT_RE = Blinded
+            ok, output = self.check_of(artifact, m=source)
+        finally:
+            gen.RETURN_OBJECT_RE = real
+        self.assertFalse(ok)
+        self.assertIn("not by the file scan", output)
+
     def test_a_return_inside_a_comment_is_not_a_site(self) -> None:
         """Masking, pinned. A commented-out return is not code, and reporting
         it as unattributed would make the gate cry wolf on every module that
