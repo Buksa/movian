@@ -617,9 +617,19 @@ def combine_conditions(*conditions: str | None) -> str | None:
 
 
 def split_fields(text: str) -> list[str]:
-    """Top-level comma-separated fields of one entry's inner text (paren/
-    bracket depth tracked so a field like `foo(a, b)` -- not used by either
-    table today, but kept generic -- doesn't get split)."""
+    """Top-level comma-separated fields of one entry's inner text.
+
+    Paren, bracket AND brace depth are tracked, so neither `foo(a, b)` nor
+    `{x: 1, y: 2}` nor `function (a, b) { g(1, 2); }` gets split. The brace
+    half arrived with movian#229: the C tables this started life on are flat,
+    but `_anonymous_return_shape` splits JS object literals with the same
+    helper, and there a field value routinely contains both braces and commas.
+
+    Before that, `{pos: {x: 1, y: 2}}` split into `pos: {x: 1` and `y: 2}`.
+    Nothing broke, because both halves then failed the `new Ctor(...)`
+    fullmatch and the shape declined -- the right answer reached for the wrong
+    reason, and only while that fullmatch was the only field form accepted.
+    """
     fields: list[str] = []
     buf: list[str] = []
     depth = 0
@@ -644,12 +654,12 @@ def split_fields(text: str) -> list[str]:
             buf.append(c)
             i += 1
             continue
-        if c in "([":
+        if c in "([{":
             depth += 1
             buf.append(c)
             i += 1
             continue
-        if c in ")]":
+        if c in ")]}":
             depth -= 1
             buf.append(c)
             i += 1
@@ -2815,10 +2825,71 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
     return shapes
 
 
-def _anonymous_return_shape(region: str) -> dict[str, Any] | None:
+FIELD_FUNCTION_RE = re.compile(
+    r"function\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\(([^)]*)\)\s*\{", re.S)
+
+
+def _field_function_shape(value: str) -> tuple[dict[str, Any] | None, str]:
+    """`(signature, reason)` for a function-valued object field.
+
+    The form `movian/itemhook.create` returns and the recogniser could not
+    express before movian#229:
+
+        return { destroy: function() { prop.destroy(node); } }
+
+    A handle object whose entire purpose is to carry a function was the one
+    case that always fell through, so `hook.destroy()` -- and `hook.anything()`
+    -- were unchecked.
+
+    The return type is PROVED, never assumed. A body whose own returns are all
+    valueless (including none at all) yields `undefined` on every path, and
+    `void` says exactly that. Anything else has to go through `_returned_shape`
+    and answer, or this field is not understood -- which, by the all-or-nothing
+    contract movian#160 established, declines the whole object rather than
+    emitting a partial `any`.
+
+    `_returns_after` is what makes the void claim safe: it excludes the returns
+    of functions nested inside the field, so a callback's `return n.v` is not
+    read as the field's own value.
+    """
+    match = FIELD_FUNCTION_RE.match(value)
+    if match is None:
+        return None, "not a function literal"
+    open_brace = match.end() - 1
+    end = _balanced_end(value, open_brace)
+    if end is None or value[end:].strip():
+        # `function(){}.bind(this)`, or a literal whose braces never close.
+        # The field's value is then not simply this function, and its type is
+        # whatever the trailing expression produces.
+        return None, "the function literal is not the whole field value"
+    params = _parse_params(match.group(1))
+    if params is None:
+        return None, "the parameter list did not parse"
+    own = _returns_after(value, open_brace)
+    if all(VALUELESS_RETURN_RE.match(text.strip()) for text in own):
+        return {"kind": "function", "params": params,
+                "returns": {"kind": "void"}}, ""
+    returned = _returned_shape("= " + value)
+    if returned is None:
+        return None, "the function returns a value with no provable shape"
+    return {"kind": "function", "params": params,
+            "returns": returned}, ""
+
+
+def _anonymous_return_shape_verbose(
+        region: str) -> tuple[dict[str, Any] | None, str]:
+    """`(shape, reason)` -- the shape of a direct `return { ... }`, and when
+    there is none, why not.
+
+    The reason is not decoration. Nothing compared an emitted `returns` against
+    source, so a shape the recogniser declined failed no gate and printed no
+    diagnostic (movian#229). `_check_object_return_coverage` takes a census of
+    the source and requires every site to be either emitted or named here, so
+    this function has to be able to say what happened to each one.
+    """
     matches = list(RETURN_OBJECT_RE.finditer(region))
     if not matches:
-        return None
+        return None, "no object literal is returned"
 
     depths = [0] * (len(region) + 1)
     depth = 0
@@ -2832,41 +2903,72 @@ def _anonymous_return_shape(region: str) -> dict[str, Any] | None:
         match for match in matches
         if depths[match.start()] == 1
     ]
+    if not direct_returns:
+        return None, ("the object is returned from a nested block or "
+                      "function, not from the export's own body")
     if len(direct_returns) != 1:
-        return None
+        return None, ("the body returns %d different object literals, so it "
+                      "has no single shape" % len(direct_returns))
+
+    # Reachability, the guard this function never had. `_returned_shape` grew
+    # it in movian#190 and the object path did not, so
+    # `function (t) { if (t) { return {a: new Node(x)}; } return {b: new
+    # Node(y)}; }` declared `{b: Node}` -- a WRONG type on the `t` path, not a
+    # missing one. Two facts are needed and neither implies the other: the
+    # direct return must be the body's ONLY own return (otherwise another path
+    # returns something else), and it must be the body's last statement
+    # (otherwise an unbraced `if (t) return {...};` falls through to
+    # `undefined`, which sits at depth 1 and passes the filter above).
+    function = COMMONJS_FUNCTION_RE.search(region)
+    if function is None:
+        return None, "the export is not assigned a function literal"
+    body_brace = region.find("{", function.end())
+    if body_brace < 0:
+        return None, "the function literal has no body"
+    own_returns, _ = _scan_returns(region, body_brace)
+    if len(own_returns) != 1:
+        return None, ("the body has %d returns, so the object is not what "
+                      "every path yields" % len(own_returns))
+    if not _always_returns(region, body_brace):
+        return None, ("the return is not the body's last statement, so the "
+                      "function can fall through to undefined")
 
     match = direct_returns[0]
     open_index = match.end() - 1
-    depth = 0
-    close_index = None
-    for index in range(open_index, len(region)):
-        if region[index] == "{":
-            depth += 1
-        elif region[index] == "}":
-            depth -= 1
-            if depth == 0:
-                close_index = index
-                break
+    close_index = _balanced_end(region, open_index)
     if close_index is None:
-        return None
+        return None, "the object literal's braces never close"
+    close_index -= 1
 
-    fields: list[dict[str, str]] = []
+    fields: list[dict[str, Any]] = []
     for field in split_fields(region[open_index + 1:close_index]):
         entry = re.fullmatch(
             r"\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*(.*?)\s*",
             field, re.S)
         if entry is None:
-            return None
+            return None, ("field %r is not a plain `name: value` pair"
+                          % field.strip()[:40])
+        name, value = entry.group(1), entry.group(2)
         constructor = re.fullmatch(
             r"new\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(.*\)",
-            entry.group(2), re.S)
-        if constructor is None:
-            return None
-        fields.append({
-            "name": entry.group(1),
-            "type": constructor.group(1),
-        })
-    return {"kind": "object", "fields": fields} if fields else None
+            value, re.S)
+        if constructor is not None:
+            fields.append({"name": name, "type": constructor.group(1)})
+            continue
+        signature, why = _field_function_shape(value)
+        if signature is None:
+            return None, ("field %r is not a form the recogniser "
+                          "understands: %s" % (name, why))
+        signature["name"] = name
+        fields.append({key: signature[key] for key in
+                       ("name", "kind", "params", "returns")})
+    if not fields:
+        return None, "the object literal has no fields"
+    return {"kind": "object", "fields": fields}, ""
+
+
+def _anonymous_return_shape(region: str) -> dict[str, Any] | None:
+    return _anonymous_return_shape_verbose(region)[0]
 
 
 def _receiver_members(
@@ -2961,22 +3063,43 @@ def _export_region(
     end = _balanced_end(region, open_index)
     return region[:end] if end is not None else region
 
-def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
-    raw_lines = path.read_text(encoding="utf-8").splitlines()
+def _commonjs_masked_lines(path: Path) -> list[str]:
+    """The module's lines with comments masked -- the text every scan of this
+    file reads, so a `return {` inside a comment is not code to anybody."""
     masked_lines: list[str] = []
     in_block_comment = False
-    for raw_line in raw_lines:
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
         line, in_block_comment = _mask_js_comments(
             raw_line, in_block_comment)
         masked_lines.append(line)
+    return masked_lines
 
+
+def _commonjs_export_regions(
+        path: Path) -> list[tuple[str, int, str]]:
+    """`(export name, 0-based head line, region text)` for each export the
+    scan reads.
+
+    Split out of `scan_commonjs_exports` in movian#229 so the coverage census
+    and the generator see the SAME regions. A census that rebuilt its own idea
+    of where an export begins could report a site as covered that the
+    generator never looked at -- the two sides blind in the same way, which is
+    the defect this census exists to make impossible.
+
+    A repeated export name is skipped here exactly as the generator skips it.
+    That is deliberate: a second `exports.foo = ...` wins at runtime and the
+    scan describes the first, so a `return {` inside the second belongs to no
+    region the generator read, and the census is supposed to say so rather
+    than quietly count it.
+    """
+    masked_lines = _commonjs_masked_lines(path)
     candidates: list[tuple[int, str]] = []
     for line_index, line in enumerate(masked_lines):
         match = COMMONJS_EXPORT_RE.match(line)
         if match is not None:
             candidates.append((line_index, match.group(1) or match.group(3)))
 
-    exports: list[dict[str, Any]] = []
+    regions: list[tuple[str, int, str]] = []
     seen: set[str] = set()
     for candidate_index, (line_index, export_name) in enumerate(candidates):
         if export_name in seen:
@@ -2985,7 +3108,15 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
         next_line = (candidates[candidate_index + 1][0]
                      if candidate_index + 1 < len(candidates)
                      else len(masked_lines))
-        region = _export_region(masked_lines, line_index, next_line)
+        regions.append((
+            export_name, line_index,
+            _export_region(masked_lines, line_index, next_line)))
+    return regions
+
+
+def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
+    exports: list[dict[str, Any]] = []
+    for export_name, line_index, region in _commonjs_export_regions(path):
         record = {
             "name": export_name,
             "source": {"file": rel(path), "line": line_index + 1},
@@ -3689,6 +3820,149 @@ def _format_shape_member(
         member: tuple[str, str, str, str]) -> str:
     module, kind, receiver, name = member
     return "%s:%s:%s.%s" % (module, kind, receiver, name)
+
+
+def _object_return_census() -> list[dict[str, Any]]:
+    """Every `return { ... }` in the CommonJS corpus, and what became of it.
+
+    Read from the SOURCE tree, never from the artifact. A check whose two
+    sides are both the generator's own output cannot see the generator
+    declining to emit -- and declining silently is exactly what this census
+    exists to catch (movian#229). Before it, a return shape the recogniser
+    refused failed no gate and printed no diagnostic; the only reason anybody
+    found `movian/itemhook.create` was reading the file.
+
+    Each record is one site: `file`, `line`, `column`, the `export` whose
+    region contains it, `status` and, when the recogniser said no, `reason`.
+
+    `status` is one of:
+
+    * `emitted`      -- the recogniser produced a shape for this region.
+    * `declined`     -- it produced a reason instead. Reported, never fatal:
+                        refusing to type a shape it cannot prove is the
+                        contract from movian#160, not a failure.
+    * `unattributed` -- the site is in module code that no export region the
+                        generator reads covers. THIS is the silence. The
+                        generator never looked at it, so it can neither emit
+                        nor decline, and nothing else in the build would ever
+                        mention it.
+    """
+    census: list[dict[str, Any]] = []
+    for path in sorted(COMMONJS_DIR.rglob("*.js")):
+        masked = [_mask_js_strings(line)
+                  for line in _commonjs_masked_lines(path)]
+        # Sites as the file has them, before any region is consulted.
+        sites: set[tuple[int, int]] = set()
+        for line_index, line in enumerate(masked):
+            for match in RETURN_OBJECT_RE.finditer(line):
+                sites.add((line_index + 1, match.start()))
+        if not sites:
+            continue
+        covered: set[tuple[int, int]] = set()
+        for export_name, line_index, region in _commonjs_export_regions(path):
+            found = list(RETURN_OBJECT_RE.finditer(region))
+            if not found:
+                continue
+            shape, reason = _anonymous_return_shape_verbose(region)
+            for match in found:
+                offset = match.start()
+                line = line_index + 1 + region.count("\n", 0, offset)
+                column = offset - (region.rfind("\n", 0, offset) + 1)
+                if (line, column) not in sites or (line, column) in covered:
+                    continue
+                covered.add((line, column))
+                record = {
+                    "file": rel(path), "line": line, "column": column,
+                    "export": export_name,
+                    "status": "emitted" if shape is not None else "declined",
+                }
+                if shape is None:
+                    record["reason"] = reason
+                census.append(record)
+        for line, column in sorted(sites - covered):
+            census.append({
+                "file": rel(path), "line": line, "column": column,
+                "export": None, "status": "unattributed",
+                "reason": "no export region the generator reads covers this "
+                          "line",
+            })
+    return sorted(census, key=lambda r: (r["file"], r["line"], r["column"]))
+
+
+def _artifact_object_returns(
+        artifact: dict[str, Any]) -> set[tuple[str, str]]:
+    """`(module, export)` for every module export the artifact declares an
+    object return shape for."""
+    found: set[tuple[str, str]] = set()
+    for module in artifact.get("js", {}).get("modules", []):
+        for export in module.get("exports", []):
+            returns = export.get("returns")
+            if isinstance(returns, dict) and returns.get("kind") == "object":
+                found.add((module["name"], export["name"]))
+    return found
+
+
+def _module_name_of(file: str) -> str:
+    return Path(file).relative_to(
+        COMMONJS_DIR.relative_to(REPO_ROOT)).with_suffix("").as_posix()
+
+
+def _check_object_return_coverage(
+        artifact: dict[str, Any]) -> tuple[bool, str]:
+    """Every object-literal return in the corpus is emitted, or says why not.
+
+    Three ways to fail, and they are different failures:
+
+    * a site nothing looked at (`unattributed`),
+    * a decline with no reason -- the reason path is meant to be total, and a
+      blank one would put the site back into the silence this replaces,
+    * a site the recogniser emits that the artifact does not carry, which is
+      the two sides disagreeing.
+
+    A decline WITH a reason is not a failure. It prints on a passing run
+    (the `notCompared` idiom from movian#228) so a site that quietly stops
+    being emitted is visible as a changed line long before it becomes drift.
+    """
+    census = _object_return_census()
+    emitted = _artifact_object_returns(artifact)
+    failures: list[str] = []
+    declined: list[str] = []
+    emitted_count = 0
+
+    for site in census:
+        where = "%s:%d" % (site["file"], site["line"])
+        if site["status"] == "unattributed":
+            failures.append(
+                "  %s: %s -- the generator never read it, so it can neither "
+                "type it nor say why not" % (where, site["reason"]))
+            continue
+        if site["status"] == "declined":
+            if not site["reason"]:
+                failures.append(
+                    "  %s: declined with no reason given" % where)
+                continue
+            declined.append("  %s %s -- %s" % (
+                where, site["export"], site["reason"]))
+            continue
+        emitted_count += 1
+        key = (_module_name_of(site["file"]), site["export"])
+        if key not in emitted:
+            failures.append(
+                "  %s: the recogniser types %s but the artifact declares no "
+                "object return for it" % (where, site["export"]))
+
+    lines: list[str] = []
+    if failures:
+        lines.append("OBJECT RETURN COVERAGE FAILED")
+        lines.extend(failures)
+    else:
+        lines.append(
+            "OBJECT RETURN COVERAGE OK (sites %d, emitted %d, declined %d)"
+            % (len(census), emitted_count, len(declined)))
+    if declined:
+        lines.append("declined, with the reason -- not a failure:")
+        lines.extend(declined)
+    return not failures, "\n".join(lines)
 
 
 def _check_commonjs_shape_coverage(
@@ -5352,10 +5626,37 @@ def render_dts(artifact: dict[str, Any]) -> str:
         return ("%d+" % len(params) if variadic else str(len(params)),
                 signature)
 
+    def render_field_type(field: dict[str, Any], shape_names: set[str]) -> str:
+        """The TypeScript type of one field of an object return shape.
+
+        Two forms, matching what the recogniser can prove. A constructor field
+        carries `type`; a function field carries `params` and its own proved
+        `returns` (movian#229). Anything else is not a shape this renderer
+        invents a type for.
+        """
+        if field.get("kind") == "function":
+            params = field.get("params")
+            if not isinstance(params, list) or not all(
+                    isinstance(name, str) for name in params):
+                return "any"
+            signature = ", ".join("%s: any" % name for name in params)
+            return "(%s) => %s" % (
+                signature, render_return_type(field.get("returns"),
+                                              shape_names))
+        field_type = field.get("type")
+        if isinstance(field_type, str) and field_type in shape_names:
+            return field_type
+        return "any"
+
     def render_return_type(
             returned: Any, shape_names: set[str]) -> str:
         if isinstance(returned, str):
             return returned if returned in shape_names else "any"
+        # A function whose every path yields `undefined`. `void` is the proved
+        # answer, not a fallback: `any` here would let a caller use the result
+        # of a `destroy()` that returns nothing.
+        if isinstance(returned, dict) and returned.get("kind") == "void":
+            return "void"
         if isinstance(returned, dict) and returned.get("kind") == "array":
             element = returned.get("element")
             # Same rule as every other shape reference here: a name the
@@ -5375,12 +5676,10 @@ def render_dts(artifact: dict[str, Any]) -> str:
             if not isinstance(field, dict):
                 return "any"
             field_name = field.get("name")
-            field_type = field.get("type")
             if not isinstance(field_name, str):
                 return "any"
-            if not isinstance(field_type, str) or field_type not in shape_names:
-                field_type = "any"
-            rendered.append("%s: %s;" % (field_name, field_type))
+            rendered.append("%s: %s;" % (
+                field_name, render_field_type(field, shape_names)))
         return "{ %s }" % " ".join(rendered)
 
 
@@ -5788,19 +6087,22 @@ def cmd_check(args: argparse.Namespace) -> int:
     coverage_ok, coverage_output = _run_reference_dts_check(("--commonjs",))
     shape_coverage_ok, shape_coverage_output = (
         _check_commonjs_shape_coverage(committed))
+    object_return_ok, object_return_output = (
+        _check_object_return_coverage(committed))
     reference_dts_ok = reference_dts_ok and coverage_ok
     if coverage_output:
         reference_dts_output = "\n".join(
             part for part in (reference_dts_output, coverage_output) if part)
 
     if (metadata_ok and dts_ok and reference_dts_ok
-            and shape_coverage_ok and runtime_oracle_ok):
+            and shape_coverage_ok and object_return_ok and runtime_oracle_ok):
         if args.json:
             print(json.dumps({
                 "metadata": "ok",
                 "dts": "ok",
                 "referenceDts": "ok",
                 "shapeCoverage": "ok",
+                "objectReturnCoverage": "ok",
                 "runtimeOracle": runtime_oracle_report["status"],
             }, indent=2))
         else:
@@ -5809,6 +6111,10 @@ def cmd_check(args: argparse.Namespace) -> int:
                      fresh.get("movianRevision")))
             print("DTS OK")
             print(shape_coverage_output)
+            # Printed on the PASSING run too. The declined sites are the
+            # whole point: a shape that stops being emitted shows up here as
+            # a changed line, instead of as nothing at all (movian#229).
+            print(object_return_output)
             print(runtime_oracle_output)
             if reference_dts_output:
                 print(reference_dts_output)
@@ -5824,6 +6130,7 @@ def cmd_check(args: argparse.Namespace) -> int:
             "dts": "ok" if dts_ok else "drift",
             "referenceDts": "ok" if reference_dts_ok else "failed",
             "shapeCoverage": "ok" if shape_coverage_ok else "failed",
+            "objectReturnCoverage": "ok" if object_return_ok else "failed",
             "runtimeOracle": runtime_oracle_report["status"],
         }
         if diff is not None:
@@ -5832,6 +6139,7 @@ def cmd_check(args: argparse.Namespace) -> int:
             result["referenceDtsOutput"] = reference_dts_output
         if not shape_coverage_ok:
             result["shapeCoverageOutput"] = shape_coverage_output
+        result["objectReturnCoverageOutput"] = object_return_output
         if not runtime_oracle_ok:
             result["runtimeOracleOutput"] = runtime_oracle_report
         print(json.dumps(result, ensure_ascii=False, indent=2,
@@ -5847,6 +6155,7 @@ def cmd_check(args: argparse.Namespace) -> int:
             print(runtime_oracle_output)
         if not shape_coverage_ok:
             print(shape_coverage_output)
+        print(object_return_output)
         if not reference_dts_ok:
             print(reference_dts_output or "reference-dts: checker failed")
     return 1

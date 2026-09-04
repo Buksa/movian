@@ -4670,6 +4670,19 @@
             "params": [
               "conf"
             ],
+            "returns": {
+              "fields": [
+                {
+                  "kind": "function",
+                  "name": "destroy",
+                  "params": [],
+                  "returns": {
+                    "kind": "void"
+                  }
+                }
+              ],
+              "kind": "object"
+            },
             "source": {
               "file": "res/ecmascript/modules/movian/itemhook.js",
               "line": 7
@@ -9963,6 +9976,6 @@
       }
     ]
   },
-  "movianRevision": "0dbab78804f242d813ac4ad33669ff83058a3c74",
+  "movianRevision": "303d713b27b3dadcad6fe037ad3f2a687f5f1641",
   "schemaVersion": 1
 }
