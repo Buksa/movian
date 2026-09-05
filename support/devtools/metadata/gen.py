@@ -4575,10 +4575,17 @@ def _check_doc_type_coverage(
         lines.append("`any` with no reason given:")
         lines.extend(unexplained)
     else:
+        # The population is DECLARATION RECORDS, not lines of the emitted
+        # file, and the two are not equal: the renderer writes a receiver
+        # member once as a hoisted `function` and again inside every
+        # interface it belongs to, so `movian/settings.getvalue` is three
+        # lines and one record. Saying which is counted is the difference
+        # between a number and a number somebody can check.
         lines.append(
-            "DOC TYPE COVERAGE OK (parameters typed %d / any %d; "
-            "returns typed %d / any %d)"
-            % (counts["parameter"][0], counts["parameter"][1],
+            "DOC TYPE COVERAGE OK (%d CommonJS declarations; parameters "
+            "typed %d / any %d; returns typed %d / any %d)"
+            % (len(_commonjs_callables(artifact)),
+               counts["parameter"][0], counts["parameter"][1],
                counts["return"][0], counts["return"][1]))
         lines.append("why the remaining `any`:")
         for reason in sorted(reasons, key=lambda key: (-reasons[key], key)):

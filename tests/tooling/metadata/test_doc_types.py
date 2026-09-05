@@ -505,6 +505,21 @@ class Census(unittest.TestCase):
         self.assertEqual(
             sites({"kind": "array", "element": "Node"}, "Node[]"), [])
 
+    def test_the_report_names_the_population_it_counts(self) -> None:
+        """A number nobody can check is not a measurement.
+
+        The census counts declaration RECORDS. The emitted file writes a
+        receiver member once as a hoisted `function` and again inside every
+        interface it belongs to -- `movian/settings.getvalue` is three lines
+        and one record -- so counting lines of the `.d.ts` and expecting the
+        census to match is wrong in a way the old wording invited.
+        """
+        artifact = self.artifact()
+        ok, output = gen._check_doc_type_coverage(artifact)
+        self.assertTrue(ok, output)
+        self.assertIn("%d CommonJS declarations"
+                      % len(gen._commonjs_callables(artifact)), output)
+
     def test_an_any_with_no_reason_fails(self) -> None:
         """Forced by injection. The reason path is total by construction,
         which is exactly why the guard must not be a silent pass."""
