@@ -108,6 +108,141 @@ REFUSED = [
 ]
 
 
+# `_anonymous_return_shape` sees the text of one export region, exactly as the
+# export scan passes it. Each case is the whole region so the brace walk that
+# finds the direct `return {` has the same input it has in production.
+OBJECT_ANSWERED = [
+    ("the real movian/html form -- constructor fields, unchanged by #229",
+     "= function(h){ var gdoc = gumbo.parse(h);"
+     " return { document: new Node(gdoc.document),"
+     " root: new Node(gdoc.root) }; }",
+     {"kind": "object", "fields": [
+         {"name": "document", "type": "Node"},
+         {"name": "root", "type": "Node"}]}),
+    ("the real movian/itemhook handle -- a function field that returns nothing",
+     "= function(conf){ var node = prop.createRoot();"
+     " return { destroy: function() { prop.destroy(node); } }; }",
+     {"kind": "object", "fields": [
+         {"name": "destroy", "kind": "function", "params": [],
+          "returns": {"kind": "void"}}]}),
+    ("a function field with parameters",
+     "= function(){ return { seek: function(where, how) { io.seek(where); } }; }",
+     {"kind": "object", "fields": [
+         {"name": "seek", "kind": "function", "params": ["where", "how"],
+          "returns": {"kind": "void"}}]}),
+    ("every own return valueless still proves void",
+     "= function(){ return { stop: function(x) { if (x) { return; } return; } }; }",
+     {"kind": "object", "fields": [
+         {"name": "stop", "kind": "function", "params": ["x"],
+          "returns": {"kind": "void"}}]}),
+    ("a nested callback's return is not the field's own",
+     "= function(){ return { run: function() {"
+     " xs.forEach(function(n){ return n.v; }); } }; }",
+     {"kind": "object", "fields": [
+         {"name": "run", "kind": "function", "params": [],
+          "returns": {"kind": "void"}}]}),
+    ("a function field whose own return has a provable shape",
+     "= function(){ return { open: function(u) { return new Request(u); } }; }",
+     {"kind": "object", "fields": [
+         {"name": "open", "kind": "function", "params": ["u"],
+          "returns": "Request"}]}),
+    ("constructor and function fields together",
+     "= function(){ return { root: new Node(x),"
+     " destroy: function() { prop.destroy(x); } }; }",
+     {"kind": "object", "fields": [
+         {"name": "root", "type": "Node"},
+         {"name": "destroy", "kind": "function", "params": [],
+          "returns": {"kind": "void"}}]}),
+]
+
+# The all-or-nothing contract from movian#160: a value form still not
+# understood declines the WHOLE shape rather than emitting a partial `any`.
+# #229 recognises one more form; it does not relax the contract.
+OBJECT_REFUSED = [
+    ("a plain value field",
+     "= function(){ return { n: 1 }; }"),
+    ("a bare identifier field",
+     "= function(){ return { node: node }; }"),
+    ("a call-valued field",
+     "= function(){ return { doc: gumbo.parse(h) }; }"),
+    ("one unknown field poisons the known ones",
+     "= function(){ return { root: new Node(x), n: 1 }; }"),
+    ("a function field whose parameter list does not parse (ES5 has no defaults)",
+     "= function(){ return { go: function(a = 1) { x(); } }; }"),
+    ("a function field that returns a value with no provable shape",
+     "= function(){ return { pick: function() { return xs[0]; } }; }"),
+    ("a function field that can fall through -- undefined on the other path",
+     "= function(){ return { pick: function(n) { if (n) return new Node(n); } }; }"),
+    ("a nested object field is one field, and an unrecognised one",
+     "= function(){ return { pos: { x: 1, y: 2 } }; }"),
+    # Reachability, the guard movian#190 gave the scalar path and this one
+    # never had. An unbraced `if` puts the return at depth 1, so the direct
+    # filter accepts it and it is the body's only own return -- only
+    # `_always_returns` sees that `!t` falls through to `undefined`.
+    ("an unbraced conditional return -- undefined on the other path",
+     "= function(t){ if (t) return { a: new Node(x) }; }"),
+    ("a return-object inside a loop",
+     "= function(t){ while (n--) return { a: new Node(x) }; }"),
+    # Not the last statement: the body carries on and yields undefined.
+    ("a return-object followed by more of the body",
+     "= function(t){ if (t) { return { a: new Node(x) }; } cleanup(); }"),
+    ("two direct return-objects: no single shape",
+     "= function(t){ if (t) { return { a: new Node(x) }; }"
+     " return { b: new Node(y) }; }"),
+]
+
+
+class AnonymousReturnShape(unittest.TestCase):
+    """The object-literal return family (movian#229).
+
+    Paired the same way as `ReturnedShape` above, and for the same reason. The
+    ANSWERED half dies if the recogniser is gutted; the REFUSED half dies if it
+    is loosened into `any`. Only one form was added -- a function-valued field
+    -- because that is the one the corpus uses and cannot express today.
+    """
+
+    def test_answers_the_forms_the_corpus_uses(self) -> None:
+        for label, region, expected in OBJECT_ANSWERED:
+            with self.subTest(label):
+                self.assertEqual(gen._anonymous_return_shape(region), expected)
+
+    def test_declines_the_whole_shape_on_an_unknown_field(self) -> None:
+        for label, region in OBJECT_REFUSED:
+            with self.subTest(label):
+                self.assertIsNone(gen._anonymous_return_shape(region))
+
+    def test_every_refusal_says_why(self) -> None:
+        """Totality of the reason path, pinned at the source.
+
+        `_check_object_return_coverage` reports a declined site by printing
+        the reason the recogniser gave, and treats a blank one as a failure.
+        That treatment is only meaningful if a reason is genuinely always
+        produced -- otherwise the gate's own guard is the thing keeping the
+        silence, one level up.
+        """
+        for label, region in OBJECT_REFUSED:
+            with self.subTest(label):
+                shape, reason = gen._anonymous_return_shape_verbose(region)
+                self.assertIsNone(shape)
+                self.assertTrue(reason, "declined with no reason")
+
+    def test_split_fields_does_not_split_inside_braces(self) -> None:
+        """The hazard the issue named, pinned as a decision.
+
+        `split_fields` tracked paren and bracket depth but not brace depth, so
+        `{ pos: {x: 1, y: 2} }` split into `pos: {x: 1` and `y: 2}`. That was
+        harmless only by luck -- both halves failed the `new Ctor(...)`
+        fullmatch and the shape declined for the wrong reason. A function field
+        body ends the luck: its `,` are inside braces too.
+        """
+        self.assertEqual(
+            gen.split_fields("pos: {x: 1, y: 2}, root: new Node(n)"),
+            ["pos: {x: 1, y: 2}", "root: new Node(n)"])
+        self.assertEqual(
+            gen.split_fields("f: function(a, b) { g(1, 2); }, n: 1"),
+            ["f: function(a, b) { g(1, 2); }", "n: 1"])
+
+
 class ReturnedShape(unittest.TestCase):
     def test_answers_the_shapes_the_corpus_uses(self) -> None:
         for label, region, expected in ANSWERED:
@@ -152,18 +287,34 @@ class ReturnedShape(unittest.TestCase):
                 for value in node:
                     yield from typed(value)
 
+        def population(member: dict) -> str:
+            # A field of an object return shape carries `name` and `returns`
+            # too, so the walker above finds it -- but it is not a member of
+            # any module, it is part of one member's type. `source` is what
+            # tells them apart: every real member records where it was
+            # scanned from, a field records nothing (movian#229). Counting
+            # them together would let a lost member hide behind a gained
+            # field.
+            if "source" not in member:
+                return "returnField"
+            return "native" if "impl" in member else "commonjs"
+
         members = sorted(
-            (m["name"], m.get("source", {}).get("file", "?"),
-             "native" if "impl" in m else "commonjs")
+            (m["name"], m.get("source", {}).get("file", "?"), population(m))
             for m in typed(json.loads(artifact.read_text())))
         counted = collections.Counter(kind for _, _, kind in members)
         # 72 natives when the return scan read a body with one push and
         # refused everything else; 91 once it also resolves the class behind
         # `es_resource_push`/`es_push_native_obj` and reads a container filled
-        # through `duk_put_prop_*`. Both numbers are measurements, not targets
-        # -- if this fails, re-measure before adjusting it.
-        self.assertEqual(dict(counted), {"commonjs": 11, "native": 91},
-                         members)
+        # through `duk_put_prop_*`. 11 CommonJS until movian#229 taught the
+        # object-return recogniser one more field form, which added
+        # `movian/itemhook.create` and, with it, the first `returnField`.
+        # All three are measurements, not targets -- if this fails,
+        # re-measure before adjusting it.
+        self.assertEqual(
+            dict(counted),
+            {"commonjs": 12, "native": 91, "returnField": 1},
+            members)
 
 
 if __name__ == "__main__":
