@@ -1567,9 +1567,14 @@
       "type": "object"
     }
   },
-  "capturedAt": 1787666526920,
+  "capturedAt": 1788588485591,
   "globalSettingsError": null,
   "inputs": {
+    "configuration": {
+      "ENABLE_HTTPSERVER": "1",
+      "ENABLE_PLUGINS": "1",
+      "ENABLE_WEBPOPUP": "0"
+    },
     "digest": "6c75bc778ad7bd12049b99518a781e4783cbf2ae43c30c962f74fc5ae9b565ee",
     "files": {
       "res/ecmascript/legacy/api-v1.js": "ff3bc1f704125fc3fddc1cb4ddd032577f22b35bc5729e470a915bffd9c8635a",
@@ -1720,7 +1725,7 @@
     "res/ecmascript/modules/movian/itemhook.js": "216246244e04fb78312f4875298cab3a39a83a460e7e9d1bdaf59a4a9c9303ef",
     "res/ecmascript/modules/movian/page.js": "ed7944b108d4a5e9239aa117b1234f00ea8367d03e322d5108b1ca89dadd2686",
     "res/ecmascript/modules/movian/popup.js": "a66c8f6e7f98b38221c994929a0266d9757c8898e7d1d77b26830f2aa3546b7d",
-    "res/ecmascript/modules/movian/prop.js": "5ba253d171eae4aaefddbe09c0e0faf1fa53f0cda02d378075fcaa32b2eb7ff0",
+    "res/ecmascript/modules/movian/prop.js": "e6755e37f95ec6d123f42c021433baed9c6c3e0cc680dc8f673626552e01d9cf",
     "res/ecmascript/modules/movian/service.js": "37f6833df41fda1f8f28f3930c5e83a18c96fc1cee6dc66b96e86eb33e8abeee",
     "res/ecmascript/modules/movian/settings.js": "6e5119406a7be436c8253ff9a8fac7ea6b1866c629a3d1ccf5357c0a5eb31e58",
     "res/ecmascript/modules/movian/sqlite.js": "4f6fc04b357d6cdc61570b866f8e1908ed3f4e7bf103528d0c8538d0ca42e559",

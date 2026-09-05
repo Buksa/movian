@@ -4073,6 +4073,9 @@
       {
         "exports": [
           {
+            "docParams": {
+              "path": "string"
+            },
             "name": "mkdirSync",
             "nargs": 1,
             "params": [
@@ -4084,6 +4087,11 @@
             }
           },
           {
+            "docParams": {
+              "filename": "string",
+              "opts": "*"
+            },
+            "docReturns": "DuktapeBuffer",
             "name": "readFileSync",
             "nargs": 2,
             "params": [
@@ -4096,6 +4104,10 @@
             }
           },
           {
+            "docParams": {
+              "path": "string"
+            },
+            "docReturns": "string[]",
             "name": "readdirSync",
             "nargs": 1,
             "params": [
@@ -4107,6 +4119,9 @@
             }
           },
           {
+            "docParams": {
+              "path": "string"
+            },
             "name": "rmdirSync",
             "nargs": 1,
             "params": [
@@ -4118,6 +4133,9 @@
             }
           },
           {
+            "docParams": {
+              "filename": "string"
+            },
             "name": "unlinkSync",
             "nargs": 1,
             "params": [
@@ -4129,6 +4147,11 @@
             }
           },
           {
+            "docParams": {
+              "data": "string|DuktapeBuffer",
+              "filename": "string",
+              "opts": "*"
+            },
             "name": "writeFileSync",
             "nargs": 3,
             "params": [
@@ -4152,6 +4175,12 @@
       {
         "exports": [
           {
+            "docParams": {
+              "callback": "unknown",
+              "https": "boolean",
+              "opts": "string|Object"
+            },
+            "docReturns": "Request",
             "name": "get",
             "nargs": 3,
             "params": [
@@ -4165,6 +4194,12 @@
             }
           },
           {
+            "docParams": {
+              "callback": "unknown",
+              "https": "boolean",
+              "opts": "string|Object"
+            },
+            "docReturns": "Request",
             "name": "request",
             "nargs": 3,
             "params": [
@@ -4195,6 +4230,10 @@
                 }
               },
               {
+                "docParams": {
+                  "fn": "(...args: any[]) => void",
+                  "name": "string"
+                },
                 "name": "on",
                 "nargs": 2,
                 "params": [
@@ -4252,6 +4291,10 @@
             "kind": "prototype",
             "methods": [
               {
+                "docParams": {
+                  "event": "string",
+                  "fn": "(...args: any[]) => void"
+                },
                 "name": "on",
                 "nargs": 2,
                 "params": [
@@ -4264,6 +4307,9 @@
                 }
               },
               {
+                "docParams": {
+                  "enc": "string"
+                },
                 "name": "setEncoding",
                 "nargs": 1,
                 "params": [
@@ -4333,6 +4379,10 @@
       {
         "exports": [
           {
+            "docParams": {
+              "cb": "unknown",
+              "opts": "string|Object"
+            },
             "name": "get",
             "nargs": 2,
             "params": [
@@ -4345,6 +4395,10 @@
             }
           },
           {
+            "docParams": {
+              "cb": "unknown",
+              "opts": "string|Object"
+            },
             "name": "request",
             "nargs": 2,
             "params": [
@@ -4367,6 +4421,9 @@
       {
         "exports": [
           {
+            "docParams": {
+              "html": "string"
+            },
             "name": "parse",
             "nargs": 1,
             "params": [
@@ -4398,6 +4455,10 @@
             "kind": "prototype",
             "methods": [
               {
+                "docParams": {
+                  "cls": "string"
+                },
+                "docReturns": "Node[]",
                 "name": "getElementByClassName",
                 "nargs": 1,
                 "params": [
@@ -4413,6 +4474,10 @@
                 }
               },
               {
+                "docParams": {
+                  "id": "string"
+                },
+                "docReturns": "Node|null",
                 "name": "getElementById",
                 "nargs": 1,
                 "params": [
@@ -4424,6 +4489,10 @@
                 }
               },
               {
+                "docParams": {
+                  "tag": "string"
+                },
+                "docReturns": "Node[]",
                 "name": "getElementByTagName",
                 "nargs": 1,
                 "params": [
@@ -4440,6 +4509,10 @@
               },
               {
                 "aliasOf": "getElementByClassName",
+                "docParams": {
+                  "cls": "string"
+                },
+                "docReturns": "Node[]",
                 "name": "getElementsByClassName",
                 "nargs": 1,
                 "params": [
@@ -4456,6 +4529,10 @@
               },
               {
                 "aliasOf": "getElementByTagName",
+                "docParams": {
+                  "tag": "string"
+                },
+                "docReturns": "Node[]",
                 "name": "getElementsByTagName",
                 "nargs": 1,
                 "params": [
@@ -4541,6 +4618,11 @@
             "callbackShape": "HttpResponse",
             "callbackShapeIndex": 1,
             "callbackShapeNullable": true,
+            "docParams": {
+              "callback": "(err: any, res: HttpResponse|null) => void",
+              "ctrl": "import('native/io').HttpReqOptions",
+              "url": "string"
+            },
             "name": "request",
             "nargs": 3,
             "params": [
@@ -4563,6 +4645,9 @@
             "kind": "prototype",
             "methods": [
               {
+                "docParams": {
+                  "encoding": "string"
+                },
                 "name": "convertFromEncoding",
                 "nargs": 1,
                 "params": [
@@ -4665,6 +4750,9 @@
       {
         "exports": [
           {
+            "docParams": {
+              "conf": "{itemtype?: string, title?: string, icon?: string, handler?: Function}"
+            },
             "name": "create",
             "nargs": 1,
             "params": [
@@ -4702,6 +4790,10 @@
             "callbackParam": "callback",
             "callbackShape": "Page",
             "constructor": true,
+            "docParams": {
+              "callback": "(page: Page, ...matches: any[]) => void",
+              "re": "string"
+            },
             "name": "Route",
             "nargs": 2,
             "params": [
@@ -4717,6 +4809,11 @@
             "callbackParam": "callback",
             "callbackShape": "Page",
             "constructor": true,
+            "docParams": {
+              "callback": "(page: Page, query: string) => void",
+              "icon": "string",
+              "title": "string"
+            },
             "name": "Searcher",
             "nargs": 3,
             "params": [
@@ -4737,6 +4834,12 @@
             "kind": "prototype",
             "methods": [
               {
+                "docParams": {
+                  "func": "Function",
+                  "subtype": "string",
+                  "title": "string"
+                },
+                "docReturns": "PropHandle",
                 "name": "addOptAction",
                 "nargs": 3,
                 "params": [
@@ -4750,6 +4853,9 @@
                 }
               },
               {
+                "docParams": {
+                  "title": "string"
+                },
                 "name": "addOptSeparator",
                 "nargs": 1,
                 "params": [
@@ -4761,6 +4867,11 @@
                 }
               },
               {
+                "docParams": {
+                  "subtype": "string",
+                  "title": "string",
+                  "url": "string"
+                },
                 "name": "addOptURL",
                 "nargs": 3,
                 "params": [
@@ -4774,6 +4885,9 @@
                 }
               },
               {
+                "docParams": {
+                  "obj": "import('native/metadata').VideoMetadataBindOptions"
+                },
                 "name": "bindVideoMetadata",
                 "nargs": 1,
                 "params": [
@@ -4794,6 +4908,9 @@
                 }
               },
               {
+                "docParams": {
+                  "item": "PropHandle"
+                },
                 "name": "destroyOption",
                 "nargs": 1,
                 "params": [
@@ -4832,6 +4949,9 @@
                 }
               },
               {
+                "docParams": {
+                  "before": "Item|null"
+                },
                 "name": "moveBefore",
                 "nargs": 1,
                 "params": [
@@ -4843,6 +4963,10 @@
                 }
               },
               {
+                "docParams": {
+                  "callback": "(...args: any[]) => void",
+                  "type": "string"
+                },
                 "name": "onEvent",
                 "nargs": 2,
                 "params": [
@@ -4864,6 +4988,9 @@
                 }
               },
               {
+                "docParams": {
+                  "obj": "*"
+                },
                 "name": "unbindVideoMetadata",
                 "nargs": 1,
                 "params": [
@@ -4912,6 +5039,12 @@
             "kind": "prototype",
             "methods": [
               {
+                "docParams": {
+                  "func": "Function",
+                  "subtype": "string",
+                  "title": "string"
+                },
+                "docReturns": "Item",
                 "name": "appendAction",
                 "nargs": 3,
                 "params": [
@@ -4926,6 +5059,12 @@
                 }
               },
               {
+                "docParams": {
+                  "metadata": "Object",
+                  "type": "string",
+                  "url": "string"
+                },
+                "docReturns": "Item",
                 "name": "appendItem",
                 "nargs": 3,
                 "params": [
@@ -4940,6 +5079,12 @@
                 }
               },
               {
+                "docParams": {
+                  "data": "*",
+                  "metadata": "Object",
+                  "type": "string"
+                },
+                "docReturns": "Item",
                 "name": "appendPassiveItem",
                 "nargs": 3,
                 "params": [
@@ -4963,6 +5108,9 @@
                 }
               },
               {
+                "docParams": {
+                  "msg": "*"
+                },
                 "name": "error",
                 "nargs": 1,
                 "params": [
@@ -4974,6 +5122,10 @@
                 }
               },
               {
+                "docParams": {
+                  "v": "PropHandle"
+                },
+                "docReturns": "number",
                 "name": "findItemByProp",
                 "nargs": 1,
                 "params": [
@@ -5003,6 +5155,9 @@
                 }
               },
               {
+                "docParams": {
+                  "v": "boolean"
+                },
                 "name": "haveMore",
                 "nargs": 1,
                 "params": [
@@ -5014,6 +5169,10 @@
                 }
               },
               {
+                "docParams": {
+                  "callback": "(...args: any[]) => void",
+                  "type": "string"
+                },
                 "name": "onEvent",
                 "nargs": 2,
                 "params": [
@@ -5026,6 +5185,9 @@
                 }
               },
               {
+                "docParams": {
+                  "url": "string"
+                },
                 "name": "redirect",
                 "nargs": 1,
                 "params": [
@@ -5255,6 +5417,9 @@
       {
         "exports": [
           {
+            "docParams": {
+              "name": "string"
+            },
             "name": "createRoot",
             "nargs": 1,
             "params": [
@@ -5280,6 +5445,11 @@
             }
           },
           {
+            "docParams": {
+              "callback": "(...args: any[]) => void",
+              "ctrl": "import('native/prop').SubscribeOptions|null",
+              "prop": "PropHandle"
+            },
             "name": "subscribeValue",
             "nargs": 3,
             "params": [
@@ -5289,7 +5459,7 @@
             ],
             "source": {
               "file": "res/ecmascript/modules/movian/prop.js",
-              "line": 111
+              "line": 114
             }
           }
         ],
@@ -5304,6 +5474,14 @@
       {
         "exports": [
           {
+            "docParams": {
+              "enabled": "boolean",
+              "icon": "string",
+              "title": "string",
+              "type": "string",
+              "url": "string"
+            },
+            "docReturns": "Service",
             "name": "create",
             "nargs": 5,
             "params": [
@@ -5370,6 +5548,12 @@
       {
         "exports": [
           {
+            "docParams": {
+              "desc": "string",
+              "icon": "string",
+              "id": "string",
+              "title": "string"
+            },
             "name": "globalSettings",
             "nargs": 4,
             "params": [
@@ -5437,6 +5621,11 @@
             }
           },
           {
+            "docParams": {
+              "domain": "string",
+              "nodes": "*",
+              "url": "string"
+            },
             "name": "kvstoreSettings",
             "nargs": 3,
             "params": [
@@ -5698,6 +5887,9 @@
         "exports": [
           {
             "constructor": true,
+            "docParams": {
+              "dbname": "string"
+            },
             "name": "DB",
             "nargs": 1,
             "params": [
@@ -5744,6 +5936,9 @@
                 }
               },
               {
+                "docParams": {
+                  "path": "string"
+                },
                 "name": "upgradeSchema",
                 "nargs": 1,
                 "params": [
@@ -5805,6 +6000,9 @@
       {
         "exports": [
           {
+            "docParams": {
+              "name": "string"
+            },
             "name": "create",
             "nargs": 1,
             "params": [
@@ -5816,6 +6014,9 @@
             }
           },
           {
+            "docParams": {
+              "path": "string"
+            },
             "name": "createFromPath",
             "nargs": 1,
             "params": [
@@ -5837,6 +6038,9 @@
       {
         "exports": [
           {
+            "docParams": {
+              "fn": "(req: any) => void"
+            },
             "name": "addProvider",
             "nargs": 1,
             "params": [
@@ -5961,6 +6165,9 @@
       {
         "exports": [
           {
+            "docParams": {
+              "x": "HtsmsgHandle"
+            },
             "name": "htsmsg",
             "nargs": 1,
             "params": [
@@ -5972,6 +6179,9 @@
             }
           },
           {
+            "docParams": {
+              "str": "string"
+            },
             "name": "parse",
             "nargs": 1,
             "params": [
@@ -9718,6 +9928,10 @@
       {
         "exports": [
           {
+            "docParams": {
+              "d": "{protocol: string, slashes?: boolean, host?: string, hostname?: string, port?: string|number, auth?: string, pathname: string, search?: string, query?: Object, hash?: string}"
+            },
+            "docReturns": "string",
             "name": "format",
             "nargs": 1,
             "params": [
@@ -9754,6 +9968,10 @@
         "exports": [
           {
             "constructor": true,
+            "docParams": {
+              "URL": "string",
+              "protocol": "string"
+            },
             "name": "w3cwebsocket",
             "nargs": 2,
             "params": [
@@ -9773,6 +9991,9 @@
             "kind": "prototype",
             "methods": [
               {
+                "docParams": {
+                  "d": "unknown"
+                },
                 "name": "close",
                 "nargs": 1,
                 "params": [
@@ -9784,6 +10005,9 @@
                 }
               },
               {
+                "docParams": {
+                  "d": "string|ArrayBuffer|ArrayBufferView|DuktapeBuffer"
+                },
                 "name": "send",
                 "nargs": 1,
                 "params": [
@@ -9976,6 +10200,6 @@
       }
     ]
   },
-  "movianRevision": "303d713b27b3dadcad6fe037ad3f2a687f5f1641",
+  "movianRevision": "ce12bf4561d37ad796016aa1d0a6bf2dd2506193",
   "schemaVersion": 1
 }

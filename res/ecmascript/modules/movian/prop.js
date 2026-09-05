@@ -105,8 +105,11 @@ exports.createRoot = function(name) {
 /**
  * @param {PropHandle} prop
  * @param {(...args: any[]) => void} callback
- * @param {import('native/prop').SubscribeOptions} [ctrl] the keys
- *   es_prop_subscribe reads off argument 2
+ * @param {import('native/prop').SubscribeOptions|null} [ctrl] the keys
+ *   es_prop_subscribe reads off argument 2. `null` is accepted and means the
+ *   same as omitting it: es_prop_is_true (src/ecmascript/ecmascript.c:85)
+ *   returns 0 for anything duk_is_object rejects, so every option reads
+ *   false. Real plugins pass it -- movian-plugin-HDRezka/utils/ui.js:75.
  */
 exports.subscribeValue = function(prop, callback, ctrl) {
   return np.subscribe(prop, function(type, v1, v2) {
