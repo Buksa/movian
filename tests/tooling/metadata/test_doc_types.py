@@ -80,6 +80,145 @@ class BlockReader(unittest.TestCase):
         self.assertNotIn("[ctrl]", types["params"])
 
 
+class ReaderLexing(unittest.TestCase):
+    """The reader is a lexer, and every shortcut in it was a real misreading.
+
+    All five cases below came out of the cross-vendor review round, and every
+    one produced either a wrong type in the emitted file or an annotation
+    attributed to the wrong function.
+    """
+
+    def probe(self, source: str, line: int):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "m.js"
+            path.write_text(source, encoding="utf-8")
+            try:
+                return gen._jsdoc_types(path, line)
+            finally:
+                gen._RAW_LINES_CACHE.pop(path, None)
+
+    def test_a_brace_inside_a_string_type_is_not_a_delimiter(self) -> None:
+        """`@returns {"}"}` read as `{"`, and the emitted declaration was an
+        unterminated string literal -- tsc TS1002."""
+        self.assertEqual(gen._braced('{"}"} rest', 0), ('"}"', 5))
+        self.assertEqual(
+            self.probe('/** @returns {"}"} */\nexports.f = function() {};\n',
+                       2).get("returns"),
+            '"}"')
+
+    def test_whitespace_inside_a_string_type_is_preserved(self) -> None:
+        """Layout whitespace is collapsed so a multi-line object type reads;
+        whitespace INSIDE a literal is part of the value, and collapsing it
+        made the signature reject the call the annotation described."""
+        self.assertEqual(
+            self.probe('/** @param {"true  false"} x */\n'
+                       'exports.f = function(x) {};\n', 2)["params"]["x"],
+            '"true  false"')
+        self.assertEqual(
+            self.probe('/**\n * @param {{a?: string,\n'
+                       ' *          b?: Item}} c\n */\n'
+                       'exports.f = function(c) {};\n', 5)["params"]["c"],
+            "{a?: string, b?: Item}")
+
+    def test_a_trailing_comment_does_not_transfer_the_block(self) -> None:
+        """Attribution needs comment lexical state, not proximity.
+
+        The walk started at the ORDINARY comment's `*/`, crossed executable
+        code, and reached the block belonging to `first` -- typing `f` with
+        an annotation written for a different function.
+        """
+        self.assertEqual(
+            self.probe('/** @param {string} x */\n'
+                       'exports.first = function(x) {}; /* ordinary */\n'
+                       'exports.f = function(x) {};\n', 3), {})
+
+    def test_a_fake_opener_inside_an_ordinary_comment_is_not_a_block(
+            self) -> None:
+        self.assertEqual(
+            self.probe('/* ordinary comment\n'
+                       ' /** @param {string} x\n'
+                       '*/\n'
+                       'exports.f = function(x) {};\n', 4), {})
+
+    def test_a_dotted_param_documents_a_property_not_the_parameter(
+            self) -> None:
+        """`@param {string} options.name` matched the `options` prefix and
+        overwrote the parameter's own type, rendering `options?: string` and
+        rejecting every real call."""
+        self.assertEqual(
+            self.probe('/**\n * @param {{name: string}} options\n'
+                       ' * @param {string} options.name\n */\n'
+                       'exports.f = function(options) {};\n',
+                       5)["params"],
+            {"options": "{name: string}"})
+
+    def test_a_multiline_ordinary_comment_does_not_transfer_the_block(
+            self) -> None:
+        """The second half of the walk guard.
+
+        A trailing `/* ... */` on the same line as code is caught by the
+        closing-line rule. An ordinary comment whose `*/` sits on its own line
+        passes that rule and is only stopped by the walk refusing to cross a
+        second comment's boundary.
+        """
+        self.assertEqual(
+            self.probe('/** @param {string} x */\n'
+                       'exports.first = function(x) {};\n'
+                       '/* an ordinary note\n'
+                       '   spanning lines\n'
+                       '*/\n'
+                       'exports.f = function(x) {};\n', 6), {})
+
+    def test_the_ordinary_forms_still_read(self) -> None:
+        """The other half. A reader tightened until it reads nothing passes
+        every refusal test above."""
+        self.assertEqual(
+            self.probe('/** @param {string} s */\n'
+                       'exports.f = function(s) {};\n', 2),
+            {"params": {"s": "string"}})
+        self.assertEqual(
+            self.probe('/**\n * @param {string} a\n * @returns {Item}\n'
+                       ' */\nexports.f = function(a) {};\n', 5),
+            {"params": {"a": "string"}, "returns": "Item"})
+
+
+class Aliases(unittest.TestCase):
+    """A prototype alias copies the target's record.
+
+    Inheriting the annotations is right -- the function is identical. Claiming
+    the target's words came from the ALIAS's source line is not, and the
+    alias's own block was never read at all.
+    """
+
+    def scan(self, source: str):
+        path = MODULES / "movian" / "_alias_probe.js"
+        path.write_text(source, encoding="utf-8")
+        try:
+            return {method["name"]: method
+                    for shape in gen.scan_commonjs_shapes(path)
+                    for method in shape["methods"]}
+        finally:
+            path.unlink()
+            gen._RAW_LINES_CACHE.pop(path, None)
+
+    SOURCE = ('/**\n * @param {string} x\n * @returns {string}\n */\n'
+              'C.prototype.original = function(x) { return x; };\n'
+              '/**\n * @param {Item} x\n * @returns {Item}\n */\n'
+              'C.prototype.alias = C.prototype.original;\n'
+              'C.prototype.bare = C.prototype.original;\n')
+
+    def test_an_alias_reads_its_own_block(self) -> None:
+        methods = self.scan(self.SOURCE)
+        self.assertEqual(methods["alias"]["docParams"], {"x": "Item"})
+        self.assertEqual(methods["alias"]["docReturns"], "Item")
+        self.assertNotIn("docFrom", methods["alias"])
+
+    def test_an_undocumented_alias_inherits_and_says_so(self) -> None:
+        methods = self.scan(self.SOURCE)
+        self.assertEqual(methods["bare"]["docParams"], {"x": "string"})
+        self.assertEqual(methods["bare"]["docFrom"], "original")
+
+
 class TypeResolution(unittest.TestCase):
     """What may be emitted, and what must fall back to `any`."""
 
@@ -104,15 +243,15 @@ class TypeResolution(unittest.TestCase):
 
     def test_refuses_a_name_the_module_cannot_write(self) -> None:
         for text, fragment in [
-                ("HttpResponse", "not declared in this module"),
-                ("Page|null", "not declared in this module"),
+                ("HttpResponse", "not a name this module declares"),
+                ("Page|null", "not a name this module declares"),
                 ("Wat[]", "Wat"),
                 ("import('native/prop').Nope", "declares no Nope"),
                 ("import('native/nothing').X", "declares no X"),
                 # Declared, but somewhere else. Resolving against one flat set
                 # would emit a name this block cannot write, and the emitted
                 # file would not compile where it landed.
-                ("SubscribeOptions", "not declared in this module"),
+                ("SubscribeOptions", "not a name this module declares"),
                 ("SubscribeOptions[]", "SubscribeOptions"),
         ]:
             with self.subTest(text):
@@ -137,6 +276,47 @@ class TypeResolution(unittest.TestCase):
     def test_closure_star_becomes_any(self) -> None:
         self.assertEqual(gen.render_doc_type("*"), "any")
         self.assertEqual(gen.render_doc_type("string"), "string")
+
+    def test_a_qualified_name_is_refused_outright(self) -> None:
+        """The old rule skipped an identifier "preceded by a dot".
+
+        `[...Missing]` is a rest element, not a qualification, so `Missing`
+        was skipped and emitted -- TS2304 in a file that is supposed to
+        compile. `Item.Missing` was accepted too, and an interface is not a
+        namespace: TS2702. Only `import('module').Member` is a dotted form
+        this resolver can follow.
+        """
+        problem = self.problem("[...Missing]")
+        self.assertIsNotNone(problem)
+        self.assertIn("Missing", problem)
+        problem = self.problem("Item.Missing")
+        self.assertIsNotNone(problem)
+        self.assertIn("qualified name", problem)
+
+    def test_unknown_nested_in_a_type_is_refused_on_a_parameter(self) -> None:
+        """The asymmetry does not survive nesting.
+
+        `(value: unknown) => void` puts `unknown` in a CONTRAVARIANT position:
+        the emitted callback must accept unknown, so
+        `f((value: string) => ...)` stops compiling although it compiled
+        against `any`. Bare `unknown` at the top level is still fine, and that
+        is what the corpus actually writes.
+        """
+        problem = self.problem("(value: unknown) => void")
+        self.assertIsNotNone(problem)
+        self.assertIn("contravariant", problem)
+        self.assertIsNone(self.problem("unknown"))
+
+    def test_forms_the_resolver_reads_correctly(self) -> None:
+        """Lexical bugs, each of which refused a valid annotation.
+
+        A name inside a string is not a type reference, a method shorthand key
+        is not a type reference, and a type operator is a keyword.
+        """
+        for text in ['{run(): void}', '{"property name": string}',
+                     '"key: value"', 'keyof {a: string}']:
+            with self.subTest(text):
+                self.assertIsNone(self.problem(text))
 
     def test_a_property_name_is_not_a_type_reference(self) -> None:
         """The `?:` half of this cost both object-literal annotations.
@@ -235,7 +415,95 @@ class Census(unittest.TestCase):
         census = gen._doc_type_census(self.artifact())
         typed = sum(1 for s in census
                     if s["kind"] == "parameter" and s["status"] == "typed")
-        self.assertEqual(typed, 96)
+        # 96 while `*` was counted as typed and the rest-parameter slots were
+        # not counted at all -- a number that described the annotations, not
+        # the emitted file. Both were corrected in the review round.
+        self.assertEqual(typed, 90)  # noqa: kept, see comment above
+
+    def test_a_closure_star_is_counted_as_any_not_typed(self) -> None:
+        """It renders `any`. Counting it typed described the annotation and
+        not the file, and excluded six real `any` slots from the reasons."""
+        artifact = {"js": {"modules": [{
+            "name": "movian/m", "kind": "commonjs", "shapes": [],
+            "exports": [{"name": "f", "params": ["a"],
+                         "docParams": {"a": "*"},
+                         "source": {"file": "res/ecmascript/modules/"
+                                            "movian/m.js", "line": 1}}]}]}}
+        slot = [s for s in gen._doc_type_census(artifact)
+                if s["slot"] == "a"][0]
+        self.assertEqual(slot["status"], "any")
+        self.assertIn("Closure's any", slot["reason"])
+
+    def test_the_rest_parameter_slot_is_counted(self) -> None:
+        """`params_signature(None)` emits `...args: any[]` -- a real `any` in
+        the declaration that the census skipped, because it iterated a list
+        that was None."""
+        for record, fragment in [
+            ({"name": "f", "params": None}, "did not parse"),
+            ({"name": "f", "params": ["a"], "variadic": True}, "`arguments`"),
+        ]:
+            with self.subTest(fragment):
+                record["source"] = {"file": "res/ecmascript/modules/"
+                                            "movian/m.js", "line": 1}
+                sites = gen._doc_type_census({"js": {"modules": [{
+                    "name": "movian/m", "kind": "commonjs", "shapes": [],
+                    "exports": [record]}]}})
+                rest = [s for s in sites if s["slot"] == "...args"]
+                self.assertEqual(len(rest), 1)
+                self.assertIn(fragment, rest[0]["reason"])
+
+    def test_a_value_member_gets_no_return_slot(self) -> None:
+        """The emitter writes `name: any;`, not a call signature. Inventing a
+        return for it added four results that do not exist."""
+        sites = gen._doc_type_census({"js": {"modules": [{
+            "name": "movian/m", "kind": "commonjs", "shapes": [],
+            "exports": [{"name": "init", "params": [], "nargs": 0,
+                         "source": {"file": "res/ecmascript/modules/"
+                                            "movian/m.js", "line": 1},
+                         "receiverMembers": [
+                             {"name": "v", "kind": "value",
+                              "source": {"file": "res/ecmascript/modules/"
+                                                 "movian/m.js", "line": 2}}]}]
+        }]}})
+        self.assertEqual(
+            [s for s in sites if s["member"] == "init.v"], [])
+
+    def test_a_mismatched_name_survives_into_the_report(self) -> None:
+        """The requirement is to print the name claimed and the name that
+        exists. Folding it into "no annotation" erased both -- the one reason
+        in the list that names somebody's mistake was the one the summary
+        threw away."""
+        artifact = {"js": {"modules": [{
+            "name": "movian/m", "kind": "commonjs", "shapes": [],
+            "exports": [{"name": "f", "params": ["x"],
+                         "docParamsUnmatched": ["oldName"],
+                         "source": {"file": "res/ecmascript/modules/"
+                                            "movian/m.js", "line": 1}}]}]}}
+        ok, output = gen._check_doc_type_coverage(artifact)
+        self.assertTrue(ok, output)
+        self.assertIn("oldName", output)
+        self.assertIn("x", output)
+
+    def test_a_structural_proof_can_disagree_too(self) -> None:
+        """`isinstance(proved, str)` excluded every object, array and void
+        proof from the comparison."""
+        def sites(proved, claimed):
+            return [s for s in gen._doc_type_census({"js": {"modules": [{
+                "name": "movian/m", "kind": "commonjs", "shapes": [
+                    {"name": "Node", "kind": "prototype", "methods": []}],
+                "exports": [{"name": "f", "params": [], "returns": proved,
+                             "docReturns": claimed,
+                             "source": {"file": "res/ecmascript/modules/"
+                                                "movian/m.js", "line": 1}}]}]}})
+                    if s.get("disagreement")]
+
+        self.assertEqual(len(sites({"kind": "object", "fields": []},
+                                   "string")), 1)
+        # And the noise cut: `Node[]` and {"kind":"array","element":"Node"}
+        # are the same claim in two notations. Comparing raw forms reported
+        # four agreements in the real corpus as contradictions.
+        self.assertEqual(
+            sites({"kind": "array", "element": "Node"}, "Node[]"), [])
 
     def test_an_any_with_no_reason_fails(self) -> None:
         """Forced by injection. The reason path is total by construction,
@@ -300,6 +568,64 @@ class Rendering(unittest.TestCase):
         rendered = self.render(returns="Item", doc_returns="Node")
         self.assertIn("): Item;", rendered)
         self.assertNotIn("): Node;", rendered)
+
+    def test_a_method_parameter_reaches_the_signature(self) -> None:
+        """The defect the review found first, and the worst of them.
+
+        `member_signature` was shared by every emission site, but every method
+        site called it without the record, so `params_signature` had nothing
+        to read `docParams` off -- 42 documented method parameters emitted
+        `any` while the census counted them typed. Being one function did not
+        make the ARGUMENT the same.
+        """
+        rendered = gen.render_dts({"js": {"modules": [{
+            "name": "movian/m", "kind": "commonjs", "exports": [],
+            "shapes": [{"name": "Thing", "kind": "prototype", "methods": [
+                {"name": "go", "params": ["url"], "nargs": 1,
+                 "docParams": {"url": "string"},
+                 "source": {"file": "res/ecmascript/modules/movian/m.js",
+                            "line": 1}}]}]}]}})
+        self.assertIn("go(url?: string)", rendered)
+
+    def test_a_receiver_member_parameter_reaches_the_signature(self) -> None:
+        """The same defect as the method sites, in the two receiver
+        emitters."""
+        member = {"name": "send", "kind": "function", "params": ["body"],
+                  "nargs": 1, "docParams": {"body": "string"},
+                  "source": {"file": "res/ecmascript/modules/movian/m.js",
+                             "line": 2}}
+        rendered = gen.render_dts({"js": {"modules": [{
+            "name": "movian/m", "kind": "commonjs", "shapes": [],
+            "receiverMembers": [member],
+            "exports": [{
+                "name": "init", "params": [], "nargs": 0,
+                "receiverMutation": True,
+                "source": {"file": "res/ecmascript/modules/movian/m.js",
+                           "line": 1},
+                "receiverMembers": [member]}]}]}})
+        # The hoisted module-level declaration. The export's own interface is
+        # only emitted alongside shared shapes, which this artifact has none
+        # of; `test_a_method_return_goes_through_the_shared_rule` covers that
+        # emitter.
+        self.assertIn("send(body?: string)", rendered)
+
+    def test_a_method_return_goes_through_the_shared_rule(self) -> None:
+        """Three emitters wrote `: any;` outright, so a shared method could
+        be `any` as a hoisted module member and `string` inside its own
+        interface -- the same method, two answers."""
+        rendered = gen.render_dts({"js": {"modules": [{
+            "name": "movian/m", "kind": "commonjs",
+            "exports": [{"name": "init", "params": [], "nargs": 0,
+                         "receiverMutation": True,
+                         "source": {"file": "res/ecmascript/modules/"
+                                            "movian/m.js", "line": 1}}],
+            "shapes": [{"name": "sp", "kind": "shared", "methods": [
+                {"name": "f", "params": [], "nargs": 0,
+                 "docReturns": "string",
+                 "source": {"file": "res/ecmascript/modules/movian/m.js",
+                            "line": 1}}]}]}]}})
+        self.assertNotIn("function f(): any;", rendered)
+        self.assertIn("function f(): string;", rendered)
 
     def test_unknown_on_a_return_falls_back_to_any(self) -> None:
         self.assertIn("): any;", self.render(doc_returns="unknown"))

@@ -2212,6 +2212,28 @@ def _attach_doc_types(record: dict[str, Any], path: Path) -> None:
 _RAW_LINES_CACHE: dict[Path, list[str]] = {}
 
 
+def _open_block_at(path: Path) -> list[bool]:
+    """Whether a block comment is already open at the START of each line.
+
+    `/**` only opens a doc block when nothing is open already. Without this,
+
+        /* ordinary comment
+        /** @param {string} x
+        */
+        exports.f = function(x) {};
+
+    hands `f` an annotation that is a line of prose inside somebody else's
+    comment. `_mask_js_comments` already carries this state for every other
+    scan in the file; this reuses it rather than inventing a second lexer.
+    """
+    states: list[bool] = []
+    in_block = False
+    for line in _raw_lines(path):
+        states.append(in_block)
+        _masked, in_block = _mask_js_comments(line, in_block)
+    return states
+
+
 def _raw_lines(path: Path) -> list[str]:
     """The file's lines, uncached-comment. Every other scan in this file reads
     the MASKED text, where a comment is blanked to spaces -- so the annotations
@@ -2240,36 +2262,117 @@ def _braced(text: str, start: int) -> tuple[str, int] | None:
     if start >= len(text) or text[start] != "{":
         return None
     depth = 0
-    for index in range(start, len(text)):
-        if text[index] == "{":
+    quote = None
+    index = start
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            # A brace inside a string-literal type is not a delimiter.
+            # `@returns {"}"}` read as `{"` before this, and the emitted
+            # declaration was an unterminated string literal.
+            if char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+        elif char in "\"'`":
+            quote = char
+        elif char == "{":
             depth += 1
-        elif text[index] == "}":
+        elif char == "}":
             depth -= 1
             if depth == 0:
                 return text[start + 1:index], index + 1
+        index += 1
     return None
+
+
+def _collapse_layout_whitespace(text: str) -> str:
+    """Runs of whitespace collapsed to one space, EXCEPT inside a string.
+
+    A multi-line object type arrives with ` * ` indentation to remove, but
+    `{"true  false"}` is a string-literal type whose two spaces are part of the
+    value: collapsing them made the emitted signature reject the very call the
+    annotation described.
+    """
+    out: list[str] = []
+    quote = None
+    previous_space = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            out.append(char)
+            if char == "\\" and index + 1 < len(text):
+                index += 1
+                out.append(text[index])
+            elif char == quote:
+                quote = None
+            previous_space = False
+        elif char in "\"'`":
+            quote = char
+            out.append(char)
+            previous_space = False
+        elif char.isspace():
+            if not previous_space:
+                out.append(" ")
+            previous_space = True
+        else:
+            out.append(char)
+            previous_space = False
+        index += 1
+    return "".join(out).strip()
 
 
 def _jsdoc_block_above(path: Path, line: int) -> str | None:
     """The `/** ... */` block ending on the line immediately above `line`.
 
-    Immediately: a blank line, or any code, between the block and the
-    declaration breaks the attribution. A doc block that floats loose belongs
-    to nothing, and guessing which callable it meant is how a comment ends up
-    typing the wrong function.
+    Immediately, and it must be that block and nothing else: a blank line, any
+    code, or an ORDINARY comment between the block and the declaration breaks
+    the attribution. A doc block that floats loose belongs to nothing, and
+    guessing which callable it meant is how a comment types the wrong
+    function.
+
+    The lexical state is why this is not a two-line scan. Before it was
+    tracked,
+
+        /** @param {string} x */
+        exports.first = function(x) {};   /* ordinary */
+        exports.f = function(x) {};
+
+    walked back from the ORDINARY comment's `*/`, across executable code, to
+    the block belonging to `first` -- and typed `f` with it. A `/**` sitting
+    inside an ordinary block comment was accepted the same way.
     """
     lines = _raw_lines(path)
     index = line - 2               # 0-based, the line above the declaration
     if index < 0 or index >= len(lines):
         return None
-    if not lines[index].strip().endswith("*/"):
+    if lines[index].strip() != "*/" and not (
+            lines[index].lstrip().startswith("/**")
+            and lines[index].rstrip().endswith("*/")):
+        # The closing line must carry nothing but the comment's end. Code
+        # before it means the comment is trailing something, not documenting
+        # what follows.
         return None
     end = index
     while index >= 0:
-        if lines[index].lstrip().startswith("/**"):
+        stripped = lines[index].lstrip()
+        if stripped.startswith("/**") and not _open_block_at(path)[index]:
+            # Every intervening line was already required to be a
+            # continuation by the walk below; re-checking here would be a
+            # second copy of the same rule.
             return "\n".join(lines[index:end + 1])
-        if index != end and "*/" in lines[index]:
-            return None            # a second block closed first
+        if index != end and lines[index].strip() \
+                and not stripped.startswith("*"):
+            # Code between the opener and the closer. This one rule is enough:
+            # a separate "an ordinary comment breaks the walk" check was added
+            # here and no mutation could kill it, because the closing-line
+            # rule above already rejects a `*/` that is not on its own line
+            # and every other intervening form is either a `*` continuation
+            # or code. Unreachable defensive code reads like a guarantee and
+            # is not one, so the premise is written down instead.
+            return None
         index -= 1
     return None
 
@@ -2304,11 +2407,19 @@ def _jsdoc_types(path: Path, line: int) -> dict[str, Any]:
         braced = _braced(rest, offset)
         if braced is None:
             continue
-        type_text = " ".join(braced[0].split())
+        type_text = _collapse_layout_whitespace(braced[0])
         if tag.group(1) == "param":
             name = JSDOC_PARAM_NAME_RE.match(rest, braced[1])
-            if name is not None:
-                params[name.group(2)] = type_text
+            if name is None:
+                continue
+            if rest[name.end():name.end() + 1] == ".":
+                # `@param {string} options.name` documents a PROPERTY of the
+                # parameter, not the parameter. The name regex matched the
+                # `options` prefix, so this overwrote the parameter's own
+                # annotation with the property's type and rendered
+                # `options?: string`, rejecting every real call.
+                continue
+            params[name.group(2)] = type_text
         elif returns is None:
             returns = type_text
     record: dict[str, Any] = {}
@@ -2912,6 +3023,22 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
                 method["name"] = name
                 method["source"] = {"file": rel(path), "line": line}
                 method["aliasOf"] = target
+                # The copy carries the TARGET's annotations under the ALIAS's
+                # source line, so the artifact recorded an assertion as
+                # though it came from a block that says something else, and
+                # the alias's own block was never read at all. Inheriting is
+                # fine when the alias has nothing to say; claiming the
+                # target's words came from here is not.
+                for key in ("docParams", "docParamsUnmatched", "docReturns"):
+                    method.pop(key, None)
+                _attach_doc_types(method, path)
+                if "docParams" not in method and "docReturns" not in method:
+                    for key in ("docParams", "docReturns"):
+                        inherited = methods[target].get(key)
+                        if inherited is not None:
+                            method[key] = inherited
+                    if "docParams" in method or "docReturns" in method:
+                        method["docFrom"] = target
                 methods[name] = method
                 progress = True
             else:
@@ -4244,6 +4371,14 @@ def _commonjs_callables(
         if module.get("kind") == "native":
             continue
         name = module["name"]
+        # BOTH receiver surfaces, because the renderer emits both: the
+        # module-level list becomes hoisted `function` declarations, and each
+        # export's own list becomes that export's interface. They are not the
+        # same set -- the module-level one is merged by name across exports --
+        # so walking only the per-export lists counted 8 slots for
+        # `movian/settings` where the file declares 13.
+        for member in module.get("receiverMembers", []):
+            found.append((name, member["name"], member))
         for export in module.get("exports", []):
             found.append((name, export["name"], export))
             for member in export.get("receiverMembers", []):
@@ -4255,6 +4390,40 @@ def _commonjs_callables(
                 found.append((name, "%s.%s" % (receiver, method["name"]),
                               method))
     return found
+
+
+def _proved_return_text(proved: Any) -> str:
+    """A proved return shape written the way an annotation would write it.
+
+    Only for COMPARISON. `{"kind": "array", "element": "Node"}` and the
+    annotation `Node[]` are the same claim in two notations, and comparing the
+    raw forms reported four agreements as contradictions -- the same noise cut
+    movian#230 had to make once already.
+    """
+    if isinstance(proved, str):
+        return proved
+    if not isinstance(proved, dict):
+        return repr(proved)
+    kind = proved.get("kind")
+    if kind == "void":
+        return "void"
+    if kind == "array":
+        element = proved.get("element")
+        return "%s[]" % element if isinstance(element, str) else "any[]"
+    if kind == "object":
+        fields = proved.get("fields") or []
+        rendered = []
+        for field in fields:
+            if field.get("kind") == "function":
+                rendered.append("%s: (%s) => %s" % (
+                    field.get("name"),
+                    ", ".join("%s: any" % n for n in field.get("params") or []),
+                    _proved_return_text(field.get("returns"))))
+            else:
+                rendered.append("%s: %s" % (field.get("name"),
+                                            field.get("type")))
+        return "{%s}" % ", ".join(rendered)
+    return "a %s shape" % kind
 
 
 def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
@@ -4273,10 +4442,32 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
         artifact.get("js", {}).get("modules", []))
     census: list[dict[str, Any]] = []
     for module, display, record in _commonjs_callables(artifact):
+        if record.get("kind") == "value":
+            # A receiver member assigned a non-function. The emitter writes
+            # `name: any;` -- no parameters, no return. Counting it invented
+            # four call results and, once rest parameters were counted, a
+            # `...args` slot for something that has no signature at all.
+            continue
         visible = global_names | by_module.get(module, set())
         documented = record.get("docParams") or {}
         unmatched = set(record.get("docParamsUnmatched") or [])
-        for name in record.get("params") or []:
+        params = record.get("params")
+        if params is None:
+            # `params_signature(None)` emits `...args: any[]`. One real `any`
+            # slot in the declaration that the census skipped entirely,
+            # because it iterated a list that was None.
+            census.append({
+                "module": module, "member": display, "slot": "...args",
+                "kind": "parameter", "status": "any",
+                "reason": "the formal parameter list did not parse, so the "
+                          "signature is a rest parameter"})
+        elif record.get("variadic"):
+            census.append({
+                "module": module, "member": display, "slot": "...args",
+                "kind": "parameter", "status": "any",
+                "reason": "the body reads `arguments`, so the signature ends "
+                          "in a rest parameter"})
+        for name in params or []:
             entry = {"module": module, "member": display, "slot": name,
                      "kind": "parameter"}
             claimed = documented.get(name)
@@ -4291,12 +4482,22 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
             else:
                 problem = doc_type_problem(
                     claimed, visible, by_module, "parameter")
-                if problem is None:
-                    entry["status"] = "typed"
-                    entry["type"] = render_doc_type(claimed)
-                else:
+                rendered = render_doc_type(claimed)
+                if problem is not None:
                     entry["status"] = "any"
                     entry["reason"] = "@param {%s} -- %s" % (claimed, problem)
+                elif rendered == "any":
+                    # `*` is Closure's any and renders as `any`. Counting it
+                    # typed described the annotation, not the file: six slots
+                    # were reported typed while the emitted declaration said
+                    # `any`, and they were excluded from the reasons too.
+                    entry["status"] = "any"
+                    entry["reason"] = (
+                        "@param {%s} is Closure's any and renders as `any`"
+                        % claimed)
+                else:
+                    entry["status"] = "typed"
+                    entry["type"] = rendered
             census.append(entry)
 
         entry = {"module": module, "member": display, "slot": "(return)",
@@ -4306,8 +4507,8 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
         if proved is not None:
             entry["status"] = "typed"
             entry["type"] = "proved from the source"
-            if isinstance(proved, str) and isinstance(claimed, str) \
-                    and proved != claimed:
+            if claimed is not None and \
+                    _proved_return_text(proved) != claimed:
                 # Only when they actually differ. Nine sites annotate exactly
                 # what the scan proved, and printing those as "not consulted"
                 # is the noise cut movian#230 already had to make once: a
@@ -4315,7 +4516,8 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
                 # skip the one that is not.
                 entry["disagreement"] = (
                     "@returns {%s}, but the scan proved %s from the body; "
-                    "the proof wins" % (claimed, proved))
+                    "the proof wins"
+                    % (claimed, _proved_return_text(proved)))
         elif claimed is None:
             entry["status"] = "any"
             entry["reason"] = "no @returns annotation and no provable shape"
@@ -4346,10 +4548,21 @@ def _check_doc_type_coverage(
         if site["status"] == "any" and not site.get("reason")]
     counts = {"parameter": [0, 0], "return": [0, 0]}
     reasons: dict[str, int] = {}
+    mismatches: list[str] = []
     for site in census:
         counts[site["kind"]][0 if site["status"] == "typed" else 1] += 1
         if site["status"] == "any":
-            head = site.get("reason", "").split("--")[-1].strip()
+            reason = site.get("reason", "")
+            if "which is not a parameter" in reason:
+                # Never collapsed. The requirement is to print the name the
+                # annotation claims and the name that exists, and folding
+                # this into "no annotation" erased both -- the one reason in
+                # the list that names somebody's mistake was the one the
+                # summary threw away.
+                mismatches.append("  %s.%s -- %s" % (
+                    site["member"], site["slot"], reason))
+                continue
+            head = reason.split("--")[-1].strip()
             head = "no annotation" if head.startswith("no @") else head
             reasons[head] = reasons.get(head, 0) + 1
     disagreements = [
@@ -4370,9 +4583,13 @@ def _check_doc_type_coverage(
         lines.append("why the remaining `any`:")
         for reason in sorted(reasons, key=lambda key: (-reasons[key], key)):
             lines.append("  %4d  %s" % (reasons[reason], reason))
+    if mismatches:
+        lines.append(
+            "an annotation names a parameter that does not exist:")
+        lines.extend(mismatches)
     if disagreements:
         lines.append(
-            "annotation not consulted -- the source proved the answer:")
+            "the annotation contradicts what the source proves:")
         lines.extend(disagreements)
     return not unexplained, "\n".join(lines)
 
@@ -5966,70 +6183,6 @@ DOC_IMPORT_RE = re.compile(
 DOC_IDENT_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 
 
-def doc_type_problem(
-        type_text: str, visible: set[str],
-        declared_by_module: dict[str, set[str]],
-        position: str) -> str | None:
-    """Why `type_text` must not be emitted here, or None if it may be.
-
-    A JSDoc type is the author's assertion. Emitting it turns a comment into a
-    compile-time constraint on every plugin, so the only ones that go out are
-    the ones whose every named part the emitted file itself can resolve -- the
-    rule `render_return_type` already applies to a shape name, extended to a
-    type expression.
-
-    `visible` is per MODULE, not global. `interface Item` lives inside
-    `declare module 'movian/page'`, so it is not a name `movian/http` can
-    write; resolving against one flat set would emit a type that does not
-    compile in the block it lands in.
-
-    `position` is "parameter" or "return", and it is not decoration:
-    `unknown` accepts every argument, so it is safe on a parameter, and it
-    accepts no USE, so on a return it breaks every existing caller. The same
-    text is admissible in one position and not the other.
-    """
-    # No early return for `*`. It carries no identifier, so the ordinary walk
-    # below already answers None -- an alias check here could not be killed by
-    # any mutation, which is the definition of a branch that is not doing
-    # anything. The translation itself lives in `render_doc_type`, where it is
-    # observable.
-    remaining = type_text
-    for match in DOC_IMPORT_RE.finditer(type_text):
-        module, member = match.group(1), match.group(2)
-        if member not in declared_by_module.get(module, set()):
-            return ("import('%s').%s -- that module declares no %s"
-                    % (module, member, member))
-        remaining = remaining.replace(match.group(0), " ")
-    unknown_names = []
-    for match in DOC_IDENT_RE.finditer(remaining):
-        name = match.group(0)
-        after = remaining[match.end():].lstrip()
-        before = remaining[:match.start()].rstrip()
-        if after.startswith(":") or after.startswith("?:") \
-                or before.endswith("."):
-            # A property name in an object type, a parameter name in a
-            # function type, or a member of something already resolved. The
-            # `?:` half matters: `{itemtype?: string, ...}` and
-            # `(a?: X) => Y` write the optional marker between the name and
-            # the colon, and reading `itemtype` as a type reference declared
-            # the two object-literal annotations in the corpus unresolvable.
-            continue
-        if name == "unknown":
-            if position == "return":
-                return ("`unknown` accepts no use, so on a return it breaks "
-                        "every caller `any` allowed")
-            continue
-        if name in DOC_TYPE_PRIMITIVES or name in DOC_TYPE_LIB_GLOBALS:
-            continue
-        if name in visible:
-            continue
-        unknown_names.append(name)
-    if unknown_names:
-        return ("%s -- not declared in this module and not a primitive"
-                % ", ".join(sorted(set(unknown_names))))
-    return None
-
-
 def doc_type_scopes(
         modules: list[dict[str, Any]]
 ) -> tuple[set[str], dict[str, set[str]]]:
@@ -6049,6 +6202,127 @@ def doc_type_scopes(
                      in native_options_shapes(entry))
         by_module[entry["name"]] = names
     return global_names, by_module
+
+
+TYPE_OPERATOR_KEYWORDS = frozenset({
+    "keyof", "typeof", "readonly", "extends", "infer", "in", "is", "asserts",
+    "unique", "declare",
+})
+QUALIFIED_NAME_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*\s*\.")
+
+
+def _type_expression_atoms(text: str) -> list[str]:
+    """Identifiers in `text` that are used as TYPE REFERENCES.
+
+    Not a TypeScript parser -- a lexer with three exclusions, each of which
+    was a real misreading:
+
+    * anything inside a string is skipped whole. `{"property name": string}`
+      and `"key: value"` reported `property`, `name` and `value` as
+      undeclared types.
+    * a name followed by `:`, `?:` or `(` is a key, not a type: object
+      property, function parameter, or method shorthand `{run(): void}`.
+    * a type operator (`keyof`, `extends`, ...) is a keyword.
+
+    Qualified names are NOT handled here. `import('m').X` is resolved by the
+    caller before this runs, and any dotted chain that survives is refused
+    outright rather than half-skipped -- see `doc_type_problem`.
+    """
+    atoms: list[str] = []
+    index = 0
+    quote = None
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            if char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in "\"'`":
+            quote = char
+            index += 1
+            continue
+        match = DOC_IDENT_RE.match(text, index)
+        if match is None:
+            index += 1
+            continue
+        after = text[match.end():].lstrip()
+        if not (after.startswith(":") or after.startswith("?:")
+                or after.startswith("(")):
+            if match.group(0) not in TYPE_OPERATOR_KEYWORDS:
+                atoms.append(match.group(0))
+        index = match.end()
+    return atoms
+
+
+def doc_type_problem(
+        type_text: str, visible: set[str],
+        declared_by_module: dict[str, set[str]],
+        position: str) -> str | None:
+    """Why `type_text` must not be emitted here, or None if it may be.
+
+    A JSDoc type is the author's assertion. Emitting it turns a comment into a
+    compile-time constraint on every plugin, so the only ones that go out are
+    the ones whose every named part the emitted file itself can resolve -- the
+    rule `render_return_type` already applies to a shape name, extended to a
+    type expression.
+
+    `visible` is per MODULE, not global. `interface Item` lives inside
+    `declare module 'movian/page'`, so it is not a name `movian/http` can
+    write; resolving against one flat set would emit a type that does not
+    compile in the block it lands in.
+
+    Refusal is the SAFE direction: an annotation this cannot verify falls back
+    to `any`, which is what the slot said before. That is why the reasons are
+    split -- "not a name this module declares" is a fact about the
+    declarations, "the resolver does not read this form" is a fact about this
+    function, and only the first is somebody's work to fix.
+    """
+    remaining = type_text
+    for match in DOC_IMPORT_RE.finditer(type_text):
+        module, member = match.group(1), match.group(2)
+        if member not in declared_by_module.get(module, set()):
+            return ("import('%s').%s -- that module declares no %s"
+                    % (module, member, member))
+        remaining = remaining.replace(match.group(0), " ")
+    # Any dotted chain left is a qualified reference this file cannot resolve.
+    # The previous rule skipped a name "preceded by a dot", which let
+    # `[...Missing]` through (a rest element, not a qualification) and
+    # accepted `Item.Missing`, where Item is an interface and not a namespace
+    # -- TS2304 and TS2702 respectively, in a file that is supposed to
+    # compile.
+    if QUALIFIED_NAME_RE.search(remaining):
+        return ("a qualified name the resolver cannot follow; only "
+                "import('module').Member is resolved")
+    unknown_names = []
+    for name in _type_expression_atoms(remaining):
+        if name == "unknown":
+            if position == "return":
+                return ("`unknown` accepts no use, so on a return it breaks "
+                        "every caller `any` allowed")
+            if remaining.strip() != "unknown":
+                # Safe only at the top level. Inside a callback type it is
+                # CONTRAVARIANT: `(value: unknown) => void` forces every
+                # caller's handler to accept unknown, so
+                # `f((value: string) => ...)` stops compiling although it
+                # compiled against `any`.
+                return ("`unknown` nested in a type is contravariant here "
+                        "and rejects callers that `any` accepted")
+            continue
+        if name in DOC_TYPE_PRIMITIVES or name in DOC_TYPE_LIB_GLOBALS:
+            continue
+        if name in visible:
+            continue
+        unknown_names.append(name)
+    if unknown_names:
+        return ("%s -- not a name this module declares, a primitive, or one "
+                "of the %d lib globals the corpus uses"
+                % (", ".join(sorted(set(unknown_names))),
+                   len(DOC_TYPE_LIB_GLOBALS)))
+    return None
 
 
 def render_doc_type(type_text: str) -> str:
@@ -6216,7 +6490,14 @@ def render_dts(artifact: dict[str, Any]) -> str:
 
         Shared by every emission site -- module exports, prototype methods,
         shared-object methods and receiver members -- so the variadic rule
-        cannot hold in one of them and not the others. Returns `None` for the
+        cannot hold in one of them and not the others.
+
+        Being shared was not enough. Every method site called this with the
+        `export` argument omitted, so `params_signature` had no record to read
+        `docParams` off and 42 documented method parameters were emitted as
+        `any` while the census counted them typed. The call being in one
+        function did not make the ARGUMENT the same; each site now passes its
+        own record. Returns `None` for the
         arity when the parameter list did not parse, which is the caller's
         signal to omit the annotation.
         """
@@ -6405,7 +6686,7 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 for shape in prototype_shapes:
                     lines.append("  interface %s {" % shape["name"])
                     for method in shape["methods"]:
-                        arity, signature = member_signature(method)
+                        arity, signature = member_signature(method, method, shape_names)
                         if arity is not None:
                             lines.append("    /** @arity %s */" % arity)
                         # A method that plainly returns a shape says so.
@@ -6434,12 +6715,13 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     "  // CommonJS receiver-mutated shared object shapes")
                 for shape in shared_shapes:
                     for method in shape["methods"]:
-                        arity, signature = member_signature(method)
+                        arity, signature = member_signature(method, method, shape_names)
                         if arity is not None:
                             lines.append("  /** @arity %s */" % arity)
                         lines.append(
-                            "  function %s(%s): any;" %
-                            (method["name"], signature))
+                            "  function %s(%s): %s;" %
+                            (method["name"], signature,
+                             member_return_type(method, shape_names)))
                     for prop in shape.get("properties", []):
                         lines.append("  var %s: any;" % prop["name"])
                 lines.append("")
@@ -6464,7 +6746,7 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 for shape in shared_shapes:
                     lines.append("  interface %s {" % shape["name"])
                     for method in shape["methods"]:
-                        arity, signature = member_signature(method)
+                        arity, signature = member_signature(method, method, shape_names)
                         if arity is not None:
                             lines.append("    /** @arity %s */" % arity)
                         # A method that plainly returns a shape says so.
@@ -6491,12 +6773,13 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     lines.append("  interface %s%s {" % (export["name"], bases))
                     for member in own:
                         if member["kind"] == "function":
-                            arity, signature = member_signature(member)
+                            arity, signature = member_signature(member, member, shape_names)
                             if arity is not None:
                                 lines.append("    /** @arity %s */" % arity)
                             lines.append(
-                                "    %s(%s): any;" %
-                                (member["name"], signature))
+                                "    %s(%s): %s;" %
+                                (member["name"], signature,
+                                 member_return_type(member, shape_names)))
                         else:
                             lines.append("    %s: any;" % member["name"])
                     lines.append("  }")
@@ -6506,12 +6789,13 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     "  // CommonJS receiver-mutated module exports")
                 for member in receiver_members:
                     if member["kind"] == "function":
-                        arity, signature = member_signature(member)
+                        arity, signature = member_signature(member, member, shape_names)
                         if arity is not None:
                             lines.append("  /** @arity %s */" % arity)
                         lines.append(
-                            "  function %s(%s): any;" %
-                            (member["name"], signature))
+                            "  function %s(%s): %s;" %
+                            (member["name"], signature,
+                             member_return_type(member, shape_names)))
                     else:
                         lines.append("  var %s: any;" % member["name"])
                 lines.append("")

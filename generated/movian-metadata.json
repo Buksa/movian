@@ -4509,6 +4509,7 @@
               },
               {
                 "aliasOf": "getElementByClassName",
+                "docFrom": "getElementByClassName",
                 "docParams": {
                   "cls": "string"
                 },
@@ -4529,6 +4530,7 @@
               },
               {
                 "aliasOf": "getElementByTagName",
+                "docFrom": "getElementByTagName",
                 "docParams": {
                   "tag": "string"
                 },
@@ -10200,6 +10202,6 @@
       }
     ]
   },
-  "movianRevision": "ce12bf4561d37ad796016aa1d0a6bf2dd2506193",
+  "movianRevision": "557da9f2df246e4e858d73d1e5da3d79ed68cbbb",
   "schemaVersion": 1
 }
