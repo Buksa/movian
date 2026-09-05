@@ -2363,16 +2363,31 @@ def _jsdoc_block_above(path: Path, line: int) -> str | None:
             # continuation by the walk below; re-checking here would be a
             # second copy of the same rule.
             return "\n".join(lines[index:end + 1])
-        if index != end and lines[index].strip() \
-                and not stripped.startswith("*"):
-            # Code between the opener and the closer. This one rule is enough:
-            # a separate "an ordinary comment breaks the walk" check was added
-            # here and no mutation could kill it, because the closing-line
-            # rule above already rejects a `*/` that is not on its own line
-            # and every other intervening form is either a `*` continuation
-            # or code. Unreachable defensive code reads like a guarantee and
-            # is not one, so the premise is written down instead.
-            return None
+        if index != end:
+            # Two rules, and BOTH are reachable. This one was deleted once as
+            # unreachable, on the evidence that no mutation could kill it --
+            # which was a fact about the mutation set, not about the code.
+            # The input:
+            #
+            #     /** @param {string} x
+            #      * */ var y = 1; /* ordinary
+            #      */
+            #     exports.f = function(x) {};
+            #
+            # is valid JavaScript, the closing line is ` */` alone, and the
+            # walk reaches an ordinary comment's opener with executable code
+            # already behind it. Without this check the block belonging to
+            # nothing gets attached to `f`.
+            if stripped.startswith("/*") or "*/" in lines[index]:
+                return None        # an ordinary comment, or a second block
+            # No "this line is not a `*` continuation" check. A line between
+            # a `/**` and its `*/` is comment TEXT by definition, so there is
+            # no code to cross, and the boundary check above is what stops
+            # the reachable case. Requiring the leading `*` only refused
+            # valid JSDoc that writes its continuations without one -- ran
+            # the counterexample both ways to be sure, rather than inferring
+            # it from a mutation nothing killed, which is how the boundary
+            # check above got deleted the first time.
         index -= 1
     return None
 
@@ -3029,7 +3044,8 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
                 # the alias's own block was never read at all. Inheriting is
                 # fine when the alias has nothing to say; claiming the
                 # target's words came from here is not.
-                for key in ("docParams", "docParamsUnmatched", "docReturns"):
+                for key in ("docParams", "docParamsUnmatched", "docReturns",
+                            "docFrom"):
                     method.pop(key, None)
                 _attach_doc_types(method, path)
                 if "docParams" not in method and "docReturns" not in method:
@@ -4392,6 +4408,19 @@ def _commonjs_callables(
     return found
 
 
+def _normalized_type(text: str) -> str:
+    """A type written one way, for comparison only.
+
+    `{document: Node, root: Node}` and `{ document: Node; root: Node; }` are
+    the same type; the emitter writes the second and `_proved_return_text` the
+    first, so a raw comparison called every object return a contradiction with
+    the annotation that describes it exactly. Whitespace goes, `;` and `,`
+    become one separator, and a trailing separator is dropped.
+    """
+    collapsed = re.sub(r"\s+", "", text).replace(";", ",")
+    return re.sub(r",+(?=[)}\]]|$)", "", collapsed)
+
+
 def _proved_return_text(proved: Any) -> str:
     """A proved return shape written the way an annotation would write it.
 
@@ -4508,7 +4537,8 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
             entry["status"] = "typed"
             entry["type"] = "proved from the source"
             if claimed is not None and \
-                    _proved_return_text(proved) != claimed:
+                    _normalized_type(_proved_return_text(proved)) \
+                    != _normalized_type(claimed):
                 # Only when they actually differ. Nine sites annotate exactly
                 # what the scan proved, and printing those as "not consulted"
                 # is the noise cut movian#230 already had to make once: a
@@ -6175,8 +6205,14 @@ def dumps(artifact: dict[str, Any]) -> str:
 # and the reference-dts compile is what proves it resolves.
 DOC_TYPE_PRIMITIVES = frozenset({
     "string", "number", "boolean", "void", "any", "null", "undefined",
-    "object", "symbol", "never", "this", "true", "false",
+    "object", "symbol", "never", "true", "false",
 })
+# `this` is deliberately absent. Its legality depends on where the type is
+# WRITTEN, and the same record is emitted twice -- once hoisted as
+# `function f(): this;` (TS2526) and once inside the interface, where it is
+# fine. A type whose validity depends on the emission site cannot be judged
+# by a function that does not know the site.
+DOC_TYPE_CONTEXT_DEPENDENT = frozenset({"this"})
 DOC_TYPE_LIB_GLOBALS = frozenset({
     "Object", "Function", "ArrayBuffer", "ArrayBufferView",
 })
@@ -6211,11 +6247,49 @@ def doc_type_scopes(
     return global_names, by_module
 
 
-TYPE_OPERATOR_KEYWORDS = frozenset({
-    "keyof", "typeof", "readonly", "extends", "infer", "in", "is", "asserts",
-    "unique", "declare",
+# Skippable: they are operators, and what follows them is still read.
+TYPE_OPERATOR_KEYWORDS = frozenset({"keyof", "readonly"})
+# NOT skippable. Each introduces a form this resolver does not model, and
+# treating the keyword as noise made the resolver read the rest wrongly:
+# `true extends true ? Missing : string` had `Missing` skipped as a property
+# name because a `:` follows it, and the undeclared name was emitted (TS2304).
+# A refusal costs coverage; a half-parse costs correctness.
+UNMODELLED_TYPE_KEYWORDS = frozenset({
+    "extends", "infer", "is", "asserts", "unique", "declare", "typeof", "in",
 })
 QUALIFIED_NAME_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*\s*\.")
+
+
+def _without_string_literals(text: str) -> str:
+    """`text` with the contents of every string blanked, lengths preserved.
+
+    The qualified-name check ran against raw text, so `"a.b"` -- a
+    string-literal type containing no reference at all -- was refused, and
+    `"string.number"` went from accepted to refused. A rule that reads inside
+    literals defeats the atomizer that was made string-aware in the same pass.
+    """
+    out = []
+    quote = None
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            if char == "\\" and index + 1 < len(text):
+                out.append("  ")
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+                out.append(char)
+            else:
+                out.append(" ")
+        elif char in "\"'`":
+            quote = char
+            out.append(char)
+        else:
+            out.append(char)
+        index += 1
+    return "".join(out)
 
 
 def _type_expression_atoms(text: str) -> list[str]:
@@ -6301,9 +6375,22 @@ def doc_type_problem(
     # accepted `Item.Missing`, where Item is an interface and not a namespace
     # -- TS2304 and TS2702 respectively, in a file that is supposed to
     # compile.
-    if QUALIFIED_NAME_RE.search(remaining):
+    if QUALIFIED_NAME_RE.search(_without_string_literals(remaining)):
         return ("a qualified name the resolver cannot follow; only "
                 "import('module').Member is resolved")
+    if "`" in remaining:
+        # A template literal type. `_braced` and the whitespace collapser both
+        # carry ONE quote-state variable, and a nested interpolation --
+        # `` `outer${`}`}tail` `` -- needs a stack: the type was truncated to
+        # `` `outer${` `` and emitted as an unterminated template (TS1160).
+        # The corpus writes none of these, so the resolver says it cannot read
+        # the form rather than reading it badly.
+        return ("a template literal type; the reader's quote state does not "
+                "nest, so an interpolation would be truncated")
+    for keyword in UNMODELLED_TYPE_KEYWORDS:
+        if re.search(r"(?<![\w$])%s(?![\w$])" % keyword, remaining):
+            return ("`%s` introduces a form the resolver does not model"
+                    % keyword)
     unknown_names = []
     for name in _type_expression_atoms(remaining):
         if name == "unknown":
@@ -6319,6 +6406,9 @@ def doc_type_problem(
                 return ("`unknown` nested in a type is contravariant here "
                         "and rejects callers that `any` accepted")
             continue
+        if name in DOC_TYPE_CONTEXT_DEPENDENT:
+            return ("`%s` is only legal inside a class or interface, and the "
+                    "same record is also emitted outside one" % name)
         if name in DOC_TYPE_PRIMITIVES or name in DOC_TYPE_LIB_GLOBALS:
             continue
         if name in visible:

@@ -169,6 +169,33 @@ class ReaderLexing(unittest.TestCase):
                        '*/\n'
                        'exports.f = function(x) {};\n', 6), {})
 
+    def test_a_reachable_comment_boundary_stops_the_walk(self) -> None:
+        """This guard was deleted once as unreachable, on the evidence that
+        no mutation could kill it. That was a fact about the mutation set.
+
+        The input is valid JavaScript, the closing line is ` */` alone, and
+        the walk reaches an ordinary comment's opener with executable code
+        already behind it.
+        """
+        self.assertEqual(
+            self.probe('/** @param {string} x\n'
+                       ' * */ var y = 1; /* ordinary\n'
+                       ' */\n'
+                       'exports.f = function(x) {};\n', 4), {})
+
+    def test_a_continuation_without_a_leading_star_still_reads(self) -> None:
+        """A line between `/**` and `*/` is comment text by definition.
+
+        Requiring the conventional ` * ` refused valid JSDoc for no safety:
+        the reachable bad case is stopped by the comment-boundary check, and
+        that was verified by running the counterexample with this rule
+        removed -- not inferred from a mutation nothing killed.
+        """
+        self.assertEqual(
+            self.probe('/**\n@param {string} x\n*/\n'
+                       'exports.f = function(x) {};\n', 4),
+            {"params": {"x": "string"}})
+
     def test_the_ordinary_forms_still_read(self) -> None:
         """The other half. A reader tightened until it reads nothing passes
         every refusal test above."""
@@ -217,6 +244,19 @@ class Aliases(unittest.TestCase):
         methods = self.scan(self.SOURCE)
         self.assertEqual(methods["bare"]["docParams"], {"x": "string"})
         self.assertEqual(methods["bare"]["docFrom"], "original")
+
+    def test_an_alias_of_an_alias_does_not_keep_stale_provenance(self) -> None:
+        """The record is COPIED, so `docFrom` came along with it. The
+        annotation was correctly replaced and its provenance still named the
+        original method."""
+        methods = self.scan(
+            '/**\n * @param {string} x\n */\n'
+            'C.prototype.original = function(x) { return x; };\n'
+            'C.prototype.bare = C.prototype.original;\n'
+            '/**\n * @param {Item} x\n */\n'
+            'C.prototype.own = C.prototype.bare;\n')
+        self.assertEqual(methods["own"]["docParams"], {"x": "Item"})
+        self.assertNotIn("docFrom", methods["own"])
 
 
 class TypeResolution(unittest.TestCase):
@@ -306,6 +346,50 @@ class TypeResolution(unittest.TestCase):
         self.assertIsNotNone(problem)
         self.assertIn("contravariant", problem)
         self.assertIsNone(self.problem("unknown"))
+
+    def test_forms_the_resolver_refuses_rather_than_half_reads(self) -> None:
+        """Second review round. Each of these passed and emitted a
+        declaration that does not compile.
+
+        A refusal costs coverage; a half-parse costs correctness, and the
+        corpus writes none of these forms.
+        """
+        for text, fragment in [
+            # One quote-state variable cannot represent a nested
+            # interpolation: `` `outer${`}`}tail` `` truncated to `` `outer${``
+            # and emitted an unterminated template (TS1160).
+            ("`x${Missing}`", "template literal"),
+            ("`outer${`}`}tail`", "template literal"),
+            # `Missing` is followed by ` :`, so the property-name skip took
+            # it and an undeclared name was emitted (TS2304).
+            ("true extends true ? Missing : string", "`extends`"),
+            ("{[K in T]: string}", "`in`"),
+            ("typeof Item", "`typeof`"),
+        ]:
+            with self.subTest(text):
+                problem = self.problem(text)
+                self.assertIsNotNone(problem)
+                self.assertIn(fragment, problem)
+
+    def test_this_is_refused_because_its_legality_depends_on_the_site(
+            self) -> None:
+        """The same record is emitted twice -- hoisted as
+        `function f(): this;` (TS2526) and inside the interface, where it is
+        legal. A type whose validity depends on the emission site cannot be
+        judged by a function that does not know the site."""
+        for position in ("parameter", "return"):
+            with self.subTest(position):
+                problem = self.problem("this", position)
+                self.assertIsNotNone(problem)
+                self.assertIn("class or interface", problem)
+
+    def test_a_dot_inside_a_string_is_not_a_qualified_name(self) -> None:
+        """The qualified-name check read raw text, so `"a.b"` -- a
+        string-literal type containing no reference -- was refused, and
+        `"string.number"` went from accepted to refused."""
+        self.assertIsNone(self.problem('"a.b"'))
+        self.assertIsNone(self.problem('"string.number"'))
+        self.assertIsNotNone(self.problem("Item.Missing"))
 
     def test_forms_the_resolver_reads_correctly(self) -> None:
         """Lexical bugs, each of which refused a valid annotation.
@@ -504,6 +588,21 @@ class Census(unittest.TestCase):
         # four agreements in the real corpus as contradictions.
         self.assertEqual(
             sites({"kind": "array", "element": "Node"}, "Node[]"), [])
+        # And an OBJECT shape against the annotation that describes it
+        # exactly. `{document: Node, root: Node}` and
+        # `{ document: Node; root: Node; }` are the same type; the emitter
+        # writes one and the comparison text the other, so a raw comparison
+        # called both real object returns in the corpus contradictions.
+        self.assertEqual(
+            sites({"kind": "object", "fields": [
+                {"name": "document", "type": "Node"},
+                {"name": "root", "type": "Node"}]},
+                "{ document: Node; root: Node; }"), [])
+        self.assertEqual(
+            sites({"kind": "object", "fields": [
+                {"name": "destroy", "kind": "function", "params": [],
+                 "returns": {"kind": "void"}}]},
+                "{ destroy: () => void; }"), [])
 
     def test_the_report_names_the_population_it_counts(self) -> None:
         """A number nobody can check is not a measurement.
