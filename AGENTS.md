@@ -144,29 +144,31 @@ does not drop, the check was not measuring what it claimed. A gate whose
 verdict cannot change is not a gate, whatever colour it prints. Ask of any
 check: *what, exactly, could make this come out differently?*
 
-**And falsify against a fixture the producer could have written.** Start from a
-payload something real emits, then corrupt exactly the condition under test.
-A fixture invented whole kills mutations for free: the battery goes green
-because the input is impossible, not because the guard holds, and it reads
-identically to one that works.
+**And falsify against a probe input something could have written.** Where a
+guard reads a value some producer formats -- an error string, a payload field,
+a source line -- start from what that producer emits and corrupt exactly the
+condition under test. A probe invented whole kills mutations for free: the
+battery goes green because the input is impossible, not because the guard
+holds, and it reads identically to one that works.
 
-This does not forbid testing a rejection path. A guard that refuses a
-malformed payload is tested by malforming a produced one -- the ENVELOPE is
-real, the corruption is the subject. `_check_runtime_oracle` refusing a
-non-object or a wrong version is exactly that, and those tests are correct.
+This does not forbid testing a rejection path, and it does not reach a pure
+function. A guard that refuses a malformed payload is tested by malforming a
+produced one -- the ENVELOPE stays real, the corruption is the subject. And a
+scanner that takes any text takes invented text: `test_returned_shape.py`
+writes function bodies nobody shipped, and it is right to.
 
-What is fatal is inventing a value in the field you are testing, when the
-producer's real values there carry structure the guard reads. Three rounds of
-review on one change traced to that, each finding a different unproducible
-payload. The sharpest: a mutation making every capture error read as an ACL
-rejection was in the battery and was being killed -- by a fixture saying
-`Error: out of memory`. The introspector never writes that, because it appends
-`(run movian with --bypass-ecmascript-acl)` to every root-scan failure it
-reports, permission or not. The guard was matching the appended advice rather
-than the refusal, and only a fixture no run could produce hid it.
+What is fatal is inventing the value in the field under test when the real
+values there carry structure the guard reads. Three rounds of review on one
+change traced to that. The sharpest: a mutation making every capture error
+read as an ACL rejection was in the battery and was being killed -- by a probe
+saying `Error: out of memory`. `introspector.js:128-130` and `:1151-1152`
+append `(run movian with --bypass-ecmascript-acl)` to every failure to read
+the module ROOT, permission or not, so no root failure ever looks like that.
+The guard was matching the appended advice rather than the refusal
+(`es_fs.c:105`), and only an input no run could produce hid it.
 
-So when the thing under test is a string the producer writes, take the real
-wording, from the C that raises it or the JavaScript that formats it, and cite
+So when the thing under test is a string a producer writes, take the real
+wording from the C that raises it or the JavaScript that formats it, and cite
 where.
 
 Both standards share one rule. Before reporting a number, name what it counted

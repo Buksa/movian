@@ -690,6 +690,12 @@ class Adoption(unittest.TestCase):
                         "-- Error: Bad filename dataroot://res/ecmascript/"
                         "modules -- I/O error "
                         "(run movian with --bypass-ecmascript-acl)")
+    # A NON-ROOT directory that cannot be listed: `introspector.js:140` throws
+    # without appending the advice, and it lands in the same field. The only
+    # producible shape carrying no flag at all.
+    PRODUCER_NON_ROOT = ("Error: cannot list "
+                         "dataroot://res/ecmascript/modules/movian "
+                         "-- Error: I/O error")
 
     def test_the_appended_remedy_is_not_the_cause(self):
         """A non-permission failure carries the flag and is not an ACL
@@ -749,7 +755,7 @@ class Adoption(unittest.TestCase):
         import tempfile
         payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
         payload["capturedAt"] = payload["capturedAt"] + 1000
-        payload["moduleDiscoveryError"] = "Error: out of memory"
+        payload["moduleDiscoveryError"] = self.PRODUCER_NON_ROOT
         before = gen.RUNTIME_ORACLE_PATH.read_bytes()
         try:
             with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
@@ -764,17 +770,23 @@ class Adoption(unittest.TestCase):
         finally:
             gen.RUNTIME_ORACLE_PATH.write_bytes(before)
 
-    def test_an_unrelated_capture_error_does_not_get_the_acl_remedy(self):
-        """The other half of the branch. An error that is not the ACL gets
-        "recapture" and not a flag that would not have helped -- a gate that
-        prints a remedy owns that remedy, in both directions."""
+    def test_a_non_acl_input_error_does_not_get_the_acl_diagnosis(self):
+        """The same distinction on the OTHER field. `runtimeInputs` only ever
+        reports the root failure, and every root failure carries the appended
+        advice -- so this field can never hold a string without the flag, and
+        the diagnosis has to come from the cause."""
         import json
         import subprocess
         import tempfile
         payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
         payload["capturedAt"] = payload["capturedAt"] + 1000
         payload["runtimeInputs"] = None
-        payload["runtimeInputsError"] = "Error: out of memory"
+        # Producer-shaped: `runtimeInputs` only ever reports the ROOT failure
+        # (introspector.js:1151 throws only when `required`), and every root
+        # failure carries the appended advice. A bare string here is not a
+        # payload any run writes -- and a bare string cannot tell "matches the
+        # cause" from "matches the advice", which is the whole subject.
+        payload["runtimeInputsError"] = self.PRODUCER_NON_ACL
         before = gen.RUNTIME_ORACLE_PATH.read_bytes()
         try:
             with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
@@ -784,8 +796,13 @@ class Adoption(unittest.TestCase):
                     ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
                     capture_output=True, text=True, cwd=str(REPO_ROOT))
             self.assertEqual(result.returncode, 1, result.stdout)
-            self.assertIn("out of memory", result.stderr)
-            self.assertNotIn("--bypass-ecmascript-acl", result.stderr)
+            self.assertIn("I/O error", result.stderr)
+            # The flag IS in the output -- the producer appended it to its own
+            # error, and the refusal echoes the error verbatim. What must not
+            # appear is the ACL DIAGNOSIS. Asserting the string absent was
+            # asserting the producer had not done what it always does.
+            self.assertNotIn("the ecmascript ACL blocked this run",
+                             result.stderr)
         finally:
             gen.RUNTIME_ORACLE_PATH.write_bytes(before)
 
