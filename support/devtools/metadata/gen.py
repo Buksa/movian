@@ -120,11 +120,15 @@ INTROSPECTOR_DIR = (
     REPO_ROOT / "support" / "devtools" / "api-introspector")
 RUNTIME_ORACLE_INPUT_GLOBS = (
     RUNTIME_ORACLE_RUNTIME_GLOBS + RUNTIME_ORACLE_COMPILED_GLOBS)
+# The route is the start URL, not a later `mdev open`. `/api/open` is
+# discarded while the navigator is still starting and the window is variable,
+# so no fixed wait makes the two-step form reliable (movian#233). Printing a
+# recipe that usually works is worse than printing one that does: this text is
+# what somebody follows at the moment the gate is red.
 RUNTIME_ORACLE_RECAPTURE = (
     "recapture in the checkout that owns build.debug:\n"
     "    mdev run -p support/devtools/api-introspector --name introspect \\\n"
-    "        --bypass-ecmascript-acl\n"
-    "    mdev open --name introspect introspect:page\n"
+    "        --bypass-ecmascript-acl introspect:page\n"
     "  then adopt the payload printed after the route opened:\n"
     "    gen.py --adopt-oracle <captured.json>")
 
@@ -5654,6 +5658,21 @@ def _check_runtime_oracle(
                 "opening the introspect:page route"),
         }
         return False, _format_runtime_oracle_report(report), report
+    # Before the stamp check. A capture a blocked run actually produces has no
+    # `inputs` at all -- only adoption adds that field -- so asking about the
+    # stamp first meant `--check` never reached the ACL diagnosis for the only
+    # payload it exists for, and said "no freshness stamp" about a run that
+    # never got as far as reading anything (movian#239).
+    blocked = runtime_oracle_acl_blocked(oracle)
+    if blocked:
+        report = {
+            "status": "failed",
+            "match": 0,
+            "drift": 0,
+            "oracleUnreachable": 0,
+            "error": blocked,
+        }
+        return False, _format_runtime_oracle_report(report), report
     stamp = oracle.get("inputs")
     if (not isinstance(stamp, dict)
             or stamp.get("version") != RUNTIME_ORACLE_INPUTS_VERSION):
@@ -7962,6 +7981,73 @@ def runtime_oracle_build_mismatch(version: Any) -> list[str]:
     return reasons
 
 
+ECMASCRIPT_ACL_REMEDY = "--bypass-ecmascript-acl"
+# The CAUSE, written by the C that refuses the read: `es_fs.c:105` raises
+# "Bad filename %s -- Access not allowed". The introspector then appends the
+# remedy to EVERY root-scan failure it reports (introspector.js:128-130 and
+# 1151-1152), permission or not -- so matching the appended advice labels an
+# out-of-disk or a missing data root as an ACL rejection and recommends a flag
+# that cannot fix it. Match what the refusal says, not what the reporter
+# suggests about it.
+ECMASCRIPT_ACL_CAUSE = "Access not allowed"
+
+
+def runtime_oracle_acl_blocked(payload: dict[str, Any]) -> str | None:
+    """The one cause that explains every empty field at once, or None.
+
+    `discoverFileModules()` and `runtimeInputs()` read the SAME path, so a run
+    without `--bypass-ecmascript-acl` comes back with `moduleDiscoveryError`
+    AND `runtimeInputsError` set. Asked here, before either specific guard,
+    because whichever of them fires first would otherwise report its own half
+    of one cause and print a remedy that does not fix it -- which is exactly
+    what happened: the discovery guard returned first and the flag was named
+    nowhere in production, only in a test that had built a payload no run can
+    produce (movian#239).
+    """
+    for field in ("moduleDiscoveryError", "runtimeInputsError"):
+        error = payload.get(field)
+        if error and ECMASCRIPT_ACL_CAUSE in str(error):
+            return (
+                "the ecmascript ACL blocked this run: %s\n"
+                "  recapture with `mdev run ... %s`; without it the run can "
+                "neither list nor read dataroot://res/ecmascript/modules, "
+                "which is both the stamp's input set and the module census, "
+                "so the payload reports both as failed"
+                % (error, ECMASCRIPT_ACL_REMEDY))
+    return None
+
+
+def runtime_oracle_unread(recorded: Any, error: Any) -> str | None:
+    """Why the capture recorded nothing about what it read, or None.
+
+    A capture that read NOTHING and one that read a DIFFERENT tree used to
+    share a message. They do not share a remedy: the second is fixed by
+    recapturing against this tree, and the first is not fixed by recapturing
+    at all unless the invocation changes.
+
+    The overwhelmingly common cause -- the ecmascript ACL -- is NOT diagnosed
+    here. `runtime_oracle_acl_blocked` owns it and is asked first, because it
+    explains `moduleDiscoveryError` and `runtimeInputsError` at once and this
+    function only sees the second. What is left for this function is a capture
+    that failed to record its inputs for some other reason, or recorded
+    nothing at all.
+    """
+    if error:
+        # No ACL branch here. `runtime_oracle_acl_blocked` owns that cause and
+        # is asked first, by both callers. Detecting it in two places produced
+        # two nearly identical remedies, and either one satisfied a test the
+        # other was meant to pin -- so a mutation removing one of them
+        # survived.
+        return ("the capture could not record what it read: %s\n"
+                "  recapture; a run that cannot say what it loaded cannot be "
+                "stamped against anything" % error)
+    if not isinstance(recorded, dict) or not recorded:
+        return ("the capture recorded nothing about what it read\n"
+                "  recapture; this payload predates the freshness work or is "
+                "not a capture at all")
+    return None
+
+
 def runtime_oracle_read_mismatch(recorded: Any, error: Any) -> list[str]:
     """Reasons the tree differs from the one the capture actually read.
 
@@ -7975,10 +8061,20 @@ def runtime_oracle_read_mismatch(recorded: Any, error: Any) -> list[str]:
     meant to be the same tree minutes apart, so there is nothing to be
     tolerant of, and tolerance here would only widen the gap.
     """
-    if error:
-        return ["the capture could not record what it read: %s" % error]
-    if not isinstance(recorded, dict) or not recorded:
-        return ["the capture does not record what it read"]
+    # "Recorded nothing" is a DIFFERENT question from "recorded a different
+    # tree", and only one of them is fixed by recapturing the same way. They
+    # shared a headline and a remedy here, so an ACL-blocked capture was
+    # refused under "the capture read a different tree than the one being
+    # stamped" with the advice "recapture against this tree" -- which
+    # reproduces the failure exactly (movian#234).
+    #
+    # `runtime_oracle_unread` owns that question now and `cmd_adopt_oracle`
+    # asks it first, for its own headline. Delegating rather than asserting
+    # keeps this function total: it still answers for a caller that only has
+    # one question to ask.
+    nothing_read = runtime_oracle_unread(recorded, error)
+    if nothing_read is not None:
+        return [nothing_read]
 
     def resolve(name: str) -> Path | None:
         if name.startswith("plugin/"):
@@ -8067,6 +8163,11 @@ def cmd_adopt_oracle(args: argparse.Namespace) -> int:
     # internally sound. Ordering matters twice over -- a shallow clone
     # cannot resolve a build revision, and a payload that failed to look
     # should be refused for that, not for a lookup that could not run.
+    blocked = runtime_oracle_acl_blocked(payload)
+    if blocked:
+        print("gen.py: this capture cannot be stamped:", file=sys.stderr)
+        print("  %s" % blocked, file=sys.stderr)
+        return 1
     if payload.get("moduleDiscoveryError"):
         print("gen.py: the capture could not enumerate the module files, so "
               "it cannot say it saw them all: %s"
@@ -8087,6 +8188,19 @@ def cmd_adopt_oracle(args: argparse.Namespace) -> int:
         for problem in census:
             print("  %s" % problem, file=sys.stderr)
         return 1
+    # Before `runtime_oracle_build_mismatch`, which shells out to git. What
+    # the capture says about ITSELF needs no history, so checking it first
+    # means the refusal reads the same in a shallow clone -- and means an
+    # ACL-blocked capture is diagnosed as one rather than as an unknown
+    # build.
+    nothing_read = runtime_oracle_unread(
+        payload.get("runtimeInputs"), payload.get("runtimeInputsError"))
+    if nothing_read:
+        print("gen.py: this capture cannot be stamped -- it does not say "
+              "what it read:", file=sys.stderr)
+        print("  %s" % nothing_read, file=sys.stderr)
+        return 1
+
     mismatch = runtime_oracle_build_mismatch(payload.get("movianVersion"))
     if mismatch:
         print("gen.py: the capture came from a build that does not match "
