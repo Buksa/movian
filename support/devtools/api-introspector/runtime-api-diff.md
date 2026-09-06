@@ -5,12 +5,27 @@ The committed snapshot in [runtime-api.json](runtime-api.json) is the payload ex
 ## Run and extraction
 
 ```text
-mdev run -p support/devtools/api-introspector
-mdev open introspect:page
+mdev run -p support/devtools/api-introspector --bypass-ecmascript-acl introspect:page
 mdev log
 ```
 
-**Opening the route is part of the capture, not an optional extra.** The plugin emits twice: once at load, where the tier3 page and its items have not been attempted, and once from the route callback, where they have. Only the second is complete, and only the second carries `MOVIAN_API_INTROSPECTOR_JSON=` — the load-time payload is marked `MOVIAN_API_INTROSPECTOR_PARTIAL_JSON=` and carries `tier3PageOpened: false`. Both markers were identical until this was corrected, so a run that followed the earlier two-step procedure extracted the partial payload and `gen.py --check` accepted it; it now refuses one that says so.
+**`--bypass-ecmascript-acl` is required, not a convenience.** Without it the
+run cannot list `dataroot://res/ecmascript/modules`, which is both the stamp's
+input set and the module census, so `runtimeInputs` comes back `null` and the
+capture cannot be stamped against anything. Everything else about the run
+looks healthy -- the plugin loads, all 52 modules are listed, `loadErrors` is
+`{}` -- and the only sign is one field being null inside a 62 KB payload
+(movian#234). `gen.py --adopt-oracle` refuses such a capture and names the
+flag; it did refuse before, but under a headline about reading a *different*
+tree, with the advice to recapture the same way.
+
+**The route is passed as `mdev run`'s start URL, not opened afterwards.**
+`mdev open` issues `/api/open`, which the navigator discards while it is still
+starting -- the window is variable, so no fixed delay makes it reliable
+(movian#233, fixed by re-issuing, but a start URL avoids the question). Opening
+the route is part of the capture either way.
+
+The plugin emits twice: once at load, where the tier3 page and its items have not been attempted, and once from the route callback, where they have. Only the second is complete, and only the second carries `MOVIAN_API_INTROSPECTOR_JSON=` — the load-time payload is marked `MOVIAN_API_INTROSPECTOR_PARTIAL_JSON=` and carries `tier3PageOpened: false`. Both markers were identical until this was corrected, so a run that followed the earlier two-step procedure extracted the partial payload and `gen.py --check` accepted it; it now refuses one that says so.
 
 - Modules required: **52** (the 52 `declare module` blocks in `generated/movian-api.d.ts`).
 - Require failures: **none** (`loadErrors` is `{}`).

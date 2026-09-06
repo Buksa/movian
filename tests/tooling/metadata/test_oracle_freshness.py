@@ -515,6 +515,104 @@ class Adoption(unittest.TestCase):
         finally:
             shadow.unlink(missing_ok=True)
 
+    def test_a_capture_the_acl_blocked_names_the_flag(self):
+        """The capture that read NOTHING is not the capture that read a
+        DIFFERENT tree, and only one of them is fixed by recapturing the
+        same way.
+
+        `movian` without `--bypass-ecmascript-acl` cannot list
+        `dataroot://res/ecmascript/modules`, so `runtimeInputs` comes back
+        null and the payload says why in `runtimeInputsError`. Adoption
+        already refused it -- but under the headline "the capture read a
+        different tree than the one being stamped", with the remedy
+        "recapture against this tree", which produces the same failure again.
+        The flag was sitting in the reason line, named by neither.
+        """
+        import json
+        import subprocess
+        import tempfile
+        payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        payload["capturedAt"] = payload["capturedAt"] + 1000
+        payload["movianVersion"] = "5.0.1017.gdeadbee"
+        payload["runtimeInputs"] = None
+        payload["runtimeInputsError"] = (
+            "Error: cannot read dataroot://res/ecmascript/modules -- "
+            "Error: Bad filename dataroot://res/ecmascript/modules -- "
+            "Access not allowed (run movian with --bypass-ecmascript-acl)")
+        before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+                handle.write(json.dumps(payload))
+                handle.flush()
+                result = subprocess.run(
+                    ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
+                    capture_output=True, text=True, cwd=str(REPO_ROOT))
+            self.assertEqual(result.returncode, 1, result.stdout)
+            # The REMEDY, not the flag. The runtime's own error text already
+            # contains `--bypass-ecmascript-acl`, so asserting the string
+            # cannot tell a message that names the remedy from one that only
+            # echoes the error -- which is what this test did first, and a
+            # mutation removing the remedy passed it.
+            self.assertIn("recapture with `mdev run", result.stderr)
+            self.assertIn("the stamp's input set and the module census",
+                          result.stderr)
+            self.assertNotIn("read a different tree", result.stderr)
+            self.assertEqual(gen.RUNTIME_ORACLE_PATH.read_bytes(), before)
+        finally:
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
+
+    def test_an_unrelated_capture_error_does_not_get_the_acl_remedy(self):
+        """The other half of the branch. An error that is not the ACL gets
+        "recapture" and not a flag that would not have helped -- a gate that
+        prints a remedy owns that remedy, in both directions."""
+        import json
+        import subprocess
+        import tempfile
+        payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        payload["capturedAt"] = payload["capturedAt"] + 1000
+        payload["runtimeInputs"] = None
+        payload["runtimeInputsError"] = "Error: out of memory"
+        before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+                handle.write(json.dumps(payload))
+                handle.flush()
+                result = subprocess.run(
+                    ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
+                    capture_output=True, text=True, cwd=str(REPO_ROOT))
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("out of memory", result.stderr)
+            self.assertNotIn("--bypass-ecmascript-acl", result.stderr)
+        finally:
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
+
+    def test_a_capture_that_recorded_nothing_says_so_without_the_flag(self):
+        """Same class, different cause: a payload with no `runtimeInputs`
+        and no error explaining it. Recapturing is the right remedy there,
+        and the ACL flag would be a guess."""
+        import json
+        import subprocess
+        import tempfile
+        payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        payload["capturedAt"] = payload["capturedAt"] + 1000
+        payload["movianVersion"] = "5.0.1017.gdeadbee"
+        payload["runtimeInputs"] = None
+        payload.pop("runtimeInputsError", None)
+        before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+                handle.write(json.dumps(payload))
+                handle.flush()
+                result = subprocess.run(
+                    ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
+                    capture_output=True, text=True, cwd=str(REPO_ROOT))
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("recorded nothing", result.stderr)
+            self.assertNotIn("--bypass-ecmascript-acl", result.stderr)
+            self.assertNotIn("read a different tree", result.stderr)
+        finally:
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
+
     def test_a_capture_whose_discovery_failed_is_not_adopted(self):
         # --check rejects it, but adoption used not to: the committed oracle
         # would be overwritten by a payload the very next check refuses.
