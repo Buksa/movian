@@ -638,10 +638,11 @@ class Adoption(unittest.TestCase):
         """A committed oracle captured without the flag is refused by
         `--check` too, and with the whole symptom rather than half of it."""
         import json
-        # The committed oracle, so the stamp and version checks that run
-        # BEFORE this one are satisfied -- a fixture missing them is refused
-        # for a reason that has nothing to do with what this test is about,
-        # which is how the first draft of it passed for the wrong reason.
+        # An ADOPTED oracle, which is not what a blocked run produces -- the
+        # realistic stamp-less case is
+        # `test_check_reaches_the_acl_on_a_payload_a_run_produces`. This one
+        # stays to pin that a committed oracle later found to be blocked is
+        # refused too.
         oracle = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
         oracle["moduleDiscoveryError"] = self.ACL_BLOCKED % "list"
         artifact = json.loads(
@@ -661,6 +662,84 @@ class Adoption(unittest.TestCase):
         self.assertIn("--bypass-ecmascript-acl introspect:page",
                       gen.RUNTIME_ORACLE_RECAPTURE)
         self.assertNotIn("mdev open", gen.RUNTIME_ORACLE_RECAPTURE)
+        # And the documented recipe is the SAME command. A document and a
+        # program describing two different invocations is the same defect as
+        # two places printing one remedy -- the doc omitted `--name
+        # introspect` while the printed recipe had it.
+        import re
+        doc = (REPO_ROOT / "support" / "devtools" / "api-introspector"
+               / "runtime-api-diff.md").read_text()
+        # The fenced RECIPE, not the whole document -- the prose below it
+        # explains why `mdev open` is not used and has to name it. Asserting
+        # over the file conflated the command with the explanation.
+        recipe = re.search(r"```text\n(.*?)```", doc, re.S).group(1)
+        for fragment in ("--name introspect", "--bypass-ecmascript-acl",
+                         "introspect:page"):
+            with self.subTest(fragment):
+                self.assertIn(fragment, gen.RUNTIME_ORACLE_RECAPTURE)
+                self.assertIn(fragment, recipe)
+        self.assertNotIn("mdev open", recipe)
+
+    # What the producer actually emits. `introspector.js:128-130` appends the
+    # remedy to EVERY root-scan failure, permission or not, so a non-ACL
+    # failure carries the flag too -- and a detector matching the flag calls
+    # it an ACL rejection. The earlier fixtures used bare errors the producer
+    # never writes, which is why a mutation that treated every error as the
+    # ACL was killed for the wrong reason.
+    PRODUCER_NON_ACL = ("Error: cannot list dataroot://res/ecmascript/modules "
+                        "-- Error: Bad filename dataroot://res/ecmascript/"
+                        "modules -- I/O error "
+                        "(run movian with --bypass-ecmascript-acl)")
+
+    def test_the_appended_remedy_is_not_the_cause(self):
+        """A non-permission failure carries the flag and is not an ACL
+        rejection. Matching the advice instead of `Access not allowed` calls
+        it one and recommends a flag that cannot fix it."""
+        import json
+        import subprocess
+        import tempfile
+        payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        payload["capturedAt"] = payload["capturedAt"] + 1000
+        payload["moduleDiscoveryError"] = self.PRODUCER_NON_ACL
+        before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+                handle.write(json.dumps(payload))
+                handle.flush()
+                result = subprocess.run(
+                    ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
+                    capture_output=True, text=True, cwd=str(REPO_ROOT))
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("could not enumerate", result.stderr)
+            self.assertNotIn("the ecmascript ACL blocked this run",
+                             result.stderr)
+        finally:
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
+
+    def test_check_reaches_the_acl_on_a_payload_a_run_produces(self):
+        """A capture from a blocked run has NO `inputs` -- only adoption adds
+        that field -- so asking about the stamp first made `--check` report
+        "no freshness stamp" about a run that never read anything.
+
+        The earlier test cloned an adopted, stamped oracle: a payload no
+        capture can produce. Third fixture in this branch that could not
+        occur, and the third defect it hid.
+        """
+        oracle = {
+            "version": gen.RUNTIME_ORACLE_VERSION,
+            "capturedAt": 1788700000000,
+            "tier3PageOpened": True,
+            "modules": [],
+            "moduleDiscoveryError": self.ACL_BLOCKED % "list",
+            "runtimeInputs": None,
+            "runtimeInputsError": self.ACL_BLOCKED % "read",
+        }
+        self.assertNotIn("inputs", oracle)
+        ok, output, _report = gen._check_runtime_oracle(
+            {"js": {"modules": []}}, oracle)
+        self.assertFalse(ok)
+        self.assertIn("the ecmascript ACL blocked this run", output)
+        self.assertNotIn("no freshness stamp", output)
 
     def test_a_discovery_failure_that_is_not_the_acl_keeps_its_message(self):
         """The other half. Only the ACL gets the flag; an unrelated

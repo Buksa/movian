@@ -5658,6 +5658,21 @@ def _check_runtime_oracle(
                 "opening the introspect:page route"),
         }
         return False, _format_runtime_oracle_report(report), report
+    # Before the stamp check. A capture a blocked run actually produces has no
+    # `inputs` at all -- only adoption adds that field -- so asking about the
+    # stamp first meant `--check` never reached the ACL diagnosis for the only
+    # payload it exists for, and said "no freshness stamp" about a run that
+    # never got as far as reading anything (movian#239).
+    blocked = runtime_oracle_acl_blocked(oracle)
+    if blocked:
+        report = {
+            "status": "failed",
+            "match": 0,
+            "drift": 0,
+            "oracleUnreachable": 0,
+            "error": blocked,
+        }
+        return False, _format_runtime_oracle_report(report), report
     stamp = oracle.get("inputs")
     if (not isinstance(stamp, dict)
             or stamp.get("version") != RUNTIME_ORACLE_INPUTS_VERSION):
@@ -6178,13 +6193,7 @@ def _check_runtime_oracle(
     unreachable.sort(key=lambda entry: (
         entry["module"], entry["shape"], entry["member"]))
     floor_problems = runtime_oracle_census(oracle, artifact)
-    blocked = runtime_oracle_acl_blocked(oracle)
-    if blocked:
-        # Same cause, same remedy, wherever it is noticed. A committed oracle
-        # captured without the flag would otherwise be refused here by half
-        # its symptom and by adoption with the whole of it.
-        floor_problems.append(blocked)
-    elif oracle.get("moduleDiscoveryError"):
+    if oracle.get("moduleDiscoveryError"):
         floor_problems.append(
             "the capture could not enumerate the module files: %s"
             % oracle["moduleDiscoveryError"])
@@ -7973,6 +7982,14 @@ def runtime_oracle_build_mismatch(version: Any) -> list[str]:
 
 
 ECMASCRIPT_ACL_REMEDY = "--bypass-ecmascript-acl"
+# The CAUSE, written by the C that refuses the read: `es_fs.c:105` raises
+# "Bad filename %s -- Access not allowed". The introspector then appends the
+# remedy to EVERY root-scan failure it reports (introspector.js:128-130 and
+# 1151-1152), permission or not -- so matching the appended advice labels an
+# out-of-disk or a missing data root as an ACL rejection and recommends a flag
+# that cannot fix it. Match what the refusal says, not what the reporter
+# suggests about it.
+ECMASCRIPT_ACL_CAUSE = "Access not allowed"
 
 
 def runtime_oracle_acl_blocked(payload: dict[str, Any]) -> str | None:
@@ -7989,7 +8006,7 @@ def runtime_oracle_acl_blocked(payload: dict[str, Any]) -> str | None:
     """
     for field in ("moduleDiscoveryError", "runtimeInputsError"):
         error = payload.get(field)
-        if error and ECMASCRIPT_ACL_REMEDY in str(error):
+        if error and ECMASCRIPT_ACL_CAUSE in str(error):
             return (
                 "the ecmascript ACL blocked this run: %s\n"
                 "  recapture with `mdev run ... %s`; without it the run can "

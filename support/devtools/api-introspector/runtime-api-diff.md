@@ -5,17 +5,26 @@ The committed snapshot in [runtime-api.json](runtime-api.json) is the payload ex
 ## Run and extraction
 
 ```text
-mdev run -p support/devtools/api-introspector --bypass-ecmascript-acl introspect:page
-mdev log
+mdev run -p support/devtools/api-introspector --name introspect \
+    --bypass-ecmascript-acl introspect:page
+mdev log --name introspect
 ```
+
+This is the same invocation `gen.py` prints when a gate goes red
+(`RUNTIME_ORACLE_RECAPTURE`). They are kept identical on purpose: a document
+and a program describing two different commands is the same defect as two
+places printing one remedy, and this file already carried it -- the doc
+omitted `--name introspect` while the printed recipe had it.
 
 **`--bypass-ecmascript-acl` is required, not a convenience.** Without it the
 run cannot list `dataroot://res/ecmascript/modules`, which is both the stamp's
 input set and the module census, so `runtimeInputs` comes back `null` and the
-capture cannot be stamped against anything. Everything else about the run
-looks healthy -- the plugin loads, all 52 modules are listed, `loadErrors` is
-`{}` -- and the only sign is one field being null inside a 62 KB payload
-(movian#234). `gen.py --adopt-oracle` refuses such a capture and names the
+capture cannot be stamped against anything. The 52 modules are still
+listed and `loadErrors` is still `{}` -- they come from the require list, not
+from the directory scan -- so the run looks largely healthy, and the two
+fields that failed (`moduleDiscoveryError` and `runtimeInputsError`, both set,
+because both scans read the same blocked path) are easy to miss inside a 62 KB
+payload (movian#234). `gen.py --adopt-oracle` refuses such a capture and names the
 flag; it did refuse before, but under a headline about reading a *different*
 tree, with the advice to recapture the same way.
 
