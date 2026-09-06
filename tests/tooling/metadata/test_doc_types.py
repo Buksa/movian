@@ -916,8 +916,10 @@ class EvidenceBeatsAssertion(unittest.TestCase):
             "name": "movian/m", "kind": "commonjs",
             "exports": [{"name": "f", "params": [],
                          "returns": "Item", "docReturns": "Node"}],
-            "shapes": [{"name": "Item", "methods": []},
-                       {"name": "Node", "methods": []}]}]}}
+            "shapes": [{"name": "Item", "kind": "prototype",
+                        "methods": []},
+                       {"name": "Node", "kind": "prototype",
+                        "methods": []}]}]}}
         sites = [s for s in gen._doc_type_census(artifact)
                  if s.get("disagreement")]
         self.assertEqual(len(sites), 1)
