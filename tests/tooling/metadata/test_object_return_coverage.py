@@ -2,15 +2,17 @@
 """The census that makes a declined return shape impossible to miss (#229).
 
 Why this file exists. Nothing compared an emitted `returns` against source.
-`_check_commonjs_shape_coverage` compares member NAMES module by module, and
 the runtime oracle observes MEMBERS, not return shapes. So a return shape the
 generator declined to emit failed no gate and printed no diagnostic -- which is
 how `movian/itemhook.create` stayed `any` from the day the rule was tightened
 until somebody read the file.
 
-The census is read from the SOURCE tree on purpose. A check whose two sides are
-both the generator's own output cannot see the generator declining; that is the
-"both sides blind in the same way" shape this program keeps removing.
+The census is read from the SOURCE tree on purpose, and its enumerator --
+`RETURN_OBJECT_RE` over masked text -- is deliberately cruder than the
+recogniser it audits. That is what lets it report a site nothing looked at.
+ADR-0004 draws the line: a DIFFERENTIAL needs a different producer, a CENSUS
+needs an enumerator independent of the builder, and re-running our own scanner
+is neither. This file is the census side of that rule.
 
 What is pinned here is the pair, the same way `test_returned_shape.py` pins
 its rule:

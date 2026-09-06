@@ -4243,50 +4243,6 @@ def build_commonjs_modules() -> list[dict[str, Any]]:
     records.sort(key=lambda r: r["name"])
     return records
 
-def _source_shape_inventory() -> set[tuple[str, str, str, str]]:
-    inventory: set[tuple[str, str, str, str]] = set()
-    for path in sorted(COMMONJS_DIR.rglob("*.js")):
-        module_name = path.relative_to(COMMONJS_DIR).with_suffix("").as_posix()
-        for shape in scan_commonjs_shapes(path):
-            receiver = shape.get("receiver", shape["name"])
-            for method in shape["methods"]:
-                inventory.add((
-                    module_name, shape["kind"], receiver, method["name"]))
-            for prop in shape.get("properties", []):
-                inventory.add((
-                    module_name, "property", receiver, prop["name"]))
-        for export in scan_commonjs_exports(path):
-            for member in export.get("receiverMembers", []):
-                inventory.add((
-                    module_name, "receiver", "module", member["name"]))
-    return inventory
-
-
-def _artifact_shape_inventory(
-        artifact: dict[str, Any]) -> set[tuple[str, str, str, str]]:
-    inventory: set[tuple[str, str, str, str]] = set()
-    for module in artifact.get("js", {}).get("modules", []):
-        module_name = module["name"]
-        for shape in module.get("shapes", []):
-            receiver = shape.get("receiver", shape["name"])
-            for method in shape["methods"]:
-                inventory.add((
-                    module_name, shape["kind"], receiver, method["name"]))
-            for prop in shape.get("properties", []):
-                inventory.add((
-                    module_name, "property", receiver, prop["name"]))
-        for member in module.get("receiverMembers", []):
-            inventory.add((
-                module_name, "receiver", "module", member["name"]))
-    return inventory
-
-
-def _format_shape_member(
-        member: tuple[str, str, str, str]) -> str:
-    module, kind, receiver, name = member
-    return "%s:%s:%s.%s" % (module, kind, receiver, name)
-
-
 RETURN_VALUE_RE = re.compile(r"(?<![.\w$])return\b")
 RETURN_IDENT_RE = re.compile(r"(?<![.\w$])return\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*;")
 
@@ -4902,30 +4858,6 @@ def _check_object_return_coverage(
             "`return {` does not match:")
         lines.extend(uncovered)
     return not failures, "\n".join(lines)
-
-
-def _check_commonjs_shape_coverage(
-        artifact: dict[str, Any]) -> tuple[bool, str]:
-    source = _source_shape_inventory()
-    emitted = _artifact_shape_inventory(artifact)
-    missing = sorted(source - emitted)
-    phantom = sorted(emitted - source)
-    if not missing and not phantom:
-        return True, (
-            "COMMONJS shape coverage OK "
-            "(source %d, artifact %d, missing 0, phantom 0)" %
-            (len(source), len(emitted)))
-
-    lines = ["COMMONJS SHAPE COVERAGE DRIFT"]
-    if missing:
-        lines.append("missing (source, artifact):")
-        lines.extend("  " + _format_shape_member(member)
-                     for member in missing)
-    if phantom:
-        lines.append("phantom (artifact, source):")
-        lines.extend("  " + _format_shape_member(member)
-                     for member in phantom)
-    return False, "\n".join(lines)
 
 
 def _runtime_member_kind(record: Any) -> str | None:
@@ -7358,8 +7290,6 @@ def cmd_check(args: argparse.Namespace) -> int:
     # so a CommonJS module added to the metadata artifact without a fixture, or
     # a fixture deleted, failed nothing until somebody typed the flag by hand.
     coverage_ok, coverage_output = _run_reference_dts_check(("--commonjs",))
-    shape_coverage_ok, shape_coverage_output = (
-        _check_commonjs_shape_coverage(committed))
     object_return_ok, object_return_output = (
         _check_object_return_coverage(committed))
     doc_type_ok, doc_type_output = _check_doc_type_coverage(committed)
@@ -7369,14 +7299,13 @@ def cmd_check(args: argparse.Namespace) -> int:
             part for part in (reference_dts_output, coverage_output) if part)
 
     if (metadata_ok and dts_ok and reference_dts_ok
-            and shape_coverage_ok and object_return_ok and doc_type_ok
+            and object_return_ok and doc_type_ok
             and runtime_oracle_ok):
         if args.json:
             print(json.dumps({
                 "metadata": "ok",
                 "dts": "ok",
                 "referenceDts": "ok",
-                "shapeCoverage": "ok",
                 "objectReturnCoverage": "ok",
                 "docTypeCoverage": "ok",
                 "runtimeOracle": runtime_oracle_report["status"],
@@ -7386,7 +7315,6 @@ def cmd_check(args: argparse.Namespace) -> int:
                   % (committed.get("movianRevision"),
                      fresh.get("movianRevision")))
             print("DTS OK")
-            print(shape_coverage_output)
             # Printed on the PASSING run too. The declined sites are the
             # whole point: a shape that stops being emitted shows up here as
             # a changed line, instead of as nothing at all (movian#229).
@@ -7408,7 +7336,6 @@ def cmd_check(args: argparse.Namespace) -> int:
             "metadata": "ok" if metadata_ok else "drift",
             "dts": "ok" if dts_ok else "drift",
             "referenceDts": "ok" if reference_dts_ok else "failed",
-            "shapeCoverage": "ok" if shape_coverage_ok else "failed",
             "objectReturnCoverage": "ok" if object_return_ok else "failed",
             "docTypeCoverage": "ok" if doc_type_ok else "failed",
             "runtimeOracle": runtime_oracle_report["status"],
@@ -7417,8 +7344,6 @@ def cmd_check(args: argparse.Namespace) -> int:
             result["diff"] = diff
         if not reference_dts_ok and reference_dts_output:
             result["referenceDtsOutput"] = reference_dts_output
-        if not shape_coverage_ok:
-            result["shapeCoverageOutput"] = shape_coverage_output
         result["objectReturnCoverageOutput"] = object_return_output
         result["docTypeCoverageOutput"] = doc_type_output
         if not runtime_oracle_ok:
@@ -7434,8 +7359,6 @@ def cmd_check(args: argparse.Namespace) -> int:
             print("DTS DRIFT")
         if not runtime_oracle_ok:
             print(runtime_oracle_output)
-        if not shape_coverage_ok:
-            print(shape_coverage_output)
         print(object_return_output)
         print(doc_type_output)
         if not reference_dts_ok:
