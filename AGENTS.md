@@ -144,19 +144,30 @@ does not drop, the check was not measuring what it claimed. A gate whose
 verdict cannot change is not a gate, whatever colour it prints. Ask of any
 check: *what, exactly, could make this come out differently?*
 
-**And falsify against an input the producer emits.** A fixture nobody's code
-writes kills mutations for free: the battery goes green because the input is
-impossible, not because the guard holds. Derive the fixture from the producer
--- the C that raises the error, the JavaScript that formats it, a real capture
--- and cite where.
+**And falsify against a fixture the producer could have written.** Start from a
+payload something real emits, then corrupt exactly the condition under test.
+A fixture invented whole kills mutations for free: the battery goes green
+because the input is impossible, not because the guard holds, and it reads
+identically to one that works.
 
-Three rounds of review on one change traced to this, each finding a different
-impossible payload. The sharpest: a mutation making every capture error read as
-an ACL rejection was in the battery and was being killed -- by a fixture saying
-`Error: out of memory`, which the introspector never writes, because it appends
+This does not forbid testing a rejection path. A guard that refuses a
+malformed payload is tested by malforming a produced one -- the ENVELOPE is
+real, the corruption is the subject. `_check_runtime_oracle` refusing a
+non-object or a wrong version is exactly that, and those tests are correct.
+
+What is fatal is inventing a value in the field you are testing, when the
+producer's real values there carry structure the guard reads. Three rounds of
+review on one change traced to that, each finding a different unproducible
+payload. The sharpest: a mutation making every capture error read as an ACL
+rejection was in the battery and was being killed -- by a fixture saying
+`Error: out of memory`. The introspector never writes that, because it appends
 `(run movian with --bypass-ecmascript-acl)` to every root-scan failure it
-reports. The guard was matching the appended advice rather than the refusal,
-and the only thing hiding it was a fixture no run could produce.
+reports, permission or not. The guard was matching the appended advice rather
+than the refusal, and only a fixture no run could produce hid it.
+
+So when the thing under test is a string the producer writes, take the real
+wording, from the C that raises it or the JavaScript that formats it, and cite
+where.
 
 Both standards share one rule. Before reporting a number, name what it counted
 and what would move it. A count that moves in a direction it cannot move is a
