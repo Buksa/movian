@@ -64,7 +64,14 @@ HttpResponse.prototype.toString = function() {
   return string.utf8FromBytes(this.bytes);
 }
 
-/** @param {string} encoding a charset native/string.utf8FromBytes knows */
+/**
+ * @param {*} [encoding] forwarded to native/string.utf8FromBytes as argument
+ *   1. A string names a charset; ANY non-string requests autodetection --
+ *   es_utf8_from_bytes_duk branches on `if(!duk_is_string(duk, 1))`
+ *   (src/ecmascript/es_string.c:108). Typing this `string` would reject the
+ *   documented way of asking for autodetection, which is why the generated
+ *   `native/string.utf8FromBytes` declares argument 1 as `any` too.
+ */
 HttpResponse.prototype.convertFromEncoding = function(encoding) {
   return require('native/string').utf8FromBytes(this.bytes, encoding);
 }

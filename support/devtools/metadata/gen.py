@@ -2162,6 +2162,151 @@ DEFINE_PROPERTIES_CALL_RE = re.compile(
     r"Object\.defineProperties\(\s*([^,]+?)\s*,\s*\{")
 DEFINE_PROPERTY_CALL_RE = re.compile(
     r"Object\.defineProperty\(\s*([^,]+?)\s*,\s*([^,]+?)\s*,\s*\{")
+NATIVE_CALL_RE = re.compile(
+    r"(?:require\(\s*['\"](native/[A-Za-z0-9_/]+)['\"]\s*\)"
+    r"|\b([A-Za-z_$][A-Za-z0-9_$]*))\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
+
+
+def _forwarded_native_slots(
+        region: str, params: list[str], aliases: dict[str, str]
+) -> dict[str, tuple[str, str, int]]:
+    """`{parameter: (native module, function, argument index)}`.
+
+    Where a wrapper hands one of its own parameters straight to a native, the
+    native's declared type is a CEILING on what the wrapper may claim: the C
+    accessor for that slot is the only thing that enforces anything, and the
+    generated `native/*` declaration is already this project's reading of it.
+
+    Only bare, unambiguous forwarding counts. A parameter passed to two
+    different slots, or wrapped in an expression, yields nothing -- a ceiling
+    guessed from a transformed value is not a ceiling.
+    """
+    found: dict[str, tuple[str, str, int] | None] = {}
+    for match in NATIVE_CALL_RE.finditer(region):
+        module = match.group(1) or aliases.get(match.group(2) or "")
+        if module is None or not module.startswith("native/"):
+            continue
+        end = _balanced_call_end(region, match.end() - 1)
+        if end is None:
+            continue
+        args = split_fields(region[match.end():end - 1])
+        for index, argument in enumerate(args):
+            name = argument.strip()
+            if name not in params:
+                continue
+            slot = (module, match.group(3), index)
+            if name in found and found[name] != slot:
+                found[name] = None          # forwarded two ways; no ceiling
+            else:
+                found[name] = slot
+    return {name: slot for name, slot in found.items() if slot is not None}
+
+
+def _native_slot_types(
+        modules: list[dict[str, Any]]) -> dict[tuple[str, str], list[str]]:
+    """The declared type of every native argument slot, by position."""
+    table: dict[tuple[str, str], list[str]] = {}
+    for module in modules:
+        if module.get("kind") != "native":
+            continue
+        for function in module.get("functions", []):
+            # `shapeName` is how an options-object slot is declared -- the
+            # record carries no `type` at all, so reading `type` alone called
+            # `native/prop.subscribe` argument 2 an untyped `any` and
+            # reported the wrapper that names `SubscribeOptions` as
+            # over-claiming the slot it agrees with.
+            table[(module["name"], function["name"])] = [
+                param.get("type") or param.get("shapeName") or "any"
+                for param in function.get("params", [])]
+    return table
+
+
+def doc_type_exceeds_native(
+        claimed: str, slot: tuple[str, str, int],
+        native_slots: dict[tuple[str, str], list[str]]) -> str | None:
+    """Whether `claimed` promises more than the native slot it reaches.
+
+    AGENTS.md: replacing `any` with a concrete type is NARROWING, and
+    narrowing needs proof from the C at the accessor -- our own corpus cannot
+    license it, because it contains no third-party call site. This is that
+    proof, taken from where the project already recorded it: the generated
+    `native/*` declarations are derived from the C accessors (movian#207), so
+    a wrapper that agrees with its native slot is narrowing exactly as far as
+    the C already licensed, and one that goes further is doing so on nobody's
+    authority.
+
+    The case this exists for: `HttpResponse.convertFromEncoding` documented
+    `encoding` as `string` and hands it to `native/string.utf8FromBytes`
+    argument 1, which is declared `any` because `es_utf8_from_bytes_duk`
+    branches on `if(!duk_is_string(duk, 1))` and autodetects for everything
+    else. `string` there rejects the documented way of asking for
+    autodetection.
+    """
+    module, function, index = slot
+    types = native_slots.get((module, function))
+    if types is None or index >= len(types):
+        return None
+    native = types[index]
+    rendered = render_doc_type(claimed)
+    if rendered == "any":
+        return None
+    if native == "any":
+        return ("%s.%s argument %d is declared `any` -- the C reads it in "
+                "more than one way, so a wrapper may not promise `%s`"
+                % (module, function, index, rendered))
+    # WIDER is free (AGENTS.md), so the test is containment, not equality:
+    # every alternative the native admits must still be admitted here.
+    # `SubscribeOptions|null` over `SubscribeOptions` is a widening and
+    # passes; `string` over `string | DuktapeBuffer` drops an alternative and
+    # does not. Normalised, because the two sides are written by different
+    # code and `string | DuktapeBuffer` and `string|DuktapeBuffer` are one
+    # type -- comparing them raw reported a slot as over-claiming itself.
+    def alternatives(text: str) -> set[str]:
+        # `import('native/prop').SubscribeOptions` and `SubscribeOptions` are
+        # the same type written from two places -- the wrapper must qualify
+        # what its own module does not declare, the native module does not.
+        # Comparing the spellings called a wrapper that agrees with its slot
+        # an over-claim that "drops" the very type it names.
+        return {_normalized_type(DOC_IMPORT_RE.sub(r"\2", part))
+                for part in text.split("|")}
+
+    admitted = alternatives(rendered)
+    required = alternatives(native)
+    if required <= admitted:
+        return None
+    return ("%s.%s argument %d is declared `%s`, and this claims `%s`, which "
+            "drops %s" % (module, function, index, native, rendered,
+                          ", ".join(sorted(required - admitted))))
+
+
+_ALIAS_CACHE: dict[Path, dict[str, str]] = {}
+
+
+def _attach_forwarding(
+        record: dict[str, Any], region: str, path: Path) -> None:
+    """Record which native slot each parameter is handed to, if any.
+
+    Recorded at scan time because only the scan has the body. The ceiling is
+    applied at emission and in the census, both from the same field, so the
+    file and the count cannot disagree about it.
+    """
+    params = record.get("params")
+    if not params:
+        return
+    try:
+        path.relative_to(COMMONJS_DIR)
+    except ValueError:
+        return
+    aliases = _ALIAS_CACHE.get(path)
+    if aliases is None:
+        aliases = _required_aliases(path)
+        _ALIAS_CACHE[path] = aliases
+    forwards = _forwarded_native_slots(region, params, aliases)
+    if forwards:
+        record["forwardsTo"] = {
+            name: list(slot) for name, slot in sorted(forwards.items())}
+
+
 def _attach_doc_types(record: dict[str, Any], path: Path) -> None:
     """Record what the JSDoc above a callable claims, once, for every callable.
 
@@ -2529,6 +2674,7 @@ def _shape_method(
         returned = _returned_shape(region)
         if returned is not None:
             record["returns"] = returned
+        _attach_forwarding(record, region, path)
     return record
 
 
@@ -3311,6 +3457,8 @@ def _receiver_members(
             line_index + 1 + region.count(
                 "\n", 0, match.start(1)),
             kind="value")
+    for member in members.values():
+        _attach_forwarding(member, region, path)
     return [members[name] for name in sorted(members)]
 
 
@@ -3493,6 +3641,7 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
                     _returns_without_value(region):
                 record["voidWhen"] = callback_params[0]
         _attach_doc_types(record, path)
+        _attach_forwarding(record, region, path)
         exports.append(record)
     exports.sort(key=lambda r: r["name"])
     return exports
@@ -4421,6 +4570,67 @@ def _normalized_type(text: str) -> str:
     return re.sub(r",+(?=[)}\]]|$)", "", collapsed)
 
 
+# Hoisted out of `render_dts` so the census can ask the RENDERER what a
+# shape becomes. It reported a proved return as `typed` while the file
+# said `any` -- the two sides describing different things, which is the
+# same defect the `*` and value-member miscounts already were.
+def render_field_type(field: dict[str, Any], shape_names: set[str]) -> str:
+    """The TypeScript type of one field of an object return shape.
+
+    Two forms, matching what the recogniser can prove. A constructor field
+    carries `type`; a function field carries `params` and its own proved
+    `returns` (movian#229). Anything else is not a shape this renderer
+    invents a type for.
+    """
+    if field.get("kind") == "function":
+        params = field.get("params")
+        if not isinstance(params, list) or not all(
+                isinstance(name, str) for name in params):
+            return "any"
+        signature = ", ".join("%s: any" % name for name in params)
+        return "(%s) => %s" % (
+            signature, render_return_type(field.get("returns"),
+                                          shape_names))
+    field_type = field.get("type")
+    if isinstance(field_type, str) and field_type in shape_names:
+        return field_type
+    return "any"
+
+def render_return_type(
+        returned: Any, shape_names: set[str]) -> str:
+    if isinstance(returned, str):
+        return returned if returned in shape_names else "any"
+    # A function whose every path yields `undefined`. `void` is the proved
+    # answer, not a fallback: `any` here would let a caller use the result
+    # of a `destroy()` that returns nothing.
+    if isinstance(returned, dict) and returned.get("kind") == "void":
+        return "void"
+    if isinstance(returned, dict) and returned.get("kind") == "array":
+        element = returned.get("element")
+        # Same rule as every other shape reference here: a name the
+        # emitted file does not declare becomes `any`, never a dangling
+        # `Foo[]` that makes the artifact itself fail to compile.
+        if isinstance(element, str) and element in shape_names:
+            return "%s[]" % element
+        return "any"
+    if not isinstance(returned, dict) or \
+            returned.get("kind") != "object":
+        return "any"
+    fields = returned.get("fields")
+    if not isinstance(fields, list) or not fields:
+        return "any"
+    rendered: list[str] = []
+    for field in fields:
+        if not isinstance(field, dict):
+            return "any"
+        field_name = field.get("name")
+        if not isinstance(field_name, str):
+            return "any"
+        rendered.append("%s: %s;" % (
+            field_name, render_field_type(field, shape_names)))
+    return "{ %s }" % " ".join(rendered)
+
+
 def _proved_return_text(proved: Any) -> str:
     """A proved return shape written the way an annotation would write it.
 
@@ -4469,6 +4679,8 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
     """
     global_names, by_module = doc_type_scopes(
         artifact.get("js", {}).get("modules", []))
+    native_slots = _native_slot_types(
+        artifact.get("js", {}).get("modules", []))
     census: list[dict[str, Any]] = []
     for module, display, record in _commonjs_callables(artifact):
         if record.get("kind") == "value":
@@ -4511,6 +4723,11 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
             else:
                 problem = doc_type_problem(
                     claimed, visible, by_module, "parameter")
+                if problem is None:
+                    forwards = (record.get("forwardsTo") or {}).get(name)
+                    if forwards is not None:
+                        problem = doc_type_exceeds_native(
+                            claimed, tuple(forwards), native_slots)
                 rendered = render_doc_type(claimed)
                 if problem is not None:
                     entry["status"] = "any"
@@ -4534,8 +4751,20 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
         proved = record.get("returns")
         claimed = record.get("docReturns")
         if proved is not None:
-            entry["status"] = "typed"
-            entry["type"] = "proved from the source"
+            # Ask the RENDERER what this becomes. A proved shape whose name
+            # the emitted file does not declare renders `any`, and reporting
+            # it typed described the scan and not the file -- the same defect
+            # the `*` annotations and the value members already were, a third
+            # time, one field over.
+            rendered = render_return_type(proved, visible)
+            if rendered == "any":
+                entry["status"] = "any"
+                entry["reason"] = (
+                    "the scan proved %s, which this module does not declare, "
+                    "so it renders `any`" % _proved_return_text(proved))
+            else:
+                entry["status"] = "typed"
+                entry["type"] = rendered
             if claimed is not None and \
                     _normalized_type(_proved_return_text(proved)) \
                     != _normalized_type(claimed):
@@ -4579,10 +4808,19 @@ def _check_doc_type_coverage(
     counts = {"parameter": [0, 0], "return": [0, 0]}
     reasons: dict[str, int] = {}
     mismatches: list[str] = []
+    overclaims: list[str] = []
     for site in census:
         counts[site["kind"]][0 if site["status"] == "typed" else 1] += 1
         if site["status"] == "any":
             reason = site.get("reason", "")
+            if " argument " in reason and "is declared" in reason:
+                # An authoring mistake, not a gap: somebody wrote an
+                # annotation the C does not license. It gets a line of its
+                # own rather than a tally, because a tally is not something
+                # anybody can act on.
+                overclaims.append("  %s.%s -- %s" % (
+                    site["member"], site["slot"], reason))
+                continue
             if "which is not a parameter" in reason:
                 # Never collapsed. The requirement is to print the name the
                 # annotation claims and the name that exists, and folding
@@ -4624,6 +4862,11 @@ def _check_doc_type_coverage(
         lines.append(
             "an annotation names a parameter that does not exist:")
         lines.extend(mismatches)
+    if overclaims:
+        lines.append(
+            "an annotation promises more than the native slot it reaches "
+            "-- emitted as `any`:")
+        lines.extend(overclaims)
     if disagreements:
         lines.append(
             "the annotation contradicts what the source proves:")
@@ -6551,9 +6794,13 @@ def render_dts(artifact: dict[str, Any]) -> str:
         for name in params:
             annotation = "any"
             documented = doc_params.get(name)
+            forwards = ((export or {}).get("forwardsTo") or {}).get(name)
             if documented is not None and doc_type_problem(
                     documented, doc_scope["visible"], doc_declared_by_module,
-                    "parameter") is None:
+                    "parameter") is None and (
+                        forwards is None or doc_type_exceeds_native(
+                            documented, tuple(forwards),
+                            doc_native_slots) is None):
                 annotation = render_doc_type(documented)
             if export is not None and name == export.get("callbackParam"):
                 callback_shape = export.get("callbackShape")
@@ -6612,62 +6859,6 @@ def render_dts(artifact: dict[str, Any]) -> str:
         return ("%d+" % len(params) if variadic else str(len(params)),
                 signature)
 
-    def render_field_type(field: dict[str, Any], shape_names: set[str]) -> str:
-        """The TypeScript type of one field of an object return shape.
-
-        Two forms, matching what the recogniser can prove. A constructor field
-        carries `type`; a function field carries `params` and its own proved
-        `returns` (movian#229). Anything else is not a shape this renderer
-        invents a type for.
-        """
-        if field.get("kind") == "function":
-            params = field.get("params")
-            if not isinstance(params, list) or not all(
-                    isinstance(name, str) for name in params):
-                return "any"
-            signature = ", ".join("%s: any" % name for name in params)
-            return "(%s) => %s" % (
-                signature, render_return_type(field.get("returns"),
-                                              shape_names))
-        field_type = field.get("type")
-        if isinstance(field_type, str) and field_type in shape_names:
-            return field_type
-        return "any"
-
-    def render_return_type(
-            returned: Any, shape_names: set[str]) -> str:
-        if isinstance(returned, str):
-            return returned if returned in shape_names else "any"
-        # A function whose every path yields `undefined`. `void` is the proved
-        # answer, not a fallback: `any` here would let a caller use the result
-        # of a `destroy()` that returns nothing.
-        if isinstance(returned, dict) and returned.get("kind") == "void":
-            return "void"
-        if isinstance(returned, dict) and returned.get("kind") == "array":
-            element = returned.get("element")
-            # Same rule as every other shape reference here: a name the
-            # emitted file does not declare becomes `any`, never a dangling
-            # `Foo[]` that makes the artifact itself fail to compile.
-            if isinstance(element, str) and element in shape_names:
-                return "%s[]" % element
-            return "any"
-        if not isinstance(returned, dict) or \
-                returned.get("kind") != "object":
-            return "any"
-        fields = returned.get("fields")
-        if not isinstance(fields, list) or not fields:
-            return "any"
-        rendered: list[str] = []
-        for field in fields:
-            if not isinstance(field, dict):
-                return "any"
-            field_name = field.get("name")
-            if not isinstance(field_name, str):
-                return "any"
-            rendered.append("%s: %s;" % (
-                field_name, render_field_type(field, shape_names)))
-        return "{ %s }" % " ".join(rendered)
-
     def member_return_type(
             record: dict[str, Any], shape_names: set[str]) -> str:
         """The return type of one callable, from evidence first.
@@ -6699,6 +6890,7 @@ def render_dts(artifact: dict[str, Any]) -> str:
     # write, and resolving globally would emit a type that does not compile in
     # the block it lands in.
     doc_global_names, doc_declared_by_module = doc_type_scopes(modules)
+    doc_native_slots = _native_slot_types(modules)
     doc_scope: dict[str, set[str]] = {"visible": set()}
 
     for mod in modules:

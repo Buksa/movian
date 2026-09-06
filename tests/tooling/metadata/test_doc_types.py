@@ -474,6 +474,149 @@ class NameMatching(unittest.TestCase):
         self.assertEqual(record.get("docParams"), {"a": "string"})
 
 
+class NativeCeiling(unittest.TestCase):
+    """A wrapper may not promise more than the native slot it forwards to.
+
+    AGENTS.md: replacing `any` with a concrete type is NARROWING, and
+    narrowing needs proof from the C at the accessor -- our own corpus cannot
+    license it, because it contains no third-party call site by construction.
+    The generated `native/*` declarations ARE that proof, already derived
+    from the C accessors in movian#207, so a wrapper that agrees with its
+    slot narrows exactly as far as the C licensed and one that goes further
+    is doing it on nobody's authority.
+
+    Codex found the case this exists for: `convertFromEncoding` documented
+    `encoding` as `string` and hands it to `native/string.utf8FromBytes`
+    argument 1, declared `any` because `es_utf8_from_bytes_duk` branches on
+    `if(!duk_is_string(duk, 1))` and autodetects for everything else.
+    """
+
+    SLOTS = {
+        ("native/string", "utf8FromBytes"): ["DuktapeBuffer", "any"],
+        ("native/fs", "write"): ["FdHandle", "string | DuktapeBuffer"],
+        ("native/prop", "subscribe"): ["PropHandle", "any",
+                                       "SubscribeOptions"],
+    }
+
+    def exceeds(self, claimed, slot):
+        return gen.doc_type_exceeds_native(claimed, slot, self.SLOTS)
+
+    def test_a_concrete_claim_over_an_any_slot_is_refused(self) -> None:
+        problem = self.exceeds("string", ("native/string",
+                                          "utf8FromBytes", 1))
+        self.assertIsNotNone(problem)
+        self.assertIn("more than one way", problem)
+
+    def test_agreeing_with_the_slot_is_allowed(self) -> None:
+        self.assertIsNone(
+            self.exceeds("DuktapeBuffer", ("native/string",
+                                           "utf8FromBytes", 0)))
+
+    def test_widening_the_slot_is_allowed(self) -> None:
+        """`SubscribeOptions|null` over `SubscribeOptions` adds an
+        alternative. AGENTS.md calls widening free, so the test is
+        containment and not equality."""
+        self.assertIsNone(
+            self.exceeds("import('native/prop').SubscribeOptions|null",
+                         ("native/prop", "subscribe", 2)))
+
+    def test_dropping_an_alternative_is_refused(self) -> None:
+        problem = self.exceeds("string", ("native/fs", "write", 1))
+        self.assertIsNotNone(problem)
+        self.assertIn("drops", problem)
+
+    def test_spelling_differences_are_not_over_claims(self) -> None:
+        """Two sides written by different code. `string | DuktapeBuffer` and
+        `string|DuktapeBuffer` are one type, and the qualified spelling of an
+        import is the same type as the bare one -- comparing raw text called
+        a slot an over-claim of itself."""
+        self.assertIsNone(
+            self.exceeds("string|DuktapeBuffer", ("native/fs", "write", 1)))
+        self.assertIsNone(
+            self.exceeds("SubscribeOptions", ("native/prop", "subscribe", 2)))
+
+    def test_an_options_slot_is_read_from_shapeName(self) -> None:
+        """An options-object slot carries `shapeName` and no `type`. Reading
+        `type` alone called it an untyped `any` and reported the wrapper that
+        names the shape as over-claiming the slot it agrees with."""
+        table = gen._native_slot_types([{
+            "name": "native/prop", "kind": "native", "functions": [
+                {"name": "subscribe", "params": [
+                    {"type": "PropHandle"}, {},
+                    {"shapeName": "SubscribeOptions"}]}]}])
+        self.assertEqual(table[("native/prop", "subscribe")],
+                         ["PropHandle", "any", "SubscribeOptions"])
+
+    def test_forwarding_is_found_only_when_it_is_unambiguous(self) -> None:
+        aliases = {"np": "native/prop", "nf": "native/fs"}
+        self.assertEqual(
+            gen._forwarded_native_slots(
+                "= function(a) { return np.subscribe(x, y, a); }",
+                ["a"], aliases),
+            {"a": ("native/prop", "subscribe", 2)})
+        # Wrapped in an expression: a ceiling guessed from a transformed
+        # value is not a ceiling.
+        self.assertEqual(
+            gen._forwarded_native_slots(
+                "= function(a) { return np.subscribe(x, y, String(a)); }",
+                ["a"], aliases), {})
+        # Two different slots: no claim.
+        self.assertEqual(
+            gen._forwarded_native_slots(
+                "= function(a) { np.subscribe(x, y, a); nf.write(f, a); }",
+                ["a"], aliases), {})
+        # `require('native/x').fn(...)` inline, without an alias.
+        self.assertEqual(
+            gen._forwarded_native_slots(
+                "= function(a) { return require('native/fs').write(f, a); }",
+                ["a"], {}),
+            {"a": ("native/fs", "write", 1)})
+
+    def test_the_corpus_over_claims_are_reported_and_not_emitted(
+            self) -> None:
+        """Two real ones, both invisible to the compile: the C branches on
+        the slot, and no in-tree call site passes the other branch."""
+        artifact = REPO_ROOT / "generated" / "movian-metadata.json"
+        dts = REPO_ROOT / "generated" / "movian-api.d.ts"
+        if not artifact.is_file() or not dts.is_file():
+            self.skipTest("generated/ is absent")
+        ok, output = gen._check_doc_type_coverage(
+            json.loads(artifact.read_text()))
+        self.assertTrue(ok, output)
+        self.assertIn("promises more than the native slot", output)
+        self.assertIn("create.icon", output)
+        # And the emitted file did NOT take the annotation.
+        text = dts.read_text()
+        self.assertIn("icon?: any", text)
+
+    def test_the_ceiling_is_applied_when_the_file_is_RENDERED(self) -> None:
+        """In process, not by reading the committed file.
+
+        Reading `generated/` proves what the last run wrote, not what this
+        code does -- the mutation that stopped consulting the ceiling at
+        emission left the committed file untouched and survived.
+        """
+        export = {"name": "f", "params": ["enc"], "nargs": 1,
+                  "docParams": {"enc": "string"},
+                  "forwardsTo": {"enc": ["native/string",
+                                         "utf8FromBytes", 1]},
+                  "source": {"file": "res/ecmascript/modules/movian/m.js",
+                             "line": 1}}
+        artifact = {"js": {"modules": [
+            {"name": "movian/m", "kind": "commonjs", "shapes": [],
+             "exports": [export]},
+            {"name": "native/string", "kind": "native", "functions": [
+                {"name": "utf8FromBytes", "nargs": 2, "params": [
+                    {"type": "DuktapeBuffer"}, {}]}]}]}}
+        self.assertIn("f(enc?: any)", gen.render_dts(artifact))
+        # Same record, a slot that licenses the claim: the annotation goes
+        # out. Without this half, a ceiling that refused everything would
+        # pass the assertion above.
+        export["forwardsTo"] = {"enc": ["native/string", "utf8FromBytes", 0]}
+        export["docParams"] = {"enc": "DuktapeBuffer"}
+        self.assertIn("f(enc?: DuktapeBuffer)", gen.render_dts(artifact))
+
+
 class Census(unittest.TestCase):
     def artifact(self):
         path = REPO_ROOT / "generated" / "movian-metadata.json"
@@ -501,8 +644,27 @@ class Census(unittest.TestCase):
                     if s["kind"] == "parameter" and s["status"] == "typed")
         # 96 while `*` was counted as typed and the rest-parameter slots were
         # not counted at all -- a number that described the annotations, not
-        # the emitted file. Both were corrected in the review round.
-        self.assertEqual(typed, 90)  # noqa: kept, see comment above
+        # the emitted file. 90 after those two corrections, 87 once the
+        # native ceiling stopped three wrappers promising more than the C
+        # licenses. Every step down is a claim withdrawn, not coverage lost.
+        self.assertEqual(typed, 87)  # noqa: kept, see comment above
+
+    def test_a_proved_return_the_module_cannot_spell_is_counted_any(
+            self) -> None:
+        """Found by Codex. `member_return_type` passes an undeclared shape
+        name through `render_return_type`, which yields `any`, while the
+        census reported it typed -- the third time the count described the
+        scan instead of the file."""
+        artifact = {"js": {"modules": [{
+            "name": "movian/m", "kind": "commonjs", "shapes": [],
+            "exports": [{"name": "f", "params": [], "returns": "Foo",
+                         "source": {"file": "res/ecmascript/modules/"
+                                            "movian/m.js", "line": 1}}]}]}}
+        self.assertIn("function f(): any;", gen.render_dts(artifact))
+        site = [s for s in gen._doc_type_census(artifact)
+                if s["kind"] == "return"][0]
+        self.assertEqual(site["status"], "any")
+        self.assertIn("does not declare", site["reason"])
 
     def test_a_closure_star_is_counted_as_any_not_typed(self) -> None:
         """It renders `any`. Counting it typed described the annotation and
@@ -760,7 +922,10 @@ class EvidenceBeatsAssertion(unittest.TestCase):
                  if s.get("disagreement")]
         self.assertEqual(len(sites), 1)
         self.assertIn("the proof wins", sites[0]["disagreement"])
-        self.assertEqual(sites[0]["type"], "proved from the source")
+        # The type is what the RENDERER produces, not a label -- that is how
+        # a proved shape the module does not declare stopped being counted
+        # typed while the file said `any`.
+        self.assertEqual(sites[0]["type"], "Item")
 
     def test_agreement_is_not_reported(self) -> None:
         """The noise cut. Nine sites annotate exactly what the scan proved,

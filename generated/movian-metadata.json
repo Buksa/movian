@@ -4092,6 +4092,13 @@
               "opts": "*"
             },
             "docReturns": "DuktapeBuffer",
+            "forwardsTo": {
+              "filename": [
+                "native/fs",
+                "open",
+                0
+              ]
+            },
             "name": "readFileSync",
             "nargs": 2,
             "params": [
@@ -4151,6 +4158,18 @@
               "data": "string|DuktapeBuffer",
               "filename": "string",
               "opts": "*"
+            },
+            "forwardsTo": {
+              "data": [
+                "native/fs",
+                "write",
+                1
+              ],
+              "filename": [
+                "native/fs",
+                "open",
+                0
+              ]
             },
             "name": "writeFileSync",
             "nargs": 3,
@@ -4424,6 +4443,13 @@
             "docParams": {
               "html": "string"
             },
+            "forwardsTo": {
+              "html": [
+                "native/gumbo",
+                "parse",
+                0
+              ]
+            },
             "name": "parse",
             "nargs": 1,
             "params": [
@@ -4459,6 +4485,13 @@
                   "cls": "string"
                 },
                 "docReturns": "Node[]",
+                "forwardsTo": {
+                  "cls": [
+                    "native/gumbo",
+                    "findByClassName",
+                    1
+                  ]
+                },
                 "name": "getElementByClassName",
                 "nargs": 1,
                 "params": [
@@ -4478,6 +4511,13 @@
                   "id": "string"
                 },
                 "docReturns": "Node|null",
+                "forwardsTo": {
+                  "id": [
+                    "native/gumbo",
+                    "findById",
+                    1
+                  ]
+                },
                 "name": "getElementById",
                 "nargs": 1,
                 "params": [
@@ -4493,6 +4533,13 @@
                   "tag": "string"
                 },
                 "docReturns": "Node[]",
+                "forwardsTo": {
+                  "tag": [
+                    "native/gumbo",
+                    "findByTagName",
+                    1
+                  ]
+                },
                 "name": "getElementByTagName",
                 "nargs": 1,
                 "params": [
@@ -4514,6 +4561,13 @@
                   "cls": "string"
                 },
                 "docReturns": "Node[]",
+                "forwardsTo": {
+                  "cls": [
+                    "native/gumbo",
+                    "findByClassName",
+                    1
+                  ]
+                },
                 "name": "getElementsByClassName",
                 "nargs": 1,
                 "params": [
@@ -4535,6 +4589,13 @@
                   "tag": "string"
                 },
                 "docReturns": "Node[]",
+                "forwardsTo": {
+                  "tag": [
+                    "native/gumbo",
+                    "findByTagName",
+                    1
+                  ]
+                },
                 "name": "getElementsByTagName",
                 "nargs": 1,
                 "params": [
@@ -4625,6 +4686,13 @@
               "ctrl": "import('native/io').HttpReqOptions",
               "url": "string"
             },
+            "forwardsTo": {
+              "url": [
+                "native/io",
+                "httpReq",
+                0
+              ]
+            },
             "name": "request",
             "nargs": 3,
             "params": [
@@ -4635,7 +4703,7 @@
             "returns": "HttpResponse",
             "source": {
               "file": "res/ecmascript/modules/movian/http.js",
-              "line": 85
+              "line": 92
             },
             "voidWhen": "callback"
           }
@@ -4648,7 +4716,7 @@
             "methods": [
               {
                 "docParams": {
-                  "encoding": "string"
+                  "encoding": "*"
                 },
                 "name": "convertFromEncoding",
                 "nargs": 1,
@@ -4657,7 +4725,7 @@
                 ],
                 "source": {
                   "file": "res/ecmascript/modules/movian/http.js",
-                  "line": 68
+                  "line": 75
                 }
               },
               {
@@ -5422,6 +5490,13 @@
             "docParams": {
               "name": "string"
             },
+            "forwardsTo": {
+              "name": [
+                "native/prop",
+                "create",
+                0
+              ]
+            },
             "name": "createRoot",
             "nargs": 1,
             "params": [
@@ -5451,6 +5526,18 @@
               "callback": "(...args: any[]) => void",
               "ctrl": "import('native/prop').SubscribeOptions|null",
               "prop": "PropHandle"
+            },
+            "forwardsTo": {
+              "ctrl": [
+                "native/prop",
+                "subscribe",
+                2
+              ],
+              "prop": [
+                "native/prop",
+                "subscribe",
+                0
+              ]
             },
             "name": "subscribeValue",
             "nargs": 3,
@@ -5484,6 +5571,33 @@
               "url": "string"
             },
             "docReturns": "Service",
+            "forwardsTo": {
+              "enabled": [
+                "native/service",
+                "create",
+                4
+              ],
+              "icon": [
+                "native/service",
+                "create",
+                5
+              ],
+              "title": [
+                "native/service",
+                "create",
+                1
+              ],
+              "type": [
+                "native/service",
+                "create",
+                3
+              ],
+              "url": [
+                "native/service",
+                "create",
+                2
+              ]
+            },
             "name": "create",
             "nargs": 5,
             "params": [
@@ -5660,6 +5774,13 @@
                 }
               },
               {
+                "forwardsTo": {
+                  "value": [
+                    "native/kvstore",
+                    "set",
+                    3
+                  ]
+                },
                 "kind": "function",
                 "name": "setvalue",
                 "nargs": 3,
@@ -5724,6 +5845,13 @@
             }
           },
           {
+            "forwardsTo": {
+              "value": [
+                "native/kvstore",
+                "set",
+                3
+              ]
+            },
             "kind": "function",
             "name": "setvalue",
             "nargs": 3,
@@ -5892,6 +6020,13 @@
             "docParams": {
               "dbname": "string"
             },
+            "forwardsTo": {
+              "dbname": [
+                "native/sqlite",
+                "create",
+                0
+              ]
+            },
             "name": "DB",
             "nargs": 1,
             "params": [
@@ -5940,6 +6075,13 @@
               {
                 "docParams": {
                   "path": "string"
+                },
+                "forwardsTo": {
+                  "path": [
+                    "native/sqlite",
+                    "upgradeSchema",
+                    1
+                  ]
                 },
                 "name": "upgradeSchema",
                 "nargs": 1,
@@ -6183,6 +6325,13 @@
           {
             "docParams": {
               "str": "string"
+            },
+            "forwardsTo": {
+              "str": [
+                "native/htsmsg",
+                "createFromXML",
+                0
+              ]
             },
             "name": "parse",
             "nargs": 1,
@@ -9974,6 +10123,18 @@
               "URL": "string",
               "protocol": "string"
             },
+            "forwardsTo": {
+              "URL": [
+                "native/websocket",
+                "clientCreate",
+                0
+              ],
+              "protocol": [
+                "native/websocket",
+                "clientCreate",
+                1
+              ]
+            },
             "name": "w3cwebsocket",
             "nargs": 2,
             "params": [
@@ -10009,6 +10170,13 @@
               {
                 "docParams": {
                   "d": "string|ArrayBuffer|ArrayBufferView|DuktapeBuffer"
+                },
+                "forwardsTo": {
+                  "d": [
+                    "native/websocket",
+                    "clientSend",
+                    1
+                  ]
                 },
                 "name": "send",
                 "nargs": 1,
@@ -10202,6 +10370,6 @@
       }
     ]
   },
-  "movianRevision": "557da9f2df246e4e858d73d1e5da3d79ed68cbbb",
+  "movianRevision": "c45020df093560b960ebb5aba80e9821f9a7ccc0",
   "schemaVersion": 1
 }
