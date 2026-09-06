@@ -59,7 +59,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 METADATA_DIR = Path(__file__).resolve().parent
@@ -4676,11 +4676,19 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
     Every `any` carries a reason, and the reason is the thing that makes the
     number actionable: "no annotation" is work for a human, "not declared in
     this module" is work for the generator, and they are not the same backlog.
+
+    It ASKS `TypeScope` rather than deciding. This census used to re-derive
+    the type from the same inputs the renderer used, and disagreed with the
+    emitted file four times -- the last three found only when the shared seam
+    made the comparison writable at all.
     """
-    global_names, by_module = doc_type_scopes(
-        artifact.get("js", {}).get("modules", []))
-    native_slots = _native_slot_types(
-        artifact.get("js", {}).get("modules", []))
+    modules = artifact.get("js", {}).get("modules", [])
+    global_names, by_module = doc_type_scopes(modules)
+    native_slots = _native_slot_types(modules)
+    prototype_shapes = {
+        module["name"]: {shape["name"] for shape in module.get("shapes", [])
+                         if shape.get("kind") == "prototype"}
+        for module in modules}
     census: list[dict[str, Any]] = []
     for module, display, record in _commonjs_callables(artifact):
         if record.get("kind") == "value":
@@ -4689,9 +4697,9 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
             # four call results and, once rest parameters were counted, a
             # `...args` slot for something that has no signature at all.
             continue
-        visible = global_names | by_module.get(module, set())
-        documented = record.get("docParams") or {}
-        unmatched = set(record.get("docParamsUnmatched") or [])
+        scope = TypeScope(global_names | by_module.get(module, set()),
+                          by_module, native_slots)
+        shape_names = prototype_shapes.get(module, set())
         params = record.get("params")
         if params is None:
             # `params_signature(None)` emits `...args: any[]`. One real `any`
@@ -4709,85 +4717,28 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
                 "reason": "the body reads `arguments`, so the signature ends "
                           "in a rest parameter"})
         for name in params or []:
+            slot = scope.parameter(record, name, shape_names)
             entry = {"module": module, "member": display, "slot": name,
-                     "kind": "parameter"}
-            claimed = documented.get(name)
-            if claimed is None:
-                entry["status"] = "any"
-                entry["reason"] = (
-                    "no @param annotation names %s" % name
-                    if not unmatched else
-                    "no @param annotation names %s; the block documents %s, "
-                    "which is not a parameter" % (name, ", ".join(
-                        sorted(unmatched))))
+                     "kind": "parameter",
+                     "status": "any" if slot.type == "any" else "typed"}
+            if slot.type == "any":
+                entry["reason"] = slot.reason
             else:
-                problem = doc_type_problem(
-                    claimed, visible, by_module, "parameter")
-                if problem is None:
-                    forwards = (record.get("forwardsTo") or {}).get(name)
-                    if forwards is not None:
-                        problem = doc_type_exceeds_native(
-                            claimed, tuple(forwards), native_slots)
-                rendered = render_doc_type(claimed)
-                if problem is not None:
-                    entry["status"] = "any"
-                    entry["reason"] = "@param {%s} -- %s" % (claimed, problem)
-                elif rendered == "any":
-                    # `*` is Closure's any and renders as `any`. Counting it
-                    # typed described the annotation, not the file: six slots
-                    # were reported typed while the emitted declaration said
-                    # `any`, and they were excluded from the reasons too.
-                    entry["status"] = "any"
-                    entry["reason"] = (
-                        "@param {%s} is Closure's any and renders as `any`"
-                        % claimed)
-                else:
-                    entry["status"] = "typed"
-                    entry["type"] = rendered
+                entry["type"] = slot.type
+            if slot.disagreement:
+                entry["disagreement"] = slot.disagreement
             census.append(entry)
 
+        slot = scope.returns(record, shape_names)
         entry = {"module": module, "member": display, "slot": "(return)",
-                 "kind": "return"}
-        proved = record.get("returns")
-        claimed = record.get("docReturns")
-        if proved is not None:
-            # Ask the RENDERER what this becomes. A proved shape whose name
-            # the emitted file does not declare renders `any`, and reporting
-            # it typed described the scan and not the file -- the same defect
-            # the `*` annotations and the value members already were, a third
-            # time, one field over.
-            rendered = render_return_type(proved, visible)
-            if rendered == "any":
-                entry["status"] = "any"
-                entry["reason"] = (
-                    "the scan proved %s, which this module does not declare, "
-                    "so it renders `any`" % _proved_return_text(proved))
-            else:
-                entry["status"] = "typed"
-                entry["type"] = rendered
-            if claimed is not None and \
-                    _normalized_type(_proved_return_text(proved)) \
-                    != _normalized_type(claimed):
-                # Only when they actually differ. Nine sites annotate exactly
-                # what the scan proved, and printing those as "not consulted"
-                # is the noise cut movian#230 already had to make once: a
-                # gate whose notes are mostly agreement trains its reader to
-                # skip the one that is not.
-                entry["disagreement"] = (
-                    "@returns {%s}, but the scan proved %s from the body; "
-                    "the proof wins"
-                    % (claimed, _proved_return_text(proved)))
-        elif claimed is None:
-            entry["status"] = "any"
-            entry["reason"] = "no @returns annotation and no provable shape"
+                 "kind": "return",
+                 "status": "any" if slot.type == "any" else "typed"}
+        if slot.type == "any":
+            entry["reason"] = slot.reason
         else:
-            problem = doc_type_problem(claimed, visible, by_module, "return")
-            if problem is None:
-                entry["status"] = "typed"
-                entry["type"] = render_doc_type(claimed)
-            else:
-                entry["status"] = "any"
-                entry["reason"] = "@returns {%s} -- %s" % (claimed, problem)
+            entry["type"] = slot.type
+        if slot.disagreement:
+            entry["disagreement"] = slot.disagreement
         census.append(entry)
     return census
 
@@ -6669,6 +6620,236 @@ def render_doc_type(type_text: str) -> str:
     return DOC_TYPE_ANY_ALIASES.get(type_text, type_text)
 
 
+class SlotType(NamedTuple):
+    """What one parameter or return is emitted as, and why.
+
+    `reason` is set exactly when `type` is `any` and something explains it --
+    the census prints it, the renderer ignores it. `disagreement` records a
+    claim that lost: an annotation the evidence overruled.
+    """
+
+    type: str
+    reason: str | None = None
+    disagreement: str | None = None
+
+
+class TypeScope:
+    """The type of a slot inside one `declare module` block.
+
+    ONE decision, two consumers. The four functions that made it used to be
+    defined inside `render_dts` and were not module attributes, so the census
+    could not call them and re-derived the same answer from the same inputs.
+    It disagreed with the emitted file four times: a `*` annotation rendering
+    `any` while counted typed, a proved shape the module cannot spell doing
+    the same, a documented method parameter emitted `any` because the record
+    never reached `params_signature`, and -- found by the differential this
+    seam made writable -- three callback parameters where the inferred shape
+    wins in the file and the census reported the annotation.
+
+    The scope is per MODULE because `interface Item` lives inside
+    `declare module 'movian/page'` and is not a name `movian/http` may write.
+    """
+
+    def __init__(self, visible: set[str],
+                 declared_by_module: dict[str, set[str]],
+                 native_slots: dict[tuple[str, str], list[str]]) -> None:
+        self.visible = visible
+        self.declared_by_module = declared_by_module
+        self.native_slots = native_slots
+
+    def _callback_type(self, record: dict[str, Any], name: str,
+                       shape_names: set[str] | None) -> str | None:
+        """The callback signature inferred from the CALL SITE, or None.
+
+        Evidence, not assertion: `movian/http` calls
+        `callback(null, new HttpResponse(res))`, and that is what the
+        parameter has to accept. It therefore outranks a `@param` the same
+        way a proved return outranks a `@returns`.
+        """
+        if name != record.get("callbackParam"):
+            return None
+        shape = record.get("callbackShape")
+        if not shape or not shape_names or shape not in shape_names:
+            return None
+        # The shape does not necessarily arrive first. `movian/http` calls
+        # `callback(null, new HttpResponse(res))`, so typing argument 0 as
+        # the response made an error-first callback look like a
+        # response-first one. The positions ahead of it are named `argN`
+        # rather than `err`: their position is measured from the call site,
+        # their meaning is not, and TypeScript requires some name.
+        index = record.get("callbackShapeIndex", 0)
+        spelling = shape
+        if record.get("callbackShapeNullable"):
+            spelling += " | null"
+        parts = ["arg%d: any" % position for position in range(index)]
+        parts += ["value: %s" % spelling, "...args: any[]"]
+        return "(%s) => any" % ", ".join(parts)
+
+    def parameter(self, record: dict[str, Any], name: str,
+                  shape_names: set[str] | None = None) -> SlotType:
+        documented = (record.get("docParams") or {}).get(name)
+        annotated: SlotType
+        if documented is None:
+            unmatched = sorted(record.get("docParamsUnmatched") or [])
+            annotated = SlotType("any", (
+                "no @param annotation names %s" % name if not unmatched else
+                "no @param annotation names %s; the block documents %s, "
+                "which is not a parameter" % (name, ", ".join(unmatched))))
+        else:
+            problem = doc_type_problem(
+                documented, self.visible, self.declared_by_module, "parameter")
+            if problem is None:
+                forwards = (record.get("forwardsTo") or {}).get(name)
+                if forwards is not None:
+                    problem = doc_type_exceeds_native(
+                        documented, tuple(forwards), self.native_slots)
+            if problem is not None:
+                annotated = SlotType(
+                    "any", "@param {%s} -- %s" % (documented, problem))
+            else:
+                spelled = render_doc_type(documented)
+                annotated = SlotType(spelled) if spelled != "any" else SlotType(
+                    "any", "@param {%s} is Closure's any and renders as "
+                           "`any`" % documented)
+
+        callback = self._callback_type(record, name, shape_names)
+        if callback is None:
+            return annotated
+        if documented is None:
+            return SlotType(callback)
+        return SlotType(callback, None, (
+            "@param {%s}, but the call site proves %s; the call site wins"
+            % (documented, callback)))
+
+    def returns(self, record: dict[str, Any],
+                shape_names: set[str]) -> SlotType:
+        """A `returns` was PROVED from the source; a `docReturns` is the
+        author saying so. When both exist the proof wins and the annotation
+        is reported, because a comment must not overrule a reading of the
+        code or the annotations become a second, unchecked type system."""
+        proved = record.get("returns")
+        claimed = record.get("docReturns")
+        if proved is not None:
+            # The disagreement is a fact about the two CLAIMS and does not
+            # depend on which branch produces the type -- an unspellable
+            # proof still contradicts an annotation that says something else,
+            # and computing it inside the happy path lost exactly that case.
+            disagreement = None
+            if claimed is not None and _normalized_type(
+                    _proved_return_text(proved)) != _normalized_type(claimed):
+                disagreement = (
+                    "@returns {%s}, but the scan proved %s from the body; "
+                    "the proof wins" % (claimed, _proved_return_text(proved)))
+            spelled = render_return_type(proved, shape_names)
+            if spelled == "any":
+                return SlotType("any", (
+                    "the scan proved %s, which this module does not declare, "
+                    "so it renders `any`" % _proved_return_text(proved)),
+                    disagreement)
+            return SlotType(spelled, None, disagreement)
+        if claimed is None:
+            return SlotType(
+                "any", "no @returns annotation and no provable shape")
+        problem = doc_type_problem(
+            claimed, self.visible, self.declared_by_module, "return")
+        if problem is not None:
+            return SlotType("any", "@returns {%s} -- %s" % (claimed, problem))
+        spelled = render_doc_type(claimed)
+        if spelled == "any":
+            return SlotType("any", (
+                "@returns {%s} is Closure's any and renders as `any`"
+                % claimed))
+        return SlotType(spelled)
+
+
+def native_signature(func: dict[str, Any]) -> str:
+    """The parameter list for a native ES_MODULE export.
+
+    `duk_function_list_entry` gives a name and `nargs` and nothing else, so
+    the parameters are positional and untyped -- but `nargs` is a real fact
+    and was being thrown away. Every native function used to be emitted
+    `(...args: any[])`, which accepts any call at all, while the `@arity`
+    comment beside it said otherwise: `fs.basename('a','b','c')` type-checked
+    against an arity of 1 (movian#207).
+
+    Optional parameters bound the call from above only. Passing fewer
+    arguments than `nargs` stays legal, which matches both the runtime --
+    Duktape pads the missing ones with `undefined` -- and how the CommonJS
+    exports in this same file are already emitted.
+
+    A variadic native (`nargs == -1`, `DUK_VARARGS`) keeps the rest
+    parameter, because for those the runtime really does accept anything.
+    """
+    if func.get("variadic"):
+        return "...args: any[]"
+    nargs = func["nargs"]
+    if nargs <= 0:
+        return ""
+    params = func.get("params") or []
+    rendered = []
+    for index in range(nargs):
+        param = params[index] if index < len(params) else {}
+        if "shapeName" in param:
+            spelling = " | ".join([param["shapeName"],
+                                   *param.get("shapeUnion", [])])
+        else:
+            spelling = param.get("type", "any")
+        rendered.append("%s?: %s" % (param.get("name", "arg%d" % index),
+                                     spelling))
+    return ", ".join(rendered)
+
+
+def params_signature(
+        params: list[str] | None, export: dict[str, Any] | None,
+        shape_names: set[str] | None, scope: TypeScope) -> str:
+    if params is None:
+        return "...args: any[]"
+    return ", ".join(
+        "%s?: %s" % (name, scope.parameter(export or {}, name,
+                                           shape_names).type)
+        for name in params)
+
+
+def member_signature(
+        member: dict[str, Any], export: dict[str, Any] | None,
+        shape_names: set[str] | None, scope: TypeScope
+) -> tuple[str | None, str]:
+    """`@arity` text and parameter list for one callable member.
+
+    Shared by every emission site -- module exports, prototype methods,
+    shared-object methods and receiver members -- so the variadic rule cannot
+    hold in one of them and not the others.
+
+    Being shared was not enough. Every method site called this with the
+    `export` argument omitted, so the annotations had no record to come off
+    and 42 documented method parameters were emitted as `any` while the
+    census counted them typed. The call being in one function did not make
+    the ARGUMENT the same; `export` and `scope` are now required rather than
+    defaulted, so a site cannot silently omit them again.
+
+    Returns `None` for the arity when the parameter list did not parse, which
+    is the caller's signal to omit the annotation.
+    """
+    params = member.get("params")
+    variadic = member.get("variadic", False)
+    signature = params_signature(params, export, shape_names, scope)
+    if variadic:
+        # `params_signature(None)` is already `...args: any[]`, and `variadic`
+        # is only recorded when the formal list parsed, so the rest parameter
+        # is never appended twice.
+        signature = ", ".join([signature, "...args: any[]"]) \
+            if signature else "...args: any[]"
+    if params is None:
+        return None, signature
+    return ("%d+" % len(params) if variadic else str(len(params)),
+            signature)
+
+
+def member_return_type(record: dict[str, Any], shape_names: set[str],
+                       scope: TypeScope) -> str:
+    return scope.returns(record, shape_names).type
+
+
 def render_dts(artifact: dict[str, Any]) -> str:
     """Render a .d.ts file from js.modules data."""
     modules = artifact.get("js", {}).get("modules", [])
@@ -6747,143 +6928,6 @@ def render_dts(artifact: dict[str, Any]) -> str:
             lines.append("};")
             lines.append("")
 
-    def native_signature(func: dict[str, Any]) -> str:
-        """The parameter list for a native ES_MODULE export.
-
-        `duk_function_list_entry` gives a name and `nargs` and nothing else, so
-        the parameters are positional and untyped -- but `nargs` is a real
-        fact and was being thrown away. Every native function used to be
-        emitted `(...args: any[])`, which accepts any call at all, while the
-        `@arity` comment beside it said otherwise: `fs.basename('a','b','c')`
-        type-checked against an arity of 1 (movian#207).
-
-        Optional parameters bound the call from above only. Passing fewer
-        arguments than `nargs` stays legal, which matches both the runtime --
-        Duktape pads the missing ones with `undefined` -- and how the CommonJS
-        exports in this same file are already emitted.
-
-        A variadic native (`nargs == -1`, `DUK_VARARGS`) keeps the rest
-        parameter, because for those the runtime really does accept anything.
-        """
-        if func.get("variadic"):
-            return "...args: any[]"
-        nargs = func["nargs"]
-        if nargs <= 0:
-            return ""
-        params = func.get("params") or []
-        rendered = []
-        for index in range(nargs):
-            param = params[index] if index < len(params) else {}
-            if "shapeName" in param:
-                spelling = " | ".join([param["shapeName"],
-                                       *param.get("shapeUnion", [])])
-            else:
-                spelling = param.get("type", "any")
-            rendered.append("%s?: %s" % (param.get("name", "arg%d" % index),
-                                         spelling))
-        return ", ".join(rendered)
-
-    def params_signature(
-            params: list[str] | None, export: dict[str, Any] | None = None,
-            shape_names: set[str] | None = None
-    ) -> str:
-        if params is None:
-            return "...args: any[]"
-        parts = []
-        doc_params = (export or {}).get("docParams") or {}
-        for name in params:
-            annotation = "any"
-            documented = doc_params.get(name)
-            forwards = ((export or {}).get("forwardsTo") or {}).get(name)
-            if documented is not None and doc_type_problem(
-                    documented, doc_scope["visible"], doc_declared_by_module,
-                    "parameter") is None and (
-                        forwards is None or doc_type_exceeds_native(
-                            documented, tuple(forwards),
-                            doc_native_slots) is None):
-                annotation = render_doc_type(documented)
-            if export is not None and name == export.get("callbackParam"):
-                callback_shape = export.get("callbackShape")
-                if callback_shape and shape_names and \
-                        callback_shape in shape_names:
-                    # The shape does not necessarily arrive first. `movian/
-                    # http` calls `callback(null, new HttpResponse(res))`, so
-                    # typing argument 0 as the response made an error-first
-                    # callback look like a response-first one. The positions
-                    # ahead of it are named `argN` rather than `err`: their
-                    # position is measured from the call site, their meaning
-                    # is not, and TypeScript requires some name.
-                    index = export.get("callbackShapeIndex", 0)
-                    shape_type = callback_shape
-                    if export.get("callbackShapeNullable"):
-                        shape_type += " | null"
-                    callback_params = [
-                        "arg%d: any" % position for position in range(index)
-                    ] + ["value: %s" % shape_type, "...args: any[]"]
-                    annotation = (
-                        "(%s) => any" % ", ".join(callback_params))
-            parts.append("%s?: %s" % (name, annotation))
-        return ", ".join(parts)
-
-    def member_signature(
-            member: dict[str, Any],
-            export: dict[str, Any] | None = None,
-            shape_names: set[str] | None = None
-    ) -> tuple[str | None, str]:
-        """`@arity` text and parameter list for one callable member.
-
-        Shared by every emission site -- module exports, prototype methods,
-        shared-object methods and receiver members -- so the variadic rule
-        cannot hold in one of them and not the others.
-
-        Being shared was not enough. Every method site called this with the
-        `export` argument omitted, so `params_signature` had no record to read
-        `docParams` off and 42 documented method parameters were emitted as
-        `any` while the census counted them typed. The call being in one
-        function did not make the ARGUMENT the same; each site now passes its
-        own record. Returns `None` for the
-        arity when the parameter list did not parse, which is the caller's
-        signal to omit the annotation.
-        """
-        params = member.get("params")
-        variadic = member.get("variadic", False)
-        signature = params_signature(params, export, shape_names)
-        if variadic:
-            # `params_signature(None)` is already `...args: any[]`, and
-            # `variadic` is only recorded when the formal list parsed, so the
-            # rest parameter is never appended twice.
-            signature = ", ".join([signature, "...args: any[]"]) \
-                if signature else "...args: any[]"
-        if params is None:
-            return None, signature
-        return ("%d+" % len(params) if variadic else str(len(params)),
-                signature)
-
-    def member_return_type(
-            record: dict[str, Any], shape_names: set[str]) -> str:
-        """The return type of one callable, from evidence first.
-
-        A `returns` on the record was PROVED from the source -- the scan read
-        the body and saw what it yields. A `docReturns` is the author saying
-        so. When both exist the proof wins and the disagreement is the
-        census's to print; a comment must not be able to overrule a reading of
-        the code, or the annotations become a second, unchecked type system.
-
-        Shared by all three emission sites (prototype methods, shared-object
-        methods, module exports) for the reason `member_signature` is shared:
-        a rule that holds in two of three places is a rule nobody can rely on.
-        """
-        proved = record.get("returns")
-        if proved is not None:
-            return render_return_type(proved, shape_names)
-        documented = record.get("docReturns")
-        if documented is not None and doc_type_problem(
-                documented, doc_scope["visible"], doc_declared_by_module,
-                "return") is None:
-            return render_doc_type(documented)
-        return "any"
-
-
     # What each module block may WRITE, computed once. A doc type is resolved
     # against this and not against a flat set: `interface Item` lives inside
     # `declare module 'movian/page'`, so it is not a name `movian/http` can
@@ -6891,11 +6935,15 @@ def render_dts(artifact: dict[str, Any]) -> str:
     # the block it lands in.
     doc_global_names, doc_declared_by_module = doc_type_scopes(modules)
     doc_native_slots = _native_slot_types(modules)
-    doc_scope: dict[str, set[str]] = {"visible": set()}
+    scope = TypeScope(set(), doc_declared_by_module, doc_native_slots)
 
     for mod in modules:
-        doc_scope["visible"] = (
-            doc_global_names | doc_declared_by_module.get(mod["name"], set()))
+        # One scope per module block, rebuilt as the loop moves. The census
+        # builds the same object from the same inputs, so the two cannot
+        # answer differently.
+        scope = TypeScope(
+            doc_global_names | doc_declared_by_module.get(mod["name"], set()),
+            doc_declared_by_module, doc_native_slots)
         name = mod["name"]
         kind = mod.get("kind", "unknown")
 
@@ -6975,7 +7023,7 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 for shape in prototype_shapes:
                     lines.append("  interface %s {" % shape["name"])
                     for method in shape["methods"]:
-                        arity, signature = member_signature(method, method, shape_names)
+                        arity, signature = member_signature(method, method, shape_names, scope)
                         if arity is not None:
                             lines.append("    /** @arity %s */" % arity)
                         # A method that plainly returns a shape says so.
@@ -6987,7 +7035,7 @@ def render_dts(artifact: dict[str, Any]) -> str:
                         lines.append(
                             "    %s(%s): %s;" %
                             (method["name"], signature,
-                             member_return_type(method, shape_names)))
+                             member_return_type(method, shape_names, scope)))
                     for prop in shape.get("properties", []):
                         # A plugin-supplied hook the module only guards is
                         # optional: requiring it would produce errors the
@@ -7004,13 +7052,13 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     "  // CommonJS receiver-mutated shared object shapes")
                 for shape in shared_shapes:
                     for method in shape["methods"]:
-                        arity, signature = member_signature(method, method, shape_names)
+                        arity, signature = member_signature(method, method, shape_names, scope)
                         if arity is not None:
                             lines.append("  /** @arity %s */" % arity)
                         lines.append(
                             "  function %s(%s): %s;" %
                             (method["name"], signature,
-                             member_return_type(method, shape_names)))
+                             member_return_type(method, shape_names, scope)))
                     for prop in shape.get("properties", []):
                         lines.append("  var %s: any;" % prop["name"])
                 lines.append("")
@@ -7035,7 +7083,7 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 for shape in shared_shapes:
                     lines.append("  interface %s {" % shape["name"])
                     for method in shape["methods"]:
-                        arity, signature = member_signature(method, method, shape_names)
+                        arity, signature = member_signature(method, method, shape_names, scope)
                         if arity is not None:
                             lines.append("    /** @arity %s */" % arity)
                         # A method that plainly returns a shape says so.
@@ -7047,7 +7095,7 @@ def render_dts(artifact: dict[str, Any]) -> str:
                         lines.append(
                             "    %s(%s): %s;" %
                             (method["name"], signature,
-                             member_return_type(method, shape_names)))
+                             member_return_type(method, shape_names, scope)))
                     for prop in shape.get("properties", []):
                         lines.append("    %s%s: any;" % (
                             prop["name"],
@@ -7062,13 +7110,13 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     lines.append("  interface %s%s {" % (export["name"], bases))
                     for member in own:
                         if member["kind"] == "function":
-                            arity, signature = member_signature(member, member, shape_names)
+                            arity, signature = member_signature(member, member, shape_names, scope)
                             if arity is not None:
                                 lines.append("    /** @arity %s */" % arity)
                             lines.append(
                                 "    %s(%s): %s;" %
                                 (member["name"], signature,
-                                 member_return_type(member, shape_names)))
+                                 member_return_type(member, shape_names, scope)))
                         else:
                             lines.append("    %s: any;" % member["name"])
                     lines.append("  }")
@@ -7078,13 +7126,13 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     "  // CommonJS receiver-mutated module exports")
                 for member in receiver_members:
                     if member["kind"] == "function":
-                        arity, signature = member_signature(member, member, shape_names)
+                        arity, signature = member_signature(member, member, shape_names, scope)
                         if arity is not None:
                             lines.append("  /** @arity %s */" % arity)
                         lines.append(
                             "  function %s(%s): %s;" %
                             (member["name"], signature,
-                             member_return_type(member, shape_names)))
+                             member_return_type(member, shape_names, scope)))
                     else:
                         lines.append("  var %s: any;" % member["name"])
                 lines.append("")
@@ -7112,7 +7160,7 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 # arguments than they declare. Requiring them would generate
                 # errors the runtime does not have. The honest count stays in
                 # @arity.
-                arity, sig = member_signature(exp, exp, shape_names)
+                arity, sig = member_signature(exp, exp, shape_names, scope)
                 if exp.get("receiverMutation"):
                     # `this.__proto__ = sp` does not choose between the two
                     # call forms: constructed, `this` is the new instance;
@@ -7141,7 +7189,7 @@ def render_dts(artifact: dict[str, Any]) -> str:
                     lines.append("  };")
                 elif params is not None:
                     lines.append("  /** @arity %s */" % arity)
-                    return_type = member_return_type(exp, shape_names)
+                    return_type = member_return_type(exp, shape_names, scope)
                     void_when = exp.get("voidWhen")
                     if void_when is not None and void_when in params:
                         # Two forms, split at the callback parameter: without
@@ -7153,7 +7201,7 @@ def render_dts(artifact: dict[str, Any]) -> str:
                         head_member = dict(exp)
                         head_member["params"] = head
                         _, head_sig = member_signature(
-                            head_member, exp, shape_names)
+                            head_member, exp, shape_names, scope)
                         lines.append("  %sfunction %s(%s): %s;" %
                                      (decl, ename, head_sig, return_type))
                         lines.append("  %sfunction %s(%s): void;" %
