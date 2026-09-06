@@ -73,7 +73,15 @@ ERROR_SIGNALS = re.compile(
 # event -- the only deterministic signal that a queued /api/open actually
 # ran (the prop tree alone can't distinguish "old page still showing" from
 # "same URL re-opened").
-NAV_OPENING_RE = re.compile(r"navigator.*Opening (\S+)")
+# To END OF LINE, not `\S+`. A URL is not one non-space token: the search bar
+# concatenates the user's query raw (`glwskins/flat/theme.view:227`) and
+# `es_route.c:236-240` pushes the capture undecoded, so any multi-word search
+# produces `Opening canonproof:search:red lipstick`. `\S+` captured
+# `canonproof:search:red`, the equality below failed, and `nav_seen` stayed
+# false for a navigation that had already happened -- movian#182's "any URL
+# containing a space", which this file's own comments had put down to
+# `openerror` alone. Both were real; only one of them had been fixed.
+NAV_OPENING_RE = re.compile(r"navigator.*?Opening (.+)")
 
 IMAGE_MAGIC = [
     (b"\x89PNG\r\n\x1a\n", "png"),
@@ -584,7 +592,7 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
         # would otherwise report the OLD page's state as the result.
         if not nav_seen:
             delta = read_log_delta(inst, offset)
-            nav_seen = any(m.group(1) == url
+            nav_seen = any(m.group(1).rstrip() == url
                            for m in NAV_OPENING_RE.finditer(delta))
             if nav_seen:
                 # Grace tick: the trace fires just before the currentpage
