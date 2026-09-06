@@ -561,6 +561,130 @@ class Adoption(unittest.TestCase):
         finally:
             gen.RUNTIME_ORACLE_PATH.write_bytes(before)
 
+    ACL_BLOCKED = ("Error: cannot %s dataroot://res/ecmascript/modules -- "
+                   "Error: Bad filename dataroot://res/ecmascript/modules -- "
+                   "Access not allowed (run movian with "
+                   "--bypass-ecmascript-acl)")
+
+    def test_a_real_acl_blocked_run_reaches_the_remedy(self):
+        """The payload a real blocked run actually produces.
+
+        `discoverFileModules()` and `runtimeInputs()` read the SAME blocked
+        path, so an ACL-blocked capture carries `moduleDiscoveryError` AND
+        `runtimeInputsError`. The discovery guard returned first, so the
+        remedy naming the flag was unreachable in production -- the only case
+        it exists for. The earlier tests missed it by mutating the committed
+        payload, whose `moduleDiscoveryError` is null: a payload that cannot
+        occur (Codex, on movian#239).
+        """
+        import json
+        import subprocess
+        import tempfile
+        payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        payload["capturedAt"] = payload["capturedAt"] + 1000
+        payload["runtimeInputs"] = None
+        payload["runtimeInputsError"] = self.ACL_BLOCKED % "read"
+        payload["moduleDiscoveryError"] = self.ACL_BLOCKED % "list"
+        before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+                handle.write(json.dumps(payload))
+                handle.flush()
+                result = subprocess.run(
+                    ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
+                    capture_output=True, text=True, cwd=str(REPO_ROOT))
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("recapture with `mdev run", result.stderr)
+            self.assertIn("the stamp's input set and the module census",
+                          result.stderr)
+        finally:
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
+
+    def test_either_field_alone_reaches_the_remedy(self):
+        """Both fields are inspected, and each on its own is enough.
+
+        A test that sets BOTH cannot tell an owner reading one field from an
+        owner reading two -- removing either from the loop survived it.
+        """
+        import json
+        import subprocess
+        import tempfile
+        for field, verb in (("moduleDiscoveryError", "list"),
+                            ("runtimeInputsError", "read")):
+            with self.subTest(field):
+                payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+                payload["capturedAt"] = payload["capturedAt"] + 1000
+                payload[field] = self.ACL_BLOCKED % verb
+                if field == "runtimeInputsError":
+                    payload["runtimeInputs"] = None
+                before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+                try:
+                    with tempfile.NamedTemporaryFile(
+                            "w", suffix=".json") as handle:
+                        handle.write(json.dumps(payload))
+                        handle.flush()
+                        result = subprocess.run(
+                            ["python3", str(GEN_PY), "--adopt-oracle",
+                             handle.name],
+                            capture_output=True, text=True,
+                            cwd=str(REPO_ROOT))
+                    self.assertEqual(result.returncode, 1, result.stdout)
+                    self.assertIn("the ecmascript ACL blocked this run",
+                                  result.stderr)
+                finally:
+                    gen.RUNTIME_ORACLE_PATH.write_bytes(before)
+
+    def test_check_reports_the_same_cause_as_adoption(self):
+        """A committed oracle captured without the flag is refused by
+        `--check` too, and with the whole symptom rather than half of it."""
+        import json
+        # The committed oracle, so the stamp and version checks that run
+        # BEFORE this one are satisfied -- a fixture missing them is refused
+        # for a reason that has nothing to do with what this test is about,
+        # which is how the first draft of it passed for the wrong reason.
+        oracle = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        oracle["moduleDiscoveryError"] = self.ACL_BLOCKED % "list"
+        artifact = json.loads(
+            (REPO_ROOT / "generated" / "movian-metadata.json").read_text())
+        ok, output, _report = gen._check_runtime_oracle(artifact, oracle)
+        self.assertFalse(ok)
+        self.assertIn("the ecmascript ACL blocked this run", output)
+        self.assertIn("--bypass-ecmascript-acl", output)
+
+    def test_the_printed_recapture_recipe_is_one_that_works(self):
+        """The gate prints a command somebody follows while it is red.
+
+        The two-step form it used to print -- `mdev run` then `mdev open` --
+        loses the open to a startup race with a variable window (movian#233),
+        so the route goes in as the start URL.
+        """
+        self.assertIn("--bypass-ecmascript-acl introspect:page",
+                      gen.RUNTIME_ORACLE_RECAPTURE)
+        self.assertNotIn("mdev open", gen.RUNTIME_ORACLE_RECAPTURE)
+
+    def test_a_discovery_failure_that_is_not_the_acl_keeps_its_message(self):
+        """The other half. Only the ACL gets the flag; an unrelated
+        enumeration failure keeps the message that fits it."""
+        import json
+        import subprocess
+        import tempfile
+        payload = json.loads(gen.RUNTIME_ORACLE_PATH.read_text())
+        payload["capturedAt"] = payload["capturedAt"] + 1000
+        payload["moduleDiscoveryError"] = "Error: out of memory"
+        before = gen.RUNTIME_ORACLE_PATH.read_bytes()
+        try:
+            with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+                handle.write(json.dumps(payload))
+                handle.flush()
+                result = subprocess.run(
+                    ["python3", str(GEN_PY), "--adopt-oracle", handle.name],
+                    capture_output=True, text=True, cwd=str(REPO_ROOT))
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("could not enumerate", result.stderr)
+            self.assertNotIn("--bypass-ecmascript-acl", result.stderr)
+        finally:
+            gen.RUNTIME_ORACLE_PATH.write_bytes(before)
+
     def test_an_unrelated_capture_error_does_not_get_the_acl_remedy(self):
         """The other half of the branch. An error that is not the ACL gets
         "recapture" and not a flag that would not have helped -- a gate that

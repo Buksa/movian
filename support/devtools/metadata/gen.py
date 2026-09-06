@@ -120,11 +120,15 @@ INTROSPECTOR_DIR = (
     REPO_ROOT / "support" / "devtools" / "api-introspector")
 RUNTIME_ORACLE_INPUT_GLOBS = (
     RUNTIME_ORACLE_RUNTIME_GLOBS + RUNTIME_ORACLE_COMPILED_GLOBS)
+# The route is the start URL, not a later `mdev open`. `/api/open` is
+# discarded while the navigator is still starting and the window is variable,
+# so no fixed wait makes the two-step form reliable (movian#233). Printing a
+# recipe that usually works is worse than printing one that does: this text is
+# what somebody follows at the moment the gate is red.
 RUNTIME_ORACLE_RECAPTURE = (
     "recapture in the checkout that owns build.debug:\n"
     "    mdev run -p support/devtools/api-introspector --name introspect \\\n"
-    "        --bypass-ecmascript-acl\n"
-    "    mdev open --name introspect introspect:page\n"
+    "        --bypass-ecmascript-acl introspect:page\n"
     "  then adopt the payload printed after the route opened:\n"
     "    gen.py --adopt-oracle <captured.json>")
 
@@ -6174,7 +6178,13 @@ def _check_runtime_oracle(
     unreachable.sort(key=lambda entry: (
         entry["module"], entry["shape"], entry["member"]))
     floor_problems = runtime_oracle_census(oracle, artifact)
-    if oracle.get("moduleDiscoveryError"):
+    blocked = runtime_oracle_acl_blocked(oracle)
+    if blocked:
+        # Same cause, same remedy, wherever it is noticed. A committed oracle
+        # captured without the flag would otherwise be refused here by half
+        # its symptom and by adoption with the whole of it.
+        floor_problems.append(blocked)
+    elif oracle.get("moduleDiscoveryError"):
         floor_problems.append(
             "the capture could not enumerate the module files: %s"
             % oracle["moduleDiscoveryError"])
@@ -7965,6 +7975,31 @@ def runtime_oracle_build_mismatch(version: Any) -> list[str]:
 ECMASCRIPT_ACL_REMEDY = "--bypass-ecmascript-acl"
 
 
+def runtime_oracle_acl_blocked(payload: dict[str, Any]) -> str | None:
+    """The one cause that explains every empty field at once, or None.
+
+    `discoverFileModules()` and `runtimeInputs()` read the SAME path, so a run
+    without `--bypass-ecmascript-acl` comes back with `moduleDiscoveryError`
+    AND `runtimeInputsError` set. Asked here, before either specific guard,
+    because whichever of them fires first would otherwise report its own half
+    of one cause and print a remedy that does not fix it -- which is exactly
+    what happened: the discovery guard returned first and the flag was named
+    nowhere in production, only in a test that had built a payload no run can
+    produce (movian#239).
+    """
+    for field in ("moduleDiscoveryError", "runtimeInputsError"):
+        error = payload.get(field)
+        if error and ECMASCRIPT_ACL_REMEDY in str(error):
+            return (
+                "the ecmascript ACL blocked this run: %s\n"
+                "  recapture with `mdev run ... %s`; without it the run can "
+                "neither list nor read dataroot://res/ecmascript/modules, "
+                "which is both the stamp's input set and the module census, "
+                "so the payload reports both as failed"
+                % (error, ECMASCRIPT_ACL_REMEDY))
+    return None
+
+
 def runtime_oracle_unread(recorded: Any, error: Any) -> str | None:
     """Why the capture recorded nothing about what it read, or None.
 
@@ -7973,26 +8008,22 @@ def runtime_oracle_unread(recorded: Any, error: Any) -> str | None:
     recapturing against this tree, and the first is not fixed by recapturing
     at all unless the invocation changes.
 
-    The overwhelmingly common cause is the ecmascript ACL. Without
-    `--bypass-ecmascript-acl` the run cannot list
-    `dataroot://res/ecmascript/modules`, which is both the stamp's input set
-    and the module census -- and the payload says so in `runtimeInputsError`,
-    where the flag sat unread while the refusal advised something else. A gate
-    that prints a remedy owns that remedy, so when the capture names the flag,
-    so does the refusal.
+    The overwhelmingly common cause -- the ecmascript ACL -- is NOT diagnosed
+    here. `runtime_oracle_acl_blocked` owns it and is asked first, because it
+    explains `moduleDiscoveryError` and `runtimeInputsError` at once and this
+    function only sees the second. What is left for this function is a capture
+    that failed to record its inputs for some other reason, or recorded
+    nothing at all.
     """
     if error:
-        blocked = ECMASCRIPT_ACL_REMEDY in str(error)
-        return (
-            "the capture could not read the module tree: %s\n"
-            "  recapture with `mdev run ... %s`; without it the run cannot "
-            "list dataroot://res/ecmascript/modules, which is both the "
-            "stamp's input set and the module census"
-            % (error, ECMASCRIPT_ACL_REMEDY)
-            if blocked else
-            "the capture could not record what it read: %s\n"
-            "  recapture; a run that cannot say what it loaded cannot be "
-            "stamped against anything" % error)
+        # No ACL branch here. `runtime_oracle_acl_blocked` owns that cause and
+        # is asked first, by both callers. Detecting it in two places produced
+        # two nearly identical remedies, and either one satisfied a test the
+        # other was meant to pin -- so a mutation removing one of them
+        # survived.
+        return ("the capture could not record what it read: %s\n"
+                "  recapture; a run that cannot say what it loaded cannot be "
+                "stamped against anything" % error)
     if not isinstance(recorded, dict) or not recorded:
         return ("the capture recorded nothing about what it read\n"
                 "  recapture; this payload predates the freshness work or is "
@@ -8115,6 +8146,11 @@ def cmd_adopt_oracle(args: argparse.Namespace) -> int:
     # internally sound. Ordering matters twice over -- a shallow clone
     # cannot resolve a build revision, and a payload that failed to look
     # should be refused for that, not for a lookup that could not run.
+    blocked = runtime_oracle_acl_blocked(payload)
+    if blocked:
+        print("gen.py: this capture cannot be stamped:", file=sys.stderr)
+        print("  %s" % blocked, file=sys.stderr)
+        return 1
     if payload.get("moduleDiscoveryError"):
         print("gen.py: the capture could not enumerate the module files, so "
               "it cannot say it saw them all: %s"
