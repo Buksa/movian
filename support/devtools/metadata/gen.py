@@ -6708,9 +6708,18 @@ class TypeScope:
                     "any", "@param {%s} -- %s" % (documented, problem))
             else:
                 spelled = render_doc_type(documented)
-                annotated = SlotType(spelled) if spelled != "any" else SlotType(
-                    "any", "@param {%s} is Closure's any and renders as "
-                           "`any`" % documented)
+                if spelled != "any":
+                    annotated = SlotType(spelled)
+                elif documented in DOC_TYPE_ANY_ALIASES:
+                    annotated = SlotType(
+                        "any", "@param {%s} is Closure's any and renders as "
+                               "`any`" % documented)
+                else:
+                    # A literal `{any}` is not Closure's `*`; calling it that
+                    # sends the reader looking for a translation that did not
+                    # happen.
+                    annotated = SlotType(
+                        "any", "@param {%s} is already `any`" % documented)
 
         callback = self._callback_type(record, name, shape_names)
         if callback is None:
@@ -6941,8 +6950,6 @@ def render_dts(artifact: dict[str, Any]) -> str:
     # the block it lands in.
     doc_global_names, doc_declared_by_module = doc_type_scopes(modules)
     doc_native_slots = _native_slot_types(modules)
-    scope = TypeScope(set(), doc_declared_by_module, doc_native_slots)
-
     for mod in modules:
         # One scope per module block, rebuilt as the loop moves. The census
         # builds the same object from the same inputs, so the two cannot

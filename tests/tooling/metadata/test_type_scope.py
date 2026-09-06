@@ -40,6 +40,24 @@ def scope_for(artifact, module_name="movian/m"):
 class TheRendererHasAnInterface(unittest.TestCase):
     """Reachability. Every one of these was private to `render_dts`."""
 
+    def test_the_record_and_scope_cannot_be_omitted(self) -> None:
+        """`member_signature` docstring says `export` and `scope` are
+        required rather than defaulted -- that is the regression that cost 42
+        emitted-`any` method parameters, because a defaulted argument let
+        every method site silently omit the record.
+
+        Prose is not a guard. Re-adding `= None` keeps a `hasattr` test green,
+        so the signature itself is pinned.
+        """
+        import inspect
+        parameters = inspect.signature(gen.member_signature).parameters
+        for name in ("member", "export", "shape_names", "scope"):
+            with self.subTest(name):
+                self.assertIs(parameters[name].default,
+                              inspect.Parameter.empty,
+                              "%s gained a default; a call site can omit it "
+                              "again" % name)
+
     def test_the_rendering_vocabulary_is_callable(self) -> None:
         for name in ("native_signature", "params_signature",
                      "member_signature", "member_return_type", "TypeScope"):
@@ -225,24 +243,49 @@ class TheTwoConsumersAgree(unittest.TestCase):
         Scoped per declaration on purpose. Searching the whole file for
         `url?: string` finds it 21 times, so flipping one declaration to
         `any` left the pin green -- a check passing because something ELSE
-        satisfied it, which is the defect class this whole seam exists to
-        remove. Codex found it here.
+        satisfied it.
+
+        A first cut then indexed only lines carrying their own name, and a
+        constructor is not written that way:
+
+            const Route: {
+              new (re?: string, callback?: ...): Route;
+            };
+
+        The outer line has no parentheses and the inner one has no name, so
+        36 of 251 census sites -- 14 of them TYPED parameters -- were indexed
+        nowhere and skipped by `if not lines`. Nothing satisfied those pins;
+        they simply were not made. The enclosing `const` name is carried down
+        so the call signatures inside land under it.
         """
         found: dict[tuple[str, str], list[str]] = {}
         module = None
-        for line in self.dts.splitlines():
+        const = None
+        for raw in self.dts.splitlines():
+            line = raw.strip()
             head = re.match(r"declare module '([^']+)'", line)
             if head is not None:
-                module = head.group(1)
+                module, const = head.group(1), None
                 continue
             if module is None:
                 continue
+            opening = re.match(r"(?:export\s+)?const\s+([A-Za-z_0-9]+)\s*:"
+                               r"\s*\{\s*$", line)
+            if opening is not None:
+                const = opening.group(1)
+                continue
+            if const is not None and line.startswith("}"):
+                const = None
+                continue
             call = re.search(
-                r"(?:function\s+|new\s*|^\s+)([A-Za-z_0-9]*)\s*\([^;]*\)\s*:",
+                r"(?:function\s+|new\s*|^)([A-Za-z_0-9]*)\s*\([^;]*\)\s*:",
                 line)
             if call is None:
                 continue
-            found.setdefault((module, call.group(1)), []).append(line.strip())
+            name = call.group(1) or const
+            if name is None:
+                continue
+            found.setdefault((module, name), []).append(line)
         return found
 
     def emitted_for(self, site, declarations):
@@ -252,8 +295,25 @@ class TheTwoConsumersAgree(unittest.TestCase):
         `exports.w3cwebsocket.send` -- and the file declares it under the
         last component.
         """
-        return declarations.get((site["module"], site["member"].split(".")[-1]),
-                                [])
+        return declarations.get(
+            (site["module"], site["member"].split(".")[-1]), [])
+
+    def matching(self, lines, slot, spelled):
+        """Whether EVERY declaration that mentions this slot spells it this
+        way.
+
+        `any(...)` over the bucket was the remaining hole: a name can carry
+        more than one declaration -- an overload, or a receiver member
+        emitted both hoisted and inside its export's interface, which really
+        do render from different records -- and one of them satisfying the
+        pin let the other be wrong. Only declarations that actually mention
+        the slot are judged; the rest are a different member's signature.
+        """
+        mentioning = [line for line in lines if ("%s?:" % slot) in line]
+        if not mentioning:
+            return False
+        return all(("%s?: %s" % (slot, spelled)) in line
+                   for line in mentioning)
 
     def test_every_typed_parameter_appears_in_its_own_declaration(self) -> None:
         declarations = self.declarations()
@@ -264,17 +324,17 @@ class TheTwoConsumersAgree(unittest.TestCase):
             if site["slot"] == "...args":
                 continue
             lines = self.emitted_for(site, declarations)
-            if not lines:
-                continue        # emitted through a form this reader does not
-            checked += 1        # index; the return test covers the same sites
+            checked += 1
             with self.subTest("%s.%s" % (site["member"], site["slot"])):
+                self.assertTrue(lines, "no declaration indexed for %s.%s"
+                                % (site["module"], site["member"]))
                 self.assertTrue(
-                    any("%s?: %s" % (site["slot"], site["type"]) in line
-                        for line in lines),
-                    "%s not found in %s" % (site["type"], lines))
-        # A differential that checked nothing would pass. Measured, not a
-        # target: re-measure before changing it.
-        self.assertGreaterEqual(checked, 60)
+                    self.matching(lines, site["slot"], site["type"]),
+                    "%s not spelled %s in %s"
+                    % (site["slot"], site["type"], lines))
+        # Every typed parameter is checked -- there is no `continue` left to
+        # skip one. Measured, not a target: re-measure before changing it.
+        self.assertEqual(checked, 87)
 
     def test_every_typed_return_appears_in_its_own_declaration(self) -> None:
         declarations = self.declarations()
@@ -283,15 +343,27 @@ class TheTwoConsumersAgree(unittest.TestCase):
             if site["kind"] != "return" or site["status"] != "typed":
                 continue
             lines = self.emitted_for(site, declarations)
-            if not lines:
-                continue
             checked += 1
             with self.subTest("%s.(return)" % site["member"]):
+                self.assertTrue(lines, "no declaration indexed for %s.%s"
+                                % (site["module"], site["member"]))
+                # One declaration must return it, and any OTHER may only
+                # be the `voidWhen` overload -- `movian/http.request` emits
+                # the synchronous form and a callback form returning `void`,
+                # and the census models one return per callable. Anything
+                # else in the bucket is a real divergence, so `all` would be
+                # wrong and `any` would be vacuous.
                 self.assertTrue(
                     any(line.rstrip().endswith("): %s;" % site["type"])
                         for line in lines),
-                    "%s not found in %s" % (site["type"], lines))
-        self.assertGreaterEqual(checked, 10)
+                    "%s returned by none of %s" % (site["type"], lines))
+                self.assertTrue(
+                    all(line.rstrip().endswith("): %s;" % site["type"])
+                        or line.rstrip().endswith("): void;")
+                        for line in lines),
+                    "%s has a third return form: %s"
+                    % (site["member"], lines))
+        self.assertEqual(checked, 19)
 
     def test_no_parameter_counted_typed_renders_any(self) -> None:
         """The exact defect, as a property over the whole corpus."""
