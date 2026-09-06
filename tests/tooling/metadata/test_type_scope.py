@@ -17,6 +17,7 @@ consumers cross that seam.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -178,6 +179,21 @@ class EvidenceOutranksTheAnnotation(unittest.TestCase):
             "(arg0: any, value: Item | null, ...args: any[]) => any")
         self.assertIn("the call site wins", site["disagreement"])
 
+    def test_an_agreeing_annotation_reports_no_loss(self) -> None:
+        """An annotation that already says what the call site proves has not
+        been overruled. Reporting it prints two identical types."""
+        spelled = "(arg0: any, value: Item | null, ...args: any[]) => any"
+        site = [s for s in gen._doc_type_census(self.artifact(spelled))
+                if s["slot"] == "cb"][0]
+        self.assertEqual(site["type"], spelled)
+        self.assertNotIn("disagreement", site)
+        # Spacing is not a contradiction either -- the two sides are written
+        # by different code.
+        site = [s for s in gen._doc_type_census(self.artifact(
+            "(arg0:any, value:Item|null, ...args:any[])=>any"))
+                if s["slot"] == "cb"][0]
+        self.assertNotIn("disagreement", site)
+
     def test_an_undocumented_callback_reports_no_loss(self) -> None:
         """Nothing was overruled, so nothing is reported -- the noise cut
         this report has needed three times already."""
@@ -202,28 +218,80 @@ class TheTwoConsumersAgree(unittest.TestCase):
         self.artifact = json.loads(artifact.read_text())
         self.dts = dts.read_text()
 
-    def test_every_typed_parameter_appears_in_the_emitted_file(self) -> None:
-        """Substring, not a parsed slot list: an object type is emitted
-        verbatim and contains the commas any splitter would cut it on."""
+    def declarations(self):
+        """`{(module, callable name): [declaration text, ...]}` from the
+        emitted file.
+
+        Scoped per declaration on purpose. Searching the whole file for
+        `url?: string` finds it 21 times, so flipping one declaration to
+        `any` left the pin green -- a check passing because something ELSE
+        satisfied it, which is the defect class this whole seam exists to
+        remove. Codex found it here.
+        """
+        found: dict[tuple[str, str], list[str]] = {}
+        module = None
+        for line in self.dts.splitlines():
+            head = re.match(r"declare module '([^']+)'", line)
+            if head is not None:
+                module = head.group(1)
+                continue
+            if module is None:
+                continue
+            call = re.search(
+                r"(?:function\s+|new\s*|^\s+)([A-Za-z_0-9]*)\s*\([^;]*\)\s*:",
+                line)
+            if call is None:
+                continue
+            found.setdefault((module, call.group(1)), []).append(line.strip())
+        return found
+
+    def emitted_for(self, site, declarations):
+        """Every declaration the emitted file has for this census site.
+
+        The census names a member by its path -- `create`, `Page.appendItem`,
+        `exports.w3cwebsocket.send` -- and the file declares it under the
+        last component.
+        """
+        return declarations.get((site["module"], site["member"].split(".")[-1]),
+                                [])
+
+    def test_every_typed_parameter_appears_in_its_own_declaration(self) -> None:
+        declarations = self.declarations()
+        checked = 0
         for site in gen._doc_type_census(self.artifact):
             if site["kind"] != "parameter" or site["status"] != "typed":
                 continue
             if site["slot"] == "...args":
                 continue
+            lines = self.emitted_for(site, declarations)
+            if not lines:
+                continue        # emitted through a form this reader does not
+            checked += 1        # index; the return test covers the same sites
             with self.subTest("%s.%s" % (site["member"], site["slot"])):
-                self.assertIn("%s?: %s" % (site["slot"], site["type"]),
-                              self.dts)
+                self.assertTrue(
+                    any("%s?: %s" % (site["slot"], site["type"]) in line
+                        for line in lines),
+                    "%s not found in %s" % (site["type"], lines))
+        # A differential that checked nothing would pass. Measured, not a
+        # target: re-measure before changing it.
+        self.assertGreaterEqual(checked, 60)
 
-    def test_every_typed_return_appears_in_the_emitted_file(self) -> None:
-        """The shape set the census resolves against must be the one the
-        renderer uses. Widening it makes the census report `typed` for a name
-        the block does not declare, while the file says `any` -- the same
-        defect as the parameter side, one slot over."""
+    def test_every_typed_return_appears_in_its_own_declaration(self) -> None:
+        declarations = self.declarations()
+        checked = 0
         for site in gen._doc_type_census(self.artifact):
             if site["kind"] != "return" or site["status"] != "typed":
                 continue
+            lines = self.emitted_for(site, declarations)
+            if not lines:
+                continue
+            checked += 1
             with self.subTest("%s.(return)" % site["member"]):
-                self.assertIn("): %s;" % site["type"], self.dts)
+                self.assertTrue(
+                    any(line.rstrip().endswith("): %s;" % site["type"])
+                        for line in lines),
+                    "%s not found in %s" % (site["type"], lines))
+        self.assertGreaterEqual(checked, 10)
 
     def test_no_parameter_counted_typed_renders_any(self) -> None:
         """The exact defect, as a property over the whole corpus."""

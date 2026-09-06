@@ -6715,7 +6715,13 @@ class TypeScope:
         callback = self._callback_type(record, name, shape_names)
         if callback is None:
             return annotated
-        if documented is None:
+        if documented is None or _normalized_type(documented) == \
+                _normalized_type(callback):
+            # Nothing was overruled when the annotation already says what the
+            # call site proves. Reporting it anyway prints two identical
+            # types under "the annotation contradicts what the source
+            # proves" -- the same noise cut the return path already makes,
+            # missed here for the fourth time in this file.
             return SlotType(callback)
         return SlotType(callback, None, (
             "@param {%s}, but the call site proves %s; the call site wins"
