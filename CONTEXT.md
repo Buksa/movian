@@ -79,6 +79,21 @@ test inputs, a different thing)
 A check wired into `.github/workflows/gates.yml` that can fail a push. A check
 that exists but nothing runs is not a gate.
 
+**Differential**:
+A check comparing two sides, whose guarantee comes from the second side having
+a DIFFERENT PRODUCER -- the runtime (the **oracle**), the C accessors, `tsc`.
+Re-running our own scanner is not a second side: both results come from the
+same code. See ADR-0004.
+_Avoid_: cross-check (unqualified), comparison
+
+**Census**:
+A check asking whether everything was looked at, not whether two sides agree.
+It has no second producer and needs none, but its ENUMERATOR must be
+independent of the builder and is usually cruder -- that is how
+`_check_object_return_coverage` reports a `return {` site no export region
+covered, which leaves no trace in the **artifact** at all. See ADR-0004.
+_Avoid_: coverage (which is the floor below), inventory
+
 **Coverage floor**:
 The pinned set of artifact members each of which, when removed, must break a
 fixture. It measures that the fixtures still bite.
