@@ -92,6 +92,15 @@ PAGE_ERROR = "global/navigators/current/currentpage/model/error"
 # believed. Long enough for a backend that is about to fail to say so,
 # short enough not to matter to a page that really has no loading prop.
 ABSENT_LOADING_SETTLE = 1.0
+# `/api/open` accepts and answers 302 before the navigator will consume the
+# event. Measured on the stand: an open issued 1s after `mdev run` returns is
+# discarded with no trace in the log -- and so is `page:settings`, which needs
+# no plugin, so it is neither route registration nor the backend. At ~3s the
+# same request works. The GET is idempotent, so the honest answer is to issue
+# it again rather than wait longer: waiting cannot recover a dropped event,
+# which is why raising `--timeout` never helped (movian#233).
+NAV_REISSUE_AFTER = 1.5
+NAV_REISSUE_LIMIT = 4
 PAGE_NODES = "global/navigators/current/currentpage/model/nodes"
 
 
@@ -551,12 +560,17 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
     before_url = prop_value(base, PAGE_URL)
     offset = log_size(inst)
 
-    result = http_request(
-        base, "/api/open?" + urllib.parse.urlencode({"url": url}),
-        timeout=5.0)
-    if not result.get("ok"):
-        raise MdevError("GET /api/open failed: %s"
-                        % (result.get("error") or result.get("status")))
+    def issue_open() -> None:
+        result = http_request(
+            base, "/api/open?" + urllib.parse.urlencode({"url": url}),
+            timeout=5.0)
+        if not result.get("ok"):
+            raise MdevError("GET /api/open failed: %s"
+                            % (result.get("error") or result.get("status")))
+
+    issue_open()
+    issued = 1
+    issued_at = time.monotonic()
 
     deadline = time.monotonic() + timeout
     cur_url = title = None
@@ -577,6 +591,15 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
                 # prop swap becomes visible over HTTP.
                 time.sleep(0.3)
             else:
+                # No "Opening <url>" yet. Either the navigator has not got to
+                # it, or it never will -- the two are indistinguishable from
+                # here, and one of them is recoverable, so re-issue.
+                if (issued < NAV_REISSUE_LIMIT
+                        and time.monotonic() - issued_at
+                        >= NAV_REISSUE_AFTER):
+                    issue_open()
+                    issued += 1
+                    issued_at = time.monotonic()
                 time.sleep(0.2)
             continue
         cur_url = prop_value(base, PAGE_URL)
@@ -635,9 +658,10 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
     if not ready:
         raise MdevError(
             "page not ready after %.0fs: nav_event_seen=%r url=%r "
-            "loading=%r title=%r"
+            "loading=%r title=%r (open issued %d time%s)"
             % (timeout, nav_seen, cur_url,
-               prop_value(base, PAGE_LOADING), title)
+               prop_value(base, PAGE_LOADING), title,
+               issued, "" if issued == 1 else "s")
         )
 
     ptype = prop_value(base, PAGE_TYPE)
