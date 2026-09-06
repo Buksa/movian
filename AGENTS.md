@@ -144,6 +144,20 @@ does not drop, the check was not measuring what it claimed. A gate whose
 verdict cannot change is not a gate, whatever colour it prints. Ask of any
 check: *what, exactly, could make this come out differently?*
 
+**And falsify against an input the producer emits.** A fixture nobody's code
+writes kills mutations for free: the battery goes green because the input is
+impossible, not because the guard holds. Derive the fixture from the producer
+-- the C that raises the error, the JavaScript that formats it, a real capture
+-- and cite where.
+
+Three rounds of review on one change traced to this, each finding a different
+impossible payload. The sharpest: a mutation making every capture error read as
+an ACL rejection was in the battery and was being killed -- by a fixture saying
+`Error: out of memory`, which the introspector never writes, because it appends
+`(run movian with --bypass-ecmascript-acl)` to every root-scan failure it
+reports. The guard was matching the appended advice rather than the refusal,
+and the only thing hiding it was a fixture no run could produce.
+
 Both standards share one rule. Before reporting a number, name what it counted
 and what would move it. A count that moves in a direction it cannot move is a
 measurement bug, not a finding.
