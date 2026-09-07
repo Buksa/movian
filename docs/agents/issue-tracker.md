@@ -41,5 +41,23 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 - **Child ticket**: an issue linked to the map as a GitHub sub-issue (`gh api` on the sub-issues endpoint). Where sub-issues aren't enabled, add the child to a task list in the map body and put `Part of #<map>` at the top of the child body. Labels: `wayfinder:<type>` (`research`/`prototype`/`grilling`/`task`). Once claimed, the ticket is assigned to the driving dev.
 - **Blocking**: GitHub's **native issue dependencies** — the canonical, UI-visible representation. Add an edge with `gh api --method POST repos/<owner>/<repo>/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>`, where `<blocker-db-id>` is the blocker's numeric **database id** (`gh api repos/<owner>/<repo>/issues/<n> --jq .id`, _not_ the `#number` or `node_id`). GitHub reports `issue_dependencies_summary.blocked_by` (open blockers only — the live gate). Where dependencies aren't available, fall back to a `Blocked by: #<n>, #<n>` line at the top of the child body. A ticket is unblocked when every blocker is closed.
 - **Frontier query**: list the map's open children (`gh issue list --state open`, scoped to the map's sub-issues / task list), drop any with an open blocker (`issue_dependencies_summary.blocked_by > 0`, or an open issue in the `Blocked by` line) or an assignee; first in map order wins.
+
+### Verified on this repository (2026-09-07)
+
+- All five `wayfinder:*` labels exist and were each applied to a real issue and
+  removed again. Names and colours mirror `Buksa/movian-plugin-sdk`.
+- **Native dependencies are available here**, so the `Blocked by:` body
+  fallback above does not apply. A round trip was run end to end: the POST
+  recipe works, and the blocker's numeric database id really is required --
+  `#number` is not accepted.
+- **`issue_dependencies_summary` lags a write.** Read immediately after
+  creating an edge it still reports `blocked_by: 0`, and catches up within a
+  few seconds. A session that adds a blocker and then runs the frontier query
+  in the same breath will see the ticket as unblocked and hand it out. The
+  authoritative read is the list endpoint, correct immediately:
+  `gh api repos/<owner>/<repo>/issues/<n>/dependencies/blocked_by`. Use the
+  summary for a bulk frontier scan, the list endpoint whenever a write just
+  happened.
+
 - **Claim**: `gh issue edit <n> --add-assignee @me` — the session's first write.
 - **Resolve**: `gh issue comment <n> --body "<answer>"`, then `gh issue close <n>`, then append a context pointer (gist + link) to the map's Decisions-so-far.

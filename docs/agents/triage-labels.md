@@ -33,5 +33,7 @@ applicable to the same issue.
 maintainer or by an agent working to a DoD and need no triage pass; the labels
 are in place for the ones that arrive from outside.
 
-Sibling repositories differ: `Buksa/movian-plugin-sdk` carries the
-`wayfinder:*` family that `/wayfinder` needs, and this one does not.
+The `wayfinder:*` family that `/wayfinder` needs was created here on
+2026-09-07 as well, mirroring `Buksa/movian-plugin-sdk`'s names and colours so
+the two repositories read the same. See the wayfinding section of
+`issue-tracker.md`.
