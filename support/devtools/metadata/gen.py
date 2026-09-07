@@ -5033,19 +5033,17 @@ def _format_runtime_member(
 # and an entry that becomes reachable fails too, because leaving it listed
 # lets the floor keep credit for a member nobody observes any more.
 RUNTIME_ORACLE_UNREACHABLE: tuple[tuple[str, str, str], ...] = (
-    # The capture never constructs a Request. The reason it records --
-    # "the request factory starts network I/O" -- is false: http.js:61-64
-    # formats a URL and calls `new Request(url)`, and the socket only
-    # opens in `end()`. These six are therefore the six most likely to
-    # leave this list, and they leave it by the introspector attempting
-    # the construction, not by anyone editing the excuse.
-    ("http", "Request", "end"),
-    ("http", "Request", "headers"),
-    ("http", "Request", "on"),
-    ("http", "Request", "onError"),
-    ("http", "Request", "onResponse"),
-    ("http", "Request", "url"),
-    # A Response exists only as the result of a transfer.
+    # The six `http.Request` members that used to head this list left it in
+    # movian#237, the way the note said they would: the introspector now
+    # calls `exports.request` and describes what comes back. The excuse they
+    # carried -- "the request factory starts network I/O" -- was false, and
+    # re-reading it was what removed them.
+    #
+    # `Response` is the family that looked identical and is not. Nothing
+    # exported hands one back and the constructor is module-local
+    # (http.js:3), so the only site that makes one is the io.httpReq
+    # callback inside `Request.prototype.end` (http.js:60-66). That needs a
+    # transfer, not a construction, and the capture performs none.
     ("http", "Response", "bytes"),
     ("http", "Response", "encoding"),
     ("http", "Response", "on"),
@@ -5053,8 +5051,10 @@ RUNTIME_ORACLE_UNREACHABLE: tuple[tuple[str, str, str], ...] = (
     ("http", "Response", "onEnd"),
     ("http", "Response", "setEncoding"),
     ("http", "Response", "statusCode"),
-    # Same: movian/http hands back a response object the capture cannot
-    # obtain without performing the request.
+    # Same, and re-read in movian#237 rather than assumed: `HttpResponse` is
+    # module-local too, and both construction sites in `exports.request` sit
+    # AFTER `io.httpReq` returns (movian/http.js:104-121). There is no
+    # offline path to one.
     ("movian/http", "HttpResponse", "allheaders"),
     ("movian/http", "HttpResponse", "bytes"),
     ("movian/http", "HttpResponse", "contenttype"),
@@ -5073,12 +5073,22 @@ RUNTIME_ORACLE_UNREACHABLE: tuple[tuple[str, str, str], ...] = (
     ("movian/service", "Service", "destroy"),
     ("movian/service", "Service", "enabled"),
     ("movian/service", "Service", "id"),
-    # The shared settings receiver could not be constructed safely; the
-    # capture records the attempt rather than a hand-written excuse.
+    # Not a construction problem, which is what this entry used to say.
+    # `zombie` is created by `sp.destroy` (`this.zombie = 1`,
+    # movian/settings.js:52-56) and by nothing else, so a receiver the
+    # capture constructed perfectly would still not carry it. Reaching it
+    # means destroying a live settings group -- global state the capture
+    # must leave alone. Corrected while the list was open (movian#237).
     ("movian/settings", "sp", "zombie"),
     # Opening a DB creates a file in the persistent path.
     ("movian/sqlite", "DB", "db"),
-    # The constructor calls native hook.register, a global registration.
+    # The constructor calls native hook.register, a global registration
+    # (movian/videoscrobbler.js:6). Re-read in movian#237: four of these six
+    # -- onstart, onstop, onpause, onresume -- are slots the module only
+    # guards with `typeof(this.onX) === 'function'`, so even a construction
+    # the capture could perform would score them plugin-supplied, never
+    # match. Only `paused` and `hook` could move, and the registration is
+    # what stops them.
     ("movian/videoscrobbler", "VideoScrobbler", "hook"),
     ("movian/videoscrobbler", "VideoScrobbler", "onpause"),
     ("movian/videoscrobbler", "VideoScrobbler", "onresume"),
@@ -5090,7 +5100,11 @@ RUNTIME_ORACLE_UNREACHABLE: tuple[tuple[str, str, str], ...] = (
 # to equal expected minus the reviewed exclusions minus the plugin-supplied
 # slots, and the check below says so, so the number cannot carry slack that
 # would let coverage fall without anyone noticing.
-RUNTIME_ORACLE_MIN_MATCH = 242
+# 242 until movian#237 made the capture construct an `http.Request`; the six
+# members that left the exclusion list are the six this rose by. Raising it
+# is not optional -- the floor check recomputes what a clean run must score
+# and reports the difference as slack.
+RUNTIME_ORACLE_MIN_MATCH = 248
 
 
 def _runtime_oracle_floor_problems(
@@ -5886,9 +5900,24 @@ def _check_runtime_oracle(
                             % shape["name"]),
                         export_name))
 
-    # A tier2 result's nested objects are named by the `returns` facts that
-    # the generator already emits. No constructor or arity assumptions enter
-    # this comparison.
+    # A tier2 result is named by the `returns` facts that the generator
+    # already emits. No constructor or arity assumptions enter this
+    # comparison.
+    def add_constructed_shape(
+            module_name: str, shape_name: str,
+            record: Any, label: str) -> None:
+        """Attribute one described instance to one shape of one module."""
+        if not isinstance(record, dict):
+            return
+        members, complete = stage_members(record, "keys")
+        add_scope((module_name, shape_name, "own"), members, complete, label)
+        levels = _runtime_prototype_levels(record.get("prototype"))
+        for index, level in enumerate(levels[:2]):
+            add_scope(
+                (module_name, shape_name,
+                 "prototype" if index == 0 else "prototype2"),
+                level, True, label)
+
     for module_name, module in modules.items():
         stage = tier2_all.get(module_name)
         if not isinstance(stage, dict) or \
@@ -5896,33 +5925,36 @@ def _check_runtime_oracle(
             continue
         result = stage.get("result")
         nested = result.get("nested", {}) if isinstance(result, dict) else {}
+        # tier2 calls exactly one factory per module and records which. A
+        # `returns` fact belongs to the export that was CALLED: attributing
+        # the result to every export that declares a shape return would let
+        # one call certify shapes nothing constructed, which is drift in the
+        # direction this comparison exists to prevent.
+        factory = stage.get("factory")
         for export in module.get("exports", []):
             returned = export.get("returns")
-            targets: list[tuple[str, str]] = []
             if isinstance(returned, dict):
+                # The factory returned a container of shapes -- `movian/html`
+                # hands back `{document, root}`. Each named field is one
+                # instance.
                 for field in returned.get("fields", []):
                     if isinstance(field, dict) and \
                             field.get("name") in nested and \
                             isinstance(field.get("type"), str):
-                        targets.append((field["name"], field["type"]))
-            elif isinstance(returned, str):
-                targets = [(name, returned) for name in nested]
-            for nested_name, shape_name in targets:
-                child = nested.get(nested_name)
-                if not isinstance(child, dict):
-                    continue
-                members, complete = stage_members(child, "keys")
-                add_scope(
-                    (module_name, shape_name, "own"),
-                    members, complete,
-                    "runtime-api.json tier2 %s" % nested_name)
-                levels = _runtime_prototype_levels(child.get("prototype"))
-                for index, level in enumerate(levels[:2]):
-                    add_scope(
-                        (module_name, shape_name,
-                         "prototype" if index == 0 else "prototype2"),
-                        level, True,
-                        "runtime-api.json tier2 %s" % nested_name)
+                        add_constructed_shape(
+                            module_name, field["type"],
+                            nested.get(field["name"]),
+                            "runtime-api.json tier2 %s" % field["name"])
+            elif isinstance(returned, str) and export.get("name") == factory:
+                # The factory returned the shape ITSELF -- `http.request`
+                # hands back a `Request`. The instance is the result, not a
+                # child of it, so its own keys are the constructor-set
+                # members and its prototype level carries the methods
+                # (movian#237). Reading `nested` here instead would attribute
+                # the members of `headers` to `Request`.
+                add_constructed_shape(
+                    module_name, returned, result,
+                    "runtime-api.json tier2 %s" % factory)
 
     # A shared shape is installed as a module prototype by the runtime call.
     # Its constructor-created fields remain unreachable because tier2 records
