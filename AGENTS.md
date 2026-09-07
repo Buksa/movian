@@ -193,10 +193,11 @@ report becomes internally inconsistent.
 `generated/movian-api.d.ts` and `generated/movian-metadata.json` are outputs.
 Change the generator, or the curated input beside it (`curated_*.json`) --
 NOT the fixtures under `tests/`, which test the output and are no part of
-producing it. The edit does not even survive to the next commit: `gen.py
---check` renders fresh content and diffs it against what is committed, so a
-hand-edited declaration comes back `DTS DRIFT`, exit 1, on the very next run.
-Measured by editing one `declare module` line and running it.
+producing it. Nothing stops such an edit being committed -- there is no
+pre-commit hook -- but it cannot pass the gate: `gen.py --check` renders fresh
+content and diffs it against what is committed, so a hand-edited declaration
+comes back `DTS DRIFT`, exit 1. Measured by editing one `declare module` line
+and running it.
 
 ## Narrowing The Generated API
 

@@ -47,10 +47,12 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 - **Map**: a single issue labelled `wayfinder:map`, holding the Notes / Decisions-so-far / Fog body. `gh issue create --label wayfinder:map`.
 - **Child ticket**: an issue linked to the map as a GitHub sub-issue (`gh api` on the sub-issues endpoint). Where sub-issues aren't enabled, add the child to a task list in the map body and put `Part of #<map>` at the top of the child body. Labels: `wayfinder:<type>` (`research`/`prototype`/`grilling`/`task`). Once claimed, the ticket is assigned to the driving dev.
 - **Blocking**: GitHub's **native issue dependencies** — the canonical, UI-visible representation. Add an edge with `gh api --method POST repos/<owner>/<repo>/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>`, where `<blocker-db-id>` is the blocker's numeric **database id** (`gh api repos/<owner>/<repo>/issues/<n> --jq .id`, _not_ the `#number` or `node_id`). GitHub reports `issue_dependencies_summary.blocked_by` (open blockers only — the live gate). A ticket is unblocked when every blocker is closed. The upstream template offers a `Blocked by: #<n>` body line for trackers without native dependencies; it is deliberately **not** carried here, because this repository has them (verified below) and a frontier query that read the summary would silently ignore such a line if anyone wrote one.
-- **Frontier query**: `gh issue list --json` exposes **no** blocker
-  field — not `issue_dependencies_summary`, and not `blockedBy` — so the
-  predicate has to come from the API, which returns the summary on every
-  issue in a list read:
+- **Frontier query**: read the predicate from the API, not from
+  `gh issue list`. `--json` there has never exposed
+  `issue_dependencies_summary`, and its `blockedBy`/`blocking` fields are
+  recent — absent on gh 2.92.0, present on 2.96.0 — so a documented command
+  that depends on them silently changes meaning with the CLI version. The API
+  returns the summary on every issue in a list read and is exhaustive besides:
 
   ```sh
   gh api --paginate --slurp \
