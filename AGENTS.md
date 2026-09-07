@@ -191,10 +191,22 @@ report becomes internally inconsistent.
 
 **Never hand-edit a generated artifact as the implementation of a fix.**
 `generated/movian-api.d.ts` and `generated/movian-metadata.json` are outputs.
-Change the generator, or the curated input beside it (`curated_*.json`) --
-NOT the fixtures under `tests/`, which test the output and are no part of
-producing it. Nothing stops such an edit being committed -- there is no
-pre-commit hook -- but it cannot pass the gate: `gen.py --check` renders fresh
+Fix what they were derived FROM, and prefer the earlier of these:
+
+1. **The C or JavaScript source.** Most records come from it -- `glw.functions`
+   from `funcvec[]`, `glw.attributes` from `attribtab[]`, `glw.widgets` from
+   the `glw_class_t` initializers, `js.modules` from the `ES_MODULE`
+   registrations and the CommonJS scan. `gen.py`'s header lists the origin of
+   every kind; read it before assuming a fact is curated.
+2. **A curated sidecar**, only for the kinds curated by design -- today
+   `curated_operators.json`, `curated_scopes.json` and the plugin manifest.
+   Parking a fact there that the source already states is how a derived
+   artifact quietly becomes a hand-maintained one.
+3. **The generator**, when it reads the source wrongly.
+
+Never the fixtures under `tests/`: they check the output and are no part of
+producing it. The repository ships no hook that would refuse such an edit at
+commit time, but it cannot pass the gate -- `gen.py --check` renders fresh
 content and diffs it against what is committed, so a hand-edited declaration
 comes back `DTS DRIFT`, exit 1. Measured by editing one `declare module` line
 and running it.
