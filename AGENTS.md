@@ -244,12 +244,11 @@ repository is run. They are pointers, not policy — the policy is above.
 `gh` infers the repository from the remote inside any clone of it. See
 `docs/agents/issue-tracker.md`.
 
-**Triage labels** — four of the five canonical triage labels **do not exist
-here**, because `/triage` is for issues you did not file and every issue here
-was opened by the maintainer or by an agent working to a DoD. A skill asking
-for one has no label to apply and should say so. See
-`docs/agents/triage-labels.md` for the full table and what to create if that
-changes.
+**Triage labels** — the five canonical roles, label strings unchanged:
+`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`.
+All five exist here and each was verified applicable. They are a different
+axis from `wip:*` (work state) and `area:*` / `type:*` (subject). See
+`docs/agents/triage-labels.md`.
 
 **Domain docs** — single-context: `CONTEXT.md` and `docs/adr/` at the repo
 root. See `docs/agents/domain.md`.
