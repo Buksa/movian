@@ -631,6 +631,71 @@ function makeSkippedConstruction(reason, unreachable) {
   };
 }
 
+// `http.Response` stays out of reach for a reason that survives inspection,
+// unlike the one `Request` carried. Nothing exported hands a Response back
+// and the constructor is module-local (http.js:3), so the only site that
+// makes one is the io.httpReq callback inside Request.prototype.end
+// (http.js:60-66). Reaching it takes a transfer, not merely a construction,
+// and performing one is out of scope for this capture (movian#237).
+var HTTP_RESPONSE_UNREACHABLE = {
+  'class': 'Response',
+  members: ['statusCode', 'encoding', 'bytes', 'onData', 'onEnd'],
+  reason: 'Response is constructed only by the end() transfer callback'
+};
+
+// The `http` module's tier2 construction.
+//
+// `exports.request` formats a URL and calls `new Request(url)`; the socket
+// opens in `end()`, which nothing here calls (http.js:52-67, 92-95). So the
+// four constructor-set fields and the two prototype methods are reachable
+// offline, and the excuse that used to keep them off the capture -- "the
+// request factory starts network I/O" -- was false (movian#237).
+//
+// The argument is a literal string so `request` takes the
+// `typeof(opts) === 'string'` branch and never require()s `url`. Module
+// order is observable in this payload -- a module can mutate another's
+// cached exports -- so the construction pulls in nothing the walk above did
+// not already load.
+function describeHttpConstruction(value) {
+  var request;
+
+  try {
+    if(!value || typeof value.request != 'function')
+      throw new Error('request export is not callable');
+
+    request = value.request('http://127.0.0.1/movian-introspector');
+    if(!request || typeof request != 'object')
+      throw new Error('request factory returned no object');
+
+    return {
+      status: 'constructed',
+      factory: 'request',
+      result: describeConstructed(request, 1),
+      unreachable: [HTTP_RESPONSE_UNREACHABLE]
+    };
+  } catch(e) {
+    // Fail to the safe side. Recording an empty shape here would claim the
+    // runtime HAS no such members, and the gate would print drift naming a
+    // cause -- "the shape lost these members" -- that is the opposite of
+    // what happened. `status: 'failed'` keeps them unmeasured and says so.
+    return {
+      status: 'failed',
+      factory: 'request',
+      error: String(e),
+      unreachable: [{
+        'class': 'Request',
+        members: ['url', 'headers', 'onResponse', 'onError'],
+        // `members` names the constructor-set fields; `scope` covers the
+        // rest, because a failed construction loses the prototype methods
+        // too and a list of four would describe the loss as smaller than
+        // it is. Same shape as the Page entry below.
+        scope: 'All Request instance and prototype members',
+        reason: 'Request construction failed'
+      }, HTTP_RESPONSE_UNREACHABLE]
+    };
+  }
+}
+
 function describeConstruction(name, value) {
   var parsed;
 
@@ -715,21 +780,17 @@ function describeConstruction(name, value) {
   }
 
   if(name == 'http') {
-    return makeSkippedConstruction(
-      'HTTP construction is only reached by network I/O',
-      [{
-        'class': 'Request',
-        members: ['url', 'headers', 'onResponse', 'onError'],
-        reason: 'The request factory starts network I/O'
-      }, {
-        'class': 'Response',
-        members: ['statusCode', 'encoding', 'bytes', 'onData', 'onEnd'],
-        reason: 'Responses are created only by network I/O'
-      }]
-    );
+    return describeHttpConstruction(value);
   }
 
   if(name == 'movian/http' || name == 'showtime/http') {
+    // Deliberately NOT the wording the `http` module used to carry. That
+    // one -- "the request factory starts network I/O" -- was false there
+    // and is true here, and leaving the same sentence in both places would
+    // invite the next reader to assume this family is as reachable as
+    // `Request` turned out to be. It is not: `HttpResponse` is
+    // module-local, and both construction sites in `exports.request` run
+    // only after `io.httpReq` has returned (movian/http.js:104-121).
     return makeSkippedConstruction(
       'HTTP construction is only reached by network I/O',
       [{
@@ -737,7 +798,7 @@ function describeConstruction(name, value) {
         members: ['bytes', 'allheaders', 'headers', 'headers_lc',
                   'multiheaders', 'multiheaders_lc', 'statuscode',
                   'contenttype'],
-        reason: 'The request factory starts network I/O'
+        reason: 'HttpResponse is constructed only after the transfer returns'
       }]
     );
   }

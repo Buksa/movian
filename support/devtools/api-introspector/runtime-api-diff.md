@@ -120,10 +120,12 @@ The comparison is no longer maintained by hand here. `gen.py --check` recomputes
 
 ```text
 RUNTIME ORACLE CROSS-CHECK OK
-counts: match 242, drift 0, missing-modules 0, plugin-supplied 2, oracle-unreachable 35
+counts: match 248, drift 0, missing-modules 0, plugin-supplied 2, oracle-unreachable 29
 ```
 
-These counts are recomputed from the committed inputs, not transcribed: an earlier revision of this document quoted `oracle-unreachable 31` and no plugin-supplied bucket, which no run had produced since the bucket was added. The 35 unreachable members are members no tier could construct.
+These counts are recomputed from the committed inputs, not transcribed: an earlier revision of this document quoted `oracle-unreachable 31` and no plugin-supplied bucket, which no run had produced since the bucket was added. The 29 unreachable members are members no tier could construct.
+
+It was 35 until movian#237. Tier 2 now calls `http.request` and describes the `Request` it returns -- the constructor sets four fields and returns, and the socket opens in `end()`, which the capture never calls, so the shape was always constructible offline and the excuse that excluded it ("the request factory starts network I/O") was simply wrong. Six members moved from unreachable to match. The neighbouring families were re-read at the same time and do NOT move: `http.Response` and `movian/http.HttpResponse` are module-local constructors whose only call sites sit after the transfer, so reaching them would take a request, not a construction.
 
 `missing-modules` closes the largest part of #166. Every other comparison walks the *artifact's* module list, so a module the runtime observed and the artifact dropped entirely was invisible — deleting `fs` from the artifact left the check reporting `ok`, and an artifact with **no modules at all** passed against the full oracle. The check now resolves `showtime/x` to its `movian/x` alias block and fails on any oracle module the artifact cannot account for: dropping `fs` reports 1, dropping `movian/prop` reports 2 (the alias goes with it), emptying the list reports 52. What remains open under #166 is the member-level direction: a large unreachable set still passes.
 

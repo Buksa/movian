@@ -1567,7 +1567,7 @@
       "type": "object"
     }
   },
-  "capturedAt": 1788678201897,
+  "capturedAt": 1788745644681,
   "globalSettingsError": null,
   "inputs": {
     "configuration": {
@@ -1575,7 +1575,7 @@
       "ENABLE_PLUGINS": "1",
       "ENABLE_WEBPOPUP": "0"
     },
-    "digest": "af435a1a064b3613e92ef5ec10416f1df1cf982e89dfc32bb2c9fdade9abbf5f",
+    "digest": "a759c440783f515b56460f469b1a9b687f9f72eb72b2226c6c2db72682b02f7c",
     "files": {
       "res/ecmascript/legacy/api-v1.js": "ff3bc1f704125fc3fddc1cb4ddd032577f22b35bc5729e470a915bffd9c8635a",
       "res/ecmascript/modules/fs.js": "57b8f284517c9408b38eae2f6d4f9d56def540dfc5dabe43b35292dbd3f7420f",
@@ -1624,7 +1624,7 @@
       "src/ecmascript/es_subtitles.c": "4564703cccfac8c218563fc92eb4353ce97f5c62e7de9da1d8307b90acc79b8e",
       "src/ecmascript/es_timer.c": "9f16b4c0c770171625f709bad659cf170cbef06b2ab6801171a874b25698d30a",
       "src/ecmascript/es_websocket.c": "bec99ef07cfba36091465266853bac309553baddc3c6ca5618bd2810d0d936d5",
-      "support/devtools/api-introspector/introspector.js": "add738d36656166e8ac197683d892483c969d7efed8422ce94c3b893e6d6f04d",
+      "support/devtools/api-introspector/introspector.js": "6afcf2d8a88cb3ffb1251b50966bbccb72206097369e4658cbe60684a2705385",
       "support/devtools/api-introspector/plugin.json": "10125b05a633d255b651b202965eff05638065c89fc7b4936a3fdea288a0e767"
     },
     "selection": {
@@ -1714,7 +1714,7 @@
   ],
   "movianVersion": "5.0.1017.gf1c26",
   "runtimeInputs": {
-    "plugin/introspector.js": "13bc9fb8d9dc24528d50960ffa95de1d23825ebabe215d01b8c9965583e6dfd1",
+    "plugin/introspector.js": "a9ac1ac66c2dcac7b5cf5c371b9a41b9b12e88185be9a153a55011ddfaad71da",
     "plugin/plugin.json": "fd18086f0d952ee9ef1391ac3f443bb53a7b4f994063c9c6675f560852812e85",
     "res/ecmascript/legacy/api-v1.js": "01c872e89b9a086d6da502d522f9daa29ba51620647b94c8f0a6a60d2747203f",
     "res/ecmascript/modules/fs.js": "58de36e3f4c3fe6c2e6e3169f6182a2dbbda6c2bec45316f5f8797df3f4ef685",
@@ -3720,19 +3720,83 @@
       ]
     },
     "http": {
-      "reason": "HTTP construction is only reached by network I/O",
-      "status": "skipped",
-      "unreachable": [
-        {
-          "class": "Request",
-          "members": [
-            "url",
-            "headers",
-            "onResponse",
-            "onError"
-          ],
-          "reason": "The request factory starts network I/O"
+      "factory": "request",
+      "result": {
+        "keys": {
+          "headers": {
+            "type": "object"
+          },
+          "onError": {
+            "length": 0,
+            "type": "function"
+          },
+          "onResponse": {
+            "length": 0,
+            "type": "function"
+          },
+          "url": {
+            "type": "string"
+          }
         },
+        "nested": {
+          "headers": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "prototype": {
+                "keys": {},
+                "type": "object"
+              },
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "onError": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "prototype": {
+                "keys": {},
+                "type": "object"
+              },
+              "type": "function"
+            },
+            "type": "function"
+          },
+          "onResponse": {
+            "keys": {},
+            "prototype": {
+              "keys": {},
+              "prototype": {
+                "keys": {},
+                "type": "object"
+              },
+              "type": "function"
+            },
+            "type": "function"
+          }
+        },
+        "prototype": {
+          "keys": {
+            "end": {
+              "length": 0,
+              "type": "function"
+            },
+            "on": {
+              "length": 2,
+              "type": "function"
+            }
+          },
+          "prototype": {
+            "keys": {},
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "type": "object"
+      },
+      "status": "constructed",
+      "unreachable": [
         {
           "class": "Response",
           "members": [
@@ -3742,7 +3806,7 @@
             "onData",
             "onEnd"
           ],
-          "reason": "Responses are created only by network I/O"
+          "reason": "Response is constructed only by the end() transfer callback"
         }
       ]
     },
@@ -3943,7 +4007,7 @@
             "statuscode",
             "contenttype"
           ],
-          "reason": "The request factory starts network I/O"
+          "reason": "HttpResponse is constructed only after the transfer returns"
         }
       ]
     },
@@ -4525,7 +4589,7 @@
             "statuscode",
             "contenttype"
           ],
-          "reason": "The request factory starts network I/O"
+          "reason": "HttpResponse is constructed only after the transfer returns"
         }
       ]
     },
