@@ -175,12 +175,14 @@ Both standards share one rule. Before reporting a number, name what it counted
 and what would move it. A count that moves in a direction it cannot move is a
 measurement bug, not a finding.
 
-**A mutation is only evidence once you know it landed.** Before trusting a
-probe that went red, check that it changed the occurrence you meant and that
-the failure is the targeted one -- a typo, a syntax error or a missing module
-turns the whole battery green-by-accident in the same colour as a working
-guard, one level below the probe-input rule above. Restore the mutation before
-moving on.
+**A mutation is only evidence once you know it landed.** A probe that went
+red has not yet said why it went red. Check that it changed the occurrence you
+meant and that the failure is the targeted one: a typo, a syntax error or a
+missing module reddens the run too, and a red run is exactly what the battery
+counts as a mutation killed -- so the verdict comes out favourable for a probe
+that never reached the guard. Same shape as the probe-input rule above, one
+level down: there the input was impossible, here the mutation never arrived.
+Restore the mutation before moving on.
 
 **A baseline is not proof.** Run the check before changing anything and keep
 its output; a run that was already passing says nothing about the new
