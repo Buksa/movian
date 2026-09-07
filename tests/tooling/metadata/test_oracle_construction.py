@@ -73,6 +73,7 @@ def _stage_failed(error: str) -> dict:
         "unreachable": [{
             "class": "Request",
             "members": ["url", "headers", "onResponse", "onError"],
+            "scope": "All Request instance and prototype members",
             "reason": "Request construction failed",
         }, {
             "class": "Response",
@@ -91,20 +92,14 @@ class TierTwoConstruction(unittest.TestCase):
             gen.ARTIFACT_PATH.read_text(encoding="utf-8"))
         # The committed stamp binds the capture to the sources it was taken
         # from, and every probe here edits the payload rather than the tree.
-        # Re-stamping against THIS tree is what `--adopt-oracle` writes
-        # (gen.py:8238), computed by the same functions -- without it the
-        # check stops at freshness and never reaches the comparison these
-        # tests are about, and every case below would pass for the wrong
-        # reason.
-        digests = gen.runtime_oracle_input_digests()
-        self.oracle["inputs"] = {
-            "version": gen.RUNTIME_ORACLE_INPUTS_VERSION,
-            "digest": gen.runtime_oracle_inputs_digest(digests),
-            "files": digests,
-            "configuration": gen.runtime_oracle_configuration(),
-            "selection": gen.makefile_ecmascript_selection(
-                (gen.REPO_ROOT / "Makefile").read_text(encoding="utf-8")),
-        }
+        # Re-stamping against THIS tree is what `--adopt-oracle` writes;
+        # without it the check stops at freshness and never reaches the
+        # comparison these tests are about, and every case below would pass
+        # for the wrong reason. `runtime_oracle_stamp` is the one producer
+        # both callers share, so a new axis added to the stamp cannot leave
+        # this file quietly re-typing the old shape.
+        self.oracle["inputs"] = gen.runtime_oracle_stamp(
+            gen.runtime_oracle_input_digests())
 
     def _report(self, oracle: dict) -> dict:
         _ok, _output, report = gen._check_runtime_oracle(self.artifact, oracle)
@@ -209,6 +204,63 @@ class TierTwoConstruction(unittest.TestCase):
             self.assertIn(
                 key, drift,
                 "an empty constructed shape must print as drift")
+
+    def test_the_factory_gate_covers_a_container_return_too(self) -> None:
+        """The same rule, on the branch that had it first and kept it least.
+
+        `movian/html.parse` returns `{document, root}` -- a CONTAINER of
+        shapes rather than a shape -- and that branch attributed the result
+        no matter which factory the stage recorded. The gate now sits on the
+        loop, so one rule covers both returns; without this case, moving it
+        back onto the `str` branch alone costs nothing and the comment above
+        it becomes a rule the code does not keep.
+        """
+        oracle = copy.deepcopy(self.oracle)
+        stage = oracle["tier2"]["movian/html"]
+        self.assertEqual(stage.get("status"), "constructed")
+        self.assertEqual(stage.get("factory"), "parse")
+        stage["factory"] = "notparse"
+        report = self._report(oracle)
+        unreachable = self._keys(report, "unreachableMembers")
+        node_members = {key for key in unreachable
+                        if key[0] == "movian/html" and key[1] == "Node"}
+        self.assertTrue(
+            node_members,
+            "Node was still attributed to a factory the stage did not call")
+
+    def test_the_shared_receiver_reason_does_not_promise_a_dead_remedy(
+            self) -> None:
+        """movian#239's class, found in this file's neighbourhood.
+
+        `sp.zombie` is the one member this reason has ever printed for, and
+        the reason used to be "shared receiver instance was not safely
+        constructed". True about the capture, and the remedy it points at --
+        construct one -- does not work: the source below proves `zombie` is
+        created by `sp.destroy` and by nothing else, so a receiver built
+        perfectly would still not carry it.
+
+        The source half is asserted here rather than trusted, because it is
+        the fact that makes the wording right; if a later edit gives a
+        constructor a `zombie`, this test should be the thing that notices.
+        """
+        settings = (gen.REPO_ROOT / "res" / "ecmascript" / "modules"
+                    / "movian" / "settings.js").read_text(encoding="utf-8")
+        assignments = [line.strip() for line in settings.splitlines()
+                       if "zombie" in line and "=" in line
+                       and "==" not in line]
+        self.assertEqual(assignments, ["this.zombie = 1;"], assignments)
+        destroy = settings.split("sp.destroy = function()", 1)
+        self.assertEqual(len(destroy), 2, "sp.destroy is no longer written "
+                                          "the way this test locates it")
+        self.assertIn("this.zombie = 1;", destroy[1].split("}", 1)[0])
+
+        report = self._report(self.oracle)
+        reason = next(
+            entry["reason"] for entry in report["unreachableMembers"]
+            if (entry["module"], entry["shape"], entry["member"])
+            == ("movian/settings", "sp", "zombie"))
+        self.assertIn("afterGlobalSettings", reason)
+        self.assertNotIn("was not safely constructed", reason)
 
     def test_only_the_stage_factory_names_the_result(self) -> None:
         """A returned-shape fact belongs to the export that was CALLED.

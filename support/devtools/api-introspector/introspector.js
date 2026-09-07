@@ -685,6 +685,11 @@ function describeHttpConstruction(value) {
       unreachable: [{
         'class': 'Request',
         members: ['url', 'headers', 'onResponse', 'onError'],
+        // `members` names the constructor-set fields; `scope` covers the
+        // rest, because a failed construction loses the prototype methods
+        // too and a list of four would describe the loss as smaller than
+        // it is. Same shape as the Page entry below.
+        scope: 'All Request instance and prototype members',
         reason: 'Request construction failed'
       }, HTTP_RESPONSE_UNREACHABLE]
     };
@@ -779,6 +784,13 @@ function describeConstruction(name, value) {
   }
 
   if(name == 'movian/http' || name == 'showtime/http') {
+    // Deliberately NOT the wording the `http` module used to carry. That
+    // one -- "the request factory starts network I/O" -- was false there
+    // and is true here, and leaving the same sentence in both places would
+    // invite the next reader to assume this family is as reachable as
+    // `Request` turned out to be. It is not: `HttpResponse` is
+    // module-local, and both construction sites in `exports.request` run
+    // only after `io.httpReq` has returned (movian/http.js:104-121).
     return makeSkippedConstruction(
       'HTTP construction is only reached by network I/O',
       [{
@@ -786,7 +798,7 @@ function describeConstruction(name, value) {
         members: ['bytes', 'allheaders', 'headers', 'headers_lc',
                   'multiheaders', 'multiheaders_lc', 'statuscode',
                   'contenttype'],
-        reason: 'The request factory starts network I/O'
+        reason: 'HttpResponse is constructed only after the transfer returns'
       }]
     );
   }

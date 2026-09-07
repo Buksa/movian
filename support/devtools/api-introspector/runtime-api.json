@@ -1567,7 +1567,7 @@
       "type": "object"
     }
   },
-  "capturedAt": 1788744116841,
+  "capturedAt": 1788745644681,
   "globalSettingsError": null,
   "inputs": {
     "configuration": {
@@ -1575,7 +1575,7 @@
       "ENABLE_PLUGINS": "1",
       "ENABLE_WEBPOPUP": "0"
     },
-    "digest": "ecc5f0b81cc750a5bedbfa304bbc3ba5022ec6e1ec049c19d6b3b5a4697b9eca",
+    "digest": "a759c440783f515b56460f469b1a9b687f9f72eb72b2226c6c2db72682b02f7c",
     "files": {
       "res/ecmascript/legacy/api-v1.js": "ff3bc1f704125fc3fddc1cb4ddd032577f22b35bc5729e470a915bffd9c8635a",
       "res/ecmascript/modules/fs.js": "57b8f284517c9408b38eae2f6d4f9d56def540dfc5dabe43b35292dbd3f7420f",
@@ -1624,7 +1624,7 @@
       "src/ecmascript/es_subtitles.c": "4564703cccfac8c218563fc92eb4353ce97f5c62e7de9da1d8307b90acc79b8e",
       "src/ecmascript/es_timer.c": "9f16b4c0c770171625f709bad659cf170cbef06b2ab6801171a874b25698d30a",
       "src/ecmascript/es_websocket.c": "bec99ef07cfba36091465266853bac309553baddc3c6ca5618bd2810d0d936d5",
-      "support/devtools/api-introspector/introspector.js": "3309c3ea7e863be26582f89273eb80d6e7ea9ff2fdde00e92684f7d1266532a6",
+      "support/devtools/api-introspector/introspector.js": "6afcf2d8a88cb3ffb1251b50966bbccb72206097369e4658cbe60684a2705385",
       "support/devtools/api-introspector/plugin.json": "10125b05a633d255b651b202965eff05638065c89fc7b4936a3fdea288a0e767"
     },
     "selection": {
@@ -1714,7 +1714,7 @@
   ],
   "movianVersion": "5.0.1017.gf1c26",
   "runtimeInputs": {
-    "plugin/introspector.js": "3f4812b9d28db76917983ddf86f0a977de2504c306eae984866f972e8145402f",
+    "plugin/introspector.js": "a9ac1ac66c2dcac7b5cf5c371b9a41b9b12e88185be9a153a55011ddfaad71da",
     "plugin/plugin.json": "fd18086f0d952ee9ef1391ac3f443bb53a7b4f994063c9c6675f560852812e85",
     "res/ecmascript/legacy/api-v1.js": "01c872e89b9a086d6da502d522f9daa29ba51620647b94c8f0a6a60d2747203f",
     "res/ecmascript/modules/fs.js": "58de36e3f4c3fe6c2e6e3169f6182a2dbbda6c2bec45316f5f8797df3f4ef685",
@@ -4007,7 +4007,7 @@
             "statuscode",
             "contenttype"
           ],
-          "reason": "The request factory starts network I/O"
+          "reason": "HttpResponse is constructed only after the transfer returns"
         }
       ]
     },
@@ -4589,7 +4589,7 @@
             "statuscode",
             "contenttype"
           ],
-          "reason": "The request factory starts network I/O"
+          "reason": "HttpResponse is constructed only after the transfer returns"
         }
       ]
     },

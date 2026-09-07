@@ -394,6 +394,36 @@ def runtime_oracle_inputs_digest(digests: dict[str, str]) -> str:
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
+def runtime_oracle_stamp(digests: dict[str, str]) -> dict[str, Any]:
+    """The `inputs` block binding a capture to the tree it was taken from.
+
+    One producer, because there are two consumers: `--adopt-oracle` writes
+    it, and the tier2 tests re-stamp a copied payload so the freshness gate
+    lets them reach the member comparison they are about. A test that
+    re-typed these fields would keep passing after a new axis was added to
+    the stamp and silently stop covering it.
+    """
+    return {
+        "version": RUNTIME_ORACLE_INPUTS_VERSION,
+        "digest": runtime_oracle_inputs_digest(digests),
+        "files": digests,
+        # The recipe travels with the capture. Comparing it only at adoption
+        # would bind it to that moment and nothing after: a later commit
+        # could drop a source from SRCS, or move it behind another gate,
+        # without touching a .c or the oracle, and every check would stay
+        # green while the next binary omits the API the artifact advertises.
+        # Configuration is a third axis, independent of the sources and of
+        # the recipe: `#if ENABLE_PLUGINS` decides whether
+        # `native/misc.selectView` exists at all, with every .c byte-
+        # identical. Read from the generated header, because the determinant
+        # is what the compiler saw and neither the flags nor config.h are
+        # committed.
+        "configuration": runtime_oracle_configuration(),
+        "selection": makefile_ecmascript_selection(
+            (REPO_ROOT / "Makefile").read_text(encoding="utf-8")),
+    }
+
+
 def runtime_oracle_stale_inputs(
         stamped: Any, root: Path | None = None) -> list[str]:
     """Human-readable reasons the stamp no longer describes the tree."""
@@ -5066,10 +5096,16 @@ RUNTIME_ORACLE_UNREACHABLE: tuple[tuple[str, str, str], ...] = (
     ("movian/http", "HttpResponse", "statuscode"),
     ("movian/http", "HttpResponse", "toString"),
     # Constructing a Searcher registers a global search hook, which would
-    # outlive the capture and change what later tiers observe.
+    # outlive the capture and change what later tiers observe. Re-read in
+    # movian#237 and it holds: `exports.Searcher` calls
+    # `require('native/hook').register('searcher', ...)` as its first
+    # statement (movian/page.js:487-489).
     ("movian/page", "Searcher", "searcher"),
     # service.create mutates global service state -- the same state the
-    # home screen reads.
+    # home screen reads. Re-read in movian#237 and it holds: `Service` is
+    # module-local and its only construction site is inside
+    # `exports.create`, after `s.create(...)` has already run
+    # (movian/service.js:6, 35-39).
     ("movian/service", "Service", "destroy"),
     ("movian/service", "Service", "enabled"),
     ("movian/service", "Service", "id"),
@@ -5080,7 +5116,11 @@ RUNTIME_ORACLE_UNREACHABLE: tuple[tuple[str, str, str], ...] = (
     # means destroying a live settings group -- global state the capture
     # must leave alone. Corrected while the list was open (movian#237).
     ("movian/settings", "sp", "zombie"),
-    # Opening a DB creates a file in the persistent path.
+    # Opening a DB creates a file in the persistent path. Re-read in
+    # movian#237 and it holds: `exports.DB` calls `sqlite.create(dbname)` in
+    # its body (movian/sqlite.js:5-7). Only the constructor-set `db` is
+    # here; the prototype members are reached through tier1, because the
+    # constructor IS exported.
     ("movian/sqlite", "DB", "db"),
     # The constructor calls native hook.register, a global registration
     # (movian/videoscrobbler.js:6). Re-read in movian#237: four of these six
@@ -5929,9 +5969,15 @@ def _check_runtime_oracle(
         # `returns` fact belongs to the export that was CALLED: attributing
         # the result to every export that declares a shape return would let
         # one call certify shapes nothing constructed, which is drift in the
-        # direction this comparison exists to prevent.
+        # direction this comparison exists to prevent. The gate is on the
+        # loop rather than on one branch, so the rule holds for a container
+        # return and a bare shape return alike -- it was true of neither
+        # before movian#237 and stating it for only one would be a rule the
+        # code does not keep.
         factory = stage.get("factory")
         for export in module.get("exports", []):
+            if export.get("name") != factory:
+                continue
             returned = export.get("returns")
             if isinstance(returned, dict):
                 # The factory returned a container of shapes -- `movian/html`
@@ -5945,7 +5991,7 @@ def _check_runtime_oracle(
                             module_name, field["type"],
                             nested.get(field["name"]),
                             "runtime-api.json tier2 %s" % field["name"])
-            elif isinstance(returned, str) and export.get("name") == factory:
+            elif isinstance(returned, str):
                 # The factory returned the shape ITSELF -- `http.request`
                 # hands back a `Request`. The instance is the result, not a
                 # child of it, so its own keys are the constructor-set
@@ -5994,10 +6040,20 @@ def _check_runtime_oracle(
         own = {name: kind for name, kind in own.items()
                if name not in module_names}
         for shape in shared_shapes:
+            # What was observed, not a diagnosis. The old wording here --
+            # "shared receiver instance was not safely constructed" -- was
+            # true about the capture and implied a remedy that does not
+            # work: `sp.zombie`, the one member this reason has ever
+            # printed for, is created by `sp.destroy` and by nothing else
+            # (movian/settings.js:52-56), so a receiver constructed
+            # perfectly would still not carry it. Naming a cause whose
+            # remedy is not the real one is the movian#239 class
+            # (movian#237).
             add_scope(
                 (module_name, shape["name"], "own"), own, False,
-                "runtime-api.json tier2 status=skipped: "
-                "shared receiver instance was not safely constructed")
+                "runtime-api.json afterGlobalSettings: the receiver was "
+                "observed as the module object, so a member that only a "
+                "constructor or a method creates on an instance is absent")
 
     tier3 = oracle.get("tier3")
     if not isinstance(tier3, dict):
@@ -8267,25 +8323,7 @@ def cmd_adopt_oracle(args: argparse.Namespace) -> int:
     if reconfigured is not None:
         print(reconfigured, file=sys.stderr)
         return 1
-    payload["inputs"] = {
-        "version": RUNTIME_ORACLE_INPUTS_VERSION,
-        "digest": runtime_oracle_inputs_digest(digests),
-        "files": digests,
-        # The recipe travels with the capture. Comparing it only here would
-        # bind it to the moment of adoption and nothing after: a later commit
-        # could drop a source from SRCS, or move it behind another gate,
-        # without touching a .c or the oracle, and every check would stay
-        # green while the next binary omits the API the artifact advertises.
-        # Configuration is a third axis, independent of the sources and of
-        # the recipe: `#if ENABLE_PLUGINS` decides whether
-        # `native/misc.selectView` exists at all, with every .c byte-
-        # identical. Read from the generated header, because the determinant
-        # is what the compiler saw and neither the flags nor config.h are
-        # committed.
-        "configuration": runtime_oracle_configuration(),
-        "selection": makefile_ecmascript_selection(
-            (REPO_ROOT / "Makefile").read_text(encoding="utf-8")),
-    }
+    payload["inputs"] = runtime_oracle_stamp(digests)
     RUNTIME_ORACLE_PATH.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8")
