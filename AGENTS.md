@@ -175,6 +175,24 @@ Both standards share one rule. Before reporting a number, name what it counted
 and what would move it. A count that moves in a direction it cannot move is a
 measurement bug, not a finding.
 
+**A mutation is only evidence once you know it landed.** Before trusting a
+probe that went red, check that it changed the occurrence you meant and that
+the failure is the targeted one -- a typo, a syntax error or a missing module
+turns the whole battery green-by-accident in the same colour as a working
+guard, one level below the probe-input rule above. Restore the mutation before
+moving on.
+
+**A baseline is not proof.** Run the check before changing anything and keep
+its output; a run that was already passing says nothing about the new
+behaviour, and quoting it afterwards as if it did is the commonest way a
+report becomes internally inconsistent.
+
+**Never hand-edit a generated artifact as the implementation of a fix.**
+`generated/movian-api.d.ts` and `generated/movian-metadata.json` are outputs.
+Change the generator or the fixture it reads, then regenerate -- an edited
+output passes every check exactly once, and the next regeneration silently
+reverts it.
+
 ## Narrowing The Generated API
 
 `generated/movian-api.d.ts` is a contract. It has one plugin author today and
@@ -215,3 +233,23 @@ ignored `.codex/`; never commit generated handoff files, indexes, credentials,
 machine-specific paths, or test artifacts.
 Use the `Knowledge Registry` block from `support/codex/context.sh check` before
 inspecting vault files.
+
+## Agent Skills
+
+The engineering skills (`/implement`, `/code-review`, `/triage`, `/wayfinder`
+and the rest) read three files under `docs/agents/` to learn how this
+repository is run. They are pointers, not policy — the policy is above.
+
+**Issue tracker** — GitHub Issues on `Buksa/movian`, driven by the `gh` CLI.
+`gh` infers the repository from the remote inside any clone of it. See
+`docs/agents/issue-tracker.md`.
+
+**Triage labels** — four of the five canonical triage labels **do not exist
+here**, because `/triage` is for issues you did not file and every issue here
+was opened by the maintainer or by an agent working to a DoD. A skill asking
+for one has no label to apply and should say so. See
+`docs/agents/triage-labels.md` for the full table and what to create if that
+changes.
+
+**Domain docs** — single-context: `CONTEXT.md` and `docs/adr/` at the repo
+root. See `docs/agents/domain.md`.
