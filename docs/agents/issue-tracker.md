@@ -6,20 +6,19 @@ Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all op
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
 - **Read an issue**: `gh issue view <number> --json number,title,body,labels,comments --jq '{number, title, body, labels: [.labels[].name], comments: [.comments[].body]}'`. `--jq` without `--json` is refused outright -- `cannot use --jq without specifying --json`. For a human read, `gh issue view <number> --comments` on its own is fine.
-- **List issues**: `gh issue list --state open --limit 200 --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters. **`--limit` is not optional here**: it defaults to 30 and truncates in silence — `gh issue list --state all` on this repository returns exactly 30 of 242 numbers. For a listing that must be exhaustive rather than merely large, use the paginated API form under Frontier query below.
+- **List issues**: `gh issue list --state open --limit 200 --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters. **`--limit` is not optional here**: it defaults to 30 and truncates in silence — `gh issue list --state all` returns 30 where the same command with `--limit 200` returns 118. For a listing that must be exhaustive rather than merely large, use the paginated API form under Frontier query below.
 - **Comment on an issue**: `gh issue comment <number> --body "..."`
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
 
-**Name the repository; do not rely on inference.** Every command above
-works unqualified in the three local checkouts only because each carries
-`remote.origin.gh-resolved` in its git config — a per-checkout pin, not a
-property of the clone. A fresh clone does not inherit it, and every checkout
-here also has `upstream` pointing at `andoma/movian`, so an unpinned `gh` has
-a second candidate to choose. Pass `-R Buksa/movian`, export `GH_REPO`, or run
-`gh repo set-default Buksa/movian` once per checkout. Reads are as worth
-pinning as writes: an unnoticed read of the wrong tracker is a decision made
-on someone else's issues.
+**Name the repository; do not rely on inference.** An unqualified `gh`
+resolves through `remote.origin.gh-resolved`, which is per-checkout git config
+that a fresh clone does not inherit. This project's clones commonly carry an
+`upstream` remote pointing at the fork's parent, so an unpinned `gh` has a
+second candidate to choose and no reason to prefer either. Pass
+`-R Buksa/movian`, export `GH_REPO`, or run `gh repo set-default Buksa/movian`
+once per checkout. Reads deserve pinning as much as writes: an unnoticed read
+of the wrong tracker is a decision made on someone else's issues.
 
 ## Pull requests as a triage surface
 
@@ -62,7 +61,13 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
   ```
 
   Scope to the map's sub-issues, drop anything with `blocked > 0` or an
-  assignee; first in map order wins.
+  assignee; first in map order wins. **Then re-check the winner through
+  `.../issues/<n>/dependencies/blocked_by` before claiming it.** The summary
+  this scan reads lags a write (see below), and a dispatcher cannot know
+  whether some other session added a blocker moments ago — advising the
+  *writer* to use the authoritative endpoint does nothing for a reader who
+  was not the writer. One extra request on one issue, against handing out a
+  blocked ticket.
 
   Two things this shape exists for. `per_page=100` alone stops at one page,
   so a map wider than that loses children before the scoping step and the
