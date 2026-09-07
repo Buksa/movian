@@ -28,7 +28,7 @@ on someone else's issues.
 When set to `yes`, PRs run through the same labels and states as issues, using the `gh pr` equivalents:
 
 - **Read a PR**: `gh pr view <number> --comments` and `gh pr diff <number>` for the diff.
-- **List external PRs for triage**: `authorAssociation` is **not** a `gh pr list --json` field, so that route returns nothing. Go through the API, which does carry it: `gh api 'repos/Buksa/movian/pulls?state=open' --jq '[.[] | {number, title, user: .user.login, assoc: .author_association}]'`, then keep only `CONTRIBUTOR`, `FIRST_TIME_CONTRIBUTOR` or `NONE` and drop `OWNER`/`MEMBER`/`COLLABORATOR`.
+- **List external PRs for triage**: `authorAssociation` is **not** a `gh pr list --json` field, so that route returns nothing. Go through the API, which carries `author_association`, and **exclude the internal values** rather than listing the external ones: `gh api 'repos/Buksa/movian/pulls?state=open' --jq '[.[] | select(.author_association | IN("OWNER","MEMBER","COLLABORATOR") | not) | {number, user: .user.login, assoc: .author_association}]'`. The enum is `OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR, FIRST_TIMER, MANNEQUIN, NONE` -- an allow-list silently drops `FIRST_TIMER` and `MANNEQUIN`, which are exactly the outside submissions this is looking for, and would drop any value GitHub adds later.
 - **Comment / label / close**: `gh pr comment`, `gh pr edit --add-label`/`--remove-label`, `gh pr close`.
 
 GitHub shares one number space across issues and PRs, so a bare `#42` may be either — resolve with `gh pr view 42` and fall back to `gh issue view 42`.
@@ -48,7 +48,30 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 - **Map**: a single issue labelled `wayfinder:map`, holding the Notes / Decisions-so-far / Fog body. `gh issue create --label wayfinder:map`.
 - **Child ticket**: an issue linked to the map as a GitHub sub-issue (`gh api` on the sub-issues endpoint). Where sub-issues aren't enabled, add the child to a task list in the map body and put `Part of #<map>` at the top of the child body. Labels: `wayfinder:<type>` (`research`/`prototype`/`grilling`/`task`). Once claimed, the ticket is assigned to the driving dev.
 - **Blocking**: GitHub's **native issue dependencies** — the canonical, UI-visible representation. Add an edge with `gh api --method POST repos/<owner>/<repo>/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>`, where `<blocker-db-id>` is the blocker's numeric **database id** (`gh api repos/<owner>/<repo>/issues/<n> --jq .id`, _not_ the `#number` or `node_id`). GitHub reports `issue_dependencies_summary.blocked_by` (open blockers only — the live gate). Where dependencies aren't available, fall back to a `Blocked by: #<n>, #<n>` line at the top of the child body. A ticket is unblocked when every blocker is closed.
-- **Frontier query**: `gh issue list --json` exposes **no** blocker field — not `issue_dependencies_summary`, and not `blockedBy` — so the predicate has to come from the API, which returns the summary on every issue in a list read: `gh api 'repos/Buksa/movian/issues?state=open&per_page=100' --jq '[.[] | select(has("pull_request")|not) | {n: .number, assignee: .assignee.login, blocked: .issue_dependencies_summary.blocked_by}]'`. Scope to the map's sub-issues, drop anything with `blocked > 0` or an assignee; first in map order wins.
+- **Frontier query**: `gh issue list --json` exposes **no** blocker
+  field — not `issue_dependencies_summary`, and not `blockedBy` — so the
+  predicate has to come from the API, which returns the summary on every
+  issue in a list read:
+
+  ```sh
+  gh api --paginate --slurp \
+      'repos/Buksa/movian/issues?state=open&per_page=100' \
+    | jq '[.[][] | select(has("pull_request")|not)
+           | {n: .number, assignee: .assignee.login,
+              blocked: .issue_dependencies_summary.blocked_by}]'
+  ```
+
+  Scope to the map's sub-issues, drop anything with `blocked > 0` or an
+  assignee; first in map order wins.
+
+  Two things this shape exists for. `per_page=100` alone stops at one page,
+  so a map wider than that loses children before the scoping step and the
+  frontier comes back empty for the wrong reason. And `--slurp` **cannot be
+  combined with `--jq`** — gh refuses with "the `--slurp` option is not
+  supported with `--jq`" — so `--paginate --jq` emits one result per page
+  rather than one array, and the filter has to run in an external `jq` over
+  `.[][]`. The endpoint also returns pull requests, which is what the
+  `has("pull_request")` guard drops.
 
 ### Verified on this repository (2026-09-07)
 
