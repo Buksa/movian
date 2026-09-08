@@ -76,6 +76,7 @@ class Navigator:
     def __init__(self, *, raises_popup: bool, post_fails: bool = False,
                  has_cancel: bool = False, popup_type: str = "message",
                  ignores_action: bool = False,
+                 publishes_loading: bool = False,
                  url: str = "popuptest:blocking"):
         self.url = url
         self.raises_popup = raises_popup
@@ -87,6 +88,9 @@ class Navigator:
         # A sink that enqueues the event and does nothing with it --
         # `filepicker_event` ignores both actions outright.
         self.ignores_action = ignores_action
+        # A route that publishes `loading = 0` outright, as against one
+        # that never creates the prop.
+        self.publishes_loading = publishes_loading
         self.landed = False
         self.popups = 0
         self.posts: list[tuple[str, dict[str, str]]] = []
@@ -124,8 +128,12 @@ class Navigator:
             return self.url
         if path == harness.PAGE_LOADING:
             # Absent until the handler resumes: the route never got to
-            # `page.loading = false` while it was parked.
-            return "0" if self.resumed or not self.raises_popup else None
+            # `page.loading = false` while it was parked. A route that
+            # never publishes one at all -- every static `page:*` -- keeps
+            # it absent forever, which is the settle path, NOT `"0"`.
+            if self.publishes_loading or self.resumed:
+                return "0"
+            return None
         if path == harness.PAGE_TITLE:
             return "popup dismissed" if self.resumed else None
         if path == harness.POPUP_MESSAGE_PROP:
@@ -194,17 +202,25 @@ class PendingPopupIsNotReady(unittest.TestCase):
         """The other half, and the reason the rule is about ABSENT loading
         only. A page that finished and then asked something has published a
         finished state; refusing it would break every such page."""
-        nav = Navigator(raises_popup=True)
-        nav.resumed = True          # loading == "0" while a popup is up
+        nav = Navigator(raises_popup=True, publishes_loading=True)
         nav.popups = 1
         result = drive(nav, dismiss_popups=False)
         self.assertIsInstance(result, dict, result)
 
-    def test_no_popup_no_change(self) -> None:
-        """The control. Without a popup the absent-loading path must still
-        settle into ready, or this fix has broken every static page:* route."""
+    def test_a_static_route_with_no_popup_still_settles(self) -> None:
+        """The control that matters, and it has to be the ABSENT-loading one.
+
+        Every static `page:*` route never creates the `loading` prop at all,
+        so it reaches ready only through the settle window this change put a
+        guard in front of. A control that published `loading == "0"` would
+        exercise the branch above instead and leave this one uncovered --
+        which is what it did until a review said so: a regression here times
+        out every static route and no test would have noticed.
+        """
         nav = Navigator(raises_popup=False)
-        nav.resumed = False
+        self.assertIsNone(nav.prop_value(None, harness.PAGE_LOADING),
+                          "the fake must keep `loading` absent, or this "
+                          "test is pinning the wrong branch")
         result = drive(nav, dismiss_popups=False)
         self.assertIsInstance(result, dict, result)
 
@@ -252,9 +268,17 @@ class TheAnswerIsTheDecliningOne(unittest.TestCase):
         # Not `assertNotIn("answered")`: the standing refusal already ends
         # "parked until one is answered", so that matches whether or not
         # anything was counted. The evidence clause is what must be absent.
-        self.assertNotIn("answered %d popup" % 1, str(result))
-        self.assertGreater(len(nav.posts), 1,
-                           "it stopped trying after one ignored action")
+        # The prefix, not a count: `assertNotIn("answered 1 popup")` would
+        # pass a bug that appended one per tick and reported "answered 7
+        # popup(s)". The neighbouring "parked until one is answered" clause
+        # is why the bare word cannot be used.
+        self.assertNotIn("-- answered", str(result))
+        # Exactly one. An answer stays outstanding until the queue confirms
+        # it, so a sink that ignores the action gets asked once and not once
+        # per tick -- and the refusal says the answer was posted and never
+        # confirmed rather than claiming it worked.
+        self.assertEqual(len(nav.posts), 1)
+        self.assertIn("posted but unconfirmed", str(result))
 
 
 class DismissalInsideTheLoop(unittest.TestCase):
@@ -299,6 +323,9 @@ class DismissalInsideTheLoop(unittest.TestCase):
         self.assertIn("popup", str(result).lower())
         self.assertGreater(len(nav.posts), 1,
                            "one refused POST ended the whole wait")
+        # And a refusal is not an unconfirmed answer: nothing was accepted,
+        # so there is nothing to report as posted.
+        self.assertNotIn("posted but unconfirmed", str(result))
 
     def test_nothing_is_posted_when_no_popup_is_up(self) -> None:
         """The dismissal must be driven by an observed popup, not fired

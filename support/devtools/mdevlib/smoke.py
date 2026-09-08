@@ -64,6 +64,33 @@ STEP_FIELDS = {
 }
 
 
+def _open_expecting_popup(inst: Instance, url: str) -> tuple[Any, str]:
+    """Open `url` with dismissal off, where a pending popup IS the result.
+
+    A synchronous `popup.message()` parks the route, so the wait cannot
+    reach page-ready and raises. Forwarding `dismiss_popups: false` without
+    this left the step no success path at all -- it aborted the smoke before
+    any following assertion could look at `global/popups`, so the advertised
+    ability to assert that a popup appeared did not exist (movian#242
+    review).
+
+    It is still an assertion and it can still fail: if no popup appears the
+    wait succeeds normally, and a step that asked for one did not get it.
+    """
+    try:
+        result = harness.open_and_wait(inst, url, dismiss_popups=False)
+    except MdevError as error:
+        depth = harness.node_count(inst.base_url(), harness.POPUPS_PROP)
+        if not depth:
+            raise StepFailure(
+                "opened %s with dismissal off and it did not become ready, "
+                "but no popup is pending either: %s" % (url, error))
+        return None, "opened %s, %d popup(s) left pending" % (url, depth)
+    raise StepFailure(
+        "opened %s with dismissal off expecting a popup, but the page "
+        "became ready and none is pending" % url)
+
+
 def _popup_detail(result: dict[str, Any]) -> str:
     """What a step answered on its way to the page, or nothing.
 
@@ -380,12 +407,13 @@ def _execute_step(
         return (detail, harness.read_log_delta(inst, offset), health_hash,
                 {"screenshotLatencyMs": screenshot_ms})
     elif verb == "open":
-        result = harness.open_and_wait(
-            inst, step["url"],
-            dismiss_popups=step.get("dismiss_popups", True))
-        detail = "opened %s title=%s nodes=%d%s" % (
-            result["url"], result["title"], result["nodes"],
-            _popup_detail(result))
+        if step.get("dismiss_popups", True) is False:
+            result, detail = _open_expecting_popup(inst, step["url"])
+        else:
+            result = harness.open_and_wait(inst, step["url"])
+            detail = "opened %s title=%s nodes=%d%s" % (
+                result["url"], result["title"], result["nodes"],
+                _popup_detail(result))
     elif verb == "preview":
         base = inst.base_url()
         flush = harness.http_request(base, "/api/input/action/ReloadUI",
@@ -395,12 +423,14 @@ def _execute_step(
                               (flush.get("error") or flush.get("status")))
         time.sleep(0.4)
         route = route_builder(step["view"], step["fixture"])
-        result = harness.open_and_wait(
-            inst, route, dismiss_popups=step.get("dismiss_popups", True))
-        time.sleep(1.5)
-        detail = "previewed %s title=%s nodes=%d%s" % (
-            step["view"], result["title"], result["nodes"],
-            _popup_detail(result))
+        if step.get("dismiss_popups", True) is False:
+            result, detail = _open_expecting_popup(inst, route)
+        else:
+            result = harness.open_and_wait(inst, route)
+            time.sleep(1.5)
+            detail = "previewed %s title=%s nodes=%d%s" % (
+                step["view"], result["title"], result["nodes"],
+                _popup_detail(result))
     elif verb == "action":
         base = inst.base_url()
         path = "/api/input/action/" + urllib.parse.quote(step["name"], safe="")

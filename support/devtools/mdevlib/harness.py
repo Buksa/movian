@@ -642,6 +642,15 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
     ready = nav_seen = False
     settled_since: float | None = None
     dismissed: list[str] = []
+    # Posted and not yet seen to take effect. The whole chain is
+    # asynchronous -- prop_http.c answers 200 as soon as
+    # `prop_send_ext_event` is called, while `popup_display` is blocked on
+    # its courier in another thread and the prop is not destroyed until
+    # `notifications.c:259`. So a depth read right after the POST proves
+    # nothing in either direction, and confirmation has to survive across
+    # ticks: an answer counts when the queue is later SHALLOWER than it was
+    # when the answer went out.
+    pending: list[tuple[str, int]] = []
     popups = 0
 
     def popup_evidence() -> str:
@@ -652,41 +661,56 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
         exactly where the side effect matters most, and suppressing it there
         is the swallowing this change exists to stop.
         """
-        if not dismissed:
-            return ""
-        return " -- answered %d popup(s): %s" % (
-            len(dismissed), "; ".join(dismissed))
+        parts = []
+        if dismissed:
+            parts.append("answered %d popup(s): %s"
+                         % (len(dismissed), "; ".join(dismissed)))
+        if pending:
+            # Posted and never seen to take effect. Reporting it as answered
+            # would be a claim the queue never confirmed; dropping it would
+            # hide that something was sent.
+            parts.append("posted but unconfirmed: %s"
+                         % "; ".join(text for text, _ in pending))
+        return (" -- " + "; ".join(parts)) if parts else ""
 
-    def answer_popup() -> int:
-        """Answer the oldest pending popup; return the queue depth after.
+    def confirm_answers(depth: int) -> None:
+        """Promote answers the queue has since acted on.
 
-        Everything is read BEFORE the POST. A count alone says a popup was
-        answered, not which, and "a plugin popups on every open" is only a
-        finding once you can see what it asked; reading afterwards would
-        race the prop away (movian#242).
-
-        The queue depth is re-read rather than assumed, because HTTP 200
-        means the event was enqueued and nothing more -- a sink that
-        ignores the action leaves the popup up, and counting on the status
-        alone would append a "dismissal" every tick for a popup still
-        sitting there.
-
-        A refused POST ends this attempt and nothing more. No popup is the
-        normal case rather than an error, and the caller's real answer is
-        whatever the wait concludes afterwards.
+        An answer counts when the queue is shallower than it was when that
+        answer went out -- the only observation that distinguishes "the sink
+        acted on it" from "the sink ignored it", given the POST tells you
+        neither (movian#242).
         """
+        still: list[tuple[str, int]] = []
+        for text, depth_at_post in pending:
+            if depth < depth_at_post:
+                dismissed.append(text)
+            else:
+                still.append((text, depth_at_post))
+        pending[:] = still
+
+    def answer_popup(depth: int) -> None:
+        """Answer the oldest pending popup, if it is one we may answer.
+
+        Everything is read BEFORE the POST: a count alone says a popup was
+        answered, not which, and reading afterwards would race the prop
+        away.
+
+        At most one answer is outstanding at a time. That is what stops a
+        sink which ignores the action -- `filepicker_event` ignores both --
+        from collecting one unconfirmed answer per tick, and it is why the
+        type is checked first rather than posting hopefully.
+        """
+        if pending:
+            return
         if prop_value(base, POPUP_TYPE_PROP) != POPUP_ANSWERABLE_TYPE:
-            return node_count(base, POPUPS_PROP)
+            return
         text = prop_value(base, POPUP_MESSAGE_PROP) or "(no message)"
         action = (POPUP_DECLINE
                   if prop_has_value(prop_value(base, POPUP_CANCEL_PROP))
                   else POPUP_ACKNOWLEDGE)
-        if not post_prop(base, POPUP_EVENTSINK_PROP, {"action": action}):
-            return node_count(base, POPUPS_PROP)
-        remaining = node_count(base, POPUPS_PROP)
-        if remaining < popups:
-            dismissed.append("%s [%s]" % (text, action))
-        return remaining
+        if post_prop(base, POPUP_EVENTSINK_PROP, {"action": action}):
+            pending.append(("%s [%s]" % (text, action), depth))
     while time.monotonic() < deadline:
         # /api/open only QUEUES a nav event. Before trusting the prop
         # tree, require nav_open0()'s per-open "Opening <url>" trace in
@@ -718,8 +742,9 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
         # find. One call up front would race the handler and clear nothing
         # (movian#242).
         popups = node_count(base, POPUPS_PROP)
+        confirm_answers(popups)
         if popups and dismiss_popups:
-            popups = answer_popup()
+            answer_popup(popups)
 
         cur_url = prop_value(base, PAGE_URL)
         loading = prop_value(base, PAGE_LOADING)
@@ -791,6 +816,7 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
                     # stale zero would put the false green straight back for
                     # exactly that interleaving.
                     popups = node_count(base, POPUPS_PROP)
+                    confirm_answers(popups)
                     if popups:
                         settled_since = None
                     else:
@@ -813,6 +839,14 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
                  "one is answered" % popups) if popups else "")
                + popup_evidence())
         )
+
+    # One last confirmation before reporting. The page can become ready on
+    # the very tick an answer went out -- that is the NORMAL case, since
+    # answering is what unparks the route -- and without this the answer is
+    # posted, acted on, and then dropped from the report because the loop
+    # broke before it could be confirmed. Swallowing it here would be the
+    # same defect this change exists to fix, one tick further on.
+    confirm_answers(node_count(base, POPUPS_PROP))
 
     ptype = prop_value(base, PAGE_TYPE)
     nodes = node_count(base)
