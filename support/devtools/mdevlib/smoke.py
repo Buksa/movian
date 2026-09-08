@@ -45,14 +45,16 @@ SMOKE_ORDER = (
 # and its own validation, and would buy nothing that definition does not
 # already get.
 #
-# The one thing it could buy is the other direction -- asserting that a
-# popup APPEARED and was left alone. That needs `dismiss_popups: false`
-# reaching `open_and_wait`, and the shape for it is a field on the existing
-# `open` step, not a new verb. Not added until a smoke wants it.
+# The other direction -- asserting that a popup APPEARED and was left
+# alone -- is an optional `dismiss_popups` field on those same two verbs
+# rather than a verb of its own. Two reviews asked for it on the grounds
+# that the default CHANGED under any smoke written before this, which is
+# the argument that carried: deferring it leaves such a smoke no way back
+# to its old behaviour.
 STEP_FIELDS = {
     "health": {"do"},
-    "open": {"do", "url"},
-    "preview": {"do", "view", "fixture"},
+    "open": {"do", "url", "dismiss_popups"},
+    "preview": {"do", "view", "fixture", "dismiss_popups"},
     "action": {"do", "name", "count"},
     "reload": {"do", "js"},
     "assert_prop": {"do", "path", "equals", "one_of", "absent"},
@@ -155,6 +157,11 @@ def _validate_definition(path: Path, data: Any) -> dict[str, Any]:
         elif verb == "reload" and not isinstance(step["js"], bool):
             raise MdevError("smoke %s step %d reload.js must be boolean" % (
                 data["name"], index))
+        if "dismiss_popups" in step and \
+                not isinstance(step["dismiss_popups"], bool):
+            raise MdevError(
+                "smoke %s step %d dismiss_popups must be boolean" % (
+                    data["name"], index))
     return data
 
 
@@ -373,7 +380,9 @@ def _execute_step(
         return (detail, harness.read_log_delta(inst, offset), health_hash,
                 {"screenshotLatencyMs": screenshot_ms})
     elif verb == "open":
-        result = harness.open_and_wait(inst, step["url"])
+        result = harness.open_and_wait(
+            inst, step["url"],
+            dismiss_popups=step.get("dismiss_popups", True))
         detail = "opened %s title=%s nodes=%d%s" % (
             result["url"], result["title"], result["nodes"],
             _popup_detail(result))
@@ -386,7 +395,8 @@ def _execute_step(
                               (flush.get("error") or flush.get("status")))
         time.sleep(0.4)
         route = route_builder(step["view"], step["fixture"])
-        result = harness.open_and_wait(inst, route)
+        result = harness.open_and_wait(
+            inst, route, dismiss_popups=step.get("dismiss_popups", True))
         time.sleep(1.5)
         detail = "previewed %s title=%s nodes=%d%s" % (
             step["view"], result["title"], result["nodes"],

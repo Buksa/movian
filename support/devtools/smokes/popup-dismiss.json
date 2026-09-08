@@ -1,6 +1,6 @@
 {
   "name": "popup-dismiss",
-  "describe": "A route that parks on a popup still reaches page-ready.",
+  "describe": "A parked route reaches page-ready, and a popup offering cancel is declined rather than confirmed.",
   "needs": {
     "plugin": "support/devtools/popup_test_plugin",
     "binary": "build.debug/movian"
@@ -32,6 +32,19 @@
       "do": "assert_prop",
       "path": "global/popups",
       "equals": 0
+    },
+    {
+      "do": "open",
+      "url": "popuptest:cancelable"
+    },
+    {
+      "do": "assert_log",
+      "must_match": "cancelable route resumed, answer=false"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "declined"
     }
   ]
 }

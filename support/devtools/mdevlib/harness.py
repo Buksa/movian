@@ -123,7 +123,30 @@ PAGE_NODES = "global/navigators/current/currentpage/model/nodes"
 # just counted, and why the opt-out exists.
 POPUPS_PROP = "global/popups"
 POPUP_MESSAGE_PROP = "global/popups/*0/message"
+POPUP_TYPE_PROP = "global/popups/*0/type"
+POPUP_CANCEL_PROP = "global/popups/*0/cancel"
 POPUP_EVENTSINK_PROP = "global/popups/*0/eventSink"
+# The answer is the DECLINING one wherever the popup offers it. Every
+# blocking popup the core raises that authorises something destructive
+# takes `MESSAGE_POPUP_CANCEL` and acts only on OK:
+#
+#   fileaccess.c:978   CANCEL|OK              -> unlink_items() deletes files
+#   metadb.c:61        RICH_TEXT|CANCEL|OK    -> clears the metadata cache
+#   fontstash.c:159    CANCEL + extra buttons -> downloads a font
+#
+# so `action=Ok` at an arbitrary pending popup can authorise data loss that
+# has nothing to do with the navigation being waited on -- the queue is
+# global and carries no attribution. Cancel unparks the route just as well
+# (notifications.c:264-266 handles both) and refuses whatever was proposed.
+# Only a popup offering nothing but OK gets OK, and there the answer is not
+# a choice.
+POPUP_DECLINE = "Cancel"
+POPUP_ACKNOWLEDGE = "Ok"
+# ...and only `type = message` at all. A filepicker, an auth prompt or a
+# text dialog wants input, not an action: `filepicker_event`
+# (fa_filepicker.c:219-233) ignores both of these outright, so posting at
+# one would loop forever counting dismissals that never happened.
+POPUP_ANSWERABLE_TYPE = "message"
 
 
 class MdevError(Exception):
@@ -590,7 +613,8 @@ def node_count(base_url: str, path: str = PAGE_NODES) -> int:
 def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
                   dismiss_popups: bool = True) -> dict[str, Any]:
     """GET /api/open for `url` and wait for page-ready; return
-    {"url", "title", "type", "nodes", "popupsDismissed"}. Shared by
+    {"url", "title", "type", "nodes", "popupsDismissed",
+    "popupsAnswered"}. Shared by
     `mdev open` and `mdev preview`.
 
     A popup answered along the way is counted and returned, never swallowed:
@@ -620,23 +644,49 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
     dismissed: list[str] = []
     popups = 0
 
-    def answer_popup() -> bool:
-        """Read the oldest pending popup, then answer it.
+    def popup_evidence() -> str:
+        """What this wait answered, for a message that is not the happy path.
 
-        The message is read FIRST and kept: a count alone says a popup was
+        Appended to every refusal, not only the ones with a popup still up:
+        a wait that answered something and then failed for another reason is
+        exactly where the side effect matters most, and suppressing it there
+        is the swallowing this change exists to stop.
+        """
+        if not dismissed:
+            return ""
+        return " -- answered %d popup(s): %s" % (
+            len(dismissed), "; ".join(dismissed))
+
+    def answer_popup() -> int:
+        """Answer the oldest pending popup; return the queue depth after.
+
+        Everything is read BEFORE the POST. A count alone says a popup was
         answered, not which, and "a plugin popups on every open" is only a
-        finding once you can see what it asked (movian#242). Reading after
-        the POST would race the prop away.
+        finding once you can see what it asked; reading afterwards would
+        race the prop away (movian#242).
+
+        The queue depth is re-read rather than assumed, because HTTP 200
+        means the event was enqueued and nothing more -- a sink that
+        ignores the action leaves the popup up, and counting on the status
+        alone would append a "dismissal" every tick for a popup still
+        sitting there.
 
         A refused POST ends this attempt and nothing more. No popup is the
         normal case rather than an error, and the caller's real answer is
         whatever the wait concludes afterwards.
         """
+        if prop_value(base, POPUP_TYPE_PROP) != POPUP_ANSWERABLE_TYPE:
+            return node_count(base, POPUPS_PROP)
         text = prop_value(base, POPUP_MESSAGE_PROP) or "(no message)"
-        if not post_prop(base, POPUP_EVENTSINK_PROP, {"action": "Ok"}):
-            return False
-        dismissed.append(text)
-        return True
+        action = (POPUP_DECLINE
+                  if prop_has_value(prop_value(base, POPUP_CANCEL_PROP))
+                  else POPUP_ACKNOWLEDGE)
+        if not post_prop(base, POPUP_EVENTSINK_PROP, {"action": action}):
+            return node_count(base, POPUPS_PROP)
+        remaining = node_count(base, POPUPS_PROP)
+        if remaining < popups:
+            dismissed.append("%s [%s]" % (text, action))
+        return remaining
     while time.monotonic() < deadline:
         # /api/open only QUEUES a nav event. Before trusting the prop
         # tree, require nav_open0()'s per-open "Opening <url>" trace in
@@ -668,8 +718,8 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
         # find. One call up front would race the handler and clear nothing
         # (movian#242).
         popups = node_count(base, POPUPS_PROP)
-        if popups and dismiss_popups and answer_popup():
-            popups = node_count(base, POPUPS_PROP)
+        if popups and dismiss_popups:
+            popups = answer_popup()
 
         cur_url = prop_value(base, PAGE_URL)
         loading = prop_value(base, PAGE_LOADING)
@@ -682,8 +732,9 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
         if prop_value(base, PAGE_TYPE) == "openerror" and \
                 (cur_url == url or cur_url != before_url):
             raise MdevError(
-                "page opened as an error: url=%r %s"
-                % (cur_url, prop_value(base, PAGE_ERROR) or "(no detail)")
+                "page opened as an error: url=%r %s%s"
+                % (cur_url, prop_value(base, PAGE_ERROR) or "(no detail)",
+                   popup_evidence())
             )
         # Ready when loading is 0 -- or void/absent: static page:* routes
         # never create the loading prop at all.
@@ -734,8 +785,17 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
                 elif settled_since is None:
                     settled_since = time.monotonic()
                 elif time.monotonic() - settled_since >= ABSENT_LOADING_SETTLE:
-                    ready = True
-                    break
+                    # Resampled, not trusted from the top of the tick. An
+                    # asynchronous route can raise its popup between that
+                    # sample and here, and this is the commit point -- the
+                    # stale zero would put the false green straight back for
+                    # exactly that interleaving.
+                    popups = node_count(base, POPUPS_PROP)
+                    if popups:
+                        settled_since = None
+                    else:
+                        ready = True
+                        break
             else:
                 settled_since = None
         else:
@@ -749,9 +809,9 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
             % (timeout, nav_seen, cur_url,
                prop_value(base, PAGE_LOADING), title,
                issued, "" if issued == 1 else "s",
-               (" -- %d popup(s) still pending, %d answered; the route is "
-                "parked until one is" % (popups, len(dismissed)))
-               if popups else "")
+               ((" -- %d popup(s) still pending; the route is parked until "
+                 "one is answered" % popups) if popups else "")
+               + popup_evidence())
         )
 
     ptype = prop_value(base, PAGE_TYPE)

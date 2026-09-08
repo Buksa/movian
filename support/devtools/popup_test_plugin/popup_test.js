@@ -42,9 +42,21 @@ new page.Route('popuptest:blocking', function(pageobj) {
   finish(pageobj, 'popup dismissed');
 });
 
+// The shape every destructive core popup has: OK and CANCEL both offered,
+// and the caller acting only on OK (fileaccess.c:978 deletes files,
+// metadb.c:61 clears the metadata cache). A harness that answered OK here
+// would authorise whatever such a popup proposed, so the answer must come
+// back false.
+new page.Route('popuptest:cancelable', function(pageobj) {
+  log('cancelable route entered; raising ok+cancel popup');
+  var answer = popup.message('issue #242 probe: decline me', true, true);
+  log('cancelable route resumed, answer=' + answer);
+  finish(pageobj, answer ? 'CONFIRMED (unsafe)' : 'declined');
+});
+
 new page.Route('popuptest:clean', function(pageobj) {
   log('clean route entered; no popup');
   finish(pageobj, 'no popup here');
 });
 
-log('plugin loaded, routes: popuptest:blocking, popuptest:clean');
+log('plugin loaded, routes: popuptest:blocking, popuptest:cancelable, popuptest:clean');

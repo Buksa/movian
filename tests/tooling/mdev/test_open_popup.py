@@ -74,10 +74,19 @@ class Navigator:
     MESSAGE = "issue #242 probe: dismiss me"
 
     def __init__(self, *, raises_popup: bool, post_fails: bool = False,
+                 has_cancel: bool = False, popup_type: str = "message",
+                 ignores_action: bool = False,
                  url: str = "popuptest:blocking"):
         self.url = url
         self.raises_popup = raises_popup
         self.post_fails = post_fails
+        # `message_popup(msg, MESSAGE_POPUP_CANCEL | MESSAGE_POPUP_OK)`
+        # publishes both; the ok-only form leaves `cancel` void.
+        self.has_cancel = has_cancel
+        self.popup_type = popup_type
+        # A sink that enqueues the event and does nothing with it --
+        # `filepicker_event` ignores both actions outright.
+        self.ignores_action = ignores_action
         self.landed = False
         self.popups = 0
         self.posts: list[tuple[str, dict[str, str]]] = []
@@ -95,6 +104,9 @@ class Navigator:
         self.posts.append((path, form))
         if self.post_fails:
             return False
+        if self.ignores_action:
+            # 200 from prop_http.c, and the popup is still there.
+            return True
         # Answering it unparks the handler, which then publishes `loading`
         # -- exactly the sequence observed on the stand.
         self.popups = 0
@@ -118,6 +130,12 @@ class Navigator:
             return "popup dismissed" if self.resumed else None
         if path == harness.POPUP_MESSAGE_PROP:
             return self.MESSAGE if self.popups else None
+        if path == harness.POPUP_TYPE_PROP:
+            return self.popup_type if self.popups else None
+        if path == harness.POPUP_CANCEL_PROP:
+            if self.popups and self.has_cancel:
+                return "1"
+            return "(void)"
         return None
 
     def node_count(self, base, path=harness.PAGE_NODES):
@@ -191,6 +209,54 @@ class PendingPopupIsNotReady(unittest.TestCase):
         self.assertIsInstance(result, dict, result)
 
 
+class TheAnswerIsTheDecliningOne(unittest.TestCase):
+    """The safety rule, and the reason it is not `Ok` (movian#242 review).
+
+    Every blocking popup the core raises that authorises something
+    destructive offers CANCEL and acts only on OK -- `fileaccess.c:978`
+    deletes files, `metadb.c:61` clears the metadata cache. The queue is
+    global and carries no attribution, so a wait that answers `Ok` at
+    whatever is pending can authorise data loss for a navigation that had
+    nothing to do with it. Cancel unparks the route just as well.
+    """
+
+    def test_a_popup_offering_cancel_is_declined(self) -> None:
+        nav = Navigator(raises_popup=True, has_cancel=True)
+        result = drive(nav)
+        self.assertIsInstance(result, dict, result)
+        self.assertEqual(nav.posts[0][1], {"action": "Cancel"})
+
+    def test_an_ok_only_popup_is_acknowledged(self) -> None:
+        """The other half. With nothing else offered, OK is not a choice --
+        and refusing to send it would leave the route parked forever."""
+        nav = Navigator(raises_popup=True, has_cancel=False)
+        result = drive(nav)
+        self.assertIsInstance(result, dict, result)
+        self.assertEqual(nav.posts[0][1], {"action": "Ok"})
+
+    def test_a_popup_that_is_not_a_message_is_left_alone(self) -> None:
+        """A filepicker or an auth prompt wants input, not an action.
+        `filepicker_event` ignores both, so posting would loop forever."""
+        nav = Navigator(raises_popup=True, popup_type="filepicker")
+        result = drive(nav)
+        self.assertIsInstance(result, harness.MdevError, result)
+        self.assertEqual(nav.posts, [])
+
+    def test_a_sink_that_ignores_the_action_is_not_counted(self) -> None:
+        """HTTP 200 means the event was enqueued, not that anything acted
+        on it. Counting on the status alone appended a dismissal every tick
+        for a popup still sitting there."""
+        nav = Navigator(raises_popup=True, ignores_action=True)
+        result = drive(nav)
+        self.assertIsInstance(result, harness.MdevError, result)
+        # Not `assertNotIn("answered")`: the standing refusal already ends
+        # "parked until one is answered", so that matches whether or not
+        # anything was counted. The evidence clause is what must be absent.
+        self.assertNotIn("answered %d popup" % 1, str(result))
+        self.assertGreater(len(nav.posts), 1,
+                           "it stopped trying after one ignored action")
+
+
 class DismissalInsideTheLoop(unittest.TestCase):
     def test_the_popup_is_answered_and_the_page_becomes_ready(self) -> None:
         nav = Navigator(raises_popup=True)
@@ -211,7 +277,8 @@ class DismissalInsideTheLoop(unittest.TestCase):
         # A count says one was answered; only the text says WHICH, and the
         # queue is global -- the core raises blocking popups too, so a run
         # that answered somebody else's must be able to show it.
-        self.assertEqual(result.get("popupsAnswered"), [Navigator.MESSAGE])
+        self.assertEqual(result.get("popupsAnswered"),
+                         ["%s [Ok]" % Navigator.MESSAGE])
 
     def test_dismissal_is_opt_out(self) -> None:
         """DoD 3. A test that wants to assert a popup appeared must be able

@@ -560,8 +560,10 @@ def cmd_preview(args: argparse.Namespace) -> int:
 
     emit(args,
          {**result, "shot": shot_path},
-         "url:   %s\ntitle: %s\ntype:  %s\nnodes: %d%s"
+         "url:   %s\ntitle: %s\ntype:  %s\nnodes: %d%s%s"
          % (result["url"], result["title"], result["type"], result["nodes"],
+            "".join("\npopup answered: %s" % m
+                    for m in result["popupsAnswered"]),
             ("\nshot:  " + shot_path) if shot_path else ""))
     return 0
 
@@ -691,8 +693,9 @@ def build_parser() -> argparse.ArgumentParser:
     opn.add_argument("--no-dismiss-popups", action="store_true",
                      help="do not answer a popup the route raises. A "
                           "synchronous popup parks the handler, so the page "
-                          "never becomes ready -- pass this only to assert "
-                          "that a popup appeared")
+                          "never becomes ready and this EXITS 1 where the "
+                          "default would have exited 0 -- pass it only to "
+                          "assert that a popup appeared")
     opn.set_defaults(func=cmd_open)
 
     shot = sub.add_parser("shot", parents=[common],
