@@ -110,6 +110,13 @@ ABSENT_LOADING_SETTLE = 1.0
 NAV_REISSUE_AFTER = 1.5
 NAV_REISSUE_LIMIT = 4
 PAGE_NODES = "global/navigators/current/currentpage/model/nodes"
+# A popup parks the route that raised it. `native/popup.message` is
+# synchronous -- `es_message` switches on `message_popup()`'s return
+# (es_misc.c:154-181) and `message_popup` blocks in `popup_display()`
+# (notifications.c:223-262) -- so the handler never reaches
+# `page.loading = false` and the prop is never created. Reading that absence
+# as "this route publishes no loading prop" reported a parked page as ready.
+POPUPS_PROP = "global/popups"
 
 
 class MdevError(Exception):
@@ -584,6 +591,7 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
     cur_url = title = None
     ready = nav_seen = False
     settled_since: float | None = None
+    popups = 0
     while time.monotonic() < deadline:
         # /api/open only QUEUES a nav event. Before trusting the prop
         # tree, require nav_open0()'s per-open "Opening <url>" trace in
@@ -610,6 +618,10 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
                     issued_at = time.monotonic()
                 time.sleep(0.2)
             continue
+        # Sampled only after the navigation landed: the popup is created BY
+        # the route, so before that there is nothing to see.
+        popups = node_count(base, POPUPS_PROP)
+
         cur_url = prop_value(base, PAGE_URL)
         loading = prop_value(base, PAGE_LOADING)
         title = prop_value(base, PAGE_TITLE)
@@ -652,11 +664,41 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
                 # a slow handler can still end in openerror after this point.
                 # Require the state to hold, which gives the openerror check
                 # above a chance to fire, rather than trusting one sample.
+                #
+                # ...but not while a popup is up. A handler parked in
+                # popup_display() has not reached `page.loading = false`, so
+                # its `loading` is absent for the same reason a static
+                # route's is, and settling here reported a parked page as
+                # ready with exit 0 -- measured, movian#242.
+                #
+                # A DEFINITE `loading == "0"` above is still trusted. Taken
+                # literally "not ready while a popup is pending" would refuse
+                # a page that had already published a finished state and then
+                # asked something, and no attribution ties a popup to the
+                # route that raised it, so the literal rule would fail pages
+                # nothing implicated. The absent-loading case is the one that
+                # was measured false-green.
                 if settled_since is None:
                     settled_since = time.monotonic()
                 elif time.monotonic() - settled_since >= ABSENT_LOADING_SETTLE:
-                    ready = True
-                    break
+                    # One check, at the commit point, and resampled here
+                    # rather than trusted from the top of the tick: an
+                    # asynchronous route can raise its popup in between, and
+                    # a stale zero would put the false green straight back
+                    # for that interleaving.
+                    #
+                    # An earlier version also reset the timer on every tick
+                    # a popup was up. Same outcome, and the redundancy hid
+                    # mutations: deleting one of the two left the other
+                    # doing the job, so a battery that removed only one came
+                    # back green and read as though the guard did not
+                    # matter.
+                    popups = node_count(base, POPUPS_PROP)
+                    if popups:
+                        settled_since = None
+                    else:
+                        ready = True
+                        break
             else:
                 settled_since = None
         else:
@@ -666,10 +708,12 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
     if not ready:
         raise MdevError(
             "page not ready after %.0fs: nav_event_seen=%r url=%r "
-            "loading=%r title=%r (open issued %d time%s)"
+            "loading=%r title=%r (open issued %d time%s)%s"
             % (timeout, nav_seen, cur_url,
                prop_value(base, PAGE_LOADING), title,
-               issued, "" if issued == 1 else "s")
+               issued, "" if issued == 1 else "s",
+               (" -- %d popup(s) pending; the route is parked until one is "
+                "answered" % popups) if popups else "")
         )
 
     ptype = prop_value(base, PAGE_TYPE)

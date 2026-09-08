@@ -35,10 +35,11 @@ SMOKE_ORDER = (
     "reload-clean",
     "keyboard-mode",
     "js-reload",
+    "popup-parks-route",
 )
 STEP_FIELDS = {
     "health": {"do"},
-    "open": {"do", "url"},
+    "open": {"do", "url", "expect_popup"},
     "preview": {"do", "view", "fixture"},
     "action": {"do", "name", "count"},
     "reload": {"do", "js"},
@@ -47,6 +48,40 @@ STEP_FIELDS = {
     "shot": {"do", "tag"},
     "sleep": {"do", "seconds"},
 }
+
+
+def _open_expecting_popup(inst: Instance, url: str) -> str:
+    """Open `url` where a route parked on a popup IS the expected outcome.
+
+    The only way an automated check can observe the guard: a synchronous
+    `popup.message()` parks the route, so the wait cannot reach page-ready
+    and refuses. Without this the step would abort the smoke and nothing
+    could assert the refusal (movian#242).
+
+    Two things have to hold, and BOTH are the assertion: the wait must
+    refuse, and a popup must be pending when it does.
+
+    A successful return is a failure here even when a popup IS pending --
+    that combination is precisely the false green this smoke exists to
+    catch. An earlier version of this helper accepted it as success, and
+    the smoke then passed with the guard deleted: it could not fail in the
+    direction it claimed to test. Found by removing the guard and running
+    it, which is the only way that shows.
+    """
+    depth_of = lambda: harness.node_count(inst.base_url(), harness.POPUPS_PROP)
+    try:
+        harness.open_and_wait(inst, url)
+    except MdevError as error:
+        depth = depth_of()
+        if not depth:
+            raise StepFailure(
+                "opened %s expecting a popup; it did not become ready and no "
+                "popup is pending either: %s" % (url, error))
+        return "opened %s, refused with %d popup(s) pending" % (url, depth)
+    depth = depth_of()
+    raise StepFailure(
+        "opened %s expecting the wait to refuse, and it reported the page "
+        "ready with %d popup(s) pending" % (url, depth))
 
 
 class StepFailure(Exception):
@@ -128,6 +163,10 @@ def _validate_definition(path: Path, data: Any) -> dict[str, Any]:
         elif verb == "reload" and not isinstance(step["js"], bool):
             raise MdevError("smoke %s step %d reload.js must be boolean" % (
                 data["name"], index))
+        if "expect_popup" in step and not isinstance(step["expect_popup"], bool):
+            raise MdevError(
+                "smoke %s step %d expect_popup must be boolean" % (
+                    data["name"], index))
     return data
 
 
@@ -346,9 +385,12 @@ def _execute_step(
         return (detail, harness.read_log_delta(inst, offset), health_hash,
                 {"screenshotLatencyMs": screenshot_ms})
     elif verb == "open":
-        result = harness.open_and_wait(inst, step["url"])
-        detail = "opened %s title=%s nodes=%d" % (
-            result["url"], result["title"], result["nodes"])
+        if step.get("expect_popup"):
+            detail = _open_expecting_popup(inst, step["url"])
+        else:
+            result = harness.open_and_wait(inst, step["url"])
+            detail = "opened %s title=%s nodes=%d" % (
+                result["url"], result["title"], result["nodes"])
     elif verb == "preview":
         base = inst.base_url()
         flush = harness.http_request(base, "/api/input/action/ReloadUI",
