@@ -114,8 +114,16 @@ PAGE_NODES = "global/navigators/current/currentpage/model/nodes"
 # lookup movian#152 restored. `*0` is the oldest pending one; answering it
 # makes the next become `*0`, so a loop that keeps posting to `*0` drains
 # the queue without ever needing an index.
-POPUPS = "global/popups"
-POPUP_EVENTSINK = "/api/prop/global/popups/*0/eventSink"
+#
+# This is `global/popups`, the WHOLE queue -- there is no attribution on a
+# popup saying which route raised it, so a wait cannot answer only "its
+# own". The core raises blocking popups too (metadb.c:61, fontstash.c:159,
+# fileaccess.c:978), and those get the same default confirmation. That is
+# why the answered popup's own text is captured and reported rather than
+# just counted, and why the opt-out exists.
+POPUPS_PROP = "global/popups"
+POPUP_MESSAGE_PROP = "global/popups/*0/message"
+POPUP_EVENTSINK_PROP = "global/popups/*0/eventSink"
 
 
 class MdevError(Exception):
@@ -547,6 +555,20 @@ def get_prop(base_url: str, path: str, timeout: float = 5.0) -> dict[str, Any] |
     return diag.parse_prop(result["body"].decode("utf-8", "replace"))
 
 
+def post_prop(base_url: str, path: str, form: dict[str, str],
+              timeout: float = 5.0) -> bool:
+    """POST a form at one prop's eventSink; True when it was accepted.
+
+    Shares `get_prop`'s escaping rule -- `:`/`@`/`*` are legal in a path
+    segment and Movian's /api/prop does not decode percent-escapes, so
+    encoding them makes an addressable prop unreachable.
+    """
+    encoded = urllib.parse.quote(path, safe="/*:@")
+    result = http_request(base_url, "/api/prop/" + encoded, timeout,
+                          method="POST", form=form)
+    return bool(result.get("ok"))
+
+
 def prop_value(base_url: str, path: str, timeout: float = 5.0) -> str | None:
     parsed = get_prop(base_url, path, timeout)
     if parsed is None:
@@ -595,19 +617,26 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
     cur_url = title = None
     ready = nav_seen = False
     settled_since: float | None = None
-    dismissed = 0
+    dismissed: list[str] = []
     popups = 0
 
     def answer_popup() -> bool:
-        """POST the default confirmation at the oldest pending popup.
+        """Read the oldest pending popup, then answer it.
+
+        The message is read FIRST and kept: a count alone says a popup was
+        answered, not which, and "a plugin popups on every open" is only a
+        finding once you can see what it asked (movian#242). Reading after
+        the POST would race the prop away.
 
         A refused POST ends this attempt and nothing more. No popup is the
         normal case rather than an error, and the caller's real answer is
         whatever the wait concludes afterwards.
         """
-        result = http_request(base, POPUP_EVENTSINK, timeout=5.0,
-                              method="POST", form={"action": "Ok"})
-        return bool(result.get("ok"))
+        text = prop_value(base, POPUP_MESSAGE_PROP) or "(no message)"
+        if not post_prop(base, POPUP_EVENTSINK_PROP, {"action": "Ok"}):
+            return False
+        dismissed.append(text)
+        return True
     while time.monotonic() < deadline:
         # /api/open only QUEUES a nav event. Before trusting the prop
         # tree, require nav_open0()'s per-open "Opening <url>" trace in
@@ -638,10 +667,9 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
         # popup is created BY the route, so before that there is nothing to
         # find. One call up front would race the handler and clear nothing
         # (movian#242).
-        popups = node_count(base, POPUPS)
+        popups = node_count(base, POPUPS_PROP)
         if popups and dismiss_popups and answer_popup():
-            dismissed += 1
-            popups = node_count(base, POPUPS)
+            popups = node_count(base, POPUPS_PROP)
 
         cur_url = prop_value(base, PAGE_URL)
         loading = prop_value(base, PAGE_LOADING)
@@ -693,6 +721,14 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
                 # exit 0 -- measured, movian#242. A DEFINITE `loading == "0"`
                 # above is still trusted: a page that finished and then asked
                 # something IS ready.
+                #
+                # A deliberate narrowing of movian#242's "must not report
+                # ready while a popup is pending": taken literally that
+                # would refuse a page which had already published a
+                # finished state, and there is no attribution tying a
+                # popup to the route that raised it, so the literal rule
+                # would fail pages nothing implicated. The absent-loading
+                # case is the one that was measured false-green.
                 if popups:
                     settled_since = None
                 elif settled_since is None:
@@ -714,13 +750,15 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
                prop_value(base, PAGE_LOADING), title,
                issued, "" if issued == 1 else "s",
                (" -- %d popup(s) still pending, %d answered; the route is "
-                "parked until one is" % (popups, dismissed)) if popups else "")
+                "parked until one is" % (popups, len(dismissed)))
+               if popups else "")
         )
 
     ptype = prop_value(base, PAGE_TYPE)
     nodes = node_count(base)
     return {"url": cur_url, "title": title, "type": ptype, "nodes": nodes,
-            "popupsDismissed": dismissed}
+            "popupsDismissed": len(dismissed),
+            "popupsAnswered": dismissed}
 
 
 # ---------------------------------------------------------------------------

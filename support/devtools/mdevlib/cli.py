@@ -122,9 +122,12 @@ def cmd_open(args: argparse.Namespace) -> int:
              % (result["url"], result["title"], result["type"],
                 result["nodes"]))
     # Printed only when it happened, and never hidden: a route that asks
-    # something on every open is a finding about the route (movian#242).
-    if result["popupsDismissed"]:
-        human += "\npopups dismissed: %d" % result["popupsDismissed"]
+    # something on every open is a finding about the route. The text comes
+    # with it because `global/popups` is the whole queue -- the core raises
+    # blocking popups too, and a count alone cannot show you answered one
+    # of those (movian#242).
+    for message in result["popupsAnswered"]:
+        human += "\npopup answered: %s" % message
     emit(args, result, human)
     return 0
 
@@ -508,7 +511,8 @@ def cmd_preview(args: argparse.Namespace) -> int:
             % (flush.get("error") or flush.get("status")))
     time.sleep(0.4)  # let the universe reload land before the open below
 
-    result = harness.open_and_wait(inst, route, timeout=20.0)
+    result = harness.open_and_wait(inst, route, timeout=20.0,
+                                   dismiss_popups=not args.no_dismiss_popups)
 
     # Settle window: a prop change (page.metadata.glwview) is dispatched
     # to the GLW thread asynchronously, so a GLW view-parse error (or our
@@ -778,6 +782,9 @@ def build_parser() -> argparse.ArgumentParser:
                               "support/devtools/viewpreview/README.md)")
     preview.add_argument("--shot", action="store_true",
                          help="screenshot after a clean render")
+    preview.add_argument("--no-dismiss-popups", action="store_true",
+                         help="do not answer a popup raised while the view "
+                              "loads; see `mdev open --help`")
     preview.set_defaults(func=cmd_preview)
 
     smoke_parser = sub.add_parser(

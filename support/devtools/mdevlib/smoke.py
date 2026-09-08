@@ -35,15 +35,20 @@ SMOKE_ORDER = (
     "reload-clean",
     "keyboard-mode",
     "js-reload",
+    "popup-dismiss",
 )
 # No popup verb, deliberately (movian#242). Both step verbs that reach a
 # page -- `open` and `preview` -- go through `harness.open_and_wait`, which
 # answers a route-raised popup and refuses to call a parked page ready, so
-# every smoke inherits that without a schema change. A verb would need its
-# own entry here, its own required-field row and its own validation, for a
-# case no committed smoke has. If one ever needs to assert that a popup
-# APPEARED, the shape is a field on the existing `open` step carrying
-# `dismiss_popups: false`, not a new verb.
+# `popup-dismiss.json` exercises the whole path using the verbs already
+# here. A verb would need its own entry below, its own required-field row
+# and its own validation, and would buy nothing that definition does not
+# already get.
+#
+# The one thing it could buy is the other direction -- asserting that a
+# popup APPEARED and was left alone. That needs `dismiss_popups: false`
+# reaching `open_and_wait`, and the shape for it is a field on the existing
+# `open` step, not a new verb. Not added until a smoke wants it.
 STEP_FIELDS = {
     "health": {"do"},
     "open": {"do", "url"},
@@ -55,6 +60,20 @@ STEP_FIELDS = {
     "shot": {"do", "tag"},
     "sleep": {"do", "seconds"},
 }
+
+
+def _popup_detail(result: dict[str, Any]) -> str:
+    """What a step answered on its way to the page, or nothing.
+
+    A smoke is where a silently dismissed popup becomes the hidden retry
+    movian#242 is about: the step goes green every run and the plugin
+    asking on every open is never seen. Appended to the step detail, so it
+    reaches the report rather than only the caller's return value.
+    """
+    answered = result.get("popupsAnswered") or []
+    if not answered:
+        return ""
+    return " popups-answered=%d [%s]" % (len(answered), "; ".join(answered))
 
 
 class StepFailure(Exception):
@@ -355,8 +374,9 @@ def _execute_step(
                 {"screenshotLatencyMs": screenshot_ms})
     elif verb == "open":
         result = harness.open_and_wait(inst, step["url"])
-        detail = "opened %s title=%s nodes=%d" % (
-            result["url"], result["title"], result["nodes"])
+        detail = "opened %s title=%s nodes=%d%s" % (
+            result["url"], result["title"], result["nodes"],
+            _popup_detail(result))
     elif verb == "preview":
         base = inst.base_url()
         flush = harness.http_request(base, "/api/input/action/ReloadUI",
@@ -368,8 +388,9 @@ def _execute_step(
         route = route_builder(step["view"], step["fixture"])
         result = harness.open_and_wait(inst, route)
         time.sleep(1.5)
-        detail = "previewed %s title=%s nodes=%d" % (
-            step["view"], result["title"], result["nodes"])
+        detail = "previewed %s title=%s nodes=%d%s" % (
+            step["view"], result["title"], result["nodes"],
+            _popup_detail(result))
     elif verb == "action":
         base = inst.base_url()
         path = "/api/input/action/" + urllib.parse.quote(step["name"], safe="")

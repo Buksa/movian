@@ -1,0 +1,37 @@
+{
+  "name": "popup-dismiss",
+  "describe": "A route that parks on a popup still reaches page-ready.",
+  "needs": {
+    "plugin": "support/devtools/popup_test_plugin",
+    "binary": "build.debug/movian"
+  },
+  "steps": [
+    {
+      "do": "open",
+      "url": "popuptest:clean"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "no popup here"
+    },
+    {
+      "do": "open",
+      "url": "popuptest:blocking"
+    },
+    {
+      "do": "assert_log",
+      "must_match": "popuptest242: blocking route resumed"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "popup dismissed"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/popups",
+      "equals": 0
+    }
+  ]
+}

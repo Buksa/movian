@@ -68,6 +68,11 @@ class Navigator:
     resumes and publishes `loading`.
     """
 
+    # The wording a real run produced on the stand, kept verbatim: the probe
+    # must carry what the producer writes, and this is what
+    # `global/popups/*0/message` held while the route was parked.
+    MESSAGE = "issue #242 probe: dismiss me"
+
     def __init__(self, *, raises_popup: bool, post_fails: bool = False,
                  url: str = "popuptest:blocking"):
         self.url = url
@@ -75,27 +80,26 @@ class Navigator:
         self.post_fails = post_fails
         self.landed = False
         self.popups = 0
-        self.posts: list[tuple[str, dict[str, str] | None]] = []
+        self.posts: list[tuple[str, dict[str, str]]] = []
         self.resumed = False
 
-    # -- the three reads open_and_wait makes -------------------------------
+    # -- the reads and the one write open_and_wait makes -------------------
     def http_request(self, base, path, timeout=5.0, method="GET", form=None):
         if path.startswith("/api/open"):
             self.landed = True
             if self.raises_popup:
                 self.popups = 1
-            return {"ok": True, "body": b""}
-        if method == "POST":
-            self.posts.append((path, form))
-            if self.post_fails:
-                return {"ok": False, "error": "connection refused",
-                        "path": path}
-            # Answering it unparks the handler, which then publishes
-            # `loading` -- exactly the sequence observed on the stand.
-            self.popups = 0
-            self.resumed = True
-            return {"ok": True, "status": 200, "body": b""}
         return {"ok": True, "body": b""}
+
+    def post_prop(self, base, path, form, timeout=5.0):
+        self.posts.append((path, form))
+        if self.post_fails:
+            return False
+        # Answering it unparks the handler, which then publishes `loading`
+        # -- exactly the sequence observed on the stand.
+        self.popups = 0
+        self.resumed = True
+        return True
 
     def read_log_delta(self, inst, offset):
         return ("navigator [INFO ]: Opening %s\n" % self.url
@@ -112,10 +116,12 @@ class Navigator:
             return "0" if self.resumed or not self.raises_popup else None
         if path == harness.PAGE_TITLE:
             return "popup dismissed" if self.resumed else None
+        if path == harness.POPUP_MESSAGE_PROP:
+            return self.MESSAGE if self.popups else None
         return None
 
     def node_count(self, base, path=harness.PAGE_NODES):
-        return self.popups if path == harness.POPUPS else 0
+        return self.popups if path == harness.POPUPS_PROP else 0
 
 
 class Clock:
@@ -135,12 +141,13 @@ class Clock:
 def drive(nav: Navigator, *, timeout: float = 6.0, **kwargs):
     saved = (harness.http_request, harness.prop_value,
              harness.read_log_delta, harness.log_size,
-             harness.node_count, harness.time)
+             harness.node_count, harness.time, harness.post_prop)
     harness.http_request = nav.http_request
     harness.read_log_delta = nav.read_log_delta
     harness.prop_value = nav.prop_value
     harness.log_size = lambda inst: 0
     harness.node_count = nav.node_count
+    harness.post_prop = nav.post_prop
     harness.time = Clock()
     try:
         try:
@@ -151,7 +158,7 @@ def drive(nav: Navigator, *, timeout: float = 6.0, **kwargs):
     finally:
         (harness.http_request, harness.prop_value,
          harness.read_log_delta, harness.log_size,
-         harness.node_count, harness.time) = saved
+         harness.node_count, harness.time, harness.post_prop) = saved
 
 
 class PendingPopupIsNotReady(unittest.TestCase):
@@ -190,9 +197,8 @@ class DismissalInsideTheLoop(unittest.TestCase):
         result = drive(nav)
         self.assertIsInstance(result, dict, result)
         self.assertTrue(nav.resumed, "the handler was never unparked")
-        self.assertEqual(
-            [path for path, _ in nav.posts],
-            ["/api/prop/global/popups/*0/eventSink"])
+        self.assertEqual([path for path, _ in nav.posts],
+                         ["global/popups/*0/eventSink"])
         self.assertEqual(nav.posts[0][1], {"action": "Ok"})
 
     def test_what_was_dismissed_is_reported(self) -> None:
@@ -202,6 +208,10 @@ class DismissalInsideTheLoop(unittest.TestCase):
         result = drive(nav)
         self.assertIsInstance(result, dict, result)
         self.assertEqual(result.get("popupsDismissed"), 1)
+        # A count says one was answered; only the text says WHICH, and the
+        # queue is global -- the core raises blocking popups too, so a run
+        # that answered somebody else's must be able to show it.
+        self.assertEqual(result.get("popupsAnswered"), [Navigator.MESSAGE])
 
     def test_dismissal_is_opt_out(self) -> None:
         """DoD 3. A test that wants to assert a popup appeared must be able
