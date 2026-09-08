@@ -124,28 +124,36 @@ PAGE_NODES = "global/navigators/current/currentpage/model/nodes"
 POPUPS_PROP = "global/popups"
 POPUP_MESSAGE_PROP = "global/popups/*0/message"
 POPUP_TYPE_PROP = "global/popups/*0/type"
-POPUP_CANCEL_PROP = "global/popups/*0/cancel"
 POPUP_EVENTSINK_PROP = "global/popups/*0/eventSink"
-# The answer is the DECLINING one wherever the popup offers it. Every
-# blocking popup the core raises that authorises something destructive
-# takes `MESSAGE_POPUP_CANCEL` and acts only on OK:
+# The answer is always Cancel, and never Ok.
+#
+# Ok is the dangerous one. Every blocking popup the core raises that
+# authorises something destructive acts only on OK:
 #
 #   fileaccess.c:978   CANCEL|OK              -> unlink_items() deletes files
 #   metadb.c:61        RICH_TEXT|CANCEL|OK    -> clears the metadata cache
 #   fontstash.c:159    CANCEL + extra buttons -> downloads a font
 #
-# so `action=Ok` at an arbitrary pending popup can authorise data loss that
-# has nothing to do with the navigation being waited on -- the queue is
-# global and carries no attribution. Cancel unparks the route just as well
-# (notifications.c:264-266 handles both) and refuses whatever was proposed.
-# Only a popup offering nothing but OK gets OK, and there the answer is not
-# a choice.
+# and `global/popups` is the whole queue with no attribution, so a wait
+# cannot know whose popup it is answering.
+#
+# Cancel is accepted by every message popup, including one that never
+# offered the button: `message_popup` maps whatever action arrives without
+# checking its own flags (notifications.c:264-266) and `popup_display`
+# returns on any event. Measured on the stand against
+# `popup.message(msg, true, false)` -- `cancel` reads `(void)`, and
+# `action=Cancel` still resumed the route with `answer=false` and emptied
+# the queue.
+#
+# That is what makes the `*0` index safe to use. It is positional: the
+# oldest popup closing between a read and the POST rebinds it to the next
+# one. Choosing the action from what `*0` said a moment ago could therefore
+# send Ok to a deletion prompt that had since become `*0`. One action that
+# is safe for every popup removes the question instead of racing it.
 POPUP_DECLINE = "Cancel"
-POPUP_ACKNOWLEDGE = "Ok"
-# ...and only `type = message` at all. A filepicker, an auth prompt or a
-# text dialog wants input, not an action: `filepicker_event`
-# (fa_filepicker.c:219-233) ignores both of these outright, so posting at
-# one would loop forever counting dismissals that never happened.
+# ...and only `type = message` is answered at all. A filepicker, an auth
+# prompt or a text dialog wants input, not an action: `filepicker_event`
+# (fa_filepicker.c:219-233) ignores it outright.
 POPUP_ANSWERABLE_TYPE = "message"
 
 
@@ -680,6 +688,11 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
         answer went out -- the only observation that distinguishes "the sink
         acted on it" from "the sink ignored it", given the POST tells you
         neither (movian#242).
+
+        With two popups overlapping, the other one closing first promotes
+        this answer early. That costs a duplicate decline at worst, because
+        the action is safe for any popup; it is the reason the action is not
+        chosen per-popup.
         """
         still: list[tuple[str, int]] = []
         for text, depth_at_post in pending:
@@ -706,11 +719,8 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
         if prop_value(base, POPUP_TYPE_PROP) != POPUP_ANSWERABLE_TYPE:
             return
         text = prop_value(base, POPUP_MESSAGE_PROP) or "(no message)"
-        action = (POPUP_DECLINE
-                  if prop_has_value(prop_value(base, POPUP_CANCEL_PROP))
-                  else POPUP_ACKNOWLEDGE)
-        if post_prop(base, POPUP_EVENTSINK_PROP, {"action": action}):
-            pending.append(("%s [%s]" % (text, action), depth))
+        if post_prop(base, POPUP_EVENTSINK_PROP, {"action": POPUP_DECLINE}):
+            pending.append(("%s [%s]" % (text, POPUP_DECLINE), depth))
     while time.monotonic() < deadline:
         # /api/open only QUEUES a nav event. Before trusting the prop
         # tree, require nav_open0()'s per-open "Opening <url>" trace in

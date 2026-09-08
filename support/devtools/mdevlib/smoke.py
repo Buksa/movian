@@ -86,6 +86,15 @@ def _open_expecting_popup(inst: Instance, url: str) -> tuple[Any, str]:
                 "opened %s with dismissal off and it did not become ready, "
                 "but no popup is pending either: %s" % (url, error))
         return None, "opened %s, %d popup(s) left pending" % (url, depth)
+    # The queue is checked on this path too. A route that publishes
+    # `loading = 0` and THEN asks something reaches ready with its popup
+    # still up -- the harness deliberately allows that -- so failing here
+    # unconditionally would make the contract unable to assert the one
+    # class of popup that does not park the route (movian#242 review).
+    depth = harness.node_count(inst.base_url(), harness.POPUPS_PROP)
+    if depth:
+        return result, "opened %s (ready), %d popup(s) left pending" % (
+            url, depth)
     raise StepFailure(
         "opened %s with dismissal off expecting a popup, but the page "
         "became ready and none is pending" % url)

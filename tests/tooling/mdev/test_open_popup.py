@@ -140,10 +140,6 @@ class Navigator:
             return self.MESSAGE if self.popups else None
         if path == harness.POPUP_TYPE_PROP:
             return self.popup_type if self.popups else None
-        if path == harness.POPUP_CANCEL_PROP:
-            if self.popups and self.has_cancel:
-                return "1"
-            return "(void)"
         return None
 
     def node_count(self, base, path=harness.PAGE_NODES):
@@ -225,15 +221,20 @@ class PendingPopupIsNotReady(unittest.TestCase):
         self.assertIsInstance(result, dict, result)
 
 
-class TheAnswerIsTheDecliningOne(unittest.TestCase):
-    """The safety rule, and the reason it is not `Ok` (movian#242 review).
+class TheAnswerIsAlwaysCancel(unittest.TestCase):
+    """The safety rule, and why it is one action rather than a choice.
 
-    Every blocking popup the core raises that authorises something
-    destructive offers CANCEL and acts only on OK -- `fileaccess.c:978`
-    deletes files, `metadb.c:61` clears the metadata cache. The queue is
-    global and carries no attribution, so a wait that answers `Ok` at
-    whatever is pending can authorise data loss for a navigation that had
-    nothing to do with it. Cancel unparks the route just as well.
+    `Ok` is the dangerous one: every blocking popup the core raises that
+    authorises something destructive acts only on OK -- `fileaccess.c:978`
+    deletes files, `metadb.c:61` clears the metadata cache -- and
+    `global/popups` is the whole queue with no attribution, so a wait cannot
+    know whose popup it is answering.
+
+    Choosing the action from what the popup said a moment ago does not help,
+    because `*0` is POSITIONAL: the oldest popup closing between the read and
+    the POST rebinds it to the next one, and an `Ok` decided for an ok-only
+    popup could land on a deletion prompt. One action that is safe for every
+    popup removes the question instead of racing it.
     """
 
     def test_a_popup_offering_cancel_is_declined(self) -> None:
@@ -242,13 +243,30 @@ class TheAnswerIsTheDecliningOne(unittest.TestCase):
         self.assertIsInstance(result, dict, result)
         self.assertEqual(nav.posts[0][1], {"action": "Cancel"})
 
-    def test_an_ok_only_popup_is_acknowledged(self) -> None:
-        """The other half. With nothing else offered, OK is not a choice --
-        and refusing to send it would leave the route parked forever."""
+    def test_an_ok_only_popup_is_declined_too(self) -> None:
+        """The half that makes one action possible at all.
+
+        `message_popup` maps whatever action arrives without checking its own
+        flags (notifications.c:264-266), so Cancel answers a popup that never
+        offered the button. Measured on the stand against
+        `popup.message(msg, true, false)`: `cancel` read `(void)`, and
+        `action=Cancel` resumed the route with `answer=false` and emptied the
+        queue. Without that, declining would park an ok-only route forever
+        and the safe action would not exist.
+        """
         nav = Navigator(raises_popup=True, has_cancel=False)
         result = drive(nav)
         self.assertIsInstance(result, dict, result)
-        self.assertEqual(nav.posts[0][1], {"action": "Ok"})
+        self.assertEqual(nav.posts[0][1], {"action": "Cancel"})
+
+    def test_ok_is_never_sent(self) -> None:
+        """The negative, over every shape the fake can take."""
+        for kwargs in ({"has_cancel": True}, {"has_cancel": False}):
+            with self.subTest(**kwargs):
+                nav = Navigator(raises_popup=True, **kwargs)
+                drive(nav)
+                self.assertNotIn(
+                    "Ok", [form["action"] for _, form in nav.posts])
 
     def test_a_popup_that_is_not_a_message_is_left_alone(self) -> None:
         """A filepicker or an auth prompt wants input, not an action.
@@ -289,7 +307,7 @@ class DismissalInsideTheLoop(unittest.TestCase):
         self.assertTrue(nav.resumed, "the handler was never unparked")
         self.assertEqual([path for path, _ in nav.posts],
                          ["global/popups/*0/eventSink"])
-        self.assertEqual(nav.posts[0][1], {"action": "Ok"})
+        self.assertEqual(nav.posts[0][1], {"action": "Cancel"})
 
     def test_what_was_dismissed_is_reported(self) -> None:
         """DoD 4. A plugin that popups on every open is a finding about the
@@ -302,7 +320,7 @@ class DismissalInsideTheLoop(unittest.TestCase):
         # queue is global -- the core raises blocking popups too, so a run
         # that answered somebody else's must be able to show it.
         self.assertEqual(result.get("popupsAnswered"),
-                         ["%s [Ok]" % Navigator.MESSAGE])
+                         ["%s [Cancel]" % Navigator.MESSAGE])
 
     def test_dismissal_is_opt_out(self) -> None:
         """DoD 3. A test that wants to assert a popup appeared must be able

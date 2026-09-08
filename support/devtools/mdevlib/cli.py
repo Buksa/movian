@@ -543,6 +543,12 @@ def cmd_preview(args: argparse.Namespace) -> int:
             print("PREVIEW ERROR")
             for line in errors:
                 print(line)
+            # The side effect happened whether or not the render worked, and
+            # this is the branch where it matters most: a preview that
+            # answered something and then failed to draw would otherwise
+            # report the failure and swallow the answer (movian#242 review).
+            for message in result["popupsAnswered"]:
+                print("popup answered: %s" % message)
         return 1
 
     shot_path = None
