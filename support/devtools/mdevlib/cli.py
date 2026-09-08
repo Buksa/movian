@@ -116,10 +116,16 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
 def cmd_open(args: argparse.Namespace) -> int:
     inst = Instance(args.name)
-    result = harness.open_and_wait(inst, args.url, timeout=args.timeout)
-    emit(args, result,
-         "url:   %s\ntitle: %s\ntype:  %s\nnodes: %d"
-         % (result["url"], result["title"], result["type"], result["nodes"]))
+    result = harness.open_and_wait(inst, args.url, timeout=args.timeout,
+                                   dismiss_popups=not args.no_dismiss_popups)
+    human = ("url:   %s\ntitle: %s\ntype:  %s\nnodes: %d"
+             % (result["url"], result["title"], result["type"],
+                result["nodes"]))
+    # Printed only when it happened, and never hidden: a route that asks
+    # something on every open is a finding about the route (movian#242).
+    if result["popupsDismissed"]:
+        human += "\npopups dismissed: %d" % result["popupsDismissed"]
+    emit(args, result, human)
     return 0
 
 
@@ -678,6 +684,11 @@ def build_parser() -> argparse.ArgumentParser:
     opn.add_argument("url")
     opn.add_argument("--timeout", type=float, default=20.0,
                      help="page-ready timeout in seconds (default: 20)")
+    opn.add_argument("--no-dismiss-popups", action="store_true",
+                     help="do not answer a popup the route raises. A "
+                          "synchronous popup parks the handler, so the page "
+                          "never becomes ready -- pass this only to assert "
+                          "that a popup appeared")
     opn.set_defaults(func=cmd_open)
 
     shot = sub.add_parser("shot", parents=[common],

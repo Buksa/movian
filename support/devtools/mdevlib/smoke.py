@@ -36,6 +36,14 @@ SMOKE_ORDER = (
     "keyboard-mode",
     "js-reload",
 )
+# No popup verb, deliberately (movian#242). Both step verbs that reach a
+# page -- `open` and `preview` -- go through `harness.open_and_wait`, which
+# answers a route-raised popup and refuses to call a parked page ready, so
+# every smoke inherits that without a schema change. A verb would need its
+# own entry here, its own required-field row and its own validation, for a
+# case no committed smoke has. If one ever needs to assert that a popup
+# APPEARED, the shape is a field on the existing `open` step carrying
+# `dismiss_popups: false`, not a new verb.
 STEP_FIELDS = {
     "health": {"do"},
     "open": {"do", "url"},

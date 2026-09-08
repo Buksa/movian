@@ -110,6 +110,12 @@ ABSENT_LOADING_SETTLE = 1.0
 NAV_REISSUE_AFTER = 1.5
 NAV_REISSUE_LIMIT = 4
 PAGE_NODES = "global/navigators/current/currentpage/model/nodes"
+# Popups are unnamed children, reachable only through the `*N` indexed
+# lookup movian#152 restored. `*0` is the oldest pending one; answering it
+# makes the next become `*0`, so a loop that keeps posting to `*0` drains
+# the queue without ever needing an index.
+POPUPS = "global/popups"
+POPUP_EVENTSINK = "/api/prop/global/popups/*0/eventSink"
 
 
 class MdevError(Exception):
@@ -559,10 +565,15 @@ def node_count(base_url: str, path: str = PAGE_NODES) -> int:
     return len(parsed.get("children", []))
 
 
-def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, Any]:
+def open_and_wait(inst: Instance, url: str, timeout: float = 20.0,
+                  dismiss_popups: bool = True) -> dict[str, Any]:
     """GET /api/open for `url` and wait for page-ready; return
-    {"url", "title", "type", "nodes"}. Shared by `mdev open` and
-    `mdev preview`.
+    {"url", "title", "type", "nodes", "popupsDismissed"}. Shared by
+    `mdev open` and `mdev preview`.
+
+    A popup answered along the way is counted and returned, never swallowed:
+    a route that asks something on every open is a finding about the route,
+    and a silent dismissal turns that into a hidden retry (movian#242).
     """
     base = inst.base_url()
     before_url = prop_value(base, PAGE_URL)
@@ -584,6 +595,19 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
     cur_url = title = None
     ready = nav_seen = False
     settled_since: float | None = None
+    dismissed = 0
+    popups = 0
+
+    def answer_popup() -> bool:
+        """POST the default confirmation at the oldest pending popup.
+
+        A refused POST ends this attempt and nothing more. No popup is the
+        normal case rather than an error, and the caller's real answer is
+        whatever the wait concludes afterwards.
+        """
+        result = http_request(base, POPUP_EVENTSINK, timeout=5.0,
+                              method="POST", form={"action": "Ok"})
+        return bool(result.get("ok"))
     while time.monotonic() < deadline:
         # /api/open only QUEUES a nav event. Before trusting the prop
         # tree, require nav_open0()'s per-open "Opening <url>" trace in
@@ -610,6 +634,15 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
                     issued_at = time.monotonic()
                 time.sleep(0.2)
             continue
+        # Sampled every tick, and only after the navigation landed: the
+        # popup is created BY the route, so before that there is nothing to
+        # find. One call up front would race the handler and clear nothing
+        # (movian#242).
+        popups = node_count(base, POPUPS)
+        if popups and dismiss_popups and answer_popup():
+            dismissed += 1
+            popups = node_count(base, POPUPS)
+
         cur_url = prop_value(base, PAGE_URL)
         loading = prop_value(base, PAGE_LOADING)
         title = prop_value(base, PAGE_TITLE)
@@ -652,7 +685,17 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
                 # a slow handler can still end in openerror after this point.
                 # Require the state to hold, which gives the openerror check
                 # above a chance to fire, rather than trusting one sample.
-                if settled_since is None:
+                #
+                # ...but not while a popup is up. A handler parked in
+                # popup_display() has not reached `page.loading = false`, so
+                # its `loading` is absent for the same reason a static route's
+                # is, and settling here reported a parked page as ready with
+                # exit 0 -- measured, movian#242. A DEFINITE `loading == "0"`
+                # above is still trusted: a page that finished and then asked
+                # something IS ready.
+                if popups:
+                    settled_since = None
+                elif settled_since is None:
                     settled_since = time.monotonic()
                 elif time.monotonic() - settled_since >= ABSENT_LOADING_SETTLE:
                     ready = True
@@ -666,15 +709,18 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
     if not ready:
         raise MdevError(
             "page not ready after %.0fs: nav_event_seen=%r url=%r "
-            "loading=%r title=%r (open issued %d time%s)"
+            "loading=%r title=%r (open issued %d time%s)%s"
             % (timeout, nav_seen, cur_url,
                prop_value(base, PAGE_LOADING), title,
-               issued, "" if issued == 1 else "s")
+               issued, "" if issued == 1 else "s",
+               (" -- %d popup(s) still pending, %d answered; the route is "
+                "parked until one is" % (popups, dismissed)) if popups else "")
         )
 
     ptype = prop_value(base, PAGE_TYPE)
     nodes = node_count(base)
-    return {"url": cur_url, "title": title, "type": ptype, "nodes": nodes}
+    return {"url": cur_url, "title": title, "type": ptype, "nodes": nodes,
+            "popupsDismissed": dismissed}
 
 
 # ---------------------------------------------------------------------------
