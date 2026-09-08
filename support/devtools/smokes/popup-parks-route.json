@@ -22,13 +22,21 @@
     },
     {
       "do": "assert_log",
-      "must_match": "popuptest242: blocking route entered",
-      "must_not_match": "popuptest242: blocking route resumed"
+      "must_match": "popuptest242: blocking route entered"
     },
     {
       "do": "assert_prop",
       "path": "global/popups",
-      "equals": 1
+      "equals": 0
+    },
+    {
+      "do": "open",
+      "url": "popuptest:clean"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "no popup here"
     }
   ]
 }

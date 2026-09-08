@@ -65,20 +65,26 @@ class Navigator:
     """
 
     def __init__(self, *, raises_popup: bool, publishes_loading: bool = False,
+                 popups_before: int = 0, probe_readable: bool = True,
                  url: str = "popuptest:blocking"):
         self.url = url
         self.raises_popup = raises_popup
         # A route that publishes `loading = 0` outright, as against one that
         # never creates the prop at all.
         self.publishes_loading = publishes_loading
+        # Something unrelated already up before this navigation -- a ConnMan
+        # credential request, a file picker.
+        self.popups = popups_before
+        self.popups_before = popups_before
+        # `get_prop` returning None: the request timed out or was refused.
+        self.probe_readable = probe_readable
         self.landed = False
-        self.popups = 0
 
     def http_request(self, base, path, timeout=5.0, method="GET", form=None):
         if path.startswith("/api/open"):
             self.landed = True
             if self.raises_popup:
-                self.popups = 1
+                self.popups = self.popups_before + 1
         return {"ok": True, "body": b""}
 
     def read_log_delta(self, inst, offset):
@@ -95,7 +101,10 @@ class Navigator:
         return None
 
     def node_count(self, base, path=harness.PAGE_NODES):
-        return self.popups if path == harness.POPUPS_PROP else 0
+        return 0
+
+    def pending_popups(self, base):
+        return self.popups if self.probe_readable else None
 
 
 class Clock:
@@ -115,12 +124,13 @@ class Clock:
 def drive(nav: Navigator, *, timeout: float = 6.0):
     saved = (harness.http_request, harness.prop_value,
              harness.read_log_delta, harness.log_size,
-             harness.node_count, harness.time)
+             harness.node_count, harness.time, harness.pending_popups)
     harness.http_request = nav.http_request
     harness.read_log_delta = nav.read_log_delta
     harness.prop_value = nav.prop_value
     harness.log_size = lambda inst: 0
     harness.node_count = nav.node_count
+    harness.pending_popups = nav.pending_popups
     harness.time = Clock()
     try:
         try:
@@ -131,7 +141,7 @@ def drive(nav: Navigator, *, timeout: float = 6.0):
     finally:
         (harness.http_request, harness.prop_value,
          harness.read_log_delta, harness.log_size,
-         harness.node_count, harness.time) = saved
+         harness.node_count, harness.time, harness.pending_popups) = saved
 
 
 class PendingPopupIsNotReady(unittest.TestCase):
@@ -172,6 +182,51 @@ class PendingPopupIsNotReady(unittest.TestCase):
                           "the fake must keep `loading` absent, or this test "
                           "is pinning the wrong branch")
         self.assertIsInstance(drive(nav), dict)
+
+
+class OnlyThisNavigationsPopups(unittest.TestCase):
+    """A popup that predates the open cannot have parked this route.
+
+    `global/popups` is global. A ConnMan credential request
+    (networking/connman.c:341) or a file picker (fa_filepicker.c:296) can be
+    pending for reasons unrelated to the navigation, and blocking on one
+    would hang every static `page:*` open until the deadline and blame the
+    route for it.
+    """
+
+    def test_a_pre_existing_popup_does_not_block_a_static_route(self) -> None:
+        nav = Navigator(raises_popup=False, popups_before=1)
+        self.assertIsInstance(drive(nav), dict)
+
+    def test_a_popup_raised_on_top_of_one_still_blocks(self) -> None:
+        """The other half: the count has to RISE, not merely be non-zero."""
+        nav = Navigator(raises_popup=True, popups_before=1)
+        result = drive(nav)
+        self.assertIsInstance(result, harness.MdevError, result)
+        self.assertIn("2 popup(s) pending (1 before this open)", str(result))
+
+
+class AnUnreadableProbeFailsClosed(unittest.TestCase):
+    """AGENTS.md: a silent instrument is not evidence until the instrument is
+    known to be working.
+
+    `node_count` collapsed an unreadable prop to 0, so a timed-out or
+    refused read said "no popup" and let a parked page settle -- the false
+    green restored by the instrument failing rather than by the bug
+    returning.
+    """
+
+    def test_an_unreadable_probe_does_not_certify_ready(self) -> None:
+        nav = Navigator(raises_popup=True, probe_readable=False)
+        result = drive(nav)
+        self.assertIsInstance(result, harness.MdevError, result)
+        self.assertIn("probe could not be read", str(result))
+
+    def test_it_fails_closed_even_with_no_popup_at_all(self) -> None:
+        """The sharp case: nothing is pending, but we cannot see that. A
+        wait that trusts an unreadable instrument is guessing."""
+        nav = Navigator(raises_popup=False, probe_readable=False)
+        self.assertIsInstance(drive(nav), harness.MdevError)
 
 
 if __name__ == "__main__":

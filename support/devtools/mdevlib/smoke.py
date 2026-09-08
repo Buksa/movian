@@ -77,6 +77,22 @@ def _open_expecting_popup(inst: Instance, url: str) -> str:
             raise StepFailure(
                 "opened %s expecting a popup; it did not become ready and no "
                 "popup is pending either: %s" % (url, error))
+        # Release the route this step deliberately parked. It is holding
+        # the plugin context mutex -- `es_message` blocks inside
+        # `message_popup` without suspending the context, and
+        # `es_context_begin` took `ec_mutex` (ecmascript.c:669) -- so a
+        # second run against the same live instance could not execute any
+        # route of this plugin, and the control step would fail for a
+        # reason that has nothing to do with what it asserts.
+        #
+        # This is teardown of a popup the step itself caused, not a policy
+        # about answering popups: `open_and_wait` still answers none.
+        # Cancel rather than Ok because Cancel declines, and
+        # `message_popup` maps whatever action arrives without consulting
+        # its own flags (notifications.c:264-266).
+        harness.http_request(
+            inst.base_url(), "/api/prop/global/popups/*0/eventSink",
+            timeout=5.0, method="POST", form={"action": "Cancel"})
         return "opened %s, refused with %d popup(s) pending" % (url, depth)
     depth = depth_of()
     raise StepFailure(

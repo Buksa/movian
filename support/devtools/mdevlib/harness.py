@@ -559,6 +559,23 @@ def prop_has_value(value: str | None) -> bool:
     return value not in (None, "", "(void)", "(zombie)")
 
 
+def pending_popups(base_url: str) -> int | None:
+    """How many popups are up, or None when the prop could not be read.
+
+    `node_count` collapses both to 0, which is the wrong shape here: a
+    timed-out or refused read would say "no popup" and let a parked page
+    settle into ready -- the false green restored by the instrument failing
+    rather than by the bug coming back. AGENTS.md: a silent instrument is
+    not evidence until the instrument is known to be working.
+    """
+    parsed = get_prop(base_url, POPUPS_PROP)
+    if parsed is None:
+        return None
+    if parsed.get("value") != "directory":
+        return 0
+    return len(parsed.get("children", []))
+
+
 def node_count(base_url: str, path: str = PAGE_NODES) -> int:
     parsed = get_prop(base_url, path)
     if parsed is None or parsed.get("value") != "directory":
@@ -574,6 +591,12 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
     base = inst.base_url()
     before_url = prop_value(base, PAGE_URL)
     offset = log_size(inst)
+    # What was already up before we navigated. A ConnMan credential request
+    # (networking/connman.c:341) or a file picker (fa_filepicker.c:296) can
+    # be pending for reasons that have nothing to do with this route, and
+    # blocking on one would hang every static page:* open until the deadline
+    # and blame the route for it.
+    popups_before = pending_popups(base) or 0
 
     def issue_open() -> None:
         result = http_request(
@@ -620,7 +643,7 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
             continue
         # Sampled only after the navigation landed: the popup is created BY
         # the route, so before that there is nothing to see.
-        popups = node_count(base, POPUPS_PROP)
+        popups = pending_popups(base)
 
         cur_url = prop_value(base, PAGE_URL)
         loading = prop_value(base, PAGE_LOADING)
@@ -693,8 +716,12 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
                     # doing the job, so a battery that removed only one came
                     # back green and read as though the guard did not
                     # matter.
-                    popups = node_count(base, POPUPS_PROP)
-                    if popups:
+                    #
+                    # None means the probe could not be read, and that fails
+                    # CLOSED -- an unreadable instrument must not be able to
+                    # certify a page ready.
+                    popups = pending_popups(base)
+                    if popups is None or popups > popups_before:
                         settled_since = None
                     else:
                         ready = True
@@ -712,8 +739,12 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
             % (timeout, nav_seen, cur_url,
                prop_value(base, PAGE_LOADING), title,
                issued, "" if issued == 1 else "s",
-               (" -- %d popup(s) pending; the route is parked until one is "
-                "answered" % popups) if popups else "")
+               " -- the popup probe could not be read"
+               if popups is None else
+               ((" -- %d popup(s) pending (%d before this open); the route "
+                 "is parked until one is answered"
+                 % (popups, popups_before))
+                if popups and popups > popups_before else ""))
         )
 
     ptype = prop_value(base, PAGE_TYPE)
