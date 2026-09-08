@@ -215,3 +215,23 @@ ignored `.codex/`; never commit generated handoff files, indexes, credentials,
 machine-specific paths, or test artifacts.
 Use the `Knowledge Registry` block from `support/codex/context.sh check` before
 inspecting vault files.
+
+## Agent Skills
+
+The engineering skills (`/implement`, `/code-review`, `/triage`, `/wayfinder`
+and the rest) read three files under `docs/agents/` to learn how this
+repository is run. They are pointers, not policy — the policy is above.
+
+**Issue tracker** — GitHub Issues on `Buksa/movian`, driven by the `gh` CLI.
+Name the repository rather than relying on inference; `docs/agents/issue-tracker.md`
+says why and gives the three ways to pin it.
+
+**Triage labels** — the five canonical roles, label strings unchanged:
+`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`.
+All five exist here and each was verified applicable. They are a different
+axis from `wip:*` (work state) and `area:*` / `type:*` (subject). See
+`docs/agents/triage-labels.md`.
+
+**Domain docs** — single-context: `CONTEXT.md` and `docs/adr/` at the repo
+root. The glossary is scoped to the plugin API surface; see
+`docs/agents/domain.md`.
