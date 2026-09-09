@@ -64,13 +64,8 @@ class Navigator:
     the navigation lands -- the route is what creates it.
     """
 
-    # What the route's own prompt says, and what an unrelated one says.
-    MINE = "issue #242 probe: dismiss me"
-    OTHERS = "Enter the network password"
-
     def __init__(self, *, raises_popup: bool, publishes_loading: bool = False,
                  popups_before: int = 0, probe_readable: bool = True,
-                 replaces: bool = False,
                  url: str = "popuptest:blocking"):
         self.url = url
         self.raises_popup = raises_popup
@@ -79,10 +74,8 @@ class Navigator:
         self.publishes_loading = publishes_loading
         # Something unrelated already up before this navigation -- a ConnMan
         # credential request, a file picker.
-        self.popups = [self.OTHERS] * popups_before
-        # The case a depth comparison cannot see: the unrelated popup is
-        # answered while the route raises its own, so the TOTAL never moves.
-        self.replaces = replaces
+        self.popups = popups_before
+        self.popups_before = popups_before
         # `get_prop` returning None: the request timed out or was refused.
         self.probe_readable = probe_readable
         self.landed = False
@@ -91,9 +84,7 @@ class Navigator:
         if path.startswith("/api/open"):
             self.landed = True
             if self.raises_popup:
-                if self.replaces and self.popups:
-                    self.popups = self.popups[1:]
-                self.popups = self.popups + [self.MINE]
+                self.popups = self.popups_before + 1
         return {"ok": True, "body": b""}
 
     def read_log_delta(self, inst, offset):
@@ -113,7 +104,7 @@ class Navigator:
         return 0
 
     def pending_popups(self, base):
-        return list(self.popups) if self.probe_readable else None
+        return self.popups if self.probe_readable else None
 
 
 class Clock:
@@ -167,8 +158,8 @@ class PendingPopupIsNotReady(unittest.TestCase):
         """A refusal naming the wrong cause is worse than none. The count is
         what tells a reader the route is parked rather than merely slow."""
         result = drive(Navigator(raises_popup=True))
-        self.assertIn("1 popup(s) raised by this open", str(result))
-        self.assertIn(Navigator.MINE, str(result))
+        self.assertIn("1 popup(s) pending, 0 of them already up",
+                      str(result))
 
     def test_a_page_that_publishes_loading_zero_is_still_ready(self) -> None:
         """The narrowing, stated as a case. A page that finished and then
@@ -208,28 +199,54 @@ class OnlyThisNavigationsPopups(unittest.TestCase):
         self.assertIsInstance(drive(nav), dict)
 
     def test_a_popup_raised_on_top_of_one_still_blocks(self) -> None:
-        """The other half: what matters is a NEW message, not a bigger
-        number, and the refusal names the one this open raised rather than
-        the bystander."""
+        """The other half: the count has to RISE, not merely be non-zero."""
         nav = Navigator(raises_popup=True, popups_before=1)
         result = drive(nav)
         self.assertIsInstance(result, harness.MdevError, result)
-        self.assertIn(Navigator.MINE, str(result))
-        self.assertNotIn(Navigator.OTHERS, str(result))
+        self.assertIn("2 popup(s) pending, 1 of them already up", str(result))
 
-    def test_a_replacement_is_not_mistaken_for_persistence(self) -> None:
-        """The case a depth comparison cannot see at all.
 
-        One unrelated popup is answered while the route raises its own, so
-        the total never moves. Comparing counts takes the ready branch and
-        recreates the false green for a handler still parked.
-        """
-        nav = Navigator(raises_popup=True, popups_before=1, replaces=True)
-        self.assertEqual(len(nav.popups), 1)
-        result = drive(nav)
-        self.assertEqual(len(nav.popups), 1, "the total was meant to hold")
-        self.assertIsInstance(result, harness.MdevError, result)
-        self.assertIn(Navigator.MINE, str(result))
+class TheQueueIsCountedNotFingerprinted(unittest.TestCase):
+    """`pending_popups` must not depend on any per-popup field.
+
+    An earlier version fingerprinted by `message` to tell a new popup from
+    a bystander. Popups do not all have one: an auth prompt publishes
+    `id`/`source`/`reason` (keyring.c:128-133), a file picker `title`
+    (fa_filepicker.c:274-280), a resume dialog `title`/`position`
+    (playinfo.c:88-94). Only `message_popup` publishes `message`
+    (notifications.c:245). Reading it therefore called every other kind
+    unreadable, and with an auth prompt pending EVERY open would have
+    failed closed -- worse than the defect the guard is for.
+
+    So the helper counts children and reads nothing inside them. These
+    pin that, with the three shapes `/api/prop` actually returns.
+    """
+
+    def check(self, parsed, expected):
+        saved = harness.get_prop
+        harness.get_prop = lambda base, path, timeout=5.0: parsed
+        try:
+            self.assertEqual(harness.pending_popups("http://x"), expected)
+        finally:
+            harness.get_prop = saved
+
+    def test_a_directory_is_counted(self) -> None:
+        self.check({"value": "directory",
+                    "children": [{"name": "*0"}, {"name": "*1"}]}, 2)
+
+    def test_an_empty_directory_is_zero(self) -> None:
+        self.check({"value": "directory", "children": []}, 0)
+
+    def test_an_unreadable_prop_is_none_not_zero(self) -> None:
+        self.check(None, None)
+
+    def test_children_without_a_message_are_still_counted(self) -> None:
+        """The regression itself: an auth prompt has no `message`, and it
+        must count exactly like one that does."""
+        self.check({"value": "directory", "children": [
+            {"name": "*0", "children": [
+                {"name": "type"}, {"name": "id"}, {"name": "reason"}]},
+        ]}, 1)
 
 
 class AnUnreadableProbeFailsClosed(unittest.TestCase):
@@ -246,7 +263,7 @@ class AnUnreadableProbeFailsClosed(unittest.TestCase):
         nav = Navigator(raises_popup=True, probe_readable=False)
         result = drive(nav)
         self.assertIsInstance(result, harness.MdevError, result)
-        self.assertIn("probe could not be read", str(result))
+        self.assertIn("queue could not be read", str(result))
 
     def test_an_unreadable_baseline_also_fails_closed(self) -> None:
         """The read BEFORE the navigation matters as much as the ones
@@ -256,7 +273,7 @@ class AnUnreadableProbeFailsClosed(unittest.TestCase):
                         probe_readable=False)
         result = drive(nav)
         self.assertIsInstance(result, harness.MdevError, result)
-        self.assertIn("probe could not be read", str(result))
+        self.assertIn("queue could not be read", str(result))
 
     def test_it_fails_closed_even_with_no_popup_at_all(self) -> None:
         """The sharp case: nothing is pending, but we cannot see that. A

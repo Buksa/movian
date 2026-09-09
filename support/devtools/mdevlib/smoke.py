@@ -59,76 +59,69 @@ def _open_expecting_popup(inst: Instance, url: str) -> str:
     could assert the refusal (movian#242).
 
     Two things have to hold and BOTH are the assertion: the wait must
-    refuse, and the popup pending when it does must be one THIS open
-    raised. A successful return is a failure here even with a popup
-    pending -- that combination is precisely the false green the smoke
-    exists to catch, and an earlier version accepted it, so the smoke
-    passed with the guard deleted.
+    refuse, and a popup must be pending when it does. A successful return
+    is a failure here even with a popup pending -- that combination is
+    precisely the false green the smoke exists to catch, and an earlier
+    version accepted it, so the smoke passed with the guard deleted.
+
+    The queue must be EMPTY before the open. Popups carry no identity --
+    unnamed children, and the fields differ per kind -- so with a bystander
+    already up this step could neither attribute the refusal nor release
+    the right one afterwards. Refusing to run is honest; guessing is not.
     """
     base = inst.base_url()
     before = harness.pending_popups(base)
+    if before is None:
+        raise StepFailure(
+            "opened %s expecting a popup, but the popup queue could not be "
+            "read beforehand, so nothing here can be attributed" % url)
+    if before:
+        raise StepFailure(
+            "opened %s expecting a popup, but %d were already pending; this "
+            "step cannot tell its own from a bystander's and will not guess"
+            % (url, before))
     try:
         harness.open_and_wait(inst, url)
     except MdevError as error:
-        now = harness.pending_popups(base)
-        added = _added_popups(before, now)
-        if added is None:
+        pending = harness.pending_popups(base)
+        if pending is None:
             raise StepFailure(
-                "opened %s expecting a popup and the popup probe could not "
-                "be read, so the refusal cannot be attributed: %s"
+                "opened %s expecting a popup and the queue could not be "
+                "read, so the refusal cannot be attributed: %s"
                 % (url, error))
-        if not added:
+        if not pending:
             raise StepFailure(
                 "opened %s expecting a popup; it did not become ready and "
-                "this open raised none: %s" % (url, error))
-        _release(base, added)
-        return "opened %s, refused with %d popup(s) it raised: %s" % (
-            url, len(added), "; ".join(text for _, text in added))
+                "none is pending: %s" % (url, error))
+        _release(base, pending)
+        return "opened %s, refused with %d popup(s) pending" % (url, pending)
     raise StepFailure(
         "opened %s expecting the wait to refuse, and it reported the page "
         "ready" % url)
 
 
-def _added_popups(before: list[str] | None,
-                  now: list[str] | None) -> list[tuple[int, str]] | None:
-    """(index, message) for each popup `now` holds that `before` did not.
+def _release(base: str, pending: int) -> None:
+    """Release the routes this step parked.
 
-    Indices are into the live queue, which `pending_popups` returns
-    oldest-first; new popups are appended (`prop_insert` uses
-    TAILQ_INSERT_TAIL, prop_core.c:1900).
-    """
-    if before is None or now is None:
-        return None
-    remaining = list(before)
-    added = []
-    for index, message in enumerate(now):
-        if message in remaining:
-            remaining.remove(message)
-        else:
-            added.append((index, message))
-    return added
+    Everything pending is this step's: the queue was asserted empty before
+    the open. Teardown of popups the step itself caused, not a policy about
+    answering popups -- `open_and_wait` answers none, which is why
+    movian#245 is closed.
 
-
-def _release(base: str, added: list[tuple[int, str]]) -> None:
-    """Release the routes this step parked, newest first.
-
-    Teardown of popups the step itself caused, not a policy about answering
-    popups -- `open_and_wait` still answers none, which is why movian#245
-    is closed. Left parked, the route holds the plugin context mutex
+    Left parked, the route holds the plugin context mutex
     (`es_context_begin` takes `ec_mutex`, ecmascript.c:669; `es_message`
     blocks inside `message_popup` without suspending the context), so a
     second run against the same live instance could not execute any route
     of that plugin.
 
-    Addressed by index rather than `*0`, and newest first so answering one
-    does not renumber the others: `*0` is the OLDEST, which is somebody
-    else's popup whenever one was already up. Cancel rather than Ok because
+    Always `*0`, repeatedly: answering the oldest promotes the next, so the
+    queue drains without needing an index. Cancel rather than Ok because
     Cancel declines, and `message_popup` maps whatever action arrives
     without consulting its own flags (notifications.c:264-266).
     """
-    for index, _ in sorted(added, reverse=True):
+    for _ in range(pending):
         harness.http_request(
-            base, "/api/prop/global/popups/*%d/eventSink" % index,
+            base, "/api/prop/global/popups/*0/eventSink",
             timeout=5.0, method="POST", form={"action": "Cancel"})
 
 

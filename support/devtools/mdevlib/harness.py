@@ -559,21 +559,28 @@ def prop_has_value(value: str | None) -> bool:
     return value not in (None, "", "(void)", "(zombie)")
 
 
-def pending_popups(base_url: str) -> list[str] | None:
-    """Each pending popup's message, oldest first; None if unreadable.
+def pending_popups(base_url: str) -> int | None:
+    """How many popups are up, or None when the queue could not be read.
 
-    Messages rather than a count, because a count cannot tell REPLACEMENT
-    from persistence. One unrelated popup dismissed while the route raises
-    its own leaves the total unchanged, and a guard comparing totals takes
-    the ready branch for a handler still parked in `popup_display()`.
+    A COUNT, deliberately, after trying identity and finding there is none
+    to have. The children are unnamed -- that is why `*N` exists -- and the
+    fields differ per kind: a message popup publishes `message`
+    (notifications.c:245), an auth prompt publishes `id`/`source`/`reason`
+    and no message at all (keyring.c:128-133), a file picker publishes
+    `title` (fa_filepicker.c:274-280), a resume dialog `title`/`position`
+    (playinfo.c:88-94). Fingerprinting by message therefore called every
+    non-message popup unreadable, and an auth prompt pending would have
+    failed EVERY open closed -- worse than the defect this guard is for.
 
-    `*N` is positional and new popups are appended -- `prop_insert` uses
-    TAILQ_INSERT_TAIL (prop_core.c:1900) -- so index 0 is the oldest and the
-    order here is stable enough to address one by position.
+    Known and accepted limit of a count: it cannot tell replacement from
+    persistence. A bystander popup answered in the same window as this
+    route raises its own leaves the total unchanged, and the wait then
+    settles on a parked handler. Detecting that needs a stable popup
+    identity, which the prop tree does not expose; giving popups one is a
+    core change and its own decision.
 
-    None is unreadable, and every caller must fail closed on it. Collapsing
-    it to "no popups" is how an instrument failure certifies a parked page
-    ready, which is the defect this whole guard exists for, one level down.
+    None is unreadable and every caller must fail closed on it. Collapsing
+    it to zero is how an instrument failure certifies a parked page ready.
     AGENTS.md: a silent instrument is not evidence until the instrument is
     known to be working.
     """
@@ -581,33 +588,8 @@ def pending_popups(base_url: str) -> list[str] | None:
     if parsed is None:
         return None
     if parsed.get("value") != "directory":
-        return []
-    messages = []
-    for index in range(len(parsed.get("children", []))):
-        text = prop_value(base_url, "global/popups/*%d/message" % index)
-        if text is None:
-            return None
-        messages.append(text)
-    return messages
-
-
-def new_popups(before: list[str] | None,
-               now: list[str] | None) -> list[str] | None:
-    """Messages pending now that the baseline does not account for.
-
-    None if either side is unreadable -- the caller cannot tell whether a
-    popup appeared, and must say so rather than guess.
-    """
-    if before is None or now is None:
-        return None
-    remaining = list(before)
-    added = []
-    for message in now:
-        if message in remaining:
-            remaining.remove(message)
-        else:
-            added.append(message)
-    return added
+        return 0
+    return len(parsed.get("children", []))
 
 
 def node_count(base_url: str, path: str = PAGE_NODES) -> int:
@@ -677,7 +659,7 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
             continue
         # Sampled only after the navigation landed: the popup is created BY
         # the route, so before that there is nothing to see.
-        popups = new_popups(popups_before, pending_popups(base))
+        popups = pending_popups(base)
 
         cur_url = prop_value(base, PAGE_URL)
         loading = prop_value(base, PAGE_LOADING)
@@ -754,8 +736,9 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
                     # None means the probe could not be read, and that fails
                     # CLOSED -- an unreadable instrument must not be able to
                     # certify a page ready.
-                    popups = new_popups(popups_before, pending_popups(base))
-                    if popups is None or popups:
+                    popups = pending_popups(base)
+                    if popups is None or popups_before is None \
+                            or popups > popups_before:
                         settled_since = None
                     else:
                         ready = True
@@ -773,11 +756,12 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
             % (timeout, nav_seen, cur_url,
                prop_value(base, PAGE_LOADING), title,
                issued, "" if issued == 1 else "s",
-               " -- the popup probe could not be read"
-               if popups is None else
-               ((" -- %d popup(s) raised by this open, none answered; the "
-                 "route is parked until one is: %s"
-                 % (len(popups), "; ".join(popups))) if popups else ""))
+               " -- the popup queue could not be read"
+               if popups is None or popups_before is None else
+               ((" -- %d popup(s) pending, %d of them already up before this "
+                 "open; the route is parked until one is answered"
+                 % (popups, popups_before))
+                if popups > popups_before else ""))
         )
 
     ptype = prop_value(base, PAGE_TYPE)
