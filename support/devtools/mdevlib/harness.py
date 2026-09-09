@@ -559,21 +559,55 @@ def prop_has_value(value: str | None) -> bool:
     return value not in (None, "", "(void)", "(zombie)")
 
 
-def pending_popups(base_url: str) -> int | None:
-    """How many popups are up, or None when the prop could not be read.
+def pending_popups(base_url: str) -> list[str] | None:
+    """Each pending popup's message, oldest first; None if unreadable.
 
-    `node_count` collapses both to 0, which is the wrong shape here: a
-    timed-out or refused read would say "no popup" and let a parked page
-    settle into ready -- the false green restored by the instrument failing
-    rather than by the bug coming back. AGENTS.md: a silent instrument is
-    not evidence until the instrument is known to be working.
+    Messages rather than a count, because a count cannot tell REPLACEMENT
+    from persistence. One unrelated popup dismissed while the route raises
+    its own leaves the total unchanged, and a guard comparing totals takes
+    the ready branch for a handler still parked in `popup_display()`.
+
+    `*N` is positional and new popups are appended -- `prop_insert` uses
+    TAILQ_INSERT_TAIL (prop_core.c:1900) -- so index 0 is the oldest and the
+    order here is stable enough to address one by position.
+
+    None is unreadable, and every caller must fail closed on it. Collapsing
+    it to "no popups" is how an instrument failure certifies a parked page
+    ready, which is the defect this whole guard exists for, one level down.
+    AGENTS.md: a silent instrument is not evidence until the instrument is
+    known to be working.
     """
     parsed = get_prop(base_url, POPUPS_PROP)
     if parsed is None:
         return None
     if parsed.get("value") != "directory":
-        return 0
-    return len(parsed.get("children", []))
+        return []
+    messages = []
+    for index in range(len(parsed.get("children", []))):
+        text = prop_value(base_url, "global/popups/*%d/message" % index)
+        if text is None:
+            return None
+        messages.append(text)
+    return messages
+
+
+def new_popups(before: list[str] | None,
+               now: list[str] | None) -> list[str] | None:
+    """Messages pending now that the baseline does not account for.
+
+    None if either side is unreadable -- the caller cannot tell whether a
+    popup appeared, and must say so rather than guess.
+    """
+    if before is None or now is None:
+        return None
+    remaining = list(before)
+    added = []
+    for message in now:
+        if message in remaining:
+            remaining.remove(message)
+        else:
+            added.append(message)
+    return added
 
 
 def node_count(base_url: str, path: str = PAGE_NODES) -> int:
@@ -596,7 +630,7 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
     # be pending for reasons that have nothing to do with this route, and
     # blocking on one would hang every static page:* open until the deadline
     # and blame the route for it.
-    popups_before = pending_popups(base) or 0
+    popups_before = pending_popups(base)
 
     def issue_open() -> None:
         result = http_request(
@@ -643,7 +677,7 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
             continue
         # Sampled only after the navigation landed: the popup is created BY
         # the route, so before that there is nothing to see.
-        popups = pending_popups(base)
+        popups = new_popups(popups_before, pending_popups(base))
 
         cur_url = prop_value(base, PAGE_URL)
         loading = prop_value(base, PAGE_LOADING)
@@ -720,8 +754,8 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
                     # None means the probe could not be read, and that fails
                     # CLOSED -- an unreadable instrument must not be able to
                     # certify a page ready.
-                    popups = pending_popups(base)
-                    if popups is None or popups > popups_before:
+                    popups = new_popups(popups_before, pending_popups(base))
+                    if popups is None or popups:
                         settled_since = None
                     else:
                         ready = True
@@ -741,10 +775,9 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
                issued, "" if issued == 1 else "s",
                " -- the popup probe could not be read"
                if popups is None else
-               ((" -- %d popup(s) pending (%d before this open); the route "
-                 "is parked until one is answered"
-                 % (popups, popups_before))
-                if popups and popups > popups_before else ""))
+               ((" -- %d popup(s) raised by this open, none answered; the "
+                 "route is parked until one is: %s"
+                 % (len(popups), "; ".join(popups))) if popups else ""))
         )
 
     ptype = prop_value(base, PAGE_TYPE)

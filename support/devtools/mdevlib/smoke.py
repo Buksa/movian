@@ -58,46 +58,78 @@ def _open_expecting_popup(inst: Instance, url: str) -> str:
     and refuses. Without this the step would abort the smoke and nothing
     could assert the refusal (movian#242).
 
-    Two things have to hold, and BOTH are the assertion: the wait must
-    refuse, and a popup must be pending when it does.
-
-    A successful return is a failure here even when a popup IS pending --
-    that combination is precisely the false green this smoke exists to
-    catch. An earlier version of this helper accepted it as success, and
-    the smoke then passed with the guard deleted: it could not fail in the
-    direction it claimed to test. Found by removing the guard and running
-    it, which is the only way that shows.
+    Two things have to hold and BOTH are the assertion: the wait must
+    refuse, and the popup pending when it does must be one THIS open
+    raised. A successful return is a failure here even with a popup
+    pending -- that combination is precisely the false green the smoke
+    exists to catch, and an earlier version accepted it, so the smoke
+    passed with the guard deleted.
     """
-    depth_of = lambda: harness.node_count(inst.base_url(), harness.POPUPS_PROP)
+    base = inst.base_url()
+    before = harness.pending_popups(base)
     try:
         harness.open_and_wait(inst, url)
     except MdevError as error:
-        depth = depth_of()
-        if not depth:
+        now = harness.pending_popups(base)
+        added = _added_popups(before, now)
+        if added is None:
             raise StepFailure(
-                "opened %s expecting a popup; it did not become ready and no "
-                "popup is pending either: %s" % (url, error))
-        # Release the route this step deliberately parked. It is holding
-        # the plugin context mutex -- `es_message` blocks inside
-        # `message_popup` without suspending the context, and
-        # `es_context_begin` took `ec_mutex` (ecmascript.c:669) -- so a
-        # second run against the same live instance could not execute any
-        # route of this plugin, and the control step would fail for a
-        # reason that has nothing to do with what it asserts.
-        #
-        # This is teardown of a popup the step itself caused, not a policy
-        # about answering popups: `open_and_wait` still answers none.
-        # Cancel rather than Ok because Cancel declines, and
-        # `message_popup` maps whatever action arrives without consulting
-        # its own flags (notifications.c:264-266).
-        harness.http_request(
-            inst.base_url(), "/api/prop/global/popups/*0/eventSink",
-            timeout=5.0, method="POST", form={"action": "Cancel"})
-        return "opened %s, refused with %d popup(s) pending" % (url, depth)
-    depth = depth_of()
+                "opened %s expecting a popup and the popup probe could not "
+                "be read, so the refusal cannot be attributed: %s"
+                % (url, error))
+        if not added:
+            raise StepFailure(
+                "opened %s expecting a popup; it did not become ready and "
+                "this open raised none: %s" % (url, error))
+        _release(base, added)
+        return "opened %s, refused with %d popup(s) it raised: %s" % (
+            url, len(added), "; ".join(text for _, text in added))
     raise StepFailure(
         "opened %s expecting the wait to refuse, and it reported the page "
-        "ready with %d popup(s) pending" % (url, depth))
+        "ready" % url)
+
+
+def _added_popups(before: list[str] | None,
+                  now: list[str] | None) -> list[tuple[int, str]] | None:
+    """(index, message) for each popup `now` holds that `before` did not.
+
+    Indices are into the live queue, which `pending_popups` returns
+    oldest-first; new popups are appended (`prop_insert` uses
+    TAILQ_INSERT_TAIL, prop_core.c:1900).
+    """
+    if before is None or now is None:
+        return None
+    remaining = list(before)
+    added = []
+    for index, message in enumerate(now):
+        if message in remaining:
+            remaining.remove(message)
+        else:
+            added.append((index, message))
+    return added
+
+
+def _release(base: str, added: list[tuple[int, str]]) -> None:
+    """Release the routes this step parked, newest first.
+
+    Teardown of popups the step itself caused, not a policy about answering
+    popups -- `open_and_wait` still answers none, which is why movian#245
+    is closed. Left parked, the route holds the plugin context mutex
+    (`es_context_begin` takes `ec_mutex`, ecmascript.c:669; `es_message`
+    blocks inside `message_popup` without suspending the context), so a
+    second run against the same live instance could not execute any route
+    of that plugin.
+
+    Addressed by index rather than `*0`, and newest first so answering one
+    does not renumber the others: `*0` is the OLDEST, which is somebody
+    else's popup whenever one was already up. Cancel rather than Ok because
+    Cancel declines, and `message_popup` maps whatever action arrives
+    without consulting its own flags (notifications.c:264-266).
+    """
+    for index, _ in sorted(added, reverse=True):
+        harness.http_request(
+            base, "/api/prop/global/popups/*%d/eventSink" % index,
+            timeout=5.0, method="POST", form={"action": "Cancel"})
 
 
 class StepFailure(Exception):
