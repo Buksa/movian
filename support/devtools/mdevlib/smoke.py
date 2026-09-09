@@ -118,11 +118,35 @@ def _release(base: str, pending: int) -> None:
     queue drains without needing an index. Cancel rather than Ok because
     Cancel declines, and `message_popup` maps whatever action arrives
     without consulting its own flags (notifications.c:264-266).
+
+    Every response is checked, and then the queue is checked. `http_request`
+    returns `{"ok": False}` rather than raising, so discarding the result
+    let a refused POST read as a successful teardown -- the step would
+    report success with its route still parked, poisoning the instance the
+    teardown exists to protect. And a 200 only means the event was
+    enqueued: `prop_http.c` calls `prop_send_ext_event` and returns, while
+    `popup_display` is blocked on its courier in another thread. The end
+    state is the evidence, not the status code.
     """
     for _ in range(pending):
-        harness.http_request(
+        result = harness.http_request(
             base, "/api/prop/global/popups/*0/eventSink",
             timeout=5.0, method="POST", form={"action": "Cancel"})
+        if not result.get("ok"):
+            raise StepFailure(
+                "could not release the popup this step raised: %s"
+                % (result.get("error") or result.get("status")))
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        left = harness.pending_popups(base)
+        if left == 0:
+            return
+        time.sleep(0.2)
+    raise StepFailure(
+        "released the popup this step raised and %s are still pending; the "
+        "route stays parked and this instance cannot be reused"
+        % ("the queue could not be read" if left is None else "%d" % left))
 
 
 class StepFailure(Exception):
