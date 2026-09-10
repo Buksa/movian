@@ -110,6 +110,13 @@ ABSENT_LOADING_SETTLE = 1.0
 NAV_REISSUE_AFTER = 1.5
 NAV_REISSUE_LIMIT = 4
 PAGE_NODES = "global/navigators/current/currentpage/model/nodes"
+# A popup parks the route that raised it. `native/popup.message` is
+# synchronous -- `es_message` switches on `message_popup()`'s return
+# (es_misc.c:154-181) and `message_popup` blocks in `popup_display()`
+# (notifications.c:223-262) -- so the handler never reaches
+# `page.loading = false` and the prop is never created. Reading that absence
+# as "this route publishes no loading prop" reported a parked page as ready.
+POPUPS_PROP = "global/popups"
 
 
 class MdevError(Exception):
@@ -552,6 +559,39 @@ def prop_has_value(value: str | None) -> bool:
     return value not in (None, "", "(void)", "(zombie)")
 
 
+def pending_popups(base_url: str) -> int | None:
+    """How many popups are up, or None when the queue could not be read.
+
+    A COUNT, deliberately, after trying identity and finding there is none
+    to have. The children are unnamed -- that is why `*N` exists -- and the
+    fields differ per kind: a message popup publishes `message`
+    (notifications.c:245), an auth prompt publishes `id`/`source`/`reason`
+    and no message at all (keyring.c:128-133), a file picker publishes
+    `title` (fa_filepicker.c:274-280), a resume dialog `title`/`position`
+    (playinfo.c:88-94). Fingerprinting by message therefore called every
+    non-message popup unreadable, and an auth prompt pending would have
+    failed EVERY open closed -- worse than the defect this guard is for.
+
+    Known and accepted limit of a count: it cannot tell replacement from
+    persistence. A bystander popup answered in the same window as this
+    route raises its own leaves the total unchanged, and the wait then
+    settles on a parked handler. Detecting that needs a stable popup
+    identity, which the prop tree does not expose; giving popups one is a
+    core change and its own decision.
+
+    None is unreadable and every caller must fail closed on it. Collapsing
+    it to zero is how an instrument failure certifies a parked page ready.
+    AGENTS.md: a silent instrument is not evidence until the instrument is
+    known to be working.
+    """
+    parsed = get_prop(base_url, POPUPS_PROP)
+    if parsed is None:
+        return None
+    if parsed.get("value") != "directory":
+        return 0
+    return len(parsed.get("children", []))
+
+
 def node_count(base_url: str, path: str = PAGE_NODES) -> int:
     parsed = get_prop(base_url, path)
     if parsed is None or parsed.get("value") != "directory":
@@ -567,6 +607,12 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
     base = inst.base_url()
     before_url = prop_value(base, PAGE_URL)
     offset = log_size(inst)
+    # What was already up before we navigated. A ConnMan credential request
+    # (networking/connman.c:341) or a file picker (fa_filepicker.c:296) can
+    # be pending for reasons that have nothing to do with this route, and
+    # blocking on one would hang every static page:* open until the deadline
+    # and blame the route for it.
+    popups_before = pending_popups(base)
 
     def issue_open() -> None:
         result = http_request(
@@ -584,6 +630,7 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
     cur_url = title = None
     ready = nav_seen = False
     settled_since: float | None = None
+    popups = 0
     while time.monotonic() < deadline:
         # /api/open only QUEUES a nav event. Before trusting the prop
         # tree, require nav_open0()'s per-open "Opening <url>" trace in
@@ -610,6 +657,10 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
                     issued_at = time.monotonic()
                 time.sleep(0.2)
             continue
+        # Sampled only after the navigation landed: the popup is created BY
+        # the route, so before that there is nothing to see.
+        popups = pending_popups(base)
+
         cur_url = prop_value(base, PAGE_URL)
         loading = prop_value(base, PAGE_LOADING)
         title = prop_value(base, PAGE_TITLE)
@@ -652,11 +703,46 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
                 # a slow handler can still end in openerror after this point.
                 # Require the state to hold, which gives the openerror check
                 # above a chance to fire, rather than trusting one sample.
+                #
+                # ...but not while a popup is up. A handler parked in
+                # popup_display() has not reached `page.loading = false`, so
+                # its `loading` is absent for the same reason a static
+                # route's is, and settling here reported a parked page as
+                # ready with exit 0 -- measured, movian#242.
+                #
+                # A DEFINITE `loading == "0"` above is still trusted. Taken
+                # literally "not ready while a popup is pending" would refuse
+                # a page that had already published a finished state and then
+                # asked something, and no attribution ties a popup to the
+                # route that raised it, so the literal rule would fail pages
+                # nothing implicated. The absent-loading case is the one that
+                # was measured false-green.
                 if settled_since is None:
                     settled_since = time.monotonic()
                 elif time.monotonic() - settled_since >= ABSENT_LOADING_SETTLE:
-                    ready = True
-                    break
+                    # One check, at the commit point, and resampled here
+                    # rather than trusted from the top of the tick: an
+                    # asynchronous route can raise its popup in between, and
+                    # a stale zero would put the false green straight back
+                    # for that interleaving.
+                    #
+                    # An earlier version also reset the timer on every tick
+                    # a popup was up. Same outcome, and the redundancy hid
+                    # mutations: deleting one of the two left the other
+                    # doing the job, so a battery that removed only one came
+                    # back green and read as though the guard did not
+                    # matter.
+                    #
+                    # None means the probe could not be read, and that fails
+                    # CLOSED -- an unreadable instrument must not be able to
+                    # certify a page ready.
+                    popups = pending_popups(base)
+                    if popups is None or popups_before is None \
+                            or popups > popups_before:
+                        settled_since = None
+                    else:
+                        ready = True
+                        break
             else:
                 settled_since = None
         else:
@@ -666,10 +752,16 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
     if not ready:
         raise MdevError(
             "page not ready after %.0fs: nav_event_seen=%r url=%r "
-            "loading=%r title=%r (open issued %d time%s)"
+            "loading=%r title=%r (open issued %d time%s)%s"
             % (timeout, nav_seen, cur_url,
                prop_value(base, PAGE_LOADING), title,
-               issued, "" if issued == 1 else "s")
+               issued, "" if issued == 1 else "s",
+               " -- the popup queue could not be read"
+               if popups is None or popups_before is None else
+               ((" -- %d popup(s) pending, %d of them already up before this "
+                 "open; the route is parked until one is answered"
+                 % (popups, popups_before))
+                if popups > popups_before else ""))
         )
 
     ptype = prop_value(base, PAGE_TYPE)

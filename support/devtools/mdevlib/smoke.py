@@ -35,10 +35,11 @@ SMOKE_ORDER = (
     "reload-clean",
     "keyboard-mode",
     "js-reload",
+    "popup-parks-route",
 )
 STEP_FIELDS = {
     "health": {"do"},
-    "open": {"do", "url"},
+    "open": {"do", "url", "expect_popup"},
     "preview": {"do", "view", "fixture"},
     "action": {"do", "name", "count"},
     "reload": {"do", "js"},
@@ -47,6 +48,105 @@ STEP_FIELDS = {
     "shot": {"do", "tag"},
     "sleep": {"do", "seconds"},
 }
+
+
+def _open_expecting_popup(inst: Instance, url: str) -> str:
+    """Open `url` where a route parked on a popup IS the expected outcome.
+
+    The only way an automated check can observe the guard: a synchronous
+    `popup.message()` parks the route, so the wait cannot reach page-ready
+    and refuses. Without this the step would abort the smoke and nothing
+    could assert the refusal (movian#242).
+
+    Two things have to hold and BOTH are the assertion: the wait must
+    refuse, and a popup must be pending when it does. A successful return
+    is a failure here even with a popup pending -- that combination is
+    precisely the false green the smoke exists to catch, and an earlier
+    version accepted it, so the smoke passed with the guard deleted.
+
+    The queue must be EMPTY before the open. Popups carry no identity --
+    unnamed children, and the fields differ per kind -- so with a bystander
+    already up this step could neither attribute the refusal nor release
+    the right one afterwards. Refusing to run is honest; guessing is not.
+    """
+    base = inst.base_url()
+    before = harness.pending_popups(base)
+    if before is None:
+        raise StepFailure(
+            "opened %s expecting a popup, but the popup queue could not be "
+            "read beforehand, so nothing here can be attributed" % url)
+    if before:
+        raise StepFailure(
+            "opened %s expecting a popup, but %d were already pending; this "
+            "step cannot tell its own from a bystander's and will not guess"
+            % (url, before))
+    try:
+        harness.open_and_wait(inst, url)
+    except MdevError as error:
+        pending = harness.pending_popups(base)
+        if pending is None:
+            raise StepFailure(
+                "opened %s expecting a popup and the queue could not be "
+                "read, so the refusal cannot be attributed: %s"
+                % (url, error))
+        if not pending:
+            raise StepFailure(
+                "opened %s expecting a popup; it did not become ready and "
+                "none is pending: %s" % (url, error))
+        _release(base, pending)
+        return "opened %s, refused with %d popup(s) pending" % (url, pending)
+    raise StepFailure(
+        "opened %s expecting the wait to refuse, and it reported the page "
+        "ready" % url)
+
+
+def _release(base: str, pending: int) -> None:
+    """Release the routes this step parked.
+
+    Everything pending is this step's: the queue was asserted empty before
+    the open. Teardown of popups the step itself caused, not a policy about
+    answering popups -- `open_and_wait` answers none, which is why
+    movian#245 is closed.
+
+    Left parked, the route holds the plugin context mutex
+    (`es_context_begin` takes `ec_mutex`, ecmascript.c:669; `es_message`
+    blocks inside `message_popup` without suspending the context), so a
+    second run against the same live instance could not execute any route
+    of that plugin.
+
+    Always `*0`, repeatedly: answering the oldest promotes the next, so the
+    queue drains without needing an index. Cancel rather than Ok because
+    Cancel declines, and `message_popup` maps whatever action arrives
+    without consulting its own flags (notifications.c:264-266).
+
+    Every response is checked, and then the queue is checked. `http_request`
+    returns `{"ok": False}` rather than raising, so discarding the result
+    let a refused POST read as a successful teardown -- the step would
+    report success with its route still parked, poisoning the instance the
+    teardown exists to protect. And a 200 only means the event was
+    enqueued: `prop_http.c` calls `prop_send_ext_event` and returns, while
+    `popup_display` is blocked on its courier in another thread. The end
+    state is the evidence, not the status code.
+    """
+    for _ in range(pending):
+        result = harness.http_request(
+            base, "/api/prop/global/popups/*0/eventSink",
+            timeout=5.0, method="POST", form={"action": "Cancel"})
+        if not result.get("ok"):
+            raise StepFailure(
+                "could not release the popup this step raised: %s"
+                % (result.get("error") or result.get("status")))
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        left = harness.pending_popups(base)
+        if left == 0:
+            return
+        time.sleep(0.2)
+    raise StepFailure(
+        "released the popup this step raised and %s are still pending; the "
+        "route stays parked and this instance cannot be reused"
+        % ("the queue could not be read" if left is None else "%d" % left))
 
 
 class StepFailure(Exception):
@@ -128,6 +228,10 @@ def _validate_definition(path: Path, data: Any) -> dict[str, Any]:
         elif verb == "reload" and not isinstance(step["js"], bool):
             raise MdevError("smoke %s step %d reload.js must be boolean" % (
                 data["name"], index))
+        if "expect_popup" in step and not isinstance(step["expect_popup"], bool):
+            raise MdevError(
+                "smoke %s step %d expect_popup must be boolean" % (
+                    data["name"], index))
     return data
 
 
@@ -346,9 +450,12 @@ def _execute_step(
         return (detail, harness.read_log_delta(inst, offset), health_hash,
                 {"screenshotLatencyMs": screenshot_ms})
     elif verb == "open":
-        result = harness.open_and_wait(inst, step["url"])
-        detail = "opened %s title=%s nodes=%d" % (
-            result["url"], result["title"], result["nodes"])
+        if step.get("expect_popup"):
+            detail = _open_expecting_popup(inst, step["url"])
+        else:
+            result = harness.open_and_wait(inst, step["url"])
+            detail = "opened %s title=%s nodes=%d" % (
+                result["url"], result["title"], result["nodes"])
     elif verb == "preview":
         base = inst.base_url()
         flush = harness.http_request(base, "/api/input/action/ReloadUI",

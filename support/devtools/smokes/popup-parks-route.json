@@ -1,0 +1,42 @@
+{
+  "name": "popup-parks-route",
+  "describe": "A route parked on a popup is refused, not reported ready.",
+  "needs": {
+    "plugin": "support/devtools/popup_test_plugin",
+    "binary": "build.debug/movian"
+  },
+  "steps": [
+    {
+      "do": "open",
+      "url": "popuptest:clean"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "no popup here"
+    },
+    {
+      "do": "open",
+      "url": "popuptest:blocking",
+      "expect_popup": true
+    },
+    {
+      "do": "assert_log",
+      "must_match": "popuptest242: blocking route entered"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/popups",
+      "equals": 0
+    },
+    {
+      "do": "open",
+      "url": "popuptest:clean"
+    },
+    {
+      "do": "assert_prop",
+      "path": "global/navigators/current/currentpage/model/metadata/title",
+      "equals": "no popup here"
+    }
+  ]
+}
