@@ -10,8 +10,8 @@ The path a plugin setting actually lands at, traced rather than guessed:
 
     plugins.c:240        fqid = "<manifest id>@<origin>", origin "dev" for
                          a `-p` plugin (plugins.c:1435, 1465)
-    ecmascript.c:881-882 Core.storagePath = <persistent>/plugins/<fqid>
-    settings.js:276,297  globalSettings stores at <storagePath>/settings/<group>
+    ecmascript.c:881    Core.storagePath = <persistent>/plugins/<fqid>
+    settings.js:276,297 globalSettings -> <storagePath>/settings/<group>
     store.js:20-21       written as JSON.stringify(keys) -- a flat object
 
 So: `<persistent>/plugins/<id>@dev/settings/<group>`, and the file really
@@ -35,7 +35,6 @@ itself. An id that matches none of them is refused with the ones that do.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import sys
 import tempfile
@@ -73,20 +72,37 @@ class ParsingTheSpec(unittest.TestCase):
         Movian never would."""
         for spec, expected in (("p:g:k=true", 1), ("p:g:k=false", 0)):
             with self.subTest(spec):
-                self.assertEqual(harness.parse_plugin_setting(spec)[3],
+                self.assertEqual(harness.parse_plugin_setting(spec).value,
                                  expected)
 
     def test_an_integer_stays_an_integer(self) -> None:
-        self.assertEqual(harness.parse_plugin_setting("p:g:k=42")[3], 42)
-        self.assertEqual(harness.parse_plugin_setting("p:g:k=-1")[3], -1)
+        self.assertEqual(harness.parse_plugin_setting("p:g:k=42").value, 42)
+        self.assertEqual(harness.parse_plugin_setting("p:g:k=-1").value, -1)
 
     def test_anything_else_is_a_string(self) -> None:
-        self.assertEqual(harness.parse_plugin_setting("p:g:k=hd.example")[3],
-                         "hd.example")
+        self.assertEqual(
+            harness.parse_plugin_setting("p:g:k=hd.example").value,
+            "hd.example")
+
+    def test_quoting_forces_the_literal_string(self) -> None:
+        """The escape hatch, and the reason it has to exist.
+
+        `true` and `2160` are guesses about the DECLARED type, which mdev
+        cannot see -- `createString` and `createInt` write the same file, so
+        a string setting whose value happens to be digits would be handed an
+        int the application never wrote. Quoting is the only way to seed the
+        string `2160`, or the string `true`.
+        """
+        for spec, expected in (('p:g:k="2160"', "2160"),
+                               ('p:g:k="true"', "true"),
+                               ('p:g:k=""', "")):
+            with self.subTest(spec):
+                self.assertEqual(
+                    harness.parse_plugin_setting(spec).value, expected)
 
     def test_a_value_may_contain_the_separators(self) -> None:
         """A domain or a cookie is a perfectly ordinary setting value, and
-        both carry `:` and `=`. Only the first three `:` and the first `=`
+        both carry `:` and `=`. Only the first two `:` and the first `=`
         after them are structure."""
         self.assertEqual(
             harness.parse_plugin_setting("p:g:domain=https://x.example/a=b"),
@@ -157,6 +173,24 @@ class Seeding(unittest.TestCase):
         self.assertIn("Wrong", message)
         self.assertIn("HDRezka", message)
         self.assertIn("tmdb", message)
+
+    def test_an_unreadable_manifest_says_so(self) -> None:
+        """A `-p` directory whose manifest cannot be parsed used to vanish
+        from the known set, and the refusal then pointed at the id the
+        caller typed -- "not among the -p plugins: (none given)" -- instead
+        of at the manifest. That is a misdirecting diagnosis, which is the
+        movian#239 class."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        broken = root / "broken"
+        broken.mkdir()
+        (broken / "plugin.json").write_text("{not json", encoding="utf-8")
+        with self.assertRaises(MdevError) as caught:
+            harness.seed_plugin_settings(
+                root / "persistent", [str(broken)], ["x:g:k=1"])
+        self.assertIn("not valid JSON", str(caught.exception))
+        self.assertIn("broken", str(caught.exception))
 
     def test_the_suffix_is_not_typed_by_hand(self) -> None:
         """`HDRezka@dev` is how the core names a dev load, not something a

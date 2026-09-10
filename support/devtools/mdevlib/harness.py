@@ -19,7 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from . import movian_diag_snapshot as diag
 
@@ -358,19 +358,31 @@ def kill_owned_pid(inst: "Instance", pid: int, timeout: float = 5.0) -> str:
 PLUGIN_DEV_ORIGIN = "dev"
 
 
-def parse_plugin_setting(spec: str) -> tuple[str, str, str, Any]:
+class PluginSetting(NamedTuple):
+    plugin_id: str
+    group: str
+    key: str
+    value: Any
+
+
+def parse_plugin_setting(spec: str) -> PluginSetting:
     """Parse `<plugin-id>:<group>:<key>=<value>`.
 
     Only the first two `:` and the first `=` after them are structure. A
     domain or a cookie is an ordinary setting value and carries both.
 
-    Booleans are written as 1 and 0, which is what Movian writes: a
-    `createBool` setting appears in the store as an integer, and
-    `getvalue` hands the stored value to the plugin RAW, with no coercion
-    (settings.js:298-300). Writing `true` would hand a plugin something the
-    application never would.
+    `true`/`false` become 1 and 0, which is what Movian holds: the setting
+    prop reads `type = bool, value = 1`, `setvalue` stores what
+    `prop.subscribeValue` yields (settings.js:78-83, 302-304), and
+    `getvalue` hands it back RAW with no coercion (settings.js:298-300). A
+    digit string becomes an int for the same reason.
+
+    Those two rules are a guess about the DECLARED type, which mdev cannot
+    see -- `createString` and `createInt` write the same file. So a value in
+    double quotes is taken literally, which is the only way to seed the
+    string `"2160"` or the string `"true"`.
     """
-    head, sep, assignment = spec.partition(":")
+    plugin_id, sep, assignment = spec.partition(":")
     group, sep2, rest = assignment.partition(":")
     if not sep or not sep2:
         raise MdevError(
@@ -378,23 +390,22 @@ def parse_plugin_setting(spec: str) -> tuple[str, str, str, Any]:
             "got %r" % spec)
     key, sep3, value = rest.partition("=")
     if not sep3:
-        raise MdevError(
-            "--plugin-setting %r has no <key>=<value>" % spec)
-    if not head or not group or not key:
+        raise MdevError("--plugin-setting %r has no <key>=<value>" % spec)
+    if not plugin_id or not group or not key:
         raise MdevError(
             "--plugin-setting %r has an empty plugin id, group or key"
             % spec)
-    return head, group, key, _coerce_setting(value)
+    return PluginSetting(plugin_id, group, key, _coerce_setting(value))
 
 
 def _coerce_setting(value: str) -> Any:
+    if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+        return value[1:-1]
     if value == "true":
         return 1
     if value == "false":
         return 0
-    if re.fullmatch(r"-?\d+", value):
-        return int(value)
-    return value
+    return coerce_scalar(value)
 
 
 def plugin_setting_path(persistent: Path, plugin_id: str,
@@ -409,15 +420,26 @@ def plugin_setting_path(persistent: Path, plugin_id: str,
     return persistent / "plugins" / fqid / "settings" / group
 
 
-def plugin_manifest_id(plugin_dir: str) -> str | None:
-    """The `id` a plugin declares, which is what the core builds fqid from."""
+def plugin_manifest_id(plugin_dir: str) -> str:
+    """The `id` a plugin declares, which is what the core builds fqid from.
+
+    Raises rather than returning None. A `-p` directory whose manifest
+    cannot be read is a fact worth saying: swallowing it dropped the plugin
+    from the known set, and the refusal below then reported "not among the
+    -p plugins: (none given)" -- pointing at the id the caller typed
+    instead of at the manifest that could not be parsed.
+    """
+    manifest_path = Path(plugin_dir) / "plugin.json"
     try:
-        manifest = json.loads(
-            (Path(plugin_dir) / "plugin.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except OSError as error:
+        raise MdevError("cannot read %s: %s" % (manifest_path, error))
+    except ValueError as error:
+        raise MdevError("%s is not valid JSON: %s" % (manifest_path, error))
     value = manifest.get("id")
-    return value if isinstance(value, str) and value else None
+    if not isinstance(value, str) or not value:
+        raise MdevError("%s declares no \"id\"" % manifest_path)
+    return value
 
 
 def seed_plugin_settings(persistent: Path, plugins: list[str],
@@ -428,11 +450,9 @@ def seed_plugin_settings(persistent: Path, plugins: list[str],
     settings somebody set by hand, and one seeded key must not wipe the
     rest.
     """
-    known = {}
-    for plugin in plugins:
-        plugin_id = plugin_manifest_id(plugin)
-        if plugin_id is not None:
-            known[plugin_id] = plugin
+    if not specs:
+        return []
+    known = {plugin_manifest_id(plugin): plugin for plugin in plugins}
 
     grouped: dict[Path, dict[str, Any]] = {}
     for spec in specs:
@@ -467,6 +487,11 @@ def seed_plugin_settings(persistent: Path, plugins: list[str],
     return written
 
 
+def coerce_scalar(value: str) -> Any:
+    """An integer if it reads as one, otherwise the string it already is."""
+    return int(value) if re.fullmatch(r"-?\d+", value) else value
+
+
 def parse_dev_flags(spec: str) -> dict[str, Any]:
     """Parse "smbdebug=1,ecmascriptdebug=1" into an htsmsg-JSON dict."""
     flags: dict[str, Any] = {}
@@ -479,7 +504,7 @@ def parse_dev_flags(spec: str) -> dict[str, Any]:
         key, value = item.split("=", 1)
         if not key:
             raise MdevError("--dev-flags: empty key in %r" % item)
-        flags[key] = int(value) if re.fullmatch(r"-?\d+", value) else value
+        flags[key] = coerce_scalar(value)
     if not flags:
         raise MdevError("--dev-flags: no flags parsed from %r" % spec)
     return flags

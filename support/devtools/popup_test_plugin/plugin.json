@@ -4,7 +4,7 @@
   "title": "popup test plugin (dev only, not packaged)",
   "version": "1.0.0",
   "category": "other",
-  "synopsis": "Minimal dev plugin for issue #242: one route that raises a blocking popup from inside its own handler, and one that does not. The pair is the probe -- a red on the blocking route means nothing unless the clean route goes green in the same run. Dev tool only; lives under support/, never shipped.",
+  "synopsis": "Dev-only fixture for movian#242 and #247. Three routes: one that raises a blocking popup from inside its own handler, one that does not, and one gated behind a persisted setting -- the shape a plugin behind a terms prompt has, and the subject of the seeded/unseeded pair. Lives under support/, never shipped.",
   "file": "popup_test.js",
   "apiversion": 2
 }

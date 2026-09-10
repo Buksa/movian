@@ -1124,15 +1124,26 @@ def _run_one(
     return False, wedge, transcript, bundle
 
 
-# No smoke seeds a plugin setting, and one cannot without a change here
-# (movian#247). Seeding happens at LAUNCH -- `mdev run --plugin-setting`
-# writes the file before the process starts -- and a smoke runs against an
-# instance it does not relaunch, reusing a live one whose plugins already
-# match. So the evidence that seeding works is a PAIR of runs, unseeded and
-# seeded, which is a stand procedure rather than a step sequence. A smoke
-# could assert the seeded half alone, and that would be a check that cannot
-# fail for the reason it exists: a route that never asks looks identical to
-# one whose question was seeded away.
+# No smoke seeds a plugin setting, and two things would have to change here
+# first (movian#247).
+#
+# A definition carries `needs: {plugin, binary}` and nothing for a seed, so
+# there is no way to say one. And the reconciliation below is keyed on the
+# PLUGIN SET: two smokes over the same plugin with different seeds compare
+# equal and no relaunch happens, so the second would run against the first
+# one's seeded state. Seeding is a launch-time write, so that is the wrong
+# state.
+#
+# (An earlier note here said a smoke "does not relaunch". That is wrong
+# about the very function it annotates -- this one stops and relaunches
+# whenever the plugin set differs. The obstacle is the key, not the
+# absence.)
+#
+# Even with both fixed, the evidence is a PAIR of runs, unseeded and
+# seeded: the seeded half alone cannot fail for the reason it exists,
+# because a route that never asks looks identical to one whose question was
+# seeded away. `support/devtools/popup_test_plugin/README.md` records the
+# pair as two commands.
 def _ensure_running_with(instance_name: str, plugins: list[str]) -> Instance:
     """A live instance carrying exactly the plugins this run needs.
 

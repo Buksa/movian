@@ -52,13 +52,21 @@ new page.Route('popuptest:blocking', function(pageobj) {
 // may do (movian#245).
 var askFirst = true;
 
-settings.globalSettings('popuptest', 'popup test plugin', null,
-                        'dev-only fixture for movian#242 and #247');
-settings.createBool('askFirst', 'Ask before opening the gated route',
-                    askFirst, function(v) {
-  askFirst = !!v;
-  log('askFirst = ' + askFirst);
-});
+// Wrapped the way lifecycle_test.js wraps each of its resources, and for
+// its reason: a plugin that fails to load takes the #242 routes with it,
+// and a smoke asserting a popup would then go red for a cause that has
+// nothing to do with popups.
+try {
+  settings.globalSettings('popuptest', 'popup test plugin', null,
+                          'dev-only fixture for movian#242 and #247');
+  settings.createBool('askFirst', 'Ask before opening the gated route',
+                      askFirst, function(v) {
+    askFirst = !!v;
+    log('askFirst = ' + askFirst);
+  });
+} catch(e) {
+  log('settings unavailable, gate stays open: ' + e);
+}
 
 new page.Route('popuptest:gated', function(pageobj) {
   log('gated route entered; askFirst=' + askFirst);
@@ -77,4 +85,5 @@ new page.Route('popuptest:clean', function(pageobj) {
   finish(pageobj, 'no popup here');
 });
 
-log('plugin loaded, routes: popuptest:blocking, popuptest:gated, popuptest:clean');
+log('plugin loaded, routes: popuptest:blocking, popuptest:gated, '
+    + 'popuptest:clean');
