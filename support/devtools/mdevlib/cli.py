@@ -78,6 +78,12 @@ def cmd_run(args: argparse.Namespace) -> int:
             json.dumps(flags), encoding="utf-8"
         )
 
+    # Before launch, so the plugin reads the value on its first load rather
+    # than being asked (movian#247).
+    for path in harness.seed_plugin_settings(
+            inst.persistent, args.plugin, args.plugin_setting):
+        print("seeded %s" % path, file=sys.stderr)
+
     argv = harness.build_argv(
         inst, args.plugin, args.skin, args.libav_log, args.start_url,
         extra_flags=(["--bypass-ecmascript-acl"]
@@ -651,7 +657,23 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--skin", metavar="DIR",
                      help="skin directory (GLW --skin)")
     run.add_argument("--dev-flags", metavar="K=1,K2=1",
-                     help="seed <persistent>/settings/dev before launch")
+                     help="seed <persistent>/settings/dev before launch "
+                          "-- the CORE's dev namespace, not a plugin's own "
+                          "settings (see --plugin-setting)")
+    run.add_argument("--plugin-setting", action="append", default=[],
+                     metavar="PLUGIN:GROUP:KEY=VALUE",
+                     help="seed one of a -p plugin's own settings before "
+                          "launch, so it is read on first load rather than "
+                          "asked for; repeatable. PLUGIN is the id from its "
+                          "plugin.json (the @dev the core appends is added "
+                          "here). GROUP is the id the plugin passed to "
+                          "settings.globalSettings(). `true`/`false` are "
+                          "written as 1/0, which is what Movian writes. "
+                          "Only globalSettings is covered: "
+                          "settings.kvstoreSettings() keeps values in the "
+                          "sqlite kvstore instead, and nothing here writes "
+                          "that -- a seed for one of those lands in a file "
+                          "the plugin never reads")
     run.add_argument("--libav-log", action="store_true",
                      help="pass --libav-log to movian")
     # The documented oracle recapture needs it: the ecmascript file ACL

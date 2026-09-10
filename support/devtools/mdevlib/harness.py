@@ -351,6 +351,122 @@ def kill_owned_pid(inst: "Instance", pid: int, timeout: float = 5.0) -> str:
 # Launch
 # ---------------------------------------------------------------------------
 
+# How the core names a plugin loaded with `-p`: `plugin_load(path, "dev")`
+# (plugins.c:1435, 1465) and `fqid = "<manifest id>@<origin>"`
+# (plugins.c:240). Callers pass the manifest id and this is appended, so the
+# suffix stays an implementation detail rather than something to get wrong.
+PLUGIN_DEV_ORIGIN = "dev"
+
+
+def parse_plugin_setting(spec: str) -> tuple[str, str, str, Any]:
+    """Parse `<plugin-id>:<group>:<key>=<value>`.
+
+    Only the first two `:` and the first `=` after them are structure. A
+    domain or a cookie is an ordinary setting value and carries both.
+
+    Booleans are written as 1 and 0, which is what Movian writes: a
+    `createBool` setting appears in the store as an integer, and
+    `getvalue` hands the stored value to the plugin RAW, with no coercion
+    (settings.js:298-300). Writing `true` would hand a plugin something the
+    application never would.
+    """
+    head, sep, assignment = spec.partition(":")
+    group, sep2, rest = assignment.partition(":")
+    if not sep or not sep2:
+        raise MdevError(
+            "--plugin-setting expects <plugin-id>:<group>:<key>=<value>, "
+            "got %r" % spec)
+    key, sep3, value = rest.partition("=")
+    if not sep3:
+        raise MdevError(
+            "--plugin-setting %r has no <key>=<value>" % spec)
+    if not head or not group or not key:
+        raise MdevError(
+            "--plugin-setting %r has an empty plugin id, group or key"
+            % spec)
+    return head, group, key, _coerce_setting(value)
+
+
+def _coerce_setting(value: str) -> Any:
+    if value == "true":
+        return 1
+    if value == "false":
+        return 0
+    if re.fullmatch(r"-?\d+", value):
+        return int(value)
+    return value
+
+
+def plugin_setting_path(persistent: Path, plugin_id: str,
+                        group: str) -> Path:
+    """Where `globalSettings` keeps one group for one dev-loaded plugin.
+
+    `Core.storagePath` is `<persistent>/plugins/<fqid>`
+    (ecmascript.c:881-882) and the group is a JSON file under `settings/`
+    there (settings.js:276,297; store.js:20-21).
+    """
+    fqid = "%s@%s" % (plugin_id, PLUGIN_DEV_ORIGIN)
+    return persistent / "plugins" / fqid / "settings" / group
+
+
+def plugin_manifest_id(plugin_dir: str) -> str | None:
+    """The `id` a plugin declares, which is what the core builds fqid from."""
+    try:
+        manifest = json.loads(
+            (Path(plugin_dir) / "plugin.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    value = manifest.get("id")
+    return value if isinstance(value, str) and value else None
+
+
+def seed_plugin_settings(persistent: Path, plugins: list[str],
+                         specs: list[str]) -> list[Path]:
+    """Write plugin settings before launch; return the files touched.
+
+    Merges into whatever is already there. A persistent instance carries
+    settings somebody set by hand, and one seeded key must not wipe the
+    rest.
+    """
+    known = {}
+    for plugin in plugins:
+        plugin_id = plugin_manifest_id(plugin)
+        if plugin_id is not None:
+            known[plugin_id] = plugin
+
+    grouped: dict[Path, dict[str, Any]] = {}
+    for spec in specs:
+        plugin_id, group, key, value = parse_plugin_setting(spec)
+        if plugin_id not in known:
+            raise MdevError(
+                "--plugin-setting %r names plugin %r, which is not among "
+                "the -p plugins: %s. Pass the id from its plugin.json; the "
+                "@%s the core appends is added here."
+                % (spec, plugin_id,
+                   ", ".join(sorted(known)) or "(none given)",
+                   PLUGIN_DEV_ORIGIN))
+        grouped.setdefault(
+            plugin_setting_path(persistent, plugin_id, group), {})[key] = value
+
+    written = []
+    for path, values in grouped.items():
+        existing: dict[str, Any] = {}
+        if path.is_file():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    existing = loaded
+            except (OSError, ValueError):
+                raise MdevError(
+                    "cannot merge into %s: it exists and is not a JSON "
+                    "object, so seeding would discard it" % path)
+        existing.update(values)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(existing), encoding="utf-8")
+        written.append(path)
+    return written
+
+
 def parse_dev_flags(spec: str) -> dict[str, Any]:
     """Parse "smbdebug=1,ecmascriptdebug=1" into an htsmsg-JSON dict."""
     flags: dict[str, Any] = {}
