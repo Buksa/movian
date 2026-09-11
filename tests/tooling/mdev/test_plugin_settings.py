@@ -35,16 +35,19 @@ itself. An id that matches none of them is refused with the ones that do.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
+from support.devtools.mdevlib import cli  # noqa: E402
 from support.devtools.mdevlib import harness  # noqa: E402
 from support.devtools.mdevlib.harness import MdevError  # noqa: E402
 
@@ -434,3 +437,80 @@ class Seeding(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class RunJudgesBeforeItTouchesAnything(unittest.TestCase):
+    """Two orderings inside `cmd_run`, pinned where they live.
+
+    Everything above validated the seeding functions. These two findings
+    were about WHEN `cmd_run` calls them, and that is not visible from
+    `harness` at all: a correct `plan_plugin_settings` called after the dev
+    flags are written still leaves dev flags behind, and a correct
+    `resolve_plugin_settings` called after `--force` still kills a working
+    instance for a request that was never going to run.
+
+    Both were verified by hand on a live instance and then left unpinned,
+    which is the shape of an unchecked claim. Moving either call back down
+    `cmd_run` fails these.
+    """
+
+    def _args(self, **overrides) -> argparse.Namespace:
+        base = dict(
+            name="ordering", plugin=[], plugin_setting=[], force=False,
+            dev_flags=None, skin=None, libav_log=None, start_url=None,
+            bypass_ecmascript_acl=False, json=False)
+        base.update(overrides)
+        return argparse.Namespace(**base)
+
+    def _instance(self, persistent: Path, pid):
+        class Stub:
+            def __init__(self, name):
+                self.name = name
+                self.persistent = persistent
+
+            def live_pid(self):
+                return pid
+
+            def ensure_dirs(self):
+                pass
+
+        return Stub
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.persistent = self.root / "persistent"
+
+    def test_force_does_not_kill_for_a_request_that_cannot_run(self) -> None:
+        killed = []
+        with mock.patch.object(cli, "Instance",
+                               self._instance(self.persistent, 4242)), \
+             mock.patch.object(harness, "classify_foreign",
+                               return_value=([], [])), \
+             mock.patch.object(harness, "kill_owned_pid",
+                               side_effect=lambda *a: killed.append(a)):
+            with self.assertRaises(MdevError):
+                cli.cmd_run(self._args(
+                    plugin=[plugin_dir(self.root / "src", "P")],
+                    plugin_setting=["Bogus:g:k=1"], force=True))
+        self.assertEqual(killed, [], "a working instance was stopped for a "
+                                     "request that could never have run")
+
+    def test_dev_flags_are_not_left_behind_by_a_refused_seed(self) -> None:
+        """The spec passes id and type checks and fails only when the
+        existing store is read, which is what separates the two phases."""
+        store = harness.plugin_setting_path(self.persistent, "P", "g")
+        store.parent.mkdir(parents=True, exist_ok=True)
+        store.write_text("[1,2,3]", encoding="utf-8")
+        with mock.patch.object(cli, "Instance",
+                               self._instance(self.persistent, None)), \
+             mock.patch.object(harness, "classify_foreign",
+                               return_value=([], [])):
+            with self.assertRaises(MdevError):
+                cli.cmd_run(self._args(
+                    plugin=[plugin_dir(self.root / "src", "P")],
+                    plugin_setting=["P:g:k=1"], dev_flags="smbdebug=1"))
+        self.assertFalse(
+            (self.persistent / "settings" / "dev").exists(),
+            "dev flags stayed active after the command reported failure")
