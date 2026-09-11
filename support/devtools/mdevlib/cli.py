@@ -33,6 +33,12 @@ def emit(args: argparse.Namespace, data: dict, human: str) -> None:
 # ---------------------------------------------------------------------------
 
 def cmd_run(args: argparse.Namespace) -> int:
+    # First, and before anything with a side effect. `--force` stops the
+    # running instance a few lines down, so a malformed --plugin-setting or
+    # an unknown plugin id used to terminate a working instance for a
+    # request that was never going to run (movian#247).
+    harness.resolve_plugin_settings(args.plugin, args.plugin_setting)
+
     inst = Instance(args.name)
     own_pid = inst.live_pid()
     foreign, collisions = harness.classify_foreign(inst, own_pid)

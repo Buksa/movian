@@ -36,6 +36,7 @@ itself. An id that matches none of them is refused with the ones that do.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -245,6 +246,81 @@ class TheDestinationIsCheckedBeforeAnythingIsWritten(unittest.TestCase):
         self.assertFalse(
             harness.plugin_setting_path(persistent, "P", "g").exists(),
             "P was seeded by a request that could never have completed")
+
+
+class TheDestinationMustBeWhatItClaims(unittest.TestCase):
+    """The path-component guard promises a seed stays in the profile.
+
+    A symlink breaks that promise from the other side: `is_file()` and the
+    write both follow one, so a group symlinked at an unrelated JSON file
+    merged into it. Measured: `{"mine": true}` came back `{"mine": true,
+    "pwned": 1}`.
+
+    A leaf that is a DIRECTORY is the other half. `is_file()` reads it as
+    "no store yet" and the parent preflight passes, so the commit loop
+    raised an uncaught IsADirectoryError -- after earlier targets were
+    written, which is the partial seed the two-phase design prevents.
+    """
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.plugins = [plugin_dir(self.root / "src", "P")]
+
+    def test_a_symlinked_group_is_refused(self) -> None:
+        persistent = self.root / "persistent"
+        leaf = harness.plugin_setting_path(persistent, "P", "g")
+        leaf.parent.mkdir(parents=True, exist_ok=True)
+        outside = self.root / "outside.json"
+        outside.write_text('{"mine": true}', encoding="utf-8")
+        os.symlink(outside, leaf)
+        with self.assertRaises(MdevError) as caught:
+            harness.seed_plugin_settings(
+                persistent, self.plugins, ["P:g:pwned=1"])
+        self.assertIn("symlink", str(caught.exception))
+        self.assertEqual(json.loads(outside.read_text()), {"mine": True})
+
+    def test_a_directory_leaf_stops_the_whole_request(self) -> None:
+        persistent = self.root / "persistent"
+        harness.plugin_setting_path(persistent, "P", "bad").mkdir(parents=True)
+        with self.assertRaises(MdevError):
+            harness.seed_plugin_settings(
+                persistent, self.plugins, ["P:good:k=1", "P:bad:k=2"])
+        self.assertFalse(
+            harness.plugin_setting_path(persistent, "P", "good").exists())
+
+    def test_an_ordinary_first_seed_still_works(self) -> None:
+        """The control: the guard walks up to the profile root and stops.
+        An earlier version skipped non-existent candidates with `continue`
+        and skipped the stop condition with them, so a brand-new profile --
+        the commonest case there is -- was refused as 'outside'."""
+        persistent = self.root / "persistent"
+        harness.seed_plugin_settings(persistent, self.plugins, ["P:g:k=1"])
+        self.assertEqual(
+            json.loads(
+                harness.plugin_setting_path(persistent, "P", "g").read_text()),
+            {"k": 1})
+
+
+class OnlyAPluginThatCouldReadIt(unittest.TestCase):
+    def test_a_views_plugin_is_refused(self) -> None:
+        """`plugins.c:674` sends type "views" down a branch that never
+        calls `ecmascript_plugin_load`, so no ES context exists, no
+        `Core.storagePath` exists, and the seed would be a file nothing
+        reads -- reported as success."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        views = root / "views"
+        views.mkdir()
+        (views / "plugin.json").write_text(
+            json.dumps({"id": "V", "type": "views"}), encoding="utf-8")
+        with self.assertRaises(MdevError) as caught:
+            harness.seed_plugin_settings(
+                root / "persistent", [str(views)], ["V:g:k=1"])
+        self.assertIn("views", str(caught.exception))
+        self.assertIn("never read", str(caught.exception))
 
 
 class Seeding(unittest.TestCase):

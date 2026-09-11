@@ -448,6 +448,20 @@ def _refuse_json_constant(token: str):
         % token)
 
 
+def plugin_manifest(plugin_dir: str) -> tuple[str, str]:
+    """A plugin's declared (id, type).
+
+    The type matters: `plugins.c:674` sends `"views"` down a branch that
+    never calls `ecmascript_plugin_load`, so no ES context is created, no
+    `Core.storagePath` exists and `globalSettings` is never reached. A seed
+    for such a plugin is a file nothing will ever read, reported as success.
+    """
+    plugin_id = plugin_manifest_id(plugin_dir)
+    manifest = json.loads(
+        (Path(plugin_dir) / "plugin.json").read_text(encoding="utf-8"))
+    return plugin_id, str(manifest.get("type") or "")
+
+
 def plugin_manifest_id(plugin_dir: str) -> str:
     """The `id` a plugin declares, which is what the core builds fqid from.
 
@@ -477,6 +491,97 @@ def plugin_manifest_id(plugin_dir: str) -> str:
     return value
 
 
+def resolve_plugin_settings(plugins: list[str],
+                            specs: list[str]) -> list[PluginSetting]:
+    """Everything that can be judged without touching instance state.
+
+    Specs parsed, manifests read, ids and types checked -- no store is
+    opened, no directory made, nothing killed. `mdev run --force` stops the
+    running instance BEFORE it would otherwise have got here, so a malformed
+    setting or an unknown id used to terminate a working instance for a
+    request that was never going to run.
+    """
+    if not specs:
+        return []
+    parsed = [parse_plugin_setting(spec) for spec in specs]
+    known = {}
+    kinds = {}
+    for plugin in plugins:
+        plugin_id, kind = plugin_manifest(plugin)
+        known[plugin_id] = plugin
+        kinds[plugin_id] = kind
+    for spec, setting in zip(specs, parsed):
+        if setting.plugin_id not in known:
+            unaddressable = sorted(i for i in known if ":" in i)
+            raise MdevError(
+                "--plugin-setting %r names plugin %r, which is not among "
+                "the -p plugins: %s. Pass the id from its plugin.json; the "
+                "@%s the core appends is added here.%s"
+                % (spec, setting.plugin_id,
+                   ", ".join(sorted(known)) or "(none given)",
+                   PLUGIN_DEV_ORIGIN,
+                   ("  Note that %s cannot be addressed by this flag at all: "
+                    "a ':' in the id collides with the spec's own separators."
+                    % ", ".join(repr(i) for i in unaddressable))
+                   if unaddressable else ""))
+        if kinds[setting.plugin_id] != "ecmascript":
+            raise MdevError(
+                "--plugin-setting %r targets plugin %r, whose manifest "
+                "declares type %r. Only an ecmascript plugin gets an ES "
+                "context, and only that context has the storagePath these "
+                "settings live under (plugins.c:674, 702-727) -- the file "
+                "would be written and never read."
+                % (spec, setting.plugin_id, kinds[setting.plugin_id]))
+    return parsed
+
+
+def _check_destination(persistent: Path, path: Path) -> None:
+    """Refuse a destination that is not a plain file inside the profile.
+
+    The path-component guard promises that a seed stays in the plugin's own
+    profile, and a symlink breaks that promise from the other side: both
+    `is_file()` and the write follow one, so a group symlinked at an
+    unrelated JSON file merged into it. Measured.
+
+    A leaf that is a DIRECTORY is the other half. `is_file()` reads it as
+    "no store yet", the parent preflight passes because it only looks at the
+    parent, and the commit loop then raised an uncaught IsADirectoryError --
+    after earlier targets were already written, which is the partial seed
+    the two-phase design exists to prevent.
+    """
+    root = os.path.realpath(persistent)
+
+    # Walk from the leaf up to the profile root and no further. An earlier
+    # version walked `path.parents` and skipped non-existent candidates with
+    # `continue`, which skipped the stop condition with them and then
+    # reported the profile's own parent as "outside".
+    candidates = []
+    current = path
+    while True:
+        candidates.append(current)
+        if current == persistent or current.parent == current:
+            break
+        current = current.parent
+
+    for candidate in candidates:
+        if candidate.is_symlink():
+            raise MdevError(
+                "refusing to seed through the symlink %s: a seed must stay "
+                "inside the plugin's own profile" % candidate)
+        if not candidate.exists():
+            continue
+        if candidate == persistent:
+            continue
+        if os.path.commonpath([root, os.path.realpath(candidate)]) != root:
+            raise MdevError(
+                "refusing to seed %s: it resolves outside %s"
+                % (candidate, persistent))
+        if candidate == path and not candidate.is_file():
+            raise MdevError(
+                "refusing to seed %s: it exists and is not a regular file"
+                % path)
+
+
 def plan_plugin_settings(persistent: Path, plugins: list[str],
                          specs: list[str]) -> list[tuple[Path, dict[str, Any]]]:
     """Resolve and validate every seed, writing nothing.
@@ -492,7 +597,13 @@ def plan_plugin_settings(persistent: Path, plugins: list[str],
     """
     if not specs:
         return []
-    known = {plugin_manifest_id(plugin): plugin for plugin in plugins}
+    resolve_plugin_settings(plugins, specs)
+    known = {}
+    kinds = {}
+    for plugin in plugins:
+        plugin_id, kind = plugin_manifest(plugin)
+        known[plugin_id] = plugin
+        kinds[plugin_id] = kind
 
     grouped: dict[Path, dict[str, Any]] = {}
     for spec in specs:
@@ -514,6 +625,14 @@ def plan_plugin_settings(persistent: Path, plugins: list[str],
                     "a ':' in the id collides with the spec's own separators."
                     % ", ".join(repr(i) for i in unaddressable))
                    if unaddressable else ""))
+        if kinds[plugin_id] != "ecmascript":
+            raise MdevError(
+                "--plugin-setting %r targets plugin %r, whose manifest "
+                "declares type %r. Only an ecmascript plugin gets an ES "
+                "context, and only that context has the storagePath these "
+                "settings live under (plugins.c:674, 702-727) -- the file "
+                "would be written and never read."
+                % (spec, plugin_id, kinds[plugin_id]))
         grouped.setdefault(
             plugin_setting_path(persistent, plugin_id, group), {})[key] = value
 
@@ -523,6 +642,7 @@ def plan_plugin_settings(persistent: Path, plugins: list[str],
     # that said it had not happened.
     planned: list[tuple[Path, dict[str, Any]]] = []
     for path, values in grouped.items():
+        _check_destination(persistent, path)
         existing: dict[str, Any] = {}
         if path.is_file():
             try:
