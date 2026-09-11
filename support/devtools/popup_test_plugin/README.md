@@ -22,8 +22,14 @@ Seeding is a launch-time write, so the evidence is two runs that differ in
 exactly one flag. The seeded half alone proves nothing: a route that never
 asks looks identical to one whose question was seeded away.
 
+Both halves start from nothing. Run A without the reset and, on the second
+execution of the pair, `mdev run` refuses because B's instance is still
+alive, `mdev open` then reuses B's SEEDED profile, and the control comes
+back exit 0 -- the control passing for the reason it exists to rule out.
+
 ```sh
 # A -- no seed: the gate asks, the route parks, the wait refuses (exit 1)
+mdev stop --name seed247 2>/dev/null ; rm -rf /tmp/mdev/seed247
 mdev run -p support/devtools/popup_test_plugin --name seed247 popuptest:clean
 mdev open --name seed247 popuptest:gated ; echo "exit=$?"
 
@@ -33,6 +39,8 @@ mdev run -p support/devtools/popup_test_plugin --name seed247 \
     --plugin-setting devtools_popup_test:popuptest:askFirst=false \
     popuptest:clean
 mdev open --name seed247 popuptest:gated ; echo "exit=$?"
+
+mdev stop --name seed247        # leave nothing behind for the next pair
 ```
 
 A recorded that run as:

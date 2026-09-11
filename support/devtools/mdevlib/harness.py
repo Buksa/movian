@@ -395,6 +395,7 @@ def parse_plugin_setting(spec: str) -> PluginSetting:
         raise MdevError(
             "--plugin-setting %r has an empty plugin id, group or key"
             % spec)
+    _one_path_segment("settings group", group)
     return PluginSetting(plugin_id, group, key, _coerce_setting(value))
 
 
@@ -408,6 +409,24 @@ def _coerce_setting(value: str) -> Any:
     return coerce_scalar(value)
 
 
+def _one_path_segment(kind: str, value: str) -> str:
+    """Refuse anything that is not a single, literal path component.
+
+    `Path("a") / "/tmp/x"` is `/tmp/x` -- pathlib discards everything before
+    an absolute part -- so an absolute group name walked straight out of the
+    profile and merged into whatever JSON file it landed on. `..` walked out
+    the other way. The core concatenates strings (settings.js:297) and never
+    escapes anywhere, so this is mdev's hazard, not Movian's, and refusing
+    is the whole fix: a settings group is an identifier, not a path.
+    """
+    if not value or value in (".", "..") or "/" in value or "\\" in value:
+        raise MdevError(
+            "%s %r must be a single path component -- no separators, no "
+            "`..` -- because it names a file inside the plugin's own "
+            "profile" % (kind, value))
+    return value
+
+
 def plugin_setting_path(persistent: Path, plugin_id: str,
                         group: str) -> Path:
     """Where `globalSettings` keeps one group for one dev-loaded plugin.
@@ -416,8 +435,10 @@ def plugin_setting_path(persistent: Path, plugin_id: str,
     (ecmascript.c:881-882) and the group is a JSON file under `settings/`
     there (settings.js:276,297; store.js:20-21).
     """
-    fqid = "%s@%s" % (plugin_id, PLUGIN_DEV_ORIGIN)
-    return persistent / "plugins" / fqid / "settings" / group
+    fqid = "%s@%s" % (_one_path_segment("plugin id", plugin_id),
+                      PLUGIN_DEV_ORIGIN)
+    return (persistent / "plugins" / fqid / "settings"
+            / _one_path_segment("settings group", group))
 
 
 def plugin_manifest_id(plugin_dir: str) -> str:
@@ -475,7 +496,11 @@ def seed_plugin_settings(persistent: Path, plugins: list[str],
         grouped.setdefault(
             plugin_setting_path(persistent, plugin_id, group), {})[key] = value
 
-    written = []
+    # Two phases. Writing as it went meant a later malformed target left
+    # the earlier files already seeded while the command reported failure
+    # and launched nothing -- a profile carrying settings from an operation
+    # that said it had not happened.
+    planned: list[tuple[Path, dict[str, Any]]] = []
     for path, values in grouped.items():
         existing: dict[str, Any] = {}
         if path.is_file():
@@ -496,8 +521,12 @@ def seed_plugin_settings(persistent: Path, plugins: list[str],
                     % (path, type(loaded).__name__))
             existing = loaded
         existing.update(values)
+        planned.append((path, existing))
+
+    written = []
+    for path, contents in planned:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(existing), encoding="utf-8")
+        path.write_text(json.dumps(contents), encoding="utf-8")
         written.append(path)
     return written
 

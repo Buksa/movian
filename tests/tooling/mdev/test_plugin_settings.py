@@ -125,6 +125,78 @@ class WhereItLands(unittest.TestCase):
             Path("/p/plugins/HDRezka@dev/settings/hdrezka"))
 
 
+class ItStaysInsideTheProfile(unittest.TestCase):
+    """A settings group names a file in the plugin's own profile.
+
+    `Path("a") / "/tmp/x"` is `/tmp/x` -- pathlib discards everything before
+    an absolute part -- so an absolute group walked straight out and MERGED
+    into whatever JSON file it landed on. Reproduced before the fix: a file
+    holding `{"important": true}` came back `{"important": true, "pwned":
+    1}`. `..` walked out the other way. The core concatenates strings
+    (settings.js:297) and cannot escape at all, so this was mdev's hazard
+    alone.
+    """
+
+    def test_an_escaping_group_is_refused(self) -> None:
+        for group in ("/tmp/victim", "..", ".", "a/b", "a\\b", ""):
+            with self.subTest(group):
+                with self.assertRaises(MdevError):
+                    harness.plugin_setting_path(Path("/p"), "x", group)
+
+    def test_an_escaping_plugin_id_is_refused(self) -> None:
+        """The id comes from a manifest, which is a file this harness did
+        not write."""
+        with self.assertRaises(MdevError):
+            harness.plugin_setting_path(Path("/p"), "../../x", "g")
+
+    def test_the_spec_parser_refuses_it_too(self) -> None:
+        """Early, so the message names the spec rather than a path built
+        from it."""
+        with self.assertRaises(MdevError):
+            harness.parse_plugin_setting("p:/tmp/victim:k=1")
+
+    def test_nothing_is_written_outside(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        victim = root / "victim.json"
+        victim.write_text('{"important": true}', encoding="utf-8")
+        with self.assertRaises(MdevError):
+            harness.seed_plugin_settings(
+                root / "persistent",
+                [plugin_dir(root / "src", "P")],
+                ["P:%s:pwned=1" % victim])
+        self.assertEqual(json.loads(victim.read_text()),
+                         {"important": True})
+
+
+class NothingIsWrittenUntilEverythingCanBe(unittest.TestCase):
+    """A refused seed must leave no seed.
+
+    Writing as the loop went meant a later malformed target left the earlier
+    files already written while the command reported failure and launched
+    nothing -- a profile carrying settings from an operation that said it
+    had not happened, which a later run would use without knowing.
+    """
+
+    def test_an_earlier_file_is_not_written_when_a_later_one_refuses(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        persistent = root / "persistent"
+        plugins = [plugin_dir(root / "src", "P")]
+        bad = harness.plugin_setting_path(persistent, "P", "bad")
+        bad.parent.mkdir(parents=True, exist_ok=True)
+        bad.write_text("[1,2,3]", encoding="utf-8")
+        with self.assertRaises(MdevError):
+            harness.seed_plugin_settings(
+                persistent, plugins, ["P:good:k=1", "P:bad:k=2"])
+        self.assertFalse(
+            harness.plugin_setting_path(persistent, "P", "good").exists(),
+            "an earlier target was seeded by a request that failed")
+        self.assertEqual(bad.read_text(), "[1,2,3]")
+
+
 class Seeding(unittest.TestCase):
     def seed(self, specs, ids=("HDRezka",)):
         tmp = tempfile.TemporaryDirectory()
