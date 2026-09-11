@@ -192,6 +192,40 @@ class Seeding(unittest.TestCase):
         self.assertIn("not valid JSON", str(caught.exception))
         self.assertIn("broken", str(caught.exception))
 
+    def test_a_manifest_that_parses_but_is_not_an_object(self) -> None:
+        """Parsing is not being a manifest. `[]` gets through json.loads
+        and then `.get` raised AttributeError -- a traceback where the
+        reader documents an MdevError."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        weird = root / "weird"
+        weird.mkdir()
+        (weird / "plugin.json").write_text("[]", encoding="utf-8")
+        with self.assertRaises(MdevError) as caught:
+            harness.seed_plugin_settings(
+                root / "persistent", [str(weird)], ["x:g:k=1"])
+        self.assertIn("not an object", str(caught.exception))
+
+    def test_a_store_that_parses_but_is_not_an_object_is_refused(self) -> None:
+        """The same distinction one layer down, and it was worse here: a
+        `[]` fell through to an empty dict and was then written over --
+        discarded silently, by the code whose refusal promises not to."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        plugins = [plugin_dir(root / "src", "HDRezka")]
+        path = harness.plugin_setting_path(
+            root / "persistent", "HDRezka", "hdrezka")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("[1,2,3]", encoding="utf-8")
+        with self.assertRaises(MdevError) as caught:
+            harness.seed_plugin_settings(
+                root / "persistent", plugins, ["HDRezka:hdrezka:k=1"])
+        self.assertIn("not an object", str(caught.exception))
+        self.assertEqual(path.read_text(), "[1,2,3]",
+                         "the refusal must not have written anything")
+
     def test_the_suffix_is_not_typed_by_hand(self) -> None:
         """`HDRezka@dev` is how the core names a dev load, not something a
         caller should have to know. Passing it is refused like any other

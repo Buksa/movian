@@ -436,6 +436,13 @@ def plugin_manifest_id(plugin_dir: str) -> str:
         raise MdevError("cannot read %s: %s" % (manifest_path, error))
     except ValueError as error:
         raise MdevError("%s is not valid JSON: %s" % (manifest_path, error))
+    # Parsing is not the same as being a manifest. `[]` gets through
+    # json.loads and then `.get` raises AttributeError -- a traceback where
+    # this function promises an MdevError.
+    if not isinstance(manifest, dict):
+        raise MdevError(
+            "%s is valid JSON but not an object (%s), so it declares no id"
+            % (manifest_path, type(manifest).__name__))
     value = manifest.get("id")
     if not isinstance(value, str) or not value:
         raise MdevError("%s declares no \"id\"" % manifest_path)
@@ -474,12 +481,20 @@ def seed_plugin_settings(persistent: Path, plugins: list[str],
         if path.is_file():
             try:
                 loaded = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    existing = loaded
-            except (OSError, ValueError):
+            except (OSError, ValueError) as error:
                 raise MdevError(
-                    "cannot merge into %s: it exists and is not a JSON "
-                    "object, so seeding would discard it" % path)
+                    "cannot merge into %s: it exists and cannot be read as "
+                    "JSON (%s), so seeding would discard it" % (path, error))
+            # Same distinction the manifest reader needs: parsing is not
+            # being the right shape. A `[]` here used to fall through to an
+            # empty dict and then be written over -- discarded silently, by
+            # the very code whose refusal above promises not to.
+            if not isinstance(loaded, dict):
+                raise MdevError(
+                    "cannot merge into %s: it holds a JSON %s, not an "
+                    "object, so seeding would discard it"
+                    % (path, type(loaded).__name__))
+            existing = loaded
         existing.update(values)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(existing), encoding="utf-8")
