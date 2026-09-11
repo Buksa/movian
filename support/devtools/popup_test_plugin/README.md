@@ -27,14 +27,19 @@ execution of the pair, `mdev run` refuses because B's instance is still
 alive, `mdev open` then reuses B's SEEDED profile, and the control comes
 back exit 0 -- the control passing for the reason it exists to rule out.
 
+The removals are chained with `&&`, not `;`. `mdev stop` exits 0 when
+nothing is running, so the clean case is unaffected; when it REFUSES --
+a live pid it cannot confirm as ours -- `;` would delete the state file
+out from under that process and leave an orphan nothing can stop.
+
 ```sh
 # A -- no seed: the gate asks, the route parks, the wait refuses (exit 1)
-mdev stop --name seed247 2>/dev/null ; rm -rf /tmp/mdev/seed247
+mdev stop --name seed247 && rm -rf /tmp/mdev/seed247
 mdev run -p support/devtools/popup_test_plugin --name seed247 popuptest:clean
 mdev open --name seed247 popuptest:gated ; echo "exit=$?"
 
 # B -- seeded: same route, same everything else, reaches page-ready (exit 0)
-mdev stop --name seed247 ; rm -rf /tmp/mdev/seed247
+mdev stop --name seed247 && rm -rf /tmp/mdev/seed247
 mdev run -p support/devtools/popup_test_plugin --name seed247 \
     --plugin-setting devtools_popup_test:popuptest:askFirst=false \
     popuptest:clean

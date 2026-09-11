@@ -70,6 +70,14 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     inst.ensure_dirs()
 
+    # Resolved before either kind of seed is written -- manifests read,
+    # ids checked, existing stores parsed. `--dev-flags` used to land first,
+    # so an invalid --plugin-setting left the core's dev flags active for the
+    # next run while the command reported failure and launched nothing
+    # (movian#247).
+    planned_settings = harness.plan_plugin_settings(
+        inst.persistent, args.plugin, args.plugin_setting)
+
     if args.dev_flags:
         flags = harness.parse_dev_flags(args.dev_flags)
         settings_dir = inst.persistent / "settings"
@@ -80,8 +88,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     # Before launch, so the plugin reads the value on its first load rather
     # than being asked (movian#247).
-    for path in harness.seed_plugin_settings(
-            inst.persistent, args.plugin, args.plugin_setting):
+    for path in harness.commit_plugin_settings(planned_settings):
         print("seeded %s" % path, file=sys.stderr)
 
     argv = harness.build_argv(
@@ -674,7 +681,11 @@ def build_parser() -> argparse.ArgumentParser:
                           "double-quote the value to seed it literally -- "
                           "and quote the whole argument so the shell does "
                           "not eat them: "
-                          "--plugin-setting 'p:g:KEY=\"2160\"'. "
+                          "--plugin-setting 'p:g:KEY=\"2160\"'. A PLUGIN "
+                          "or GROUP containing ':' cannot be addressed at "
+                          "all -- the first two colons are structure -- and "
+                          "each must be a single path component, since it "
+                          "names a file inside the plugin's own profile. "
                           "Only globalSettings is covered: "
                           "settings.kvstoreSettings() keeps values in the "
                           "sqlite kvstore instead, and nothing here writes "

@@ -197,6 +197,56 @@ class NothingIsWrittenUntilEverythingCanBe(unittest.TestCase):
         self.assertEqual(bad.read_text(), "[1,2,3]")
 
 
+class WhatMovianCanActuallyRead(unittest.TestCase):
+    """Python's JSON is more permissive than Movian's, and the gap is silent.
+
+    `json.loads` accepts `NaN`/`Infinity` and `json.dumps` writes them back.
+    `JSON.parse` rejects them, and `store.js:48-51` swallows that failure
+    whole -- `try { ... } catch (e) {}` -- leaving the plugin an EMPTY
+    store. The seed would report success and the prompt it was meant to
+    bypass would appear anyway.
+    """
+
+    def test_a_store_movian_cannot_parse_is_refused(self) -> None:
+        for token in ("NaN", "Infinity", "-Infinity"):
+            with self.subTest(token):
+                tmp = tempfile.TemporaryDirectory()
+                self.addCleanup(tmp.cleanup)
+                root = Path(tmp.name)
+                path = harness.plugin_setting_path(
+                    root / "persistent", "P", "g")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('{"old": %s}' % token, encoding="utf-8")
+                with self.assertRaises(MdevError) as caught:
+                    harness.seed_plugin_settings(
+                        root / "persistent",
+                        [plugin_dir(root / "src", "P")], ["P:g:new=1"])
+                self.assertIn(token, str(caught.exception))
+                self.assertIn("old", path.read_text())
+
+
+class TheDestinationIsCheckedBeforeAnythingIsWritten(unittest.TestCase):
+    def test_a_profile_that_is_a_file_stops_the_whole_request(self) -> None:
+        """Planning validated content but not destinations, so a profile
+        directory that is actually a regular file only blew up at mkdir --
+        inside the write loop, after an earlier plugin was committed."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        persistent = root / "persistent"
+        plugins = [plugin_dir(root / "src", "P"),
+                   plugin_dir(root / "src", "Q")]
+        blocked = persistent / "plugins" / "Q@dev"
+        blocked.parent.mkdir(parents=True, exist_ok=True)
+        blocked.write_text("not a directory", encoding="utf-8")
+        with self.assertRaises(MdevError):
+            harness.seed_plugin_settings(
+                persistent, plugins, ["P:g:k=1", "Q:g:k=2"])
+        self.assertFalse(
+            harness.plugin_setting_path(persistent, "P", "g").exists(),
+            "P was seeded by a request that could never have completed")
+
+
 class Seeding(unittest.TestCase):
     def seed(self, specs, ids=("HDRezka",)):
         tmp = tempfile.TemporaryDirectory()

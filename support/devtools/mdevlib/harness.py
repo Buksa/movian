@@ -441,6 +441,13 @@ def plugin_setting_path(persistent: Path, plugin_id: str,
             / _one_path_segment("settings group", group))
 
 
+def _refuse_json_constant(token: str):
+    raise ValueError(
+        "%s is not valid JSON to Movian -- `JSON.parse` rejects it and "
+        "store.js:48-51 swallows the failure, leaving an empty store"
+        % token)
+
+
 def plugin_manifest_id(plugin_dir: str) -> str:
     """The `id` a plugin declares, which is what the core builds fqid from.
 
@@ -470,9 +477,14 @@ def plugin_manifest_id(plugin_dir: str) -> str:
     return value
 
 
-def seed_plugin_settings(persistent: Path, plugins: list[str],
-                         specs: list[str]) -> list[Path]:
-    """Write plugin settings before launch; return the files touched.
+def plan_plugin_settings(persistent: Path, plugins: list[str],
+                         specs: list[str]) -> list[tuple[Path, dict[str, Any]]]:
+    """Resolve and validate every seed, writing nothing.
+
+    Split from the commit so a caller can find out the whole request is
+    sound BEFORE it writes anything of its own -- `mdev run` also seeds the
+    core's dev flags, and those used to land first, staying active for the
+    next run while the command reported failure and launched nothing.
 
     Merges into whatever is already there. A persistent instance carries
     settings somebody set by hand, and one seeded key must not wipe the
@@ -486,13 +498,22 @@ def seed_plugin_settings(persistent: Path, plugins: list[str],
     for spec in specs:
         plugin_id, group, key, value = parse_plugin_setting(spec)
         if plugin_id not in known:
+            # A manifest id may contain ':' -- plugins.c:632-647 takes the
+            # string as given -- and this flag's grammar cannot address one,
+            # because the first two colons are structure. Detectable only
+            # here, so it is said here rather than left as a puzzle.
+            unaddressable = sorted(i for i in known if ":" in i)
             raise MdevError(
                 "--plugin-setting %r names plugin %r, which is not among "
                 "the -p plugins: %s. Pass the id from its plugin.json; the "
-                "@%s the core appends is added here."
+                "@%s the core appends is added here.%s"
                 % (spec, plugin_id,
                    ", ".join(sorted(known)) or "(none given)",
-                   PLUGIN_DEV_ORIGIN))
+                   PLUGIN_DEV_ORIGIN,
+                   ("  Note that %s cannot be addressed by this flag at all: "
+                    "a ':' in the id collides with the spec's own separators."
+                    % ", ".join(repr(i) for i in unaddressable))
+                   if unaddressable else ""))
         grouped.setdefault(
             plugin_setting_path(persistent, plugin_id, group), {})[key] = value
 
@@ -505,7 +526,14 @@ def seed_plugin_settings(persistent: Path, plugins: list[str],
         existing: dict[str, Any] = {}
         if path.is_file():
             try:
-                loaded = json.loads(path.read_text(encoding="utf-8"))
+                loaded = json.loads(
+                    path.read_text(encoding="utf-8"),
+                    # Python accepts NaN/Infinity and would write them back;
+                    # `JSON.parse` rejects them and store.js swallows that
+                    # silently (`catch (e) {}`, store.js:48-51), leaving the
+                    # plugin an EMPTY store. The seed would report success
+                    # and the prompt it was meant to bypass would appear.
+                    parse_constant=_refuse_json_constant)
             except (OSError, ValueError) as error:
                 raise MdevError(
                     "cannot merge into %s: it exists and cannot be read as "
@@ -523,12 +551,35 @@ def seed_plugin_settings(persistent: Path, plugins: list[str],
         existing.update(values)
         planned.append((path, existing))
 
+    # Every destination, before any content. A profile directory that is
+    # actually a regular file only fails at mkdir, and doing that inside the
+    # write loop committed the earlier plugin before the later one blew up.
+    # A failure here leaves empty directories and no seeds, which is the
+    # bound this can offer without a staging area.
+    for path, _ in planned:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise MdevError(
+                "cannot create %s for the seed: %s" % (path.parent, error))
+    return planned
+
+
+def commit_plugin_settings(
+        planned: list[tuple[Path, dict[str, Any]]]) -> list[Path]:
+    """Write what `plan_plugin_settings` resolved; return the files touched."""
     written = []
     for path, contents in planned:
-        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(contents), encoding="utf-8")
         written.append(path)
     return written
+
+
+def seed_plugin_settings(persistent: Path, plugins: list[str],
+                         specs: list[str]) -> list[Path]:
+    """Plan and commit in one step, for callers with nothing else to seed."""
+    return commit_plugin_settings(
+        plan_plugin_settings(persistent, plugins, specs))
 
 
 def coerce_scalar(value: str) -> Any:
