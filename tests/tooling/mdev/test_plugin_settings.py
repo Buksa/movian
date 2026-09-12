@@ -435,9 +435,6 @@ class Seeding(unittest.TestCase):
             self.seed(["HDRezka@dev:g:k=1"])
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
 
 class RunJudgesBeforeItTouchesAnything(unittest.TestCase):
     """Two orderings inside `cmd_run`, pinned where they live.
@@ -497,6 +494,32 @@ class RunJudgesBeforeItTouchesAnything(unittest.TestCase):
         self.assertEqual(killed, [], "a working instance was stopped for a "
                                      "request that could never have run")
 
+    def test_force_does_not_kill_for_an_id_that_is_not_a_path_component(
+            self) -> None:
+        """The same ordering, one layer deeper. A manifest may declare any
+        string (`plugins.c:632-647`), so an id like `../P` matched a spec,
+        passed resolution and was refused only by `plugin_setting_path` --
+        which runs in the plan, after the kill. The check now happens at
+        parse time, where both path components are decided."""
+        killed = []
+        weird = self.root / "src" / "weird"
+        weird.mkdir(parents=True, exist_ok=True)
+        (weird / "plugin.json").write_text(json.dumps({
+            "type": "ecmascript", "id": "../P", "version": "1.0.0",
+            "file": "main.js", "apiversion": 2}), encoding="utf-8")
+        with mock.patch.object(cli, "Instance",
+                               self._instance(self.persistent, 4242)), \
+             mock.patch.object(harness, "classify_foreign",
+                               return_value=([], [])), \
+             mock.patch.object(harness, "kill_owned_pid",
+                               side_effect=lambda *a: killed.append(a)):
+            with self.assertRaises(MdevError) as caught:
+                cli.cmd_run(self._args(
+                    plugin=[str(weird)], plugin_setting=["../P:g:k=1"],
+                    force=True))
+        self.assertIn("single path component", str(caught.exception))
+        self.assertEqual(killed, [])
+
     def test_dev_flags_are_not_left_behind_by_a_refused_seed(self) -> None:
         """The spec passes id and type checks and fails only when the
         existing store is read, which is what separates the two phases."""
@@ -514,3 +537,101 @@ class RunJudgesBeforeItTouchesAnything(unittest.TestCase):
         self.assertFalse(
             (self.persistent / "settings" / "dev").exists(),
             "dev flags stayed active after the command reported failure")
+
+
+class TheLeafIsOnlyTheProfilesFile(unittest.TestCase):
+    """A hard link is the symlink escape with nothing to inspect.
+
+    No target path, `realpath` inside the profile, a regular file -- and
+    one inode carrying another name somewhere else. Measured: a leaf linked
+    at `outside.json` turned `{"mine": true}` into `{"mine": true,
+    "pwned": 1}`, through the guard that had just been written to stop
+    exactly that.
+    """
+
+    def test_a_hard_linked_leaf_is_refused(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        persistent = root / "persistent"
+        leaf = harness.plugin_setting_path(persistent, "P", "g")
+        leaf.parent.mkdir(parents=True, exist_ok=True)
+        outside = root / "outside.json"
+        outside.write_text('{"mine": true}', encoding="utf-8")
+        os.link(outside, leaf)
+        with self.assertRaises(MdevError) as caught:
+            harness.seed_plugin_settings(
+                persistent, [plugin_dir(root / "src", "P")], ["P:g:pwned=1"])
+        self.assertIn("names", str(caught.exception))
+        self.assertEqual(json.loads(outside.read_text()), {"mine": True})
+
+
+class ACommittableTargetIsProvenBeforeAnyIsWritten(unittest.TestCase):
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.persistent = self.root / "persistent"
+        self.plugins = [plugin_dir(self.root / "src", "P")]
+
+    def test_a_read_only_store_is_replaced_not_written_through(self) -> None:
+        """The commit moves a staged sibling into place, so the leaf's own
+        mode never comes into it. Writing through it raised an uncaught
+        PermissionError from the middle of the loop, with the earlier target
+        already seeded -- the plan had approved everything and the failure
+        happened anyway, one layer further down."""
+        readonly = harness.plugin_setting_path(self.persistent, "P", "ro")
+        readonly.parent.mkdir(parents=True, exist_ok=True)
+        readonly.write_text('{"keep": 1}', encoding="utf-8")
+        os.chmod(readonly, 0o444)
+        self.addCleanup(os.chmod, readonly.parent, 0o755)
+        harness.seed_plugin_settings(
+            self.persistent, self.plugins, ["P:good:k=1", "P:ro:k=2"])
+        self.assertEqual(json.loads(readonly.read_text()),
+                         {"keep": 1, "k": 2})
+        self.assertEqual(
+            json.loads(harness.plugin_setting_path(
+                self.persistent, "P", "good").read_text()),
+            {"k": 1})
+
+    def test_an_unwritable_directory_stops_the_whole_request(self) -> None:
+        """What the leaf's mode does not decide, the directory's does. The
+        request is refused before any target changes, rather than partway
+        through -- and this is the case `os.replace` cannot paper over."""
+        settings = harness.plugin_setting_path(
+            self.persistent, "P", "x").parent
+        settings.mkdir(parents=True, exist_ok=True)
+        os.chmod(settings, 0o555)
+        self.addCleanup(os.chmod, settings, 0o755)
+        # Asserted against the PLAN, not the seed. Staging would refuse
+        # this anyway -- the temp file cannot be created either -- but the
+        # commit runs after `mdev run` has written the core's dev flags, so
+        # the guarantee that a refused request leaves nothing behind needs
+        # the refusal to happen here.
+        with self.assertRaises(MdevError) as caught:
+            harness.plan_plugin_settings(
+                self.persistent, self.plugins, ["P:a:k=1", "P:b:k=2"])
+        self.assertIn("not writable", str(caught.exception))
+        self.assertEqual(sorted(p.name for p in settings.iterdir()), [])
+
+    def test_nothing_is_staged_where_it_could_be_mistaken_for_a_group(
+            self) -> None:
+        """`globalSettings` reads `<storagePath>/settings/<group>` by exact
+        name, so a leftover staging file is inert -- but litter in a profile
+        is what a later run reads and cannot explain. The staging files are
+        gone whether the request succeeded or not."""
+        settings = harness.plugin_setting_path(
+            self.persistent, "P", "x").parent
+        harness.seed_plugin_settings(self.persistent, self.plugins,
+                                     ["P:g:k=1"])
+        self.assertEqual([p.name for p in settings.iterdir()], ["g"])
+
+
+# Last, so that running this file directly runs every class above it. It sat
+# in the middle once, which meant `python3 tests/tooling/mdev/
+# test_plugin_settings.py` exited 0 after 27 of 29 tests -- silently
+# skipping the two that pin the cmd_run orderings, in the very file whose
+# job is to notice things like that. Discovery-based CI imports the module
+# and ran them; the local command people actually type did not.
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

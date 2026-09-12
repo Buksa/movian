@@ -395,6 +395,11 @@ def parse_plugin_setting(spec: str) -> PluginSetting:
         raise MdevError(
             "--plugin-setting %r has an empty plugin id, group or key"
             % spec)
+    # Both halves that become path components, checked HERE rather than
+    # where they are joined. `plugin_setting_path` refused an id like
+    # `../P` too, but that runs in the plan -- after `mdev run --force` has
+    # already stopped the instance for a request that cannot proceed.
+    _one_path_segment("plugin id", plugin_id)
     _one_path_segment("settings group", group)
     return PluginSetting(plugin_id, group, key, _coerce_setting(value))
 
@@ -580,10 +585,25 @@ def _check_destination(persistent: Path, path: Path) -> None:
             raise MdevError(
                 "refusing to seed %s: it exists and is not a regular file"
                 % path)
+        # A hard link is the same escape as a symlink with nothing to
+        # inspect: no target path, `realpath` inside the profile, a regular
+        # file -- and one inode with another name somewhere else. Measured:
+        # a leaf linked at `outside.json` turned `{"mine": true}` into
+        # `{"mine": true, "pwned": 1}`. The commit below moves a new file
+        # into place rather than writing through this one, so the alias
+        # would survive either way; refusing says so instead, which is what
+        # the symlink case next door does. (Only the leaf: a directory
+        # always has nlink > 1.)
+        if candidate == path and candidate.stat().st_nlink > 1:
+            raise MdevError(
+                "refusing to seed %s: it has %d names, so it is also a file "
+                "outside the plugin's profile"
+                % (path, candidate.stat().st_nlink))
 
 
-def plan_plugin_settings(persistent: Path, plugins: list[str],
-                         specs: list[str]) -> list[tuple[Path, dict[str, Any]]]:
+def plan_plugin_settings(
+        persistent: Path, plugins: list[str],
+        specs: list[str]) -> list[tuple[Path, dict[str, Any]]]:
     """Resolve and validate every seed, writing nothing.
 
     Split from the commit so a caller can find out the whole request is
@@ -682,15 +702,59 @@ def plan_plugin_settings(persistent: Path, plugins: list[str],
         except OSError as error:
             raise MdevError(
                 "cannot create %s for the seed: %s" % (path.parent, error))
+
+    # And that it can take a file. The commit moves a staged sibling into
+    # place, so the LEAF's own mode is irrelevant -- a read-only store used
+    # to raise an uncaught PermissionError from the middle of the write
+    # loop, after earlier targets were already seeded -- but the directory's
+    # is not. Checked here because the mkdir above is what makes it exist.
+    for path, _ in planned:
+        if not os.access(path.parent, os.W_OK | os.X_OK):
+            raise MdevError(
+                "cannot seed %s: %s is not writable" % (path, path.parent))
     return planned
 
 
 def commit_plugin_settings(
         planned: list[tuple[Path, dict[str, Any]]]) -> list[Path]:
-    """Write what `plan_plugin_settings` resolved; return the files touched."""
+    """Write what `plan_plugin_settings` resolved; return the files touched.
+
+    Every file is staged as a sibling and moved into place, and every
+    staging happens before any move. Writing directly meant a target that
+    could not be written -- a read-only store -- raised from the middle of
+    the loop with earlier targets already seeded, which is the partial state
+    the plan exists to prevent, reached after the plan had approved
+    everything. Moving also means each file appears whole or not at all, and
+    that the leaf's own mode and link count do not matter.
+
+    The remaining bound: a failure in the move loop can leave earlier files
+    replaced. Nothing short of a transaction closes that, and by then the
+    directory has been proven writable and the content proven writable to
+    it, so what is left is the disk filling up between the two loops.
+    """
+    staged: list[tuple[Path, Path]] = []
+    try:
+        for path, contents in planned:
+            tmp = path.with_name(
+                "%s.mdev-new.%d" % (path.name, os.getpid()))
+            try:
+                tmp.write_text(json.dumps(contents), encoding="utf-8")
+            except OSError as error:
+                raise MdevError(
+                    "cannot stage the seed for %s: %s" % (path, error))
+            staged.append((tmp, path))
+    except MdevError:
+        for tmp, _ in staged:
+            tmp.unlink(missing_ok=True)
+        raise
+
     written = []
-    for path, contents in planned:
-        path.write_text(json.dumps(contents), encoding="utf-8")
+    for tmp, path in staged:
+        try:
+            os.replace(tmp, path)
+        except OSError as error:
+            raise MdevError(
+                "cannot move the staged seed into %s: %s" % (path, error))
         written.append(path)
     return written
 
