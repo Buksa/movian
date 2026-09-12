@@ -416,6 +416,16 @@ def parse_plugin_setting(spec: str) -> PluginSetting:
     return PluginSetting(plugin_id, group, key, _coerce_setting(value))
 
 
+# What a plugin can actually hold. `store.js` parses the seed with
+# `JSON.parse`, and a Duktape Number is a double (DUK_TYPE_NUMBER,
+# ext/duktape/duktape.h:267), so an integer past the exactly-representable
+# range comes back as a DIFFERENT integer: 9007199254740993 is written
+# exactly and read as 9007199254740992. Measured. `--dev-flags` is not
+# affected -- those go to htsmsg, read by the core in C -- so the limit
+# belongs here and not in `coerce_scalar`.
+MAX_EXACT_SETTING_INT = 2 ** 53 - 1
+
+
 def _coerce_setting(value: str) -> Any:
     if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
         return value[1:-1]
@@ -423,7 +433,16 @@ def _coerce_setting(value: str) -> Any:
         return 1
     if value == "false":
         return 0
-    return coerce_scalar(value)
+    coerced = coerce_scalar(value)
+    if isinstance(coerced, int) and abs(coerced) > MAX_EXACT_SETTING_INT:
+        raise MdevError(
+            "--plugin-setting value %s is outside the range a plugin can "
+            "read back exactly (+/-%d, Number.MAX_SAFE_INTEGER): store.js "
+            "parses the seed with JSON.parse and a Duktape Number is a "
+            "double, so the plugin would see %d instead. Quote it to seed "
+            "the string."
+            % (value, MAX_EXACT_SETTING_INT, int(float(coerced))))
+    return coerced
 
 
 def _one_path_segment(kind: str, value: str) -> str:
@@ -542,11 +561,31 @@ def plugin_manifest_id(plugin_dir: str) -> str:
     return _manifest_id(plugin_dir, _load_manifest(plugin_dir))
 
 
+# `\uXXXX` with an uppercase hex digit, which the core decodes wrongly.
+# json.c:71 computes `*s - 'F' + 10`, so A-F yield 5-10 instead of 10-15 and
+# `"P\u004A"` becomes `PE` in the core and `PJ` here -- mdev would seed
+# `PJ@dev` while the core created `PE@dev`. Filed as movian#250; until it is
+# fixed, an id whose raw text carries such an escape is refused rather than
+# seeded into a profile no plugin will read. Scoped to the id: the same
+# escape in a synopsis is the core's problem and not this seed's.
+_RAW_ID = re.compile(r'"id"\s*:\s*"((?:[^"\\]|\\.)*)"')
+_UPPER_ESCAPE = re.compile(r'\\u[0-9a-fA-F]*[A-F]')
+
+
 def _manifest_id(plugin_dir: str, manifest: dict) -> str:
     value = manifest.get("id")
+    manifest_path = Path(plugin_dir) / "plugin.json"
     if not isinstance(value, str) or not value:
+        raise MdevError("%s declares no \"id\"" % manifest_path)
+    raw = _RAW_ID.search(manifest_path.read_text(encoding="utf-8"))
+    if raw is not None and _UPPER_ESCAPE.search(raw.group(1)):
         raise MdevError(
-            "%s declares no \"id\"" % (Path(plugin_dir) / "plugin.json"))
+            "%s spells its id with an escape the core decodes differently: "
+            "%s. json.c:71 computes uppercase hex as `*s - 'F' + 10`, so "
+            "A-F yield 5-10 instead of 10-15 -- the core would build a "
+            "different fqid than this reads, and the seed would land where "
+            "nothing looks (movian#250). Spell the id literally, or in "
+            "lowercase hex." % (manifest_path, raw.group(1)))
     return value
 
 
@@ -796,10 +835,18 @@ def commit_plugin_settings(
         raise
 
     written = []
-    for tmp, path in staged:
+    for index, (tmp, path) in enumerate(staged):
         try:
             os.replace(tmp, path)
         except OSError as error:
+            # Everything not yet moved, including this one. Leaving them
+            # meant a repeatedly failing run accumulated complete settings
+            # snapshots in the profile under names nothing reads -- litter
+            # that looks like state, from an operation that reported
+            # failure. What is already moved stays moved; that is the bound
+            # the docstring names.
+            for leftover, _ in staged[index:]:
+                leftover.unlink(missing_ok=True)
             raise MdevError(
                 "cannot move the staged seed into %s: %s" % (path, error))
         written.append(path)

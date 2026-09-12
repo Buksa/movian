@@ -102,10 +102,20 @@ def cmd_run(args: argparse.Namespace) -> int:
     # neither is detectable from the plugin's side: a key that swallowed an
     # `=`, or `"2160"` that lost its quotes to the shell, both seed
     # successfully and leave the plugin reading its default (movian#247).
+    #
+    # The key and the TYPE, never the value. The documented use for this flag
+    # is a setting a plugin gates on, and those are cookies and tokens; a
+    # value passed through the environment to keep it out of shell history
+    # must not then be printed into a CI log. Type and length settle both
+    # guesses on their own -- `str` versus `int` IS the quoting question, and
+    # the key alone IS the `=` question.
     for setting in settings:
-        print("  %s:%s -> %s = %r"
-              % (setting.plugin_id, setting.group, setting.key,
-                 setting.value), file=sys.stderr)
+        kind = type(setting.value).__name__
+        shape = ("<%s, %d chars>" % (kind, len(setting.value))
+                 if isinstance(setting.value, str) else "<%s>" % kind)
+        print("  %s:%s -> %s = %s"
+              % (setting.plugin_id, setting.group, setting.key, shape),
+              file=sys.stderr)
 
     argv = harness.build_argv(
         inst, args.plugin, args.skin, args.libav_log, args.start_url,

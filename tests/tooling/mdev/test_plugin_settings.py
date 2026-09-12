@@ -36,6 +36,8 @@ itself. An id that matches none of them is refused with the ones that do.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import stat
@@ -538,6 +540,46 @@ class TheStagingFileIsNotAnAttackSurface(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(leaf.stat().st_mode) & 0o077, 0)
 
 
+class OnlyWhatAPluginCanReadBack(unittest.TestCase):
+    """The seed is read by `JSON.parse` in Duktape, whose Number is a double.
+
+    `DUK_TYPE_NUMBER` is documented as a double in
+    `ext/duktape/duktape.h:267`, so an integer past the exactly-representable
+    range is written exactly and read as a DIFFERENT integer. Measured:
+    9007199254740993 comes back 9007199254740992, and mdev reported a
+    successful seed of a value the plugin never sees.
+    """
+
+    def test_an_inexact_integer_is_refused(self) -> None:
+        for value in ("9007199254740993", "-9007199254740993",
+                      "123456789012345678901234567890"):
+            with self.subTest(value):
+                with self.assertRaises(MdevError) as caught:
+                    harness.parse_plugin_setting("P:g:k=%s" % value)
+                self.assertIn("MAX_SAFE_INTEGER", str(caught.exception))
+
+    def test_the_boundary_itself_is_accepted(self) -> None:
+        """2**53 - 1 is exactly representable, so refusing it would be the
+        guard overreaching into values that work."""
+        self.assertEqual(
+            harness.parse_plugin_setting("P:g:k=9007199254740991").value,
+            9007199254740991)
+
+    def test_a_quoted_one_is_still_a_string(self) -> None:
+        """The escape the refusal names has to exist: a plugin holding a big
+        number as a string is unaffected, and the message says so."""
+        self.assertEqual(
+            harness.parse_plugin_setting('P:g:k="9007199254740993"').value,
+            "9007199254740993")
+
+    def test_dev_flags_are_not_narrowed_by_it(self) -> None:
+        """`--dev-flags` goes to htsmsg and is read by the core in C, so the
+        Duktape limit does not apply there and must not leak into it."""
+        self.assertEqual(
+            harness.parse_dev_flags("big=9007199254740993"),
+            {"big": 9007199254740993})
+
+
 class TheManifestIsReadTheWayTheCoreReadsIt(unittest.TestCase):
     """`json.loads` keeps the last repeated member; the core keeps the first.
 
@@ -575,6 +617,50 @@ class TheManifestIsReadTheWayTheCoreReadsIt(unittest.TestCase):
                 root / "persistent", [str(weird)], ["Q:g:k=1"])
         self.assertIn("more than once", str(caught.exception))
         self.assertFalse((root / "persistent").exists())
+
+    def test_an_uppercase_unicode_escape_in_the_id_is_refused(self) -> None:
+        """The core's own decoder is wrong about uppercase hex.
+        `src/misc/json.c:71` computes `*s - 'F' + 10`, so A-F yield 5-10
+        instead of 10-15: `"P\\u004A"` is `PJ` here and `PE` there, and the
+        seed would land in a profile the core never creates. Refused until
+        movian#250 is fixed, because mirroring a core bug is worse.
+        """
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        weird = root / "src" / "esc"
+        weird.mkdir(parents=True)
+        (weird / "plugin.json").write_text(
+            '{"id":"P\\u004A","type":"ecmascript","version":"1.0.0"}',
+            encoding="utf-8")
+        with self.assertRaises(MdevError) as caught:
+            harness.seed_plugin_settings(
+                root / "persistent", [str(weird)], ["PJ:g:k=1"])
+        self.assertIn("json.c:71", str(caught.exception))
+
+    def test_the_core_decoder_is_still_the_one_described(self) -> None:
+        """Asserted, not trusted: this refusal exists only because of that
+        line, and `htsmsg_json_deserialize2` is what reads plugin.json
+        (htsmsg_json.c:228-230 delegates to json_deserialize)."""
+        decoder = (REPO_ROOT / "src" / "misc" / "json.c").read_text(
+            encoding="utf-8")
+        self.assertIn("v |= *s - 'F' + 10;", decoder)
+        delegate = (REPO_ROOT / "src" / "htsmsg" / "htsmsg_json.c").read_text(
+            encoding="utf-8")
+        self.assertIn("json_deserialize(src, &json_to_htsmsg", delegate)
+
+    def test_a_lowercase_escape_is_accepted(self) -> None:
+        """Only the affected digits. Lowercase hex decodes correctly in the
+        core, so refusing it would be the guard overreaching."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        ok = root / "src" / "esc"
+        ok.mkdir(parents=True)
+        (ok / "plugin.json").write_text(
+            '{"id":"P\\u004a","type":"ecmascript","version":"1.0.0"}',
+            encoding="utf-8")
+        self.assertEqual(harness.plugin_manifest_id(str(ok)), "PJ")
 
     def test_an_ordinary_manifest_still_reads(self) -> None:
         tmp = tempfile.TemporaryDirectory()
@@ -668,6 +754,39 @@ class RunJudgesBeforeItTouchesAnything(unittest.TestCase):
                     force=True))
         self.assertIn("single path component", str(caught.exception))
         self.assertEqual(killed, [])
+
+    def test_the_report_does_not_print_the_value(self) -> None:
+        """The documented use for this flag is a setting a plugin gates on,
+        and those are cookies and tokens. A value passed through the
+        environment to keep it out of shell history must not then be printed
+        into a CI log -- and the report exists to settle two guesses that the
+        key and the TYPE settle on their own."""
+        secret = "sid=deadbeefcafe; Domain=example.invalid"
+        captured = io.StringIO()
+        with mock.patch.object(cli, "Instance",
+                               self._instance(self.persistent, None)), \
+             mock.patch.object(harness, "classify_foreign",
+                               return_value=([], [])), \
+             mock.patch.object(harness, "build_argv",
+                               return_value=["movian"]), \
+             mock.patch.object(harness, "launch",
+                               return_value={"pid": 1, "port": 2,
+                                             "log": "/dev/null"}), \
+             contextlib.redirect_stderr(captured), \
+             contextlib.redirect_stdout(io.StringIO()):
+            cli.cmd_run(self._args(
+                plugin=[plugin_dir(self.root / "src", "P")],
+                plugin_setting=['P:g:cookie="%s"' % secret]))
+        report = captured.getvalue()
+        self.assertNotIn(secret, report)
+        self.assertNotIn("deadbeef", report)
+        self.assertIn("cookie", report)
+        self.assertIn("str", report)
+        self.assertEqual(
+            json.loads(harness.plugin_setting_path(
+                self.persistent, "P", "g").read_text()),
+            {"cookie": secret},
+            "the value must still be seeded, only not printed")
 
     def test_dev_flags_are_not_left_behind_by_a_refused_seed(self) -> None:
         """The spec passes id and type checks and fails only when the
@@ -767,6 +886,30 @@ class ACommittableTargetIsProvenBeforeAnyIsWritten(unittest.TestCase):
                 self.persistent, self.plugins, ["P:a:k=1", "P:b:k=2"])
         self.assertIn("not writable", str(caught.exception))
         self.assertEqual(sorted(p.name for p in settings.iterdir()), [])
+
+    def test_a_failed_move_takes_its_staging_files_with_it(self) -> None:
+        """A move can fail for reasons no preflight covers -- EBUSY on a
+        bind-mounted target -- and raising there left every not-yet-moved
+        staging file in the profile. A repeatedly failing run accumulated
+        complete settings snapshots under names nothing reads: litter that
+        looks like state, from an operation that reported failure."""
+        real = os.replace
+
+        def refuse_the_second(src, dst, *rest):
+            if str(dst).endswith("g2"):
+                raise OSError(16, "Device or resource busy")
+            return real(src, dst, *rest)
+
+        with mock.patch.object(os, "replace", refuse_the_second):
+            with self.assertRaises(MdevError):
+                harness.seed_plugin_settings(
+                    self.persistent, self.plugins,
+                    ["P:g1:k=1", "P:g2:k=2", "P:g3:k=3"])
+        settings = harness.plugin_setting_path(
+            self.persistent, "P", "x").parent
+        # g1 was already moved -- that is the stated bound -- and nothing
+        # else may remain.
+        self.assertEqual(sorted(p.name for p in settings.iterdir()), ["g1"])
 
     def test_nothing_is_staged_where_it_could_be_mistaken_for_a_group(
             self) -> None:

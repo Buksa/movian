@@ -32,21 +32,32 @@ nothing is running, so the clean case is unaffected; when it REFUSES --
 a live pid it cannot confirm as ours -- `;` would delete the state file
 out from under that process and leave an orphan nothing can stop.
 
+A start URL proves nothing about the plugin. `mdev run` appends it to
+Movian's argv and `launch()` returns when the HTTP port appears, so nothing
+waits on it: if the plugin failed to load in A and loaded in B, A would
+still exit 1 and B still exit 0, and the pair would read as a seeding
+difference. So each half OPENS the clean route first, and that open is the
+control that the plugin loaded and its routes answer.
+
 ```sh
 # A -- no seed: the gate asks, the route parks, the wait refuses (exit 1)
 mdev stop --name seed247 && rm -rf /tmp/mdev/seed247
-mdev run -p support/devtools/popup_test_plugin --name seed247 popuptest:clean
-mdev open --name seed247 popuptest:gated ; echo "exit=$?"
+mdev run -p support/devtools/popup_test_plugin --name seed247
+mdev open --name seed247 popuptest:clean ; echo "clean=$?"   # must be 0
+mdev open --name seed247 popuptest:gated ; echo "gated=$?"   # must be 1
 
-# B -- seeded: same route, same everything else, reaches page-ready (exit 0)
+# B -- seeded: same routes, same everything else, both reach page-ready
 mdev stop --name seed247 && rm -rf /tmp/mdev/seed247
 mdev run -p support/devtools/popup_test_plugin --name seed247 \
-    --plugin-setting devtools_popup_test:popuptest:askFirst=false \
-    popuptest:clean
-mdev open --name seed247 popuptest:gated ; echo "exit=$?"
+    --plugin-setting devtools_popup_test:popuptest:askFirst=false
+mdev open --name seed247 popuptest:clean ; echo "clean=$?"   # must be 0
+mdev open --name seed247 popuptest:gated ; echo "gated=$?"   # must be 0
 
 mdev stop --name seed247        # leave nothing behind for the next pair
 ```
+
+Read each `exit=` line. A passes only if `clean=0` AND `gated=1`: a `clean`
+of 1 says the plugin never loaded, which would make `gated=1` mean nothing.
 
 A records that run as:
 
