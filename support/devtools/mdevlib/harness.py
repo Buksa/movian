@@ -12,8 +12,10 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -381,6 +383,16 @@ def parse_plugin_setting(spec: str) -> PluginSetting:
     see -- `createString` and `createInt` write the same file. So a value in
     double quotes is taken literally, which is the only way to seed the
     string `"2160"` or the string `"true"`.
+
+    The first `=` after the two colons separates key from value, so a VALUE
+    may contain `=` (a cookie, a query string) and a KEY may not. A setting
+    id containing `=` is legal to the core -- `settings.js` passes the id
+    straight to the prop tree and the store -- and cannot be addressed by
+    this grammar: `a=b=1` reads as key `a`. Nothing can detect which was
+    meant, so the guess is not narrowed here; instead `mdev run` prints the
+    key and value it took from every spec, so a wrong split is visible in
+    the output rather than only in the plugin's behaviour. The same is true
+    of the value coercion above, which that line also makes visible.
     """
     plugin_id, sep, assignment = spec.partition(":")
     group, sep2, rest = assignment.partition(":")
@@ -453,6 +465,66 @@ def _refuse_json_constant(token: str):
         % token)
 
 
+def _no_duplicate_members(pairs: list[tuple[str, Any]]) -> dict:
+    """`json.loads` keeps the LAST of a repeated member; the core keeps the
+    first. `htsmsg_json_deserialize2` appends every field
+    (htsmsg.c:66, TAILQ_INSERT_TAIL) and `htsmsg_get_str` resolves through
+    `htsmsg_field_find`, which walks from the head and returns the first
+    match (htsmsg.c:102-105). Neither side rejects the repeat.
+
+    So `{"id":"P","id":"Q"}` is `Q` here and `P` there: mdev would accept a
+    spec for `Q`, seed `Q@dev`, report success, and the core would create
+    `P@dev` and never read it. Refused rather than mirrored -- a manifest
+    that says `id` twice is a bug its author should see, and mirroring would
+    make mdev right about an id nobody meant.
+
+    Only the manifest. A settings store is written here and read by Duktape,
+    and `JSON.parse` keeps the last member exactly as Python does, so there
+    is no disagreement to reconcile there.
+    """
+    seen: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ValueError(
+                "member %r appears more than once (%r then %r). The core "
+                "would take the first and this reads the last, so they "
+                "would disagree about the same file"
+                % (key, seen[key], value))
+        seen[key] = value
+    return seen
+
+
+def _load_manifest(plugin_dir: str) -> dict:
+    """A `-p` directory's manifest, or an MdevError saying which part failed.
+
+    Raises rather than returning None. A `-p` directory whose manifest
+    cannot be read is a fact worth saying: swallowing it dropped the plugin
+    from the known set, and the refusal downstream then reported "not among
+    the -p plugins: (none given)" -- pointing at the id the caller typed
+    instead of at the manifest that could not be parsed.
+    """
+    manifest_path = Path(plugin_dir) / "plugin.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"),
+                              object_pairs_hook=_no_duplicate_members)
+    except OSError as error:
+        raise MdevError("cannot read %s: %s" % (manifest_path, error))
+    except json.JSONDecodeError as error:
+        raise MdevError("%s is not valid JSON: %s" % (manifest_path, error))
+    except ValueError as error:
+        # Not a decode failure: valid JSON the core would read differently.
+        raise MdevError("%s cannot be used as a manifest: %s"
+                        % (manifest_path, error))
+    # Parsing is not the same as being a manifest. `[]` gets through
+    # json.loads and then `.get` raises AttributeError -- a traceback where
+    # this promises an MdevError.
+    if not isinstance(manifest, dict):
+        raise MdevError(
+            "%s is valid JSON but not an object (%s), so it declares no id"
+            % (manifest_path, type(manifest).__name__))
+    return manifest
+
+
 def plugin_manifest(plugin_dir: str) -> tuple[str, str]:
     """A plugin's declared (id, type).
 
@@ -461,38 +533,20 @@ def plugin_manifest(plugin_dir: str) -> tuple[str, str]:
     `Core.storagePath` exists and `globalSettings` is never reached. A seed
     for such a plugin is a file nothing will ever read, reported as success.
     """
-    plugin_id = plugin_manifest_id(plugin_dir)
-    manifest = json.loads(
-        (Path(plugin_dir) / "plugin.json").read_text(encoding="utf-8"))
-    return plugin_id, str(manifest.get("type") or "")
+    manifest = _load_manifest(plugin_dir)
+    return _manifest_id(plugin_dir, manifest), str(manifest.get("type") or "")
 
 
 def plugin_manifest_id(plugin_dir: str) -> str:
-    """The `id` a plugin declares, which is what the core builds fqid from.
+    """The `id` a plugin declares, which is what the core builds fqid from."""
+    return _manifest_id(plugin_dir, _load_manifest(plugin_dir))
 
-    Raises rather than returning None. A `-p` directory whose manifest
-    cannot be read is a fact worth saying: swallowing it dropped the plugin
-    from the known set, and the refusal below then reported "not among the
-    -p plugins: (none given)" -- pointing at the id the caller typed
-    instead of at the manifest that could not be parsed.
-    """
-    manifest_path = Path(plugin_dir) / "plugin.json"
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except OSError as error:
-        raise MdevError("cannot read %s: %s" % (manifest_path, error))
-    except ValueError as error:
-        raise MdevError("%s is not valid JSON: %s" % (manifest_path, error))
-    # Parsing is not the same as being a manifest. `[]` gets through
-    # json.loads and then `.get` raises AttributeError -- a traceback where
-    # this function promises an MdevError.
-    if not isinstance(manifest, dict):
-        raise MdevError(
-            "%s is valid JSON but not an object (%s), so it declares no id"
-            % (manifest_path, type(manifest).__name__))
+
+def _manifest_id(plugin_dir: str, manifest: dict) -> str:
     value = manifest.get("id")
     if not isinstance(value, str) or not value:
-        raise MdevError("%s declares no \"id\"" % manifest_path)
+        raise MdevError(
+            "%s declares no \"id\"" % (Path(plugin_dir) / "plugin.json"))
     return value
 
 
@@ -735,14 +789,7 @@ def commit_plugin_settings(
     staged: list[tuple[Path, Path]] = []
     try:
         for path, contents in planned:
-            tmp = path.with_name(
-                "%s.mdev-new.%d" % (path.name, os.getpid()))
-            try:
-                tmp.write_text(json.dumps(contents), encoding="utf-8")
-            except OSError as error:
-                raise MdevError(
-                    "cannot stage the seed for %s: %s" % (path, error))
-            staged.append((tmp, path))
+            staged.append((_stage(path, contents), path))
     except MdevError:
         for tmp, _ in staged:
             tmp.unlink(missing_ok=True)
@@ -757,6 +804,56 @@ def commit_plugin_settings(
                 "cannot move the staged seed into %s: %s" % (path, error))
         written.append(path)
     return written
+
+
+def _stage(path: Path, contents: dict[str, Any]) -> Path:
+    """Write one seed to a sibling of `path`, ready to be moved onto it.
+
+    `mkstemp` rather than a name built from `path.name`, and all three
+    reasons were defects:
+
+    A predictable sibling can be pre-created. `<group>.mdev-new.<pid>` is
+    guessable by anything that can create a file in the profile -- which
+    lives under /tmp, whose ancestors mdev creates world-traversable -- and
+    a wrapper can fix the pid by pre-creating the link and then exec'ing
+    mdev. `write_text` follows a symlink, so it truncated the link's target
+    and `os.replace` then installed the LINK as the settings leaf, pointing
+    every later seed outside the profile too. Measured: `{"mine": true}`
+    became `{"pwned": 1}`. `mkstemp` opens with O_CREAT|O_EXCL and a name
+    nothing can predict, so there is nothing to pre-create and nothing to
+    follow.
+
+    A name built by appending to `path.name` is longer than `path.name`, so
+    a group within the filesystem's limit could have a destination that is
+    legal and a staging name that is not -- a stricter, undocumented limit
+    than Movian's own, reached after `--force` had already stopped the
+    instance. A short fixed prefix is independent of the group.
+
+    And `mkstemp` creates at 0600, which is what a NEW store should be:
+    a plugin's settings can hold a session cookie, and the profile's
+    ancestors are readable by other local users. That is narrower than the
+    0644 Movian itself would write, deliberately. An EXISTING store keeps
+    its own mode instead -- replacing the inode used to reset a 0600 store
+    to 0644, widening permissions as a side effect of seeding.
+    """
+    try:
+        fd, name = tempfile.mkstemp(dir=str(path.parent), prefix=".mdev-seed.")
+    except OSError as error:
+        raise MdevError(
+            "cannot stage a seed in %s: %s" % (path.parent, error))
+    tmp = Path(name)
+    try:
+        mode = None
+        if path.exists():
+            mode = stat.S_IMODE(path.stat().st_mode)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(contents))
+        if mode is not None:
+            os.chmod(tmp, mode)
+    except OSError as error:
+        tmp.unlink(missing_ok=True)
+        raise MdevError("cannot stage the seed for %s: %s" % (path, error))
+    return tmp
 
 
 def seed_plugin_settings(persistent: Path, plugins: list[str],

@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 import tempfile
 import unittest
@@ -436,6 +437,154 @@ class Seeding(unittest.TestCase):
 
 
 
+class TheStagingFileIsNotAnAttackSurface(unittest.TestCase):
+    """The temporary the commit moves into place is itself a destination.
+
+    Making the commit safe against the leaf introduced a second path that
+    nothing checked, and it was worse than the one it fixed: a predictable
+    sibling can be pre-created as a symlink, `write_text` followed it, and
+    `os.replace` then installed the LINK as the settings leaf -- so the
+    outside file was truncated (`{"mine": true}` became `{"pwned": 1}`, not
+    merged) and every later seed would write outside the profile too.
+    """
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.persistent = self.root / "persistent"
+        self.plugins = [plugin_dir(self.root / "src", "P")]
+
+    def test_the_old_predictable_name_is_no_longer_used(self) -> None:
+        """A link at the name the previous version chose is now irrelevant:
+        `mkstemp` picks a name nothing can predict, with O_EXCL, so there is
+        nothing to pre-create."""
+        leaf = harness.plugin_setting_path(self.persistent, "P", "g")
+        leaf.parent.mkdir(parents=True, exist_ok=True)
+        outside = self.root / "outside.json"
+        outside.write_text('{"mine": true}', encoding="utf-8")
+        os.symlink(outside, leaf.with_name(
+            "%s.mdev-new.%d" % (leaf.name, os.getpid())))
+        harness.seed_plugin_settings(
+            self.persistent, self.plugins, ["P:g:pwned=1"])
+        self.assertEqual(json.loads(outside.read_text()), {"mine": True})
+        self.assertFalse(leaf.is_symlink())
+        self.assertEqual(json.loads(leaf.read_text()), {"pwned": 1})
+
+    def test_a_staging_name_cannot_be_pre_created(self) -> None:
+        """The property behind that, checked directly rather than through
+        one guessed name: whatever `_stage` opens, it opens exclusively, so
+        a file already there is an error and never a target."""
+        leaf = harness.plugin_setting_path(self.persistent, "P", "g")
+        leaf.parent.mkdir(parents=True, exist_ok=True)
+        opened = []
+        real = os.open
+
+        def spy(path, flags, *rest):
+            if ".mdev-seed." in str(path):
+                opened.append(flags)
+            return real(path, flags, *rest)
+
+        with mock.patch.object(os, "open", spy):
+            harness.seed_plugin_settings(
+                self.persistent, self.plugins, ["P:g:k=1"])
+        self.assertTrue(opened, "nothing was staged")
+        for flags in opened:
+            self.assertTrue(flags & os.O_EXCL, "staged without O_EXCL")
+            self.assertTrue(flags & os.O_CREAT)
+
+    def test_a_long_group_is_not_made_illegal_by_the_suffix(self) -> None:
+        """A group the filesystem accepts must not fail because the staging
+        name is longer than the destination. 250 bytes is legal at the
+        destination and was ENAMETOOLONG once suffixed -- a stricter limit
+        than Movian's, invented here, and reached after `--force` had
+        already stopped the instance."""
+        group = "g" * 250
+        harness.seed_plugin_settings(
+            self.persistent, self.plugins, ["P:%s:k=1" % group])
+        self.assertEqual(
+            json.loads(harness.plugin_setting_path(
+                self.persistent, "P", group).read_text()), {"k": 1})
+
+    def test_an_existing_store_keeps_its_own_mode(self) -> None:
+        """Replacing the inode reset a 0600 store to 0644 -- widening
+        permissions as a side effect of seeding, on a profile under /tmp
+        whose ancestors mdev creates world-traversable, holding whatever a
+        plugin keeps in its settings.
+
+        Every mode here differs from the 0600 `mkstemp` creates, in both
+        directions. A first version of this test used 0600 itself and passed
+        with the preservation deleted -- the staging default happened to
+        agree with it, so the test measured nothing.
+        """
+        for mode in (0o640, 0o444, 0o664):
+            with self.subTest("%04o" % mode):
+                leaf = harness.plugin_setting_path(
+                    self.persistent, "P", "g%04o" % mode)
+                leaf.parent.mkdir(parents=True, exist_ok=True)
+                leaf.write_text('{"old": 1}', encoding="utf-8")
+                os.chmod(leaf, mode)
+                harness.seed_plugin_settings(
+                    self.persistent, self.plugins,
+                    ["P:g%04o:k=1" % mode])
+                self.assertEqual(stat.S_IMODE(leaf.stat().st_mode), mode)
+                self.assertEqual(json.loads(leaf.read_text()),
+                                 {"old": 1, "k": 1})
+
+    def test_a_new_store_is_not_world_readable(self) -> None:
+        leaf = harness.plugin_setting_path(self.persistent, "P", "g")
+        harness.seed_plugin_settings(
+            self.persistent, self.plugins, ["P:g:k=1"])
+        self.assertEqual(stat.S_IMODE(leaf.stat().st_mode) & 0o077, 0)
+
+
+class TheManifestIsReadTheWayTheCoreReadsIt(unittest.TestCase):
+    """`json.loads` keeps the last repeated member; the core keeps the first.
+
+    `htsmsg_json_deserialize2` appends every field (htsmsg.c:66) and
+    `htsmsg_field_find` walks from the head (htsmsg.c:102-105), so
+    `htsmsg_get_str(ctrl, "id")` at plugins.c:633 resolves to the FIRST.
+    Neither side rejects the repeat, so the two disagree silently about the
+    same file: mdev would seed `Q@dev` and the core would create `P@dev`.
+
+    The source half is asserted rather than trusted, because it is the fact
+    that makes refusing correct.
+    """
+
+    def test_the_core_takes_the_first_of_a_repeated_member(self) -> None:
+        htsmsg = (REPO_ROOT / "src" / "htsmsg" / "htsmsg.c").read_text(
+            encoding="utf-8")
+        self.assertIn("TAILQ_INSERT_TAIL(&msg->hm_fields, f, hmf_link);",
+                      htsmsg)
+        find = htsmsg.split("htsmsg_field_find(htsmsg_t *msg", 1)[1]
+        body = find.split("\n}", 1)[0]
+        self.assertIn("TAILQ_FOREACH(f, &msg->hm_fields, hmf_link)", body)
+        self.assertNotIn("TAILQ_FOREACH_REVERSE", body)
+
+    def test_a_repeated_member_is_refused(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        weird = root / "src" / "dup"
+        weird.mkdir(parents=True)
+        (weird / "plugin.json").write_text(
+            '{"id":"P","id":"Q","type":"ecmascript","version":"1.0.0"}',
+            encoding="utf-8")
+        with self.assertRaises(MdevError) as caught:
+            harness.seed_plugin_settings(
+                root / "persistent", [str(weird)], ["Q:g:k=1"])
+        self.assertIn("more than once", str(caught.exception))
+        self.assertFalse((root / "persistent").exists())
+
+    def test_an_ordinary_manifest_still_reads(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        self.assertEqual(
+            harness.plugin_manifest(plugin_dir(root / "src", "P")),
+            ("P", "ecmascript"))
+
+
 class RunJudgesBeforeItTouchesAnything(unittest.TestCase):
     """Two orderings inside `cmd_run`, pinned where they live.
 
@@ -594,6 +743,11 @@ class ACommittableTargetIsProvenBeforeAnyIsWritten(unittest.TestCase):
                 self.persistent, "P", "good").read_text()),
             {"k": 1})
 
+    @unittest.skipIf(os.geteuid() == 0,
+                     "root bypasses the mode bits this case is about: "
+                     "chmod(0555) leaves os.access(W_OK) true under "
+                     "CAP_DAC_OVERRIDE, so as UID 0 this would measure the "
+                     "runner rather than the refusal")
     def test_an_unwritable_directory_stops_the_whole_request(self) -> None:
         """What the leaf's mode does not decide, the directory's does. The
         request is refused before any target changes, rather than partway

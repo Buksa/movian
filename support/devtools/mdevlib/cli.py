@@ -37,7 +37,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     # running instance a few lines down, so a malformed --plugin-setting or
     # an unknown plugin id used to terminate a working instance for a
     # request that was never going to run (movian#247).
-    harness.resolve_plugin_settings(args.plugin, args.plugin_setting)
+    settings = harness.resolve_plugin_settings(
+        args.plugin, args.plugin_setting)
 
     inst = Instance(args.name)
     own_pid = inst.live_pid()
@@ -96,6 +97,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     # than being asked (movian#247).
     for path in harness.commit_plugin_settings(planned_settings):
         print("seeded %s" % path, file=sys.stderr)
+    # What the spec was TAKEN to mean, not what it said. Two guesses live in
+    # that grammar -- where the key ends and what type the value is -- and
+    # neither is detectable from the plugin's side: a key that swallowed an
+    # `=`, or `"2160"` that lost its quotes to the shell, both seed
+    # successfully and leave the plugin reading its default (movian#247).
+    for setting in settings:
+        print("  %s:%s -> %s = %r"
+              % (setting.plugin_id, setting.group, setting.key,
+                 setting.value), file=sys.stderr)
 
     argv = harness.build_argv(
         inst, args.plugin, args.skin, args.libav_log, args.start_url,
@@ -692,6 +702,12 @@ def build_parser() -> argparse.ArgumentParser:
                           "all -- the first two colons are structure -- and "
                           "each must be a single path component, since it "
                           "names a file inside the plugin's own profile. "
+                          "The first '=' after them splits KEY from VALUE, "
+                          "so a VALUE may contain '=' and a KEY may not: "
+                          "'a=b=1' seeds the key 'a'. Every seed is echoed "
+                          "as the key and value it was taken to mean, "
+                          "because neither that split nor the type guess "
+                          "above is visible from the plugin's side. "
                           "Only globalSettings is covered: "
                           "settings.kvstoreSettings() keeps values in the "
                           "sqlite kvstore instead, and nothing here writes "
