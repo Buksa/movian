@@ -130,13 +130,21 @@ jobs:
           python3 -m unittest discover -s tests/tooling/mdev
           -p 'test_lsp_doctor.py' -v
 
-      # The one compiled check here, and it stays inside this workflow's rule
-      # against building: two files, no configure, no submodules, no libav.
-      # It exercises `src/misc/json.c` through `json_deserialize` -- the
-      # parser every htsmsg JSON reader ends at, and what reads every plugin
-      # manifest (plugins.c:628) -- because the defect it pins was a wrong
-      # CHARACTER and never a crash, which is how it survived since 2013
-      # (movian#250).
+      # The one compiled check here. It IS a compile, so it owes an argument
+      # against the rule at the top of this file -- and the rule's reason is
+      # footprint: submodules, libav, ext-cache, and a workflow that stops
+      # fitting in a minute. This is two files, no configure, no submodules,
+      # no libav. Measured in CI: 0.19s inside a 67s job.
+      #
+      # What buys that fifth of a second is the failure history. The defect
+      # it pins is a wrong CHARACTER that never crashes: introduced in 2010
+      # (7c34bffe9), carried into a replacement decoder in 2011 (74de6f03d),
+      # and preserved through a 166-line rewrite of its own function in 2013
+      # (3fa120ff7). Review had two chances and took neither, because there
+      # is nothing to see. So the check sweeps all 22 hex digit characters
+      # rather than the six that were wrong -- a line-level pin would catch
+      # an edit and miss the rewrite, which is the thing that actually
+      # happened (movian#250).
       - name: core json escape decoding
         run: |
           cc -I src -Werror -o /tmp/test_json_escapes \
