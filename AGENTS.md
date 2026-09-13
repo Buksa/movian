@@ -175,6 +175,50 @@ Both standards share one rule. Before reporting a number, name what it counted
 and what would move it. A count that moves in a direction it cannot move is a
 measurement bug, not a finding.
 
+And test counts, green CI, and a reviewer finding nothing are not evidence
+about what a user can see. All three are easy to report while having shown
+nothing anyone would notice.
+
+## Fixing What Was Found
+
+KISS, DRY and YAGNI, applied to fixes rather than to code shape.
+
+**Fix the violated invariant, not only the reported example.** Repeated
+findings in one area are a reason to reassess the approach before adding
+another guard. #248 is the worked example: five consecutive findings in the
+manifest-id decoder before the approach changed, and three of them existed
+only because each fix approximated the thing it should have reproduced.
+Eight of that branch's fifteen commits touched the one area.
+
+**Prefer fixing the responsible implementation** and using standard
+primitives over maintaining a parallel compatibility layer or a custom
+mechanism.
+
+**Keep one authoritative implementation of each rule** -- and note what that
+does not say. Similar-looking code alone does not justify collapsing it, and
+independent safety checks may remain when they protect different entry points
+or trust boundaries. Deleting a check because removing it leaves a mutation
+run green is the opposite of this rule when the two checks guard different
+doors.
+
+**Do not introduce new capabilities or stronger guarantees** without a
+concrete requirement. State the actual guarantee and its limits: several
+atomic replacements are not a transaction, and saying so is cheaper and more
+honest than building one.
+
+For a multi-step change, define a bounded acceptance checklist before
+editing, derived from the issue and the observable behaviour, including the
+failure cases that matter and the explicit non-goals.
+
+A review is complete when every criterion has evidence **for the final
+revision**, confirmed findings that violate the agreed behaviour are
+resolved, and the remaining ones are classified out loud -- duplicate,
+unsupported, or out of scope, with reasons. Findings are not silently
+dropped, and new ones do not silently expand scope: a reproduced regression
+stays a blocker, while unrelated defects and new capabilities are tracked
+separately. If a fix changes the design or the guarantee, revisit the
+criteria and the verification.
+
 ## Narrowing The Generated API
 
 `generated/movian-api.d.ts` is a contract. It has one plugin author today and
