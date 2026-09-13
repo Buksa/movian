@@ -1,0 +1,10 @@
+{
+  "type": "ecmascript",
+  "id": "test_json_\u004A",
+  "title": "JSON Unicode parser test \u00C9",
+  "version": "1.0.0",
+  "category": "other",
+  "synopsis": "C manifest and Duktape JSON parser comparison.",
+  "file": "json_unicode.js",
+  "apiversion": 2
+}
