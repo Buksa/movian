@@ -1259,8 +1259,17 @@ def http_request(base_url: str, path: str, timeout: float = 5.0,
         }
 
 
-def get_prop(base_url: str, path: str, timeout: float = 5.0) -> dict[str, Any] | None:
-    """Fetch and parse one /api/prop node; None if the prop does not exist."""
+def get_prop_status(base_url: str, path: str, timeout: float = 5.0
+                    ) -> tuple[dict[str, Any] | None, int | None]:
+    """One /api/prop read, as `(parsed, status)`.
+
+    `get_prop` below returns None for a 404 and None for silence, which is
+    right for "give me this prop" and wrong for "does this prop exist".
+    `pending_popups` needs that difference, so the status comes back with
+    the node rather than being thrown away. `status` is None when the
+    server never answered at all -- `http_request` only sets it when it
+    did (harness.py, http_request).
+    """
     # `:` and `@` are legal in a path segment (RFC 3986 pchar) and Movian's
     # /api/prop does not decode percent-escapes, so encoding them makes a
     # perfectly addressable prop unreachable. A service registered by a plugin
@@ -1269,8 +1278,15 @@ def get_prop(base_url: str, path: str, timeout: float = 5.0) -> dict[str, Any] |
     encoded = urllib.parse.quote(path, safe="/*:@")
     result = http_request(base_url, "/api/prop/" + encoded, timeout)
     if not result.get("ok"):
-        return None
-    return diag.parse_prop(result["body"].decode("utf-8", "replace"))
+        return None, result.get("status")
+    return (diag.parse_prop(result["body"].decode("utf-8", "replace")),
+            result.get("status"))
+
+
+def get_prop(base_url: str, path: str,
+             timeout: float = 5.0) -> dict[str, Any] | None:
+    """Fetch and parse one /api/prop node; None if the prop does not exist."""
+    return get_prop_status(base_url, path, timeout)[0]
 
 
 def prop_value(base_url: str, path: str, timeout: float = 5.0) -> str | None:
@@ -1304,14 +1320,37 @@ def pending_popups(base_url: str) -> int | None:
     identity, which the prop tree does not expose; giving popups one is a
     core change and its own decision.
 
+    Three states, not two. A COUNT when the queue answers; ZERO when the
+    prop does not exist, which is every instance until something raises a
+    popup; None when nothing answered at all. The middle one used to read
+    as None, and since None fails closed for the whole wait, `mdev open`
+    issued against a fresh instance could never certify a page ready
+    (movian#249).
+
     None is unreadable and every caller must fail closed on it. Collapsing
     it to zero is how an instrument failure certifies a parked page ready.
     AGENTS.md: a silent instrument is not evidence until the instrument is
     known to be working.
     """
-    parsed = get_prop(base_url, POPUPS_PROP)
+    parsed, status = get_prop_status(base_url, POPUPS_PROP)
+    # `parse_prop` is TOTAL: garbage and an empty body both come back as
+    # `{"value": None}` rather than None, so an answer that is not a prop
+    # rendering at all used to fall through the `!= "directory"` branch and
+    # read as an EMPTY QUEUE. That is the fail-open direction this guard
+    # exists to stop -- a proxy error page or a truncated transfer would
+    # have certified a parked page ready. A node with no value is not a
+    # queue; a well-formed node that simply is not a directory still is.
+    if parsed is not None and parsed.get("value") is None:
+        parsed = None
     if parsed is None:
-        return None
+        # 404 is an ANSWER, and the one that matters here: `prop_http.c`
+        # returns it for a prop that does not exist, and `global/popups`
+        # does not exist until something raises one. Measured on a fresh
+        # instance -- 404 immediately after `mdev run`, 200 five seconds
+        # later -- so "absent" is a fact ABOUT the queue and means zero.
+        # Anything else is not an answer: a refused connection, a timeout,
+        # a 500. An unreadable instrument must not read as an empty one.
+        return 0 if status == 404 else None
     if parsed.get("value") != "directory":
         return 0
     return len(parsed.get("children", []))
@@ -1338,6 +1377,23 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
     # blocking on one would hang every static page:* open until the deadline
     # and blame the route for it.
     popups_before = pending_popups(base)
+    if popups_before is None:
+        # One more read, and only one. A single refused or timed-out probe
+        # is a blip, not a broken instrument, and the commit point treats a
+        # None baseline as PERMANENT -- so one bad read cost the whole 20s
+        # wait and printed a queue diagnosis while the queue answered for
+        # the other 19 seconds. Reproduced by two reviewers of movian#249.
+        #
+        # Not a wait for the instance to come up: `launch()` has already
+        # blocked on the core's "Listening on port" trace, so the port is
+        # listening. An earlier attempt claimed otherwise and added a 5s
+        # retry loop; that premise was measured false and removed.
+        #
+        # Before the open, because /api/open only QUEUES the nav event: a
+        # baseline taken afterwards could count a popup this route raised
+        # and blind the guard to exactly what it is for. If this read fails
+        # too, the wait still fails closed.
+        popups_before = pending_popups(base)
 
     def issue_open() -> None:
         result = http_request(

@@ -66,6 +66,7 @@ class Navigator:
 
     def __init__(self, *, raises_popup: bool, publishes_loading: bool = False,
                  popups_before: int = 0, probe_readable: bool = True,
+                 unreadable_first: int = 0,
                  url: str = "popuptest:blocking"):
         self.url = url
         self.raises_popup = raises_popup
@@ -78,6 +79,10 @@ class Navigator:
         self.popups_before = popups_before
         # `get_prop` returning None: the request timed out or was refused.
         self.probe_readable = probe_readable
+        # How many of the first probes fail transiently. The instrument
+        # works; one read did not.
+        self.unreadable_first = unreadable_first
+        self.probes = 0
         self.landed = False
 
     def http_request(self, base, path, timeout=5.0, method="GET", form=None):
@@ -104,7 +109,10 @@ class Navigator:
         return 0
 
     def pending_popups(self, base):
-        return self.popups if self.probe_readable else None
+        self.probes += 1
+        if not self.probe_readable or self.probes <= self.unreadable_first:
+            return None
+        return self.popups
 
 
 class Clock:
@@ -223,12 +231,17 @@ class TheQueueIsCountedNotFingerprinted(unittest.TestCase):
     """
 
     def check(self, parsed, expected):
-        saved = harness.get_prop
-        harness.get_prop = lambda base, path, timeout=5.0: parsed
+        # The seam moved with movian#249: `pending_popups` needs the status
+        # as well as the node, so it reads through `get_prop_status`. These
+        # cases are about the counting rule over a parsed node, which is
+        # what they always were, so the node is what is faked.
+        saved = harness.get_prop_status
+        harness.get_prop_status = (
+            lambda base, path, timeout=5.0: (parsed, 200))
         try:
             self.assertEqual(harness.pending_popups("http://x"), expected)
         finally:
-            harness.get_prop = saved
+            harness.get_prop_status = saved
 
     def test_a_directory_is_counted(self) -> None:
         self.check({"value": "directory",
@@ -237,8 +250,53 @@ class TheQueueIsCountedNotFingerprinted(unittest.TestCase):
     def test_an_empty_directory_is_zero(self) -> None:
         self.check({"value": "directory", "children": []}, 0)
 
-    def test_an_unreadable_prop_is_none_not_zero(self) -> None:
-        self.check(None, None)
+    def test_a_node_that_will_not_parse_is_none_not_zero(self) -> None:
+        """An answer that is not a prop is not an empty queue.
+
+        Faked at `http_request` with a body a real responder could send,
+        because the pair this asks about cannot be produced at the seam
+        above it: `parse_prop` is TOTAL -- garbage and an empty body both
+        return `{"value": None}`, never None -- so `(None, 200)` is not a
+        state the code can reach, and a test built on it pins nothing.
+        Measured: 200 with a proxy error page read as 0, the fail-open
+        direction, until the value check was added.
+        """
+        saved = harness.http_request
+        harness.http_request = lambda base, path, timeout=5.0: {
+            "ok": True, "status": 200,
+            "body": b"<html><body>502 Bad Gateway</body></html>"}
+        try:
+            self.assertIsNone(harness.pending_popups("http://x"))
+        finally:
+            harness.http_request = saved
+
+    def test_a_well_formed_node_that_is_not_a_directory_is_zero(self) -> None:
+        """The control the check above must not swallow.
+
+        `(void)` is a rendering observed on a running instance -- `mdev
+        props` prints `global/popups = (void)` on one where the node exists
+        and holds nothing. That is a real, empty queue and must stay 0, or
+        the value check above would turn every quiet instance unreadable.
+
+        What creates the node, now that it is pinned: the SKIN does.
+        `glwskins/flat/universe.view:79` holds `cloner($core.popups, ...)`,
+        and a GLW subscription by name creates the prop it subscribes to.
+        That is why a fresh instance which raised nothing answers 404 and
+        then 200 a few seconds later -- the skin loads, not a popup. The
+        three raisers create it too (`prop_create(prop_get_global(),
+        "popups")` at notifications.c:204, connman.c:341,
+        fa_filepicker.c:296), and a READ never does: `prop_from_path`
+        resolves through `prop_findv`, whose third argument is
+        `allow_indexing` and not a create flag (prop_core.c:5049).
+
+        Captured from the running instance, which is where `(void)` above
+        comes from:
+
+            popups (ref:2 xref:1) is a (void)
+            Value Subscribers:
+            .//glwskins/flat/universe.view:79
+        """
+        self.check({"value": "(void)", "children": []}, 0)
 
     def test_children_without_a_message_are_still_counted(self) -> None:
         """The regression itself: an auth prompt has no `message`, and it
@@ -280,6 +338,104 @@ class AnUnreadableProbeFailsClosed(unittest.TestCase):
         wait that trusts an unreadable instrument is guessing."""
         nav = Navigator(raises_popup=False, probe_readable=False)
         self.assertIsInstance(drive(nav), harness.MdevError)
+
+
+class OneBlipIsNotABrokenInstrument(unittest.TestCase):
+    """A single failed baseline read must not doom the whole wait.
+
+    `popups_before` is read once, before the navigation, and the commit
+    point treats None as permanent. So one refused read -- a 5s
+    `http_request` timeout expiring once, a restart racing the port on a
+    loaded machine -- ran the full 20s and died with "the popup queue could
+    not be read" while the instrument answered for the remaining 19
+    seconds. Reproduced independently by two reviewers of movian#249.
+
+    NOT the startup race an earlier attempt claimed: `launch()` blocks on
+    the core's "Listening on port" trace before `mdev run` returns, and a
+    fresh instance answers 404 immediately. This is a transient, and the
+    repair is one more read rather than a wait for something to come up.
+
+    The retry stays BEFORE the open. `/api/open` only queues the nav event,
+    so a baseline taken after it could count a popup this route raised and
+    blind the guard to the thing it is for.
+    """
+
+    def test_a_single_refused_baseline_read_is_retried(self) -> None:
+        nav = Navigator(raises_popup=False, unreadable_first=1)
+        result = drive(nav)
+        self.assertNotIsInstance(result, harness.MdevError, result)
+        self.assertEqual(result["url"], nav.url)
+
+    def test_the_retry_still_precedes_the_navigation(self) -> None:
+        """If the retried baseline were taken after the open, this route's
+        own popup would land in it and the parked page would read ready."""
+        nav = Navigator(raises_popup=True, unreadable_first=1)
+        result = drive(nav)
+        self.assertIsInstance(result, harness.MdevError, result)
+        self.assertIn("popup(s) pending", str(result))
+
+    def test_an_instrument_that_stays_down_still_fails_closed(self) -> None:
+        nav = Navigator(raises_popup=False, probe_readable=False)
+        result = drive(nav)
+        self.assertIsInstance(result, harness.MdevError, result)
+        self.assertIn("queue could not be read", str(result))
+
+
+class AnAbsentQueueIsZeroNotUnreadable(unittest.TestCase):
+    """`global/popups` does not exist yet, and absent is not unreadable
+    (movian#249).
+
+    Measured on a fresh instance, against the port `launch()` has already
+    waited for:
+
+        immediately after `mdev run`:  HTTP 404
+        five seconds later:            HTTP 200
+
+    So the API is answering the whole time -- `launch()` blocks on the
+    core's "Listening on port" trace (asyncio_posix.c:882) before `mdev
+    run` returns -- and the 404 is an answer, not silence. `get_prop` maps
+    a 404 and a refused connection to the same None, so `pending_popups`
+    called an empty queue unreadable; an unreadable queue fails closed for
+    the whole wait, by design, and `mdev open page:home` straight after
+    `mdev run` timed out at 20s on a fully rendered page.
+
+    An absent prop is a fact ABOUT the queue: nothing has ever been
+    raised. A transport failure is the absence of a fact. `http_request`
+    carries `status` only when the server answered, so telling them apart
+    needs no new machinery.
+
+    A first attempt at this added a retry loop for the baseline, on the
+    theory that the port might not be up yet. The measurement above
+    refutes that theory, and the loop went with it: the 404 is the whole
+    defect.
+    """
+
+    def check(self, response, expected):
+        # Faked at `http_request`, so the status handling under test is the
+        # real one. The bodies are what Movian's /api/prop actually sends:
+        # a 404 carries the server's error page, and a refusal carries no
+        # body at all because there was no response.
+        saved = harness.http_request
+        harness.http_request = lambda base, path, timeout=5.0: response
+        try:
+            self.assertEqual(harness.pending_popups("http://x"), expected)
+        finally:
+            harness.http_request = saved
+
+    def test_a_refused_connection_is_unreadable(self) -> None:
+        self.check({"ok": False, "error": "Connection refused",
+                    "path": "/api/prop/global/popups"}, None)
+
+    def test_an_absent_prop_is_zero(self) -> None:
+        """The startup case, and the one that made #249 reachable."""
+        self.check({"ok": False, "status": 404,
+                    "body": b"No such property"}, 0)
+
+    def test_a_server_error_is_unreadable(self) -> None:
+        """Answered, but not with an answer. 500 says nothing about the
+        queue, so it must not read as an empty one."""
+        self.check({"ok": False, "status": 500,
+                    "body": b"Internal error"}, None)
 
 
 if __name__ == "__main__":
