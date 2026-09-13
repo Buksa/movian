@@ -263,9 +263,23 @@ class TheQueueIsCountedNotFingerprinted(unittest.TestCase):
             harness.http_request = saved
 
     def test_a_well_formed_node_that_is_not_a_directory_is_zero(self) -> None:
-        """The control the check above must not swallow: `global/popups`
-        exists as a void leaf once something has read it, and that is a
-        real, empty queue -- not an unreadable one."""
+        """The control the check above must not swallow.
+
+        `(void)` is a rendering observed on a running instance -- `mdev
+        props` prints `global/popups = (void)` on one where the node exists
+        and holds nothing. That is a real, empty queue and must stay 0, or
+        the value check above would turn every quiet instance unreadable.
+
+        Not claimed here, because it is not established: WHAT creates the
+        node. A read does not -- `prop_from_path` resolves through
+        `prop_findv`, whose third argument is `allow_indexing`, not a
+        create flag, and which returns NULL when the walk fails
+        (prop_core.c:5049). The three raisers create it explicitly
+        (`prop_create(prop_get_global(), "popups")` at notifications.c:204,
+        connman.c:341, fa_filepicker.c:296), yet a fresh instance that
+        raised nothing answered 404 and then 200 five seconds later, so
+        something else does too. Whatever it is does not change this rule.
+        """
         self.check({"value": "(void)", "children": []}, 0)
 
     def test_children_without_a_message_are_still_counted(self) -> None:
