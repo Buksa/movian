@@ -9,17 +9,20 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from . import movian_diag_snapshot as diag
 
@@ -351,6 +354,620 @@ def kill_owned_pid(inst: "Instance", pid: int, timeout: float = 5.0) -> str:
 # Launch
 # ---------------------------------------------------------------------------
 
+# How the core names a plugin loaded with `-p`: `plugin_load(path, "dev")`
+# (plugins.c:1435, 1465) and `fqid = "<manifest id>@<origin>"`
+# (plugins.c:240). Callers pass the manifest id and this is appended, so the
+# suffix stays an implementation detail rather than something to get wrong.
+PLUGIN_DEV_ORIGIN = "dev"
+
+
+class PluginSetting(NamedTuple):
+    plugin_id: str
+    group: str
+    key: str
+    value: Any
+
+
+def parse_plugin_setting(spec: str) -> PluginSetting:
+    """Parse `<plugin-id>:<group>:<key>=<value>`.
+
+    Only the first two `:` and the first `=` after them are structure. A
+    domain or a cookie is an ordinary setting value and carries both.
+
+    `true`/`false` become 1 and 0, which is what Movian holds: the setting
+    prop reads `type = bool, value = 1`, `setvalue` stores what
+    `prop.subscribeValue` yields (settings.js:78-83, 302-304), and
+    `getvalue` hands it back RAW with no coercion (settings.js:298-300). A
+    digit string becomes an int for the same reason.
+
+    Those two rules are a guess about the DECLARED type, which mdev cannot
+    see -- `createString` and `createInt` write the same file. So a value in
+    double quotes is taken literally, which is the only way to seed the
+    string `"2160"` or the string `"true"`.
+
+    The first `=` after the two colons separates key from value, so a VALUE
+    may contain `=` (a cookie, a query string) and a KEY may not. A setting
+    id containing `=` is legal to the core -- `settings.js` passes the id
+    straight to the prop tree and the store -- and cannot be addressed by
+    this grammar: `a=b=1` reads as key `a`. Nothing can detect which was
+    meant, so the guess is not narrowed here; instead `mdev run` prints the
+    key and value it took from every spec, so a wrong split is visible in
+    the output rather than only in the plugin's behaviour. The same is true
+    of the value coercion above, which that line also makes visible.
+    """
+    plugin_id, sep, assignment = spec.partition(":")
+    group, sep2, rest = assignment.partition(":")
+    if not sep or not sep2:
+        raise MdevError(
+            "--plugin-setting expects <plugin-id>:<group>:<key>=<value>, "
+            "got %r" % _redacted_spec(spec))
+    key, sep3, value = rest.partition("=")
+    if not sep3:
+        raise MdevError("--plugin-setting %r has no <key>=<value>"
+                        % _redacted_spec(spec))
+    if not plugin_id or not group or not key:
+        raise MdevError(
+            "--plugin-setting %r has an empty plugin id, group or key"
+            % _redacted_spec(spec))
+    # Both halves that become path components, checked HERE rather than
+    # where they are joined. `plugin_setting_path` refused an id like
+    # `../P` too, but that runs in the plan -- after `mdev run --force` has
+    # already stopped the instance for a request that cannot proceed.
+    _one_path_segment("plugin id", plugin_id)
+    _one_path_segment("settings group", group)
+    return PluginSetting(plugin_id, group, key, _coerce_setting(value))
+
+
+# What a plugin can actually hold. `store.js` parses the seed with
+# `JSON.parse`, and a Duktape Number is a double (DUK_TYPE_NUMBER,
+# ext/duktape/duktape.h:267), so an integer past the exactly-representable
+# range comes back as a DIFFERENT integer: 9007199254740993 is written
+# exactly and read as 9007199254740992. Measured. `--dev-flags` is not
+# affected -- those go to htsmsg, read by the core in C -- so the limit
+# belongs here and not in `coerce_scalar`.
+MAX_EXACT_SETTING_INT = 2 ** 53 - 1
+
+
+def _redacted_spec(spec: str) -> str:
+    """A malformed spec, safe to print: its structure without its value.
+
+    The three refusals above fire when the spec could not be parsed, so
+    there is no key to name and the raw spec is the only thing left to
+    report -- and the raw spec carries the value. Mistyping is the likeliest
+    way this path is reached, and a value is the part most likely to be a
+    cookie or a token, so the structure is echoed and the value is not.
+    A spec with no `=` at all has nothing to hide and is shown whole.
+    """
+    head, sep, _ = spec.partition("=")
+    return head + "=<redacted>" if sep else spec
+
+
+def _coerce_setting(value: str) -> Any:
+    if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+        return value[1:-1]
+    if value == "true":
+        return 1
+    if value == "false":
+        return 0
+    coerced = coerce_scalar(value)
+    if isinstance(coerced, int) and abs(coerced) > MAX_EXACT_SETTING_INT:
+        try:
+            projected = int(float(coerced))
+        except OverflowError:
+            projected = "Infinity" if coerced > 0 else "-Infinity"
+        raise MdevError(
+            "--plugin-setting value %s is outside the range a plugin can "
+            "read back exactly (+/-%d, Number.MAX_SAFE_INTEGER): store.js "
+            "parses the seed with JSON.parse and a Duktape Number is a "
+            "double, so the plugin would see %s instead. Quote it to seed "
+            "the string."
+            % (value, MAX_EXACT_SETTING_INT, projected))
+    return coerced
+
+
+def _one_path_segment(kind: str, value: str) -> str:
+    """Refuse anything that is not a single, literal path component.
+
+    `Path("a") / "/tmp/x"` is `/tmp/x` -- pathlib discards everything before
+    an absolute part -- so an absolute group name walked straight out of the
+    profile and merged into whatever JSON file it landed on. `..` walked out
+    the other way. The core concatenates strings (settings.js:297) and never
+    escapes anywhere, so this is mdev's hazard, not Movian's, and refusing
+    is the whole fix: a settings group is an identifier, not a path.
+    """
+    if not value or value in (".", "..") or "/" in value or "\\" in value:
+        raise MdevError(
+            "%s %r must be a single path component -- no separators, no "
+            "`..` -- because it names a file inside the plugin's own "
+            "profile" % (kind, value))
+    return value
+
+
+def plugin_setting_path(persistent: Path, plugin_id: str,
+                        group: str) -> Path:
+    """Where `globalSettings` keeps one group for one dev-loaded plugin.
+
+    `Core.storagePath` is `<persistent>/plugins/<fqid>`
+    (ecmascript.c:881-882) and the group is a JSON file under `settings/`
+    there (settings.js:276,297; store.js:20-21).
+    """
+    fqid = "%s@%s" % (_one_path_segment("plugin id", plugin_id),
+                      PLUGIN_DEV_ORIGIN)
+    return (persistent / "plugins" / fqid / "settings"
+            / _one_path_segment("settings group", group))
+
+
+def _refuse_json_constant(token: str):
+    raise ValueError(
+        "%s is not valid JSON to Movian -- `JSON.parse` rejects it and "
+        "store.js:48-51 swallows the failure, leaving an empty store"
+        % token)
+
+
+def _check_finite_json(value: Any, path: Path) -> None:
+    if isinstance(value, float) and not math.isfinite(value):
+        raise MdevError(
+            "cannot merge into %s: it contains a non-finite JSON number, "
+            "which JSON.parse rejects" % path)
+    if isinstance(value, dict):
+        for child in value.values():
+            _check_finite_json(child, path)
+    elif isinstance(value, list):
+        for child in value:
+            _check_finite_json(child, path)
+
+
+def _no_duplicate_members(pairs: list[tuple[str, Any]]) -> dict:
+    """`json.loads` keeps the LAST of a repeated member; the core keeps the
+    first. `htsmsg_json_deserialize2` appends every field
+    (htsmsg.c:66, TAILQ_INSERT_TAIL) and `htsmsg_get_str` resolves through
+    `htsmsg_field_find`, which walks from the head and returns the first
+    match (htsmsg.c:102-105). Neither side rejects the repeat.
+
+    So `{"id":"P","id":"Q"}` is `Q` here and `P` there: mdev would accept a
+    spec for `Q`, seed `Q@dev`, report success, and the core would create
+    `P@dev` and never read it. Refused rather than mirrored -- a manifest
+    that says `id` twice is a bug its author should see, and mirroring would
+    make mdev right about an id nobody meant.
+
+    Only the manifest. A settings store is written here and read by Duktape,
+    and `JSON.parse` keeps the last member exactly as Python does, so there
+    is no disagreement to reconcile there.
+    """
+    seen: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ValueError(
+                "member %r appears more than once (%r then %r). The core "
+                "would take the first and this reads the last, so they "
+                "would disagree about the same file"
+                % (key, seen[key], value))
+        seen[key] = value
+    return seen
+
+
+def _load_manifest(plugin_dir: str) -> dict:
+    """A `-p` directory's manifest, or an MdevError saying which part failed.
+
+    Raises rather than returning None. A `-p` directory whose manifest
+    cannot be read is a fact worth saying: swallowing it dropped the plugin
+    from the known set, and the refusal downstream then reported "not among
+    the -p plugins: (none given)" -- pointing at the id the caller typed
+    instead of at the manifest that could not be parsed.
+    """
+    manifest_path = Path(plugin_dir) / "plugin.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"),
+                              object_pairs_hook=_no_duplicate_members)
+    except OSError as error:
+        raise MdevError("cannot read %s: %s" % (manifest_path, error))
+    except json.JSONDecodeError as error:
+        raise MdevError("%s is not valid JSON: %s" % (manifest_path, error))
+    except ValueError as error:
+        # Not a decode failure: valid JSON the core would read differently.
+        raise MdevError("%s cannot be used as a manifest: %s"
+                        % (manifest_path, error))
+    # Parsing is not the same as being a manifest. `[]` gets through
+    # json.loads and then `.get` raises AttributeError -- a traceback where
+    # this promises an MdevError.
+    if not isinstance(manifest, dict):
+        raise MdevError(
+            "%s is valid JSON but not an object (%s), so it declares no id"
+            % (manifest_path, type(manifest).__name__))
+    return manifest
+
+
+def plugin_manifest(plugin_dir: str) -> tuple[str, str]:
+    """A plugin's declared (id, type).
+
+    The type matters: `plugins.c:674` sends `"views"` down a branch that
+    never calls `ecmascript_plugin_load`, so no ES context is created, no
+    `Core.storagePath` exists and `globalSettings` is never reached. A seed
+    for such a plugin is a file nothing will ever read, reported as success.
+    """
+    manifest = _load_manifest(plugin_dir)
+    return _manifest_id(plugin_dir, manifest), str(manifest.get("type") or "")
+
+
+def plugin_manifest_id(plugin_dir: str) -> str:
+    """The `id` a plugin declares, which is what the core builds fqid from."""
+    return _manifest_id(plugin_dir, _load_manifest(plugin_dir))
+
+
+# `\uXXXX` with an uppercase hex digit, which the core decodes wrongly.
+# json.c:71 computes `*s - 'F' + 10`, so A-F yield 5-10 instead of 10-15 and
+# `"P\u004A"` becomes `PE` in the core and `PJ` here -- mdev would seed
+# `PJ@dev` while the core created `PE@dev`. Filed as movian#250; until it is
+# fixed, an id whose raw text carries such an escape is refused rather than
+# seeded into a profile no plugin will read. Scoped to the id: the same
+# escape in a synopsis is the core's problem and not this seed's.
+_RAW_MEMBER = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"')
+_UPPER_ESCAPE = re.compile(r'\\u[0-9a-fA-F]*[A-F]')
+# A surrogate escape is a separate mismatch: `utf8_put` drops surrogate
+# code points (`str.c:687-688`), so the core and Python build different ids.
+_SURROGATE_ESCAPE = re.compile(
+    r'\\u(?:[dD][89aAbB][0-9a-fA-F]{2}|[dD][c-fC-F][0-9a-fA-F]{2})')
+
+
+def _raw_id_literal(text: str) -> str | None:
+    """The raw spelling of the `id` member's VALUE, however `id` is spelled.
+
+    The escape guards below have to read raw text, because a decoded id
+    cannot say which escape produced it. Searching that text for the literal
+    `"id"` missed `"\u0069d"`, which decodes to the same member, is what
+    `json.dumps` would never write but a hand-edited manifest can, and made
+    both guards unreachable -- mdev seeded `PJ@dev` while the core built
+    `PE@dev`. Keys are decoded before comparison, so the member is found by
+    what it means rather than by how it was typed.
+
+    A non-string id does not match and returns None; `_manifest_id` has
+    already refused that case on the decoded manifest.
+    """
+    for raw_key, raw_value in _RAW_MEMBER.findall(text):
+        try:
+            decoded = json.loads('"%s"' % raw_key)
+        except ValueError:
+            continue
+        if decoded == "id":
+            return raw_value
+    return None
+
+
+def _manifest_id(plugin_dir: str, manifest: dict) -> str:
+    value = manifest.get("id")
+    manifest_path = Path(plugin_dir) / "plugin.json"
+    if not isinstance(value, str) or not value:
+        raise MdevError("%s declares no \"id\"" % manifest_path)
+    raw_id = _raw_id_literal(manifest_path.read_text(encoding="utf-8"))
+    if raw_id is not None and _SURROGATE_ESCAPE.search(raw_id):
+        raise MdevError(
+            "%s spells its id with a surrogate escape: %s. "
+            "str.c:687-688 drops code points from 0xD800 through 0xDFFF, "
+            "so the core would build a different fqid than this reads and "
+            "the seed would land where nothing looks." %
+            (manifest_path, raw_id))
+    if raw_id is not None and _UPPER_ESCAPE.search(raw_id):
+        raise MdevError(
+            "%s spells its id with an escape the core decodes differently: "
+            "%s. json.c:71 computes uppercase hex as `*s - 'F' + 10`, so "
+            "A-F yield 5-10 instead of 10-15 -- the core would build a "
+            "different fqid than this reads, and the seed would land where "
+            "nothing looks (movian#250). Spell the id literally, or in "
+            "lowercase hex." % (manifest_path, raw_id))
+    return value
+
+
+def resolve_plugin_settings(plugins: list[str],
+                            specs: list[str]) -> list[PluginSetting]:
+    """Everything that can be judged without touching instance state.
+
+    Specs parsed, manifests read, ids and types checked -- no store is
+    opened, no directory made, nothing killed. `mdev run --force` stops the
+    running instance BEFORE it would otherwise have got here, so a malformed
+    setting or an unknown id used to terminate a working instance for a
+    request that was never going to run.
+    """
+    if not specs:
+        return []
+    parsed = [parse_plugin_setting(spec) for spec in specs]
+    known = {}
+    kinds = {}
+    for plugin in plugins:
+        plugin_id, kind = plugin_manifest(plugin)
+        known[plugin_id] = plugin
+        kinds[plugin_id] = kind
+    for spec, setting in zip(specs, parsed):
+        if setting.plugin_id not in known:
+            unaddressable = sorted(i for i in known if ":" in i)
+            raise MdevError(
+                "--plugin-setting %r:%r:%r=<redacted> names plugin %r, "
+                "which is not among the -p plugins: %s. Pass the id from "
+                "its plugin.json; the @%s the core appends is added here.%s"
+                % (setting.plugin_id, setting.group, setting.key,
+                   setting.plugin_id,
+                   ", ".join(sorted(known)) or "(none given)",
+                   PLUGIN_DEV_ORIGIN,
+                   ("  Note that %s cannot be addressed by this flag at all: "
+                    "a ':' in the id collides with the spec's own separators."
+                    % ", ".join(repr(i) for i in unaddressable))
+                   if unaddressable else ""))
+        if kinds[setting.plugin_id] != "ecmascript":
+            raise MdevError(
+                "--plugin-setting %r:%r:%r=<redacted> targets plugin %r, "
+                "whose manifest declares type %r. Only an ecmascript "
+                "plugin gets an ES context, and only that context has the "
+                "storagePath these settings live under (plugins.c:674, "
+                "702-727) -- the file would be written and never read."
+                % (setting.plugin_id, setting.group, setting.key,
+                   setting.plugin_id, kinds[setting.plugin_id]))
+    return parsed
+
+
+def _check_destination(persistent: Path, path: Path) -> None:
+    """Refuse a destination that is not a plain file inside the profile.
+
+    The path-component guard promises that a seed stays in the plugin's own
+    profile, and a symlink breaks that promise from the other side: both
+    `is_file()` and the write follow one, so a group symlinked at an
+    unrelated JSON file merged into it. Measured.
+
+    A leaf that is a DIRECTORY is the other half. `is_file()` reads it as
+    "no store yet", the parent preflight passes because it only looks at the
+    parent, and the commit loop then raised an uncaught IsADirectoryError --
+    after earlier targets were already written, which is the partial seed
+    the two-phase design exists to prevent.
+    """
+    root = os.path.realpath(persistent)
+
+    # Walk from the leaf up to the profile root and no further. An earlier
+    # version walked `path.parents` and skipped non-existent candidates with
+    # `continue`, which skipped the stop condition with them and then
+    # reported the profile's own parent as "outside".
+    candidates = []
+    current = path
+    while True:
+        candidates.append(current)
+        if current == persistent or current.parent == current:
+            break
+        current = current.parent
+
+    for candidate in candidates:
+        if candidate.is_symlink():
+            raise MdevError(
+                "refusing to seed through the symlink %s: a seed must stay "
+                "inside the plugin's own profile" % candidate)
+        if not candidate.exists():
+            continue
+        if candidate == persistent:
+            continue
+        if os.path.commonpath([root, os.path.realpath(candidate)]) != root:
+            raise MdevError(
+                "refusing to seed %s: it resolves outside %s"
+                % (candidate, persistent))
+        if candidate == path and not candidate.is_file():
+            raise MdevError(
+                "refusing to seed %s: it exists and is not a regular file"
+                % path)
+        # A hard link is the same escape as a symlink with nothing to
+        # inspect: no target path, `realpath` inside the profile, a regular
+        # file -- and one inode with another name somewhere else. Measured:
+        # a leaf linked at `outside.json` turned `{"mine": true}` into
+        # `{"mine": true, "pwned": 1}`. The commit below moves a new file
+        # into place rather than writing through this one, so the alias
+        # would survive either way; refusing says so instead, which is what
+        # the symlink case next door does. (Only the leaf: a directory
+        # always has nlink > 1.)
+        if candidate == path and candidate.stat().st_nlink > 1:
+            raise MdevError(
+                "refusing to seed %s: it has %d names, so it is also a file "
+                "outside the plugin's profile"
+                % (path, candidate.stat().st_nlink))
+
+
+def plan_plugin_settings(
+        persistent: Path, plugins: list[str],
+        specs: list[str]) -> list[tuple[Path, dict[str, Any]]]:
+    """Resolve and validate every seed, writing nothing.
+
+    Split from the commit so a caller can find out the whole request is
+    sound BEFORE it writes anything of its own -- `mdev run` also seeds the
+    core's dev flags, and those used to land first, staying active for the
+    next run while the command reported failure and launched nothing.
+
+    Merges into whatever is already there. A persistent instance carries
+    settings somebody set by hand, and one seeded key must not wipe the
+    rest.
+    """
+    if not specs:
+        return []
+    # One pass, and its result is USED. The loop this replaces repeated every
+    # check `resolve_plugin_settings` had just made -- parse, manifests, id,
+    # type -- with the same two refusal messages spelled out twice, which
+    # this round had to edit in both copies. The duplication also made the
+    # call below unpinned: deleting it left the whole battery green, because
+    # the copy did the refusing. What the plan needs from it is the parsed
+    # settings, so it takes them.
+    settings = resolve_plugin_settings(plugins, specs)
+
+    grouped: dict[Path, dict[str, Any]] = {}
+    for plugin_id, group, key, value in settings:
+        grouped.setdefault(
+            plugin_setting_path(persistent, plugin_id, group), {})[key] = value
+
+    # Two phases. Writing as it went meant a later malformed target left
+    # the earlier files already seeded while the command reported failure
+    # and launched nothing -- a profile carrying settings from an operation
+    # that said it had not happened.
+    planned: list[tuple[Path, dict[str, Any]]] = []
+    for path, values in grouped.items():
+        _check_destination(persistent, path)
+        existing: dict[str, Any] = {}
+        if path.is_file():
+            try:
+                loaded = json.loads(
+                    path.read_text(encoding="utf-8"),
+                    # Python accepts NaN/Infinity and would write them back;
+                    # `JSON.parse` rejects them and store.js swallows that
+                    # silently (`catch (e) {}`, store.js:48-51), leaving the
+                    # plugin an EMPTY store. The seed would report success
+                    # and the prompt it was meant to bypass would appear.
+                    parse_constant=_refuse_json_constant)
+            except (OSError, ValueError) as error:
+                raise MdevError(
+                    "cannot merge into %s: it exists and cannot be read as "
+                    "JSON (%s), so seeding would discard it" % (path, error))
+            # Same distinction the manifest reader needs: parsing is not
+            # being the right shape. A `[]` here used to fall through to an
+            # empty dict and then be written over -- discarded silently, by
+            # the very code whose refusal above promises not to.
+            if not isinstance(loaded, dict):
+                raise MdevError(
+                    "cannot merge into %s: it holds a JSON %s, not an "
+                    "object, so seeding would discard it"
+                    % (path, type(loaded).__name__))
+            # Once, here. A seeded value is a str or an int bounded by
+            # MAX_EXACT_SETTING_INT, so the merge cannot introduce a
+            # non-finite float and only what was READ can carry one. A
+            # second check after the merge covered the same case, and the
+            # pair masked each other: deleting either one alone left the
+            # whole battery green, which is how this branch's popup guard
+            # once read as though it did not matter.
+            _check_finite_json(loaded, path)
+            existing = loaded
+        existing.update(values)
+        planned.append((path, existing))
+
+    # Every destination, before any content. A profile directory that is
+    # actually a regular file only fails at mkdir, and doing that inside the
+    # write loop committed the earlier plugin before the later one blew up.
+    # A failure here leaves empty directories and no seeds, which is the
+    # bound this can offer without a staging area.
+    for path, _ in planned:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise MdevError(
+                "cannot create %s for the seed: %s" % (path.parent, error))
+
+    # And that it can take a file. The commit moves a staged sibling into
+    # place, so the LEAF's own mode is irrelevant -- a read-only store used
+    # to raise an uncaught PermissionError from the middle of the write
+    # loop, after earlier targets were already seeded -- but the directory's
+    # is not. Checked here because the mkdir above is what makes it exist.
+    for path, _ in planned:
+        if not os.access(path.parent, os.W_OK | os.X_OK):
+            raise MdevError(
+                "cannot seed %s: %s is not writable" % (path, path.parent))
+    return planned
+
+
+def commit_plugin_settings(
+        planned: list[tuple[Path, dict[str, Any]]]) -> list[Path]:
+    """Write what `plan_plugin_settings` resolved; return the files touched.
+
+    Every file is staged as a sibling and moved into place, and every
+    staging happens before any move. Writing directly meant a target that
+    could not be written -- a read-only store -- raised from the middle of
+    the loop with earlier targets already seeded, which is the partial state
+    the plan exists to prevent, reached after the plan had approved
+    everything. Moving also means each file appears whole or not at all, and
+    that the leaf's own mode and link count do not matter.
+
+    The remaining bound: a failure in the move loop can leave earlier files
+    replaced. Nothing short of a transaction closes that, and by then the
+    directory has been proven writable and the content proven writable to
+    it, so what is left is the disk filling up between the two loops.
+    """
+    staged: list[tuple[Path, Path]] = []
+    try:
+        for path, contents in planned:
+            staged.append((_stage(path, contents), path))
+    except MdevError:
+        for tmp, _ in staged:
+            tmp.unlink(missing_ok=True)
+        raise
+
+    written = []
+    for index, (tmp, path) in enumerate(staged):
+        try:
+            os.replace(tmp, path)
+        except OSError as error:
+            # Everything not yet moved, including this one. Leaving them
+            # meant a repeatedly failing run accumulated complete settings
+            # snapshots in the profile under names nothing reads -- litter
+            # that looks like state, from an operation that reported
+            # failure. What is already moved stays moved; that is the bound
+            # the docstring names.
+            for leftover, _ in staged[index:]:
+                leftover.unlink(missing_ok=True)
+            raise MdevError(
+                "cannot move the staged seed into %s: %s" % (path, error))
+        written.append(path)
+    return written
+
+
+def _stage(path: Path, contents: dict[str, Any]) -> Path:
+    """Write one seed to a sibling of `path`, ready to be moved onto it.
+
+    `mkstemp` rather than a name built from `path.name`, and all three
+    reasons were defects:
+
+    A predictable sibling can be pre-created. `<group>.mdev-new.<pid>` is
+    guessable by anything that can create a file in the profile -- which
+    lives under /tmp, whose ancestors mdev creates world-traversable -- and
+    a wrapper can fix the pid by pre-creating the link and then exec'ing
+    mdev. `write_text` follows a symlink, so it truncated the link's target
+    and `os.replace` then installed the LINK as the settings leaf, pointing
+    every later seed outside the profile too. Measured: `{"mine": true}`
+    became `{"pwned": 1}`. `mkstemp` opens with O_CREAT|O_EXCL and a name
+    nothing can predict, so there is nothing to pre-create and nothing to
+    follow.
+
+    A name built by appending to `path.name` is longer than `path.name`, so
+    a group within the filesystem's limit could have a destination that is
+    legal and a staging name that is not -- a stricter, undocumented limit
+    than Movian's own, reached after `--force` had already stopped the
+    instance. A short fixed prefix is independent of the group.
+
+    And `mkstemp` creates at 0600, which is what a NEW store should be:
+    a plugin's settings can hold a session cookie, and the profile's
+    ancestors are readable by other local users. That is narrower than the
+    0644 Movian itself would write, deliberately. An EXISTING store keeps
+    its own mode instead -- replacing the inode used to reset a 0600 store
+    to 0644, widening permissions as a side effect of seeding.
+    """
+    try:
+        fd, name = tempfile.mkstemp(dir=str(path.parent), prefix=".mdev-seed.")
+    except OSError as error:
+        raise MdevError(
+            "cannot stage a seed in %s: %s" % (path.parent, error))
+    tmp = Path(name)
+    try:
+        mode = None
+        if path.exists():
+            mode = stat.S_IMODE(path.stat().st_mode)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(contents, allow_nan=False))
+        if mode is not None:
+            os.chmod(tmp, mode)
+    except (OSError, ValueError) as error:
+        tmp.unlink(missing_ok=True)
+        raise MdevError("cannot stage the seed for %s: %s" % (path, error))
+    return tmp
+
+
+def seed_plugin_settings(persistent: Path, plugins: list[str],
+                         specs: list[str]) -> list[Path]:
+    """Plan and commit in one step, for callers with nothing else to seed."""
+    return commit_plugin_settings(
+        plan_plugin_settings(persistent, plugins, specs))
+
+
+def coerce_scalar(value: str) -> Any:
+    """An integer if it reads as one, otherwise the string it already is."""
+    return int(value) if re.fullmatch(r"-?\d+", value) else value
+
+
 def parse_dev_flags(spec: str) -> dict[str, Any]:
     """Parse "smbdebug=1,ecmascriptdebug=1" into an htsmsg-JSON dict."""
     flags: dict[str, Any] = {}
@@ -363,7 +980,7 @@ def parse_dev_flags(spec: str) -> dict[str, Any]:
         key, value = item.split("=", 1)
         if not key:
             raise MdevError("--dev-flags: empty key in %r" % item)
-        flags[key] = int(value) if re.fullmatch(r"-?\d+", value) else value
+        flags[key] = coerce_scalar(value)
     if not flags:
         raise MdevError("--dev-flags: no flags parsed from %r" % spec)
     return flags
