@@ -39,6 +39,40 @@ new page.Route('jsonunicode:test', function(pg) {
                  ' duktape_title=' + duktape.title
   });
 
+  /*
+   * The second item is not a second demonstration -- it is the other
+   * direction, and mislabelling it would be worse than leaving it out.
+   *
+   * TMDB is the heaviest consumer of the C decoder in the tree: four entry
+   * points, all `htsmsg_json_deserialize2` (tmdb.c:257, 315, 430, 575), and
+   * every response goes through it. `bindVideoMetadata` reaches them --
+   * page.js:25 -> es_metadata.c:92 -> metadata_bind_video_info
+   * (mlp.c:1849) -> the lazy query pipeline -> TMDB over HTTP with the
+   * built-in key.
+   *
+   * It cannot trigger the defect, and that was measured rather than assumed:
+   * the live API returns `"title":"Amélie"` as raw UTF-8, with ZERO \uXXXX
+   * escapes in either the search response or /configuration. Reaching the
+   * defective branch through TMDB needs a mocked response that escapes
+   * uppercase, which is listed separately in movian#250's exercise order.
+   *
+   * What it does prove is the blast radius: the single busiest consumer of
+   * the changed decoder still binds metadata end to end after the fix. A
+   * title with a non-ASCII character is chosen on purpose, so a fix that
+   * damaged ordinary UTF-8 handling would show here immediately.
+   */
+  var tmdb = pg.appendItem('tmdbmock:amelie', 'video', {
+    title: 'TMDB metadata: Amélie',
+    description: 'Blast-radius item: exercises the decoder\'s busiest ' +
+                 'consumer. Live TMDB sends raw UTF-8, so this does not ' +
+                 'trigger the defect -- it shows the fix did not break it.'
+  });
+
+  tmdb.bindVideoMetadata({
+    title: 'Amélie',
+    year: 2001
+  });
+
   // The comparison itself, so a check does not have to re-derive it.
   var expected = duktape.id + '@dev';
   pg.metadata.subtitle = Plugin.id === expected ? 'AGREE' : 'DISAGREE';
