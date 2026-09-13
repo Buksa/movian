@@ -1333,6 +1333,15 @@ def pending_popups(base_url: str) -> int | None:
     known to be working.
     """
     parsed, status = get_prop_status(base_url, POPUPS_PROP)
+    # `parse_prop` is TOTAL: garbage and an empty body both come back as
+    # `{"value": None}` rather than None, so an answer that is not a prop
+    # rendering at all used to fall through the `!= "directory"` branch and
+    # read as an EMPTY QUEUE. That is the fail-open direction this guard
+    # exists to stop -- a proxy error page or a truncated transfer would
+    # have certified a parked page ready. A node with no value is not a
+    # queue; a well-formed node that simply is not a directory still is.
+    if parsed is not None and parsed.get("value") is None:
+        parsed = None
     if parsed is None:
         # 404 is an ANSWER, and the one that matters here: `prop_http.c`
         # returns it for a prop that does not exist, and `global/popups`

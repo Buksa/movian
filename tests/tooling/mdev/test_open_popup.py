@@ -243,9 +243,30 @@ class TheQueueIsCountedNotFingerprinted(unittest.TestCase):
         self.check({"value": "directory", "children": []}, 0)
 
     def test_a_node_that_will_not_parse_is_none_not_zero(self) -> None:
-        """An answer that is not a prop is not an empty queue. The
-        transport-level cases moved to AnAbsentQueueIsZeroNotUnreadable."""
-        self.check(None, None)
+        """An answer that is not a prop is not an empty queue.
+
+        Faked at `http_request` with a body a real responder could send,
+        because the pair this asks about cannot be produced at the seam
+        above it: `parse_prop` is TOTAL -- garbage and an empty body both
+        return `{"value": None}`, never None -- so `(None, 200)` is not a
+        state the code can reach, and a test built on it pins nothing.
+        Measured: 200 with a proxy error page read as 0, the fail-open
+        direction, until the value check was added.
+        """
+        saved = harness.http_request
+        harness.http_request = lambda base, path, timeout=5.0: {
+            "ok": True, "status": 200,
+            "body": b"<html><body>502 Bad Gateway</body></html>"}
+        try:
+            self.assertIsNone(harness.pending_popups("http://x"))
+        finally:
+            harness.http_request = saved
+
+    def test_a_well_formed_node_that_is_not_a_directory_is_zero(self) -> None:
+        """The control the check above must not swallow: `global/popups`
+        exists as a void leaf once something has read it, and that is a
+        real, empty queue -- not an unreadable one."""
+        self.check({"value": "(void)", "children": []}, 0)
 
     def test_children_without_a_message_are_still_counted(self) -> None:
         """The regression itself: an auth prompt has no `message`, and it
