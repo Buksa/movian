@@ -115,6 +115,37 @@ class ParsingTheSpec(unittest.TestCase):
             harness.parse_plugin_setting("p:g:domain=https://x.example/a=b"),
             ("p", "g", "domain", "https://x.example/a=b"))
 
+    def test_a_malformed_spec_does_not_echo_its_value(self) -> None:
+        """The three parse refusals had no key to name, so they echoed the
+        whole spec -- value included. Mistyping is the likeliest way to
+        reach them, and it is the same trigger as the unknown-plugin case
+        that was redacted first, so these leaked for exactly the reason that
+        one did.
+
+        Each case below is a DIFFERENT refusal: one colon short, empty
+        group, empty key.
+        """
+        secret = "session=secret"
+        for spec in ("P:cookie=" + secret,
+                     "P::k=" + secret,
+                     "P:g:=" + secret):
+            with self.subTest(spec=spec.split("=")[0]):
+                with self.assertRaises(MdevError) as caught:
+                    harness.parse_plugin_setting(spec)
+                message = str(caught.exception)
+                self.assertNotIn(secret, message)
+                self.assertNotIn("secret", message)
+                self.assertIn("redacted", message)
+
+    def test_a_spec_with_no_value_is_shown_whole(self) -> None:
+        """Nothing to hide, and the reader needs all of it: this refusal
+        fires precisely because there is no `=`, so redacting would remove
+        the only thing it can report."""
+        with self.assertRaises(MdevError) as caught:
+            harness.parse_plugin_setting("P:g:justakey")
+        self.assertIn("P:g:justakey", str(caught.exception))
+        self.assertNotIn("redacted", str(caught.exception))
+
     def test_a_malformed_spec_is_refused(self) -> None:
         for spec in ("nocolons", "p:g", "p:g:k", "p:g:=v", "p::k=v",
                      ":g:k=v"):
@@ -230,6 +261,31 @@ class WhatMovianCanActuallyRead(unittest.TestCase):
                         [plugin_dir(root / "src", "P")], ["P:g:new=1"])
                 self.assertIn(token, str(caught.exception))
                 self.assertIn("old", path.read_text())
+
+    def test_an_exponent_overflow_is_refused_in_the_plan(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        path = harness.plugin_setting_path(
+            root / "persistent", "P", "g")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"old": 1e400}', encoding="utf-8")
+        with self.assertRaises(MdevError) as caught:
+            harness.plan_plugin_settings(
+                root / "persistent",
+                [plugin_dir(root / "src", "P")], ["P:g:new=1"])
+        self.assertIn(str(path), str(caught.exception))
+        self.assertEqual(path.read_text(), '{"old": 1e400}')
+
+    def test_serialization_overflow_is_an_mdev_error(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "persistent" / "g"
+        path.parent.mkdir(parents=True)
+        with self.assertRaises(MdevError) as caught:
+            harness._stage(path, {"old": float("inf")})
+        self.assertIn(str(path), str(caught.exception))
+        self.assertFalse(path.exists())
 
 
 class TheDestinationIsCheckedBeforeAnythingIsWritten(unittest.TestCase):
@@ -377,6 +433,76 @@ class Seeding(unittest.TestCase):
         self.assertIn("Wrong", message)
         self.assertIn("HDRezka", message)
         self.assertIn("tmdb", message)
+
+    def test_unknown_plugin_refusal_redacts_value(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        secret = "session=secret"
+        spec = "Wrong:g:cookie=" + secret
+        with self.assertRaises(MdevError) as caught:
+            harness.resolve_plugin_settings(
+                [plugin_dir(root / "src", "P")], [spec])
+        message = str(caught.exception)
+        self.assertIn("Wrong", message)
+        self.assertIn("g", message)
+        self.assertIn("cookie", message)
+        self.assertNotIn(secret, message)
+
+    def test_plan_unknown_plugin_refusal_redacts_value(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        secret = "session=secret"
+        spec = "Wrong:g:cookie=" + secret
+        plugins = [plugin_dir(root / "src", "P")]
+        with mock.patch.object(harness, "resolve_plugin_settings"):
+            with self.assertRaises(MdevError) as caught:
+                harness.plan_plugin_settings(
+                    root / "persistent", plugins, [spec])
+        message = str(caught.exception)
+        self.assertIn("Wrong", message)
+        self.assertIn("g", message)
+        self.assertIn("cookie", message)
+        self.assertNotIn(secret, message)
+
+    def test_plugin_type_refusal_redacts_value(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        views = root / "views"
+        views.mkdir()
+        (views / "plugin.json").write_text(
+            json.dumps({"id": "V", "type": "views"}), encoding="utf-8")
+        secret = "session=secret"
+        spec = "V:g:cookie=" + secret
+        with self.assertRaises(MdevError) as caught:
+            harness.resolve_plugin_settings([str(views)], [spec])
+        message = str(caught.exception)
+        self.assertIn("V", message)
+        self.assertIn("g", message)
+        self.assertIn("cookie", message)
+        self.assertNotIn(secret, message)
+
+    def test_plan_plugin_type_refusal_redacts_value(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        views = root / "views"
+        views.mkdir()
+        (views / "plugin.json").write_text(
+            json.dumps({"id": "V", "type": "views"}), encoding="utf-8")
+        secret = "session=secret"
+        spec = "V:g:cookie=" + secret
+        with mock.patch.object(harness, "resolve_plugin_settings"):
+            with self.assertRaises(MdevError) as caught:
+                harness.plan_plugin_settings(
+                    root / "persistent", [str(views)], [spec])
+        message = str(caught.exception)
+        self.assertIn("V", message)
+        self.assertIn("g", message)
+        self.assertIn("cookie", message)
+        self.assertNotIn(secret, message)
 
     def test_an_unreadable_manifest_says_so(self) -> None:
         """A `-p` directory whose manifest cannot be parsed used to vanish
@@ -565,6 +691,14 @@ class OnlyWhatAPluginCanReadBack(unittest.TestCase):
             harness.parse_plugin_setting("P:g:k=9007199254740991").value,
             9007199254740991)
 
+    def test_a_four_hundred_digit_integer_refusal_stays_clean(self) -> None:
+        for value in ("9" * 400, "-" + "9" * 400):
+            with self.subTest(value=value[:8]):
+                with self.assertRaises(MdevError) as caught:
+                    harness.parse_plugin_setting("P:g:k=%s" % value)
+                expected = "Infinity" if value[0] != "-" else "-Infinity"
+                self.assertIn(expected, str(caught.exception))
+
     def test_a_quoted_one_is_still_a_string(self) -> None:
         """The escape the refusal names has to exist: a plugin holding a big
         number as a string is unaffected, and the message says so."""
@@ -637,6 +771,33 @@ class TheManifestIsReadTheWayTheCoreReadsIt(unittest.TestCase):
             harness.seed_plugin_settings(
                 root / "persistent", [str(weird)], ["PJ:g:k=1"])
         self.assertIn("json.c:71", str(caught.exception))
+
+    def test_a_lowercase_surrogate_escape_in_the_id_is_refused(self) -> None:
+        """The core drops surrogate code points in `utf8_put`.
+        `src/misc/str.c:687-688` therefore turns this id into `P`, while
+        Python resolves the surrogate pair to `P😀`; their fqids differ.
+        """
+        source = (REPO_ROOT / "src" / "misc" / "str.c").read_text(
+            encoding="utf-8")
+        self.assertIn(
+            "if(c == 0xfffe || c == 0xffff || "
+            "(c >= 0xD800 && c < 0xE000))\n"
+            "    return 0;",
+            source)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        weird = root / "src" / "esc"
+        weird.mkdir(parents=True)
+        (weird / "plugin.json").write_text(
+            '{"id":"P\\ud83d\\ude00","type":"ecmascript",'
+            '"version":"1.0.0"}',
+            encoding="utf-8")
+        with self.assertRaises(MdevError) as caught:
+            harness.seed_plugin_settings(
+                root / "persistent", [str(weird)], ["P😀:g:k=1"])
+        self.assertIn("str.c:687", str(caught.exception))
+        self.assertNotIn("json.c:71", str(caught.exception))
 
     def test_the_core_decoder_is_still_the_one_described(self) -> None:
         """Asserted, not trusted: this refusal exists only because of that

@@ -9,6 +9,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import signal
@@ -399,14 +400,15 @@ def parse_plugin_setting(spec: str) -> PluginSetting:
     if not sep or not sep2:
         raise MdevError(
             "--plugin-setting expects <plugin-id>:<group>:<key>=<value>, "
-            "got %r" % spec)
+            "got %r" % _redacted_spec(spec))
     key, sep3, value = rest.partition("=")
     if not sep3:
-        raise MdevError("--plugin-setting %r has no <key>=<value>" % spec)
+        raise MdevError("--plugin-setting %r has no <key>=<value>"
+                        % _redacted_spec(spec))
     if not plugin_id or not group or not key:
         raise MdevError(
             "--plugin-setting %r has an empty plugin id, group or key"
-            % spec)
+            % _redacted_spec(spec))
     # Both halves that become path components, checked HERE rather than
     # where they are joined. `plugin_setting_path` refused an id like
     # `../P` too, but that runs in the plan -- after `mdev run --force` has
@@ -426,6 +428,20 @@ def parse_plugin_setting(spec: str) -> PluginSetting:
 MAX_EXACT_SETTING_INT = 2 ** 53 - 1
 
 
+def _redacted_spec(spec: str) -> str:
+    """A malformed spec, safe to print: its structure without its value.
+
+    The three refusals above fire when the spec could not be parsed, so
+    there is no key to name and the raw spec is the only thing left to
+    report -- and the raw spec carries the value. Mistyping is the likeliest
+    way this path is reached, and a value is the part most likely to be a
+    cookie or a token, so the structure is echoed and the value is not.
+    A spec with no `=` at all has nothing to hide and is shown whole.
+    """
+    head, sep, _ = spec.partition("=")
+    return head + "=<redacted>" if sep else spec
+
+
 def _coerce_setting(value: str) -> Any:
     if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
         return value[1:-1]
@@ -435,13 +451,17 @@ def _coerce_setting(value: str) -> Any:
         return 0
     coerced = coerce_scalar(value)
     if isinstance(coerced, int) and abs(coerced) > MAX_EXACT_SETTING_INT:
+        try:
+            projected = int(float(coerced))
+        except OverflowError:
+            projected = "Infinity" if coerced > 0 else "-Infinity"
         raise MdevError(
             "--plugin-setting value %s is outside the range a plugin can "
             "read back exactly (+/-%d, Number.MAX_SAFE_INTEGER): store.js "
             "parses the seed with JSON.parse and a Duktape Number is a "
-            "double, so the plugin would see %d instead. Quote it to seed "
+            "double, so the plugin would see %s instead. Quote it to seed "
             "the string."
-            % (value, MAX_EXACT_SETTING_INT, int(float(coerced))))
+            % (value, MAX_EXACT_SETTING_INT, projected))
     return coerced
 
 
@@ -482,6 +502,19 @@ def _refuse_json_constant(token: str):
         "%s is not valid JSON to Movian -- `JSON.parse` rejects it and "
         "store.js:48-51 swallows the failure, leaving an empty store"
         % token)
+
+
+def _check_finite_json(value: Any, path: Path) -> None:
+    if isinstance(value, float) and not math.isfinite(value):
+        raise MdevError(
+            "cannot merge into %s: it contains a non-finite JSON number, "
+            "which JSON.parse rejects" % path)
+    if isinstance(value, dict):
+        for child in value.values():
+            _check_finite_json(child, path)
+    elif isinstance(value, list):
+        for child in value:
+            _check_finite_json(child, path)
 
 
 def _no_duplicate_members(pairs: list[tuple[str, Any]]) -> dict:
@@ -570,6 +603,10 @@ def plugin_manifest_id(plugin_dir: str) -> str:
 # escape in a synopsis is the core's problem and not this seed's.
 _RAW_ID = re.compile(r'"id"\s*:\s*"((?:[^"\\]|\\.)*)"')
 _UPPER_ESCAPE = re.compile(r'\\u[0-9a-fA-F]*[A-F]')
+# A surrogate escape is a separate mismatch: `utf8_put` drops surrogate
+# code points (`str.c:687-688`), so the core and Python build different ids.
+_SURROGATE_ESCAPE = re.compile(
+    r'\\u(?:[dD][89aAbB][0-9a-fA-F]{2}|[dD][c-fC-F][0-9a-fA-F]{2})')
 
 
 def _manifest_id(plugin_dir: str, manifest: dict) -> str:
@@ -578,6 +615,13 @@ def _manifest_id(plugin_dir: str, manifest: dict) -> str:
     if not isinstance(value, str) or not value:
         raise MdevError("%s declares no \"id\"" % manifest_path)
     raw = _RAW_ID.search(manifest_path.read_text(encoding="utf-8"))
+    if raw is not None and _SURROGATE_ESCAPE.search(raw.group(1)):
+        raise MdevError(
+            "%s spells its id with a surrogate escape: %s. "
+            "str.c:687-688 drops code points from 0xD800 through 0xDFFF, "
+            "so the core would build a different fqid than this reads and "
+            "the seed would land where nothing looks." %
+            (manifest_path, raw.group(1)))
     if raw is not None and _UPPER_ESCAPE.search(raw.group(1)):
         raise MdevError(
             "%s spells its id with an escape the core decodes differently: "
@@ -612,10 +656,11 @@ def resolve_plugin_settings(plugins: list[str],
         if setting.plugin_id not in known:
             unaddressable = sorted(i for i in known if ":" in i)
             raise MdevError(
-                "--plugin-setting %r names plugin %r, which is not among "
-                "the -p plugins: %s. Pass the id from its plugin.json; the "
-                "@%s the core appends is added here.%s"
-                % (spec, setting.plugin_id,
+                "--plugin-setting %r:%r:%r=<redacted> names plugin %r, "
+                "which is not among the -p plugins: %s. Pass the id from "
+                "its plugin.json; the @%s the core appends is added here.%s"
+                % (setting.plugin_id, setting.group, setting.key,
+                   setting.plugin_id,
                    ", ".join(sorted(known)) or "(none given)",
                    PLUGIN_DEV_ORIGIN,
                    ("  Note that %s cannot be addressed by this flag at all: "
@@ -624,12 +669,13 @@ def resolve_plugin_settings(plugins: list[str],
                    if unaddressable else ""))
         if kinds[setting.plugin_id] != "ecmascript":
             raise MdevError(
-                "--plugin-setting %r targets plugin %r, whose manifest "
-                "declares type %r. Only an ecmascript plugin gets an ES "
-                "context, and only that context has the storagePath these "
-                "settings live under (plugins.c:674, 702-727) -- the file "
-                "would be written and never read."
-                % (spec, setting.plugin_id, kinds[setting.plugin_id]))
+                "--plugin-setting %r:%r:%r=<redacted> targets plugin %r, "
+                "whose manifest declares type %r. Only an ecmascript "
+                "plugin gets an ES context, and only that context has the "
+                "storagePath these settings live under (plugins.c:674, "
+                "702-727) -- the file would be written and never read."
+                % (setting.plugin_id, setting.group, setting.key,
+                   setting.plugin_id, kinds[setting.plugin_id]))
     return parsed
 
 
@@ -728,10 +774,10 @@ def plan_plugin_settings(
             # here, so it is said here rather than left as a puzzle.
             unaddressable = sorted(i for i in known if ":" in i)
             raise MdevError(
-                "--plugin-setting %r names plugin %r, which is not among "
-                "the -p plugins: %s. Pass the id from its plugin.json; the "
-                "@%s the core appends is added here.%s"
-                % (spec, plugin_id,
+                "--plugin-setting %r:%r:%r=<redacted> names plugin %r, "
+                "which is not among the -p plugins: %s. Pass the id from "
+                "its plugin.json; the @%s the core appends is added here.%s"
+                % (plugin_id, group, key, plugin_id,
                    ", ".join(sorted(known)) or "(none given)",
                    PLUGIN_DEV_ORIGIN,
                    ("  Note that %s cannot be addressed by this flag at all: "
@@ -740,12 +786,12 @@ def plan_plugin_settings(
                    if unaddressable else ""))
         if kinds[plugin_id] != "ecmascript":
             raise MdevError(
-                "--plugin-setting %r targets plugin %r, whose manifest "
-                "declares type %r. Only an ecmascript plugin gets an ES "
-                "context, and only that context has the storagePath these "
-                "settings live under (plugins.c:674, 702-727) -- the file "
-                "would be written and never read."
-                % (spec, plugin_id, kinds[plugin_id]))
+                "--plugin-setting %r:%r:%r=<redacted> targets plugin %r, "
+                "whose manifest declares type %r. Only an ecmascript "
+                "plugin gets an ES context, and only that context has the "
+                "storagePath these settings live under (plugins.c:674, "
+                "702-727) -- the file would be written and never read."
+                % (plugin_id, group, key, plugin_id, kinds[plugin_id]))
         grouped.setdefault(
             plugin_setting_path(persistent, plugin_id, group), {})[key] = value
 
@@ -780,6 +826,14 @@ def plan_plugin_settings(
                     "cannot merge into %s: it holds a JSON %s, not an "
                     "object, so seeding would discard it"
                     % (path, type(loaded).__name__))
+            # Once, here. A seeded value is a str or an int bounded by
+            # MAX_EXACT_SETTING_INT, so the merge cannot introduce a
+            # non-finite float and only what was READ can carry one. A
+            # second check after the merge covered the same case, and the
+            # pair masked each other: deleting either one alone left the
+            # whole battery green, which is how this branch's popup guard
+            # once read as though it did not matter.
+            _check_finite_json(loaded, path)
             existing = loaded
         existing.update(values)
         planned.append((path, existing))
@@ -894,10 +948,10 @@ def _stage(path: Path, contents: dict[str, Any]) -> Path:
         if path.exists():
             mode = stat.S_IMODE(path.stat().st_mode)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(json.dumps(contents))
+            handle.write(json.dumps(contents, allow_nan=False))
         if mode is not None:
             os.chmod(tmp, mode)
-    except OSError as error:
+    except (OSError, ValueError) as error:
         tmp.unlink(missing_ok=True)
         raise MdevError("cannot stage the seed for %s: %s" % (path, error))
     return tmp
