@@ -17,9 +17,22 @@
  * behaviour -- dropping U+FFFE, U+FFFF and D800..DFFF (str.c:687-688) --
  * cannot apply. A test that needed those would have to link the real one.
  *
- * Build and run:
- *   cc -I src -o /tmp/t tests/tooling/json/test_json_escapes.c src/misc/json.c
- *   /tmp/t
+ * NOT a gate, deliberately. It was written to establish the defect and to
+ * show the fix, it did both, and that evidence is recorded on movian#250 and
+ * movian#252. Nothing runs it on a push: the fix is a single expression, and
+ * paying for it on every push forever is not what it is worth.
+ *
+ * Run it when you touch this decoder -- which is the case it was built for,
+ * since the defect it pins survived a replacement of the whole decoder in
+ * 2011 and a 166-line rewrite of this very function in 2013. It sweeps all
+ * 22 hex digit characters rather than the six that were wrong, so it answers
+ * a rewrite and not only an edit.
+ *
+ *   cc -I src -Werror -o /tmp/t tests/tooling/json/test_json_escapes.c \
+ *      src/misc/json.c && /tmp/t
+ *
+ * Exit 0 and "OK: 0 failure(s)". Restoring `- 'F' + 10` in json.c:72 turns it
+ * red, which is how you check the test still measures something.
  */
 #include <stdio.h>
 #include <stdlib.h>
