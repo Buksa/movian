@@ -130,6 +130,19 @@ jobs:
           python3 -m unittest discover -s tests/tooling/mdev
           -p 'test_lsp_doctor.py' -v
 
+      # The one compiled check here, and it stays inside this workflow's rule
+      # against building: two files, no configure, no submodules, no libav.
+      # It exercises `src/misc/json.c` through `json_deserialize` -- the
+      # parser every htsmsg JSON reader ends at, and what reads every plugin
+      # manifest (plugins.c:628) -- because the defect it pins was a wrong
+      # CHARACTER and never a crash, which is how it survived since 2013
+      # (movian#250).
+      - name: core json escape decoding
+        run: |
+          cc -I src -Werror -o /tmp/test_json_escapes \
+            tests/tooling/json/test_json_escapes.c src/misc/json.c
+          /tmp/test_json_escapes
+
   hygiene:
     name: whitespace and merge markers
     runs-on: ubuntu-latest

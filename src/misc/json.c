@@ -69,7 +69,7 @@ json_str_read_char(const char **ptr)
       else if (*s >= 'a' && *s <= 'f')
         v |= *s - 'a' + 10;
       else if (*s >= 'A' && *s <= 'F')
-        v |= *s - 'F' + 10;
+        v |= *s - 'A' + 10;
       else
         return -2;
       s++;
