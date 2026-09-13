@@ -121,6 +121,16 @@ jobs:
           python3 -m unittest discover -s tests/tooling/mdev
           -p 'test_smoke_discovery.py' -v
 
+      # Same reason, same shape: seeding a plugin setting is path
+      # construction and JSON, done in a tempfile, so it needs no Movian and
+      # no build (movian#247). A battery nobody runs answers every question
+      # with silence -- which is what this was until a review noticed the
+      # step was missing.
+      - name: mdev plugin-setting rules
+        run: >
+          python3 -m unittest discover -s tests/tooling/mdev
+          -p 'test_plugin_settings.py' -v
+
       # Same reason, same shape: the doctor tests build their trees in
       # tempfiles and mock the subprocess, so they need no Movian and no
       # build. Selected by filename for the same reason as the line above --

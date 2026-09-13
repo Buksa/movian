@@ -19,6 +19,7 @@
 
 var page = require('movian/page');
 var popup = require('native/popup');
+var settings = require('movian/settings');
 
 var TAG = 'popuptest242';
 
@@ -42,9 +43,47 @@ new page.Route('popuptest:blocking', function(pageobj) {
   finish(pageobj, 'popup dismissed');
 });
 
+// The shape a plugin gated behind a terms prompt has (movian#247):
+// a persisted setting decides whether the question is asked at all, and
+// the route parks on it when it is. HDRezka does exactly this --
+// `service.tosEnabled` guards `popup.message(TOS_TEXT, true, true)` in
+// pages/home.js -- and that setting is what `mdev run --plugin-setting`
+// exists to seed, because answering the prompt is not something a harness
+// may do (movian#245).
+var askFirst = true;
+
+// Wrapped the way lifecycle_test.js wraps each of its resources, and for
+// its reason: a plugin that fails to load takes the #242 routes with it,
+// and a smoke asserting a popup would then go red for a cause that has
+// nothing to do with popups.
+try {
+  settings.globalSettings('popuptest', 'popup test plugin', null,
+                          'dev-only fixture for movian#242 and #247');
+  settings.createBool('askFirst', 'Ask before opening the gated route',
+                      askFirst, function(v) {
+    askFirst = !!v;
+    log('askFirst = ' + askFirst);
+  });
+} catch(e) {
+  log('settings unavailable, gate stays open: ' + e);
+}
+
+new page.Route('popuptest:gated', function(pageobj) {
+  log('gated route entered; askFirst=' + askFirst);
+  if(askFirst) {
+    var answer = popup.message('issue #247 probe: seeded away?', true, true);
+    log('gated route resumed, answer=' + answer);
+    finish(pageobj, 'was asked');
+    return;
+  }
+  log('gated route not asking');
+  finish(pageobj, 'not asked');
+});
+
 new page.Route('popuptest:clean', function(pageobj) {
   log('clean route entered; no popup');
   finish(pageobj, 'no popup here');
 });
 
-log('plugin loaded, routes: popuptest:blocking, popuptest:clean');
+log('plugin loaded, routes: popuptest:blocking, popuptest:gated, '
+    + 'popuptest:clean');
