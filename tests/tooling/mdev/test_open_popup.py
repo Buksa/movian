@@ -66,6 +66,7 @@ class Navigator:
 
     def __init__(self, *, raises_popup: bool, publishes_loading: bool = False,
                  popups_before: int = 0, probe_readable: bool = True,
+                 unreadable_first: int = 0,
                  url: str = "popuptest:blocking"):
         self.url = url
         self.raises_popup = raises_popup
@@ -78,6 +79,10 @@ class Navigator:
         self.popups_before = popups_before
         # `get_prop` returning None: the request timed out or was refused.
         self.probe_readable = probe_readable
+        # How many of the first probes fail transiently. The instrument
+        # works; one read did not.
+        self.unreadable_first = unreadable_first
+        self.probes = 0
         self.landed = False
 
     def http_request(self, base, path, timeout=5.0, method="GET", form=None):
@@ -104,7 +109,10 @@ class Navigator:
         return 0
 
     def pending_popups(self, base):
-        return self.popups if self.probe_readable else None
+        self.probes += 1
+        if not self.probe_readable or self.probes <= self.unreadable_first:
+            return None
+        return self.popups
 
 
 class Clock:
@@ -270,15 +278,23 @@ class TheQueueIsCountedNotFingerprinted(unittest.TestCase):
         and holds nothing. That is a real, empty queue and must stay 0, or
         the value check above would turn every quiet instance unreadable.
 
-        Not claimed here, because it is not established: WHAT creates the
-        node. A read does not -- `prop_from_path` resolves through
-        `prop_findv`, whose third argument is `allow_indexing`, not a
-        create flag, and which returns NULL when the walk fails
-        (prop_core.c:5049). The three raisers create it explicitly
-        (`prop_create(prop_get_global(), "popups")` at notifications.c:204,
-        connman.c:341, fa_filepicker.c:296), yet a fresh instance that
-        raised nothing answered 404 and then 200 five seconds later, so
-        something else does too. Whatever it is does not change this rule.
+        What creates the node, now that it is pinned: the SKIN does.
+        `glwskins/flat/universe.view:79` holds `cloner($core.popups, ...)`,
+        and a GLW subscription by name creates the prop it subscribes to.
+        That is why a fresh instance which raised nothing answers 404 and
+        then 200 a few seconds later -- the skin loads, not a popup. The
+        three raisers create it too (`prop_create(prop_get_global(),
+        "popups")` at notifications.c:204, connman.c:341,
+        fa_filepicker.c:296), and a READ never does: `prop_from_path`
+        resolves through `prop_findv`, whose third argument is
+        `allow_indexing` and not a create flag (prop_core.c:5049).
+
+        Captured from the running instance, which is where `(void)` above
+        comes from:
+
+            popups (ref:2 xref:1) is a (void)
+            Value Subscribers:
+            .//glwskins/flat/universe.view:79
         """
         self.check({"value": "(void)", "children": []}, 0)
 
@@ -322,6 +338,47 @@ class AnUnreadableProbeFailsClosed(unittest.TestCase):
         wait that trusts an unreadable instrument is guessing."""
         nav = Navigator(raises_popup=False, probe_readable=False)
         self.assertIsInstance(drive(nav), harness.MdevError)
+
+
+class OneBlipIsNotABrokenInstrument(unittest.TestCase):
+    """A single failed baseline read must not doom the whole wait.
+
+    `popups_before` is read once, before the navigation, and the commit
+    point treats None as permanent. So one refused read -- a 5s
+    `http_request` timeout expiring once, a restart racing the port on a
+    loaded machine -- ran the full 20s and died with "the popup queue could
+    not be read" while the instrument answered for the remaining 19
+    seconds. Reproduced independently by two reviewers of movian#249.
+
+    NOT the startup race an earlier attempt claimed: `launch()` blocks on
+    the core's "Listening on port" trace before `mdev run` returns, and a
+    fresh instance answers 404 immediately. This is a transient, and the
+    repair is one more read rather than a wait for something to come up.
+
+    The retry stays BEFORE the open. `/api/open` only queues the nav event,
+    so a baseline taken after it could count a popup this route raised and
+    blind the guard to the thing it is for.
+    """
+
+    def test_a_single_refused_baseline_read_is_retried(self) -> None:
+        nav = Navigator(raises_popup=False, unreadable_first=1)
+        result = drive(nav)
+        self.assertNotIsInstance(result, harness.MdevError, result)
+        self.assertEqual(result["url"], nav.url)
+
+    def test_the_retry_still_precedes_the_navigation(self) -> None:
+        """If the retried baseline were taken after the open, this route's
+        own popup would land in it and the parked page would read ready."""
+        nav = Navigator(raises_popup=True, unreadable_first=1)
+        result = drive(nav)
+        self.assertIsInstance(result, harness.MdevError, result)
+        self.assertIn("popup(s) pending", str(result))
+
+    def test_an_instrument_that_stays_down_still_fails_closed(self) -> None:
+        nav = Navigator(raises_popup=False, probe_readable=False)
+        result = drive(nav)
+        self.assertIsInstance(result, harness.MdevError, result)
+        self.assertIn("queue could not be read", str(result))
 
 
 class AnAbsentQueueIsZeroNotUnreadable(unittest.TestCase):

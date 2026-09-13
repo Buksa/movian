@@ -62,11 +62,13 @@ of 1 says the plugin never loaded, which would make `gated=1` mean nothing.
 A records that run as:
 
 ```
-mdev: page not ready after 20s: nav_event_seen=True url='popuptest:gated'
-  loading='(void)' title='(void)' (open issued 3 times)
-  -- 1 popup(s) pending, 0 of them already up before this open;
-     the route is parked until one is answered
+mdev: page not ready after 20s: nav_event_seen=True url='popuptest:gated' loading='(void)' title='(void)' (open issued 3 times) -- 1 popup(s) pending, 0 of them already up before this open; the route is parked until one is answered
 ```
+
+One line, long. `cli.py` prints the refusal with a bare
+`print("mdev: %s" % error)` and nothing on the path wraps it, so a wrapped
+copy here would be a fixture document showing output the tool never
+produces -- in the one file whose job is recording it literally.
 
 and B as `nodes: 0`, with the seeded file reading `{"askFirst": 0}`.
 

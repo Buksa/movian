@@ -1377,6 +1377,24 @@ def open_and_wait(inst: Instance, url: str, timeout: float = 20.0) -> dict[str, 
     # blocking on one would hang every static page:* open until the deadline
     # and blame the route for it.
     popups_before = pending_popups(base)
+    if popups_before is None:
+        # One more read, and only one. A single refused or timed-out probe
+        # is a blip, not a broken instrument, and the commit point treats a
+        # None baseline as PERMANENT -- so one bad read cost the whole 20s
+        # wait and printed a queue diagnosis while the queue answered for
+        # the other 19 seconds. Reproduced by two reviewers of movian#249.
+        #
+        # Not a wait for the instance to come up: `launch()` has already
+        # blocked on the core's "Listening on port" trace, so the port is
+        # listening. An earlier attempt claimed otherwise and added a 5s
+        # retry loop; that premise was measured false and removed.
+        #
+        # Before the open, because /api/open only QUEUES the nav event: a
+        # baseline taken afterwards could count a popup this route raised
+        # and blind the guard to exactly what it is for. If this read fails
+        # too, the wait still fails closed.
+        popups_before = pending_popups(base)
+
     def issue_open() -> None:
         result = http_request(
             base, "/api/open?" + urllib.parse.urlencode({"url": url}),
