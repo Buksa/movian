@@ -33,6 +33,13 @@ def emit(args: argparse.Namespace, data: dict, human: str) -> None:
 # ---------------------------------------------------------------------------
 
 def cmd_run(args: argparse.Namespace) -> int:
+    # First, and before anything with a side effect. `--force` stops the
+    # running instance a few lines down, so a malformed --plugin-setting or
+    # an unknown plugin id used to terminate a working instance for a
+    # request that was never going to run (movian#247).
+    settings = harness.resolve_plugin_settings(
+        args.plugin, args.plugin_setting)
+
     inst = Instance(args.name)
     own_pid = inst.live_pid()
     foreign, collisions = harness.classify_foreign(inst, own_pid)
@@ -70,6 +77,14 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     inst.ensure_dirs()
 
+    # Resolved before either kind of seed is written -- manifests read,
+    # ids checked, existing stores parsed. `--dev-flags` used to land first,
+    # so an invalid --plugin-setting left the core's dev flags active for the
+    # next run while the command reported failure and launched nothing
+    # (movian#247).
+    planned_settings = harness.plan_plugin_settings(
+        inst.persistent, args.plugin, args.plugin_setting)
+
     if args.dev_flags:
         flags = harness.parse_dev_flags(args.dev_flags)
         settings_dir = inst.persistent / "settings"
@@ -77,6 +92,30 @@ def cmd_run(args: argparse.Namespace) -> int:
         (settings_dir / "dev").write_text(
             json.dumps(flags), encoding="utf-8"
         )
+
+    # Before launch, so the plugin reads the value on its first load rather
+    # than being asked (movian#247).
+    for path in harness.commit_plugin_settings(planned_settings):
+        print("seeded %s" % path, file=sys.stderr)
+    # What the spec was TAKEN to mean, not what it said. Two guesses live in
+    # that grammar -- where the key ends and what type the value is -- and
+    # neither is detectable from the plugin's side: a key that swallowed an
+    # `=`, or `"2160"` that lost its quotes to the shell, both seed
+    # successfully and leave the plugin reading its default (movian#247).
+    #
+    # The key and the TYPE, never the value. The documented use for this flag
+    # is a setting a plugin gates on, and those are cookies and tokens; a
+    # value passed through the environment to keep it out of shell history
+    # must not then be printed into a CI log. Type and length settle both
+    # guesses on their own -- `str` versus `int` IS the quoting question, and
+    # the key alone IS the `=` question.
+    for setting in settings:
+        kind = type(setting.value).__name__
+        shape = ("<%s, %d chars>" % (kind, len(setting.value))
+                 if isinstance(setting.value, str) else "<%s>" % kind)
+        print("  %s:%s -> %s = %s"
+              % (setting.plugin_id, setting.group, setting.key, shape),
+              file=sys.stderr)
 
     argv = harness.build_argv(
         inst, args.plugin, args.skin, args.libav_log, args.start_url,
@@ -651,7 +690,42 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--skin", metavar="DIR",
                      help="skin directory (GLW --skin)")
     run.add_argument("--dev-flags", metavar="K=1,K2=1",
-                     help="seed <persistent>/settings/dev before launch")
+                     help="seed <persistent>/settings/dev before launch "
+                          "-- the CORE's dev namespace, not a plugin's own "
+                          "settings (see --plugin-setting)")
+    run.add_argument("--plugin-setting", action="append", default=[],
+                     metavar="PLUGIN:GROUP:KEY=VALUE",
+                     help="seed one of a -p plugin's own settings before "
+                          "launch, so it is read on first load rather than "
+                          "asked for; repeatable. PLUGIN is the id from its "
+                          "plugin.json (the @dev the core appends is added "
+                          "here). GROUP is the id the plugin passed to "
+                          "settings.globalSettings(). `true`/`false` are "
+                          "written as 1/0 and a run of digits as an int, "
+                          "which is what Movian writes; both are guesses "
+                          "about a declared type mdev cannot see, so "
+                          "double-quote the value to seed it literally -- "
+                          "and quote the whole argument so the shell does "
+                          "not eat them: "
+                          "--plugin-setting 'p:g:KEY=\"2160\"'. A PLUGIN "
+                          "or GROUP containing ':' cannot be addressed at "
+                          "all -- the first two colons are structure -- and "
+                          "each must be a single path component, since it "
+                          "names a file inside the plugin's own profile. "
+                          "The first '=' after them splits KEY from VALUE, "
+                          "so a VALUE may contain '=' and a KEY may not: "
+                          "'a=b=1' seeds the key 'a'. Every seed is "
+                          "reported as the key and the inferred type it was "
+                          "taken to mean -- never the value, which is "
+                          "typically a cookie or a token -- because neither "
+                          "that split nor the type guess above is visible "
+                          "from the plugin's side, and the type is what "
+                          "settles the guess. "
+                          "Only globalSettings is covered: "
+                          "settings.kvstoreSettings() keeps values in the "
+                          "sqlite kvstore instead, and nothing here writes "
+                          "that -- a seed for one of those lands in a file "
+                          "the plugin never reads")
     run.add_argument("--libav-log", action="store_true",
                      help="pass --libav-log to movian")
     # The documented oracle recapture needs it: the ecmascript file ACL
