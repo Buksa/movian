@@ -223,12 +223,17 @@ class TheQueueIsCountedNotFingerprinted(unittest.TestCase):
     """
 
     def check(self, parsed, expected):
-        saved = harness.get_prop
-        harness.get_prop = lambda base, path, timeout=5.0: parsed
+        # The seam moved with movian#249: `pending_popups` needs the status
+        # as well as the node, so it reads through `get_prop_status`. These
+        # cases are about the counting rule over a parsed node, which is
+        # what they always were, so the node is what is faked.
+        saved = harness.get_prop_status
+        harness.get_prop_status = (
+            lambda base, path, timeout=5.0: (parsed, 200))
         try:
             self.assertEqual(harness.pending_popups("http://x"), expected)
         finally:
-            harness.get_prop = saved
+            harness.get_prop_status = saved
 
     def test_a_directory_is_counted(self) -> None:
         self.check({"value": "directory",
@@ -237,7 +242,9 @@ class TheQueueIsCountedNotFingerprinted(unittest.TestCase):
     def test_an_empty_directory_is_zero(self) -> None:
         self.check({"value": "directory", "children": []}, 0)
 
-    def test_an_unreadable_prop_is_none_not_zero(self) -> None:
+    def test_a_node_that_will_not_parse_is_none_not_zero(self) -> None:
+        """An answer that is not a prop is not an empty queue. The
+        transport-level cases moved to AnAbsentQueueIsZeroNotUnreadable."""
         self.check(None, None)
 
     def test_children_without_a_message_are_still_counted(self) -> None:
@@ -280,6 +287,63 @@ class AnUnreadableProbeFailsClosed(unittest.TestCase):
         wait that trusts an unreadable instrument is guessing."""
         nav = Navigator(raises_popup=False, probe_readable=False)
         self.assertIsInstance(drive(nav), harness.MdevError)
+
+
+class AnAbsentQueueIsZeroNotUnreadable(unittest.TestCase):
+    """`global/popups` does not exist yet, and absent is not unreadable
+    (movian#249).
+
+    Measured on a fresh instance, against the port `launch()` has already
+    waited for:
+
+        immediately after `mdev run`:  HTTP 404
+        five seconds later:            HTTP 200
+
+    So the API is answering the whole time -- `launch()` blocks on the
+    core's "Listening on port" trace (asyncio_posix.c:882) before `mdev
+    run` returns -- and the 404 is an answer, not silence. `get_prop` maps
+    a 404 and a refused connection to the same None, so `pending_popups`
+    called an empty queue unreadable; an unreadable queue fails closed for
+    the whole wait, by design, and `mdev open page:home` straight after
+    `mdev run` timed out at 20s on a fully rendered page.
+
+    An absent prop is a fact ABOUT the queue: nothing has ever been
+    raised. A transport failure is the absence of a fact. `http_request`
+    carries `status` only when the server answered, so telling them apart
+    needs no new machinery.
+
+    A first attempt at this added a retry loop for the baseline, on the
+    theory that the port might not be up yet. The measurement above
+    refutes that theory, and the loop went with it: the 404 is the whole
+    defect.
+    """
+
+    def check(self, response, expected):
+        # Faked at `http_request`, so the status handling under test is the
+        # real one. The bodies are what Movian's /api/prop actually sends:
+        # a 404 carries the server's error page, and a refusal carries no
+        # body at all because there was no response.
+        saved = harness.http_request
+        harness.http_request = lambda base, path, timeout=5.0: response
+        try:
+            self.assertEqual(harness.pending_popups("http://x"), expected)
+        finally:
+            harness.http_request = saved
+
+    def test_a_refused_connection_is_unreadable(self) -> None:
+        self.check({"ok": False, "error": "Connection refused",
+                    "path": "/api/prop/global/popups"}, None)
+
+    def test_an_absent_prop_is_zero(self) -> None:
+        """The startup case, and the one that made #249 reachable."""
+        self.check({"ok": False, "status": 404,
+                    "body": b"No such property"}, 0)
+
+    def test_a_server_error_is_unreadable(self) -> None:
+        """Answered, but not with an answer. 500 says nothing about the
+        queue, so it must not read as an empty one."""
+        self.check({"ok": False, "status": 500,
+                    "body": b"Internal error"}, None)
 
 
 if __name__ == "__main__":

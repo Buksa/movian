@@ -64,23 +64,26 @@ A records that run as:
 ```
 mdev: page not ready after 20s: nav_event_seen=True url='popuptest:gated'
   loading='(void)' title='(void)' (open issued 3 times)
-  -- the popup queue could not be read
+  -- 1 popup(s) pending, 0 of them already up before this open;
+     the route is parked until one is answered
 ```
 
 and B as `nodes: 0`, with the seeded file reading `{"askFirst": 0}`.
 
-A's refusal is the right one and its reason is not. There IS a popup
-pending, so the count would refuse too, but the count is never reached: an
-`mdev open` issued immediately after `mdev run` takes its popup baseline
-before the instance's HTTP API is listening, that read fails, and an
-unreadable baseline fails closed for the whole call. Filed as movian#249,
-with the measurement that separates it -- the same open on the same
-instance, once warm, exits 0 in 1s. B is unaffected because a seeded route
-publishes a definite `loading = 0` and never reaches the popup check at all.
+That message names the count, which it could not do until movian#249 was
+fixed. Before that, this sequence printed "the popup queue could not be
+read" instead -- not because the instance was unreachable, but because
+`global/popups` does not exist until something raises a popup, and a 404
+and a refused connection both reached `pending_popups` as the same `None`.
+An unreadable queue fails closed for the whole wait, by design, so A's
+outcome was right and its reason was not.
 
-So the pair still discriminates, in both directions, and for A the outcome
-is sound while the diagnosis is not. Do not read A's message as evidence
-about the queue.
+Both halves of the message are named because they are different facts.
+`1 popup(s) pending` is the route parking, which is what A is for; `0 of
+them already up before this open` is the attribution, which is what makes
+it A's popup rather than a bystander's. B never reaches either, because a
+seeded route publishes a definite `loading = 0` and skips the popup check
+entirely.
 
 `--plugin-setting` takes the id from `plugin.json` — `devtools_popup_test`
 — and appends the `@dev` the core adds for a `-p` load. The group is the id
