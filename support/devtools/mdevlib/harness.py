@@ -601,7 +601,7 @@ def plugin_manifest_id(plugin_dir: str) -> str:
 # fixed, an id whose raw text carries such an escape is refused rather than
 # seeded into a profile no plugin will read. Scoped to the id: the same
 # escape in a synopsis is the core's problem and not this seed's.
-_RAW_ID = re.compile(r'"id"\s*:\s*"((?:[^"\\]|\\.)*)"')
+_RAW_MEMBER = re.compile(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"')
 _UPPER_ESCAPE = re.compile(r'\\u[0-9a-fA-F]*[A-F]')
 # A surrogate escape is a separate mismatch: `utf8_put` drops surrogate
 # code points (`str.c:687-688`), so the core and Python build different ids.
@@ -609,27 +609,51 @@ _SURROGATE_ESCAPE = re.compile(
     r'\\u(?:[dD][89aAbB][0-9a-fA-F]{2}|[dD][c-fC-F][0-9a-fA-F]{2})')
 
 
+def _raw_id_literal(text: str) -> str | None:
+    """The raw spelling of the `id` member's VALUE, however `id` is spelled.
+
+    The escape guards below have to read raw text, because a decoded id
+    cannot say which escape produced it. Searching that text for the literal
+    `"id"` missed `"\u0069d"`, which decodes to the same member, is what
+    `json.dumps` would never write but a hand-edited manifest can, and made
+    both guards unreachable -- mdev seeded `PJ@dev` while the core built
+    `PE@dev`. Keys are decoded before comparison, so the member is found by
+    what it means rather than by how it was typed.
+
+    A non-string id does not match and returns None; `_manifest_id` has
+    already refused that case on the decoded manifest.
+    """
+    for raw_key, raw_value in _RAW_MEMBER.findall(text):
+        try:
+            decoded = json.loads('"%s"' % raw_key)
+        except ValueError:
+            continue
+        if decoded == "id":
+            return raw_value
+    return None
+
+
 def _manifest_id(plugin_dir: str, manifest: dict) -> str:
     value = manifest.get("id")
     manifest_path = Path(plugin_dir) / "plugin.json"
     if not isinstance(value, str) or not value:
         raise MdevError("%s declares no \"id\"" % manifest_path)
-    raw = _RAW_ID.search(manifest_path.read_text(encoding="utf-8"))
-    if raw is not None and _SURROGATE_ESCAPE.search(raw.group(1)):
+    raw_id = _raw_id_literal(manifest_path.read_text(encoding="utf-8"))
+    if raw_id is not None and _SURROGATE_ESCAPE.search(raw_id):
         raise MdevError(
             "%s spells its id with a surrogate escape: %s. "
             "str.c:687-688 drops code points from 0xD800 through 0xDFFF, "
             "so the core would build a different fqid than this reads and "
             "the seed would land where nothing looks." %
-            (manifest_path, raw.group(1)))
-    if raw is not None and _UPPER_ESCAPE.search(raw.group(1)):
+            (manifest_path, raw_id))
+    if raw_id is not None and _UPPER_ESCAPE.search(raw_id):
         raise MdevError(
             "%s spells its id with an escape the core decodes differently: "
             "%s. json.c:71 computes uppercase hex as `*s - 'F' + 10`, so "
             "A-F yield 5-10 instead of 10-15 -- the core would build a "
             "different fqid than this reads, and the seed would land where "
             "nothing looks (movian#250). Spell the id literally, or in "
-            "lowercase hex." % (manifest_path, raw.group(1)))
+            "lowercase hex." % (manifest_path, raw_id))
     return value
 
 
@@ -756,42 +780,17 @@ def plan_plugin_settings(
     """
     if not specs:
         return []
-    resolve_plugin_settings(plugins, specs)
-    known = {}
-    kinds = {}
-    for plugin in plugins:
-        plugin_id, kind = plugin_manifest(plugin)
-        known[plugin_id] = plugin
-        kinds[plugin_id] = kind
+    # One pass, and its result is USED. The loop this replaces repeated every
+    # check `resolve_plugin_settings` had just made -- parse, manifests, id,
+    # type -- with the same two refusal messages spelled out twice, which
+    # this round had to edit in both copies. The duplication also made the
+    # call below unpinned: deleting it left the whole battery green, because
+    # the copy did the refusing. What the plan needs from it is the parsed
+    # settings, so it takes them.
+    settings = resolve_plugin_settings(plugins, specs)
 
     grouped: dict[Path, dict[str, Any]] = {}
-    for spec in specs:
-        plugin_id, group, key, value = parse_plugin_setting(spec)
-        if plugin_id not in known:
-            # A manifest id may contain ':' -- plugins.c:632-647 takes the
-            # string as given -- and this flag's grammar cannot address one,
-            # because the first two colons are structure. Detectable only
-            # here, so it is said here rather than left as a puzzle.
-            unaddressable = sorted(i for i in known if ":" in i)
-            raise MdevError(
-                "--plugin-setting %r:%r:%r=<redacted> names plugin %r, "
-                "which is not among the -p plugins: %s. Pass the id from "
-                "its plugin.json; the @%s the core appends is added here.%s"
-                % (plugin_id, group, key, plugin_id,
-                   ", ".join(sorted(known)) or "(none given)",
-                   PLUGIN_DEV_ORIGIN,
-                   ("  Note that %s cannot be addressed by this flag at all: "
-                    "a ':' in the id collides with the spec's own separators."
-                    % ", ".join(repr(i) for i in unaddressable))
-                   if unaddressable else ""))
-        if kinds[plugin_id] != "ecmascript":
-            raise MdevError(
-                "--plugin-setting %r:%r:%r=<redacted> targets plugin %r, "
-                "whose manifest declares type %r. Only an ecmascript "
-                "plugin gets an ES context, and only that context has the "
-                "storagePath these settings live under (plugins.c:674, "
-                "702-727) -- the file would be written and never read."
-                % (plugin_id, group, key, plugin_id, kinds[plugin_id]))
+    for plugin_id, group, key, value in settings:
         grouped.setdefault(
             plugin_setting_path(persistent, plugin_id, group), {})[key] = value
 

@@ -434,6 +434,11 @@ class Seeding(unittest.TestCase):
         self.assertIn("HDRezka", message)
         self.assertIn("tmdb", message)
 
+    # There were two more here, reaching the same two messages inside
+    # `plan_plugin_settings` by mocking `resolve_plugin_settings` away. They
+    # existed only because that function's checks were spelled out twice, and
+    # they went with the duplication: the plan now uses what resolve returns,
+    # so there is one copy of each message and these two cover it.
     def test_unknown_plugin_refusal_redacts_value(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -443,23 +448,6 @@ class Seeding(unittest.TestCase):
         with self.assertRaises(MdevError) as caught:
             harness.resolve_plugin_settings(
                 [plugin_dir(root / "src", "P")], [spec])
-        message = str(caught.exception)
-        self.assertIn("Wrong", message)
-        self.assertIn("g", message)
-        self.assertIn("cookie", message)
-        self.assertNotIn(secret, message)
-
-    def test_plan_unknown_plugin_refusal_redacts_value(self) -> None:
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        root = Path(tmp.name)
-        secret = "session=secret"
-        spec = "Wrong:g:cookie=" + secret
-        plugins = [plugin_dir(root / "src", "P")]
-        with mock.patch.object(harness, "resolve_plugin_settings"):
-            with self.assertRaises(MdevError) as caught:
-                harness.plan_plugin_settings(
-                    root / "persistent", plugins, [spec])
         message = str(caught.exception)
         self.assertIn("Wrong", message)
         self.assertIn("g", message)
@@ -478,26 +466,6 @@ class Seeding(unittest.TestCase):
         spec = "V:g:cookie=" + secret
         with self.assertRaises(MdevError) as caught:
             harness.resolve_plugin_settings([str(views)], [spec])
-        message = str(caught.exception)
-        self.assertIn("V", message)
-        self.assertIn("g", message)
-        self.assertIn("cookie", message)
-        self.assertNotIn(secret, message)
-
-    def test_plan_plugin_type_refusal_redacts_value(self) -> None:
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        root = Path(tmp.name)
-        views = root / "views"
-        views.mkdir()
-        (views / "plugin.json").write_text(
-            json.dumps({"id": "V", "type": "views"}), encoding="utf-8")
-        secret = "session=secret"
-        spec = "V:g:cookie=" + secret
-        with mock.patch.object(harness, "resolve_plugin_settings"):
-            with self.assertRaises(MdevError) as caught:
-                harness.plan_plugin_settings(
-                    root / "persistent", [str(views)], [spec])
         message = str(caught.exception)
         self.assertIn("V", message)
         self.assertIn("g", message)
@@ -809,6 +777,42 @@ class TheManifestIsReadTheWayTheCoreReadsIt(unittest.TestCase):
         delegate = (REPO_ROOT / "src" / "htsmsg" / "htsmsg_json.c").read_text(
             encoding="utf-8")
         self.assertIn("json_deserialize(src, &json_to_htsmsg", delegate)
+
+    def test_an_escaped_id_KEY_does_not_hide_the_escape(self) -> None:
+        """Both escape guards read raw text, and found it by the literal
+        `"id"`. A manifest may spell the MEMBER escaped too -- `"\\u0069d"`
+        decodes to `id` and `json.dumps` would never write it, but a
+        hand-edited manifest can -- and then neither guard fired: measured,
+        mdev seeded `PJ@dev` while the core built `PE@dev`. The member is
+        now found by what its key decodes to.
+        """
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        weird = root / "src" / "esckey"
+        weird.mkdir(parents=True)
+        (weird / "plugin.json").write_text(
+            '{"\\u0069d":"P\\u004A","type":"ecmascript",'
+            '"version":"1.0.0"}', encoding="utf-8")
+        with self.assertRaises(MdevError) as caught:
+            harness.seed_plugin_settings(
+                root / "persistent", [str(weird)], ["PJ:g:k=1"])
+        self.assertIn("json.c:71", str(caught.exception))
+        self.assertFalse((root / "persistent").exists())
+
+    def test_an_escaped_id_key_is_otherwise_read_normally(self) -> None:
+        """The control: finding the member by meaning must not turn an
+        escaped key into a refusal of its own. This id carries no escape
+        that either decoder disagrees about."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        ok = root / "src" / "esckey2"
+        ok.mkdir(parents=True)
+        (ok / "plugin.json").write_text(
+            '{"\\u0069d":"P","type":"ecmascript","version":"1.0.0"}',
+            encoding="utf-8")
+        self.assertEqual(harness.plugin_manifest_id(str(ok)), "P")
 
     def test_a_lowercase_escape_is_accepted(self) -> None:
         """Only the affected digits. Lowercase hex decodes correctly in the
