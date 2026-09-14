@@ -2953,7 +2953,7 @@
         "registered": true,
         "source": {
           "file": "src/ui/glw/glw_image.c",
-          "line": 1559
+          "line": 1569
         },
         "symbol": "glw_backdrop"
       },
@@ -3170,7 +3170,7 @@
         "registered": true,
         "source": {
           "file": "src/ui/glw/glw_image.c",
-          "line": 1590
+          "line": 1600
         },
         "symbol": "glw_frontdrop"
       },
@@ -3180,7 +3180,7 @@
         "registered": true,
         "source": {
           "file": "src/ui/glw/glw_image.c",
-          "line": 1528
+          "line": 1538
         },
         "symbol": "glw_icon"
       },
@@ -3190,7 +3190,7 @@
         "registered": true,
         "source": {
           "file": "src/ui/glw/glw_image.c",
-          "line": 1498
+          "line": 1508
         },
         "symbol": "glw_image"
       },
@@ -3310,7 +3310,7 @@
         "registered": true,
         "source": {
           "file": "src/ui/glw/glw_image.c",
-          "line": 1621
+          "line": 1631
         },
         "symbol": "glw_repeatedimage"
       },
@@ -10370,6 +10370,6 @@
       }
     ]
   },
-  "movianRevision": "c45020df093560b960ebb5aba80e9821f9a7ccc0",
+  "movianRevision": "2a85de8a9cc454545f5c504e1a2c1a0498cd1e11",
   "schemaVersion": 1
 }
