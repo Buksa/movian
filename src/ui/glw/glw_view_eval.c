@@ -1072,9 +1072,15 @@ eval_assign(glw_view_eval_context_t *ec, struct token *self, int how)
     r = 0;
     break;
 
-  default:
+  default: {
+    // A buffer per token: token2name() would render both into its single
+    // static one, so whichever call the compiler ran second would win and
+    // the message would name that operand twice (movian#258).
+    char lbuf[GLW_TOKEN2NAME_BUFSIZE], rbuf[GLW_TOKEN2NAME_BUFSIZE];
     return glw_view_seterr(ec->ei, self, "Invalid assignment %s = %s",
-			   token2name(left), token2name(right));
+			   token2name_r(left,  lbuf, sizeof(lbuf)),
+			   token2name_r(right, rbuf, sizeof(rbuf)));
+  }
   }
 
   eval_push(ec, right);
