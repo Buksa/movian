@@ -19,6 +19,7 @@
  */
 #include "glw.h"
 #include "glw_renderer.h"
+#include "glw_image_border.h"
 #include "glw_texture.h"
 
 typedef struct glw_image {
@@ -386,7 +387,7 @@ glw_image_layout_tesselated(glw_root_t *gr, const glw_rctx_t *rc,
                             glw_image_t *gi, glw_loadable_texture_t *glt)
 {
   float tex[4][2];
-  float vex[4][2];
+  float vex[2][4];   // [axis][row], because one helper fills one axis
 
   int x, y, i = 0;
 
@@ -402,19 +403,24 @@ glw_image_layout_tesselated(glw_root_t *gr, const glw_rctx_t *rc,
   tex[3][1] = glt->glt_t;
 
 
-  vex[0][0] = -1.0;
-  vex[1][0] = GLW_MIN(-1.0f + 2.0f * gi->gi_border[0] / rc->rc_width, 0.0f);
-  vex[2][0] = GLW_MAX( 1.0f - 2.0f * gi->gi_border[2] / rc->rc_width, 0.0f);
-  vex[3][0] = 1.0;
-
-  vex[0][1] = -1.0f;
-  vex[1][1] = GLW_MAX( 1.0f - 2.0f * gi->gi_border[1] / rc->rc_height, 0.0f);
-  vex[2][1] = GLW_MIN(-1.0f + 2.0f * gi->gi_border[3] / rc->rc_height, 0.0f);
-  vex[3][1] = 1.0f;
+  // One arithmetic for both axes, with the DIRECTION stated here because the
+  // axes do not run the same way: +1 is the widget's top and t=0 is the
+  // image's top, so y runs +1 -> -1 against tex's 0 -> glt_t.
+  //
+  // This held from the start until 1d84a9a2c (2016-06-01, "glw: Add support
+  // for setting margin on all widgets"), which dropped the margin terms and
+  // wrote the outer y edges as -1 and +1 -- the x convention -- while leaving
+  // rows 1 and 2 descending. The result, -1, 1-2b/h, -1+2b/h, +1, is not
+  // ordered, so every horizontal quad built from it is inverted or
+  // degenerate and the top and bottom bands stop drawing (movian#117).
+  glw_image_border_axis(vex[0], -1.0f, gi->gi_border[0], gi->gi_border[2],
+                         1.0f, rc->rc_width);
+  glw_image_border_axis(vex[1],  1.0f, gi->gi_border[1], gi->gi_border[3],
+                        -1.0f, rc->rc_height);
 
   for(y = 0; y < 4; y++) {
     for(x = 0; x < 4; x++) {
-      glw_renderer_vtx_pos(&gi->gi_gr, i, vex[x][0], vex[y][1], 0.0f);
+      glw_renderer_vtx_pos(&gi->gi_gr, i, vex[0][x], vex[1][y], 0.0f);
       glw_renderer_vtx_st (&gi->gi_gr, i, tex[x][0], tex[y][1]);
       i++;
     }
@@ -652,8 +658,12 @@ static uint16_t borderonlyobject[] = {
   2, 7, 3,
   8, 5, 4,
   8, 9, 5,
-  //  9, 6, 5,
-  //  9, 10, 6,
+  // No centre quad here, deliberately: vertices 5, 6, 9, 10 are rows 1-2 by
+  // columns 1-2, which IS the centre, and `borderOnly` exists to suppress
+  // it. The triangle count at the call site is the proof -- `borderobject`
+  // is initialised with 18 and this one with 16, and those two triangles are
+  // the difference. movian#117 suspected these lines of being the missing
+  // horizontal bands. They are not.
   10, 7, 6,
   10, 11, 7,
   12, 13, 8,
