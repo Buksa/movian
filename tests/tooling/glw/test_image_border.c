@@ -18,7 +18,8 @@
  * Header-only and dependency-free on purpose: the real function is under
  * test, not a copy of it, and pulling glw.h would drag the renderer in.
  *
- * Build and run:
+ * Run by the `glw geometry unit tests` job in .github/workflows/gates.yml on
+ * every push and pull request. By hand:
  *   cc -I src -Werror -o /tmp/t tests/tooling/glw/test_image_border.c
  *   /tmp/t
  */

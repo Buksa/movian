@@ -140,6 +140,29 @@ jobs:
           python3 -m unittest discover -s tests/tooling/mdev
           -p 'test_lsp_doctor.py' -v
 
+  glw-geometry:
+    name: glw geometry unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      # The "deliberately NOT a build" note above is about Movian's build --
+      # submodules, libav, ext-cache. It does not apply here: these tests are
+      # header-only and dependency-free by construction, so the whole step is
+      # one `cc` invocation and takes under half a second. A test nobody runs
+      # cannot pin an invariant, and the invariant this one pins -- that the
+      # nine-slice vertex rows stay ordered in their axis's own direction --
+      # is exactly the one that silently broke in 2016 and stayed broken for
+      # nine years (movian#117).
+      - name: glw_image_border_axis
+        run: |
+          cc -I src -Werror -o /tmp/test_image_border \
+            tests/tooling/glw/test_image_border.c
+          /tmp/test_image_border
+
   hygiene:
     name: whitespace and merge markers
     runs-on: ubuntu-latest
