@@ -337,13 +337,20 @@ glw_view_clone_chain(glw_root_t *gr, token_t *src, token_t **lp)
  *
  */
 const char *
-token2name(token_t *t)
+token2name_r(token_t *t, char *buf, size_t buflen)
 {
-  static char buf[200];
   int i;
 
   if(t == NULL)
     return "(null)";
+
+  // Every branch below either returns a literal or formats into `buf`. A
+  // zero-length buffer cannot hold even the terminator, so snprintf would
+  // leave it unwritten and the strlen() appends further down would read
+  // uninitialised memory. Answer before that can happen.
+  if(buflen == 0)
+    return "";
+
   switch(t->type) {
   case TOKEN_START:         return "<start>";
   case TOKEN_END:           return "<end>";
@@ -385,7 +392,7 @@ token2name(token_t *t)
   case TOKEN_LT:            return "<";
 
   case TOKEN_FUNCTION:
-    snprintf(buf, sizeof(buf), "%s()", t->t_func->name);
+    snprintf(buf, buflen, "%s()", t->t_func->name);
     return buf;
 
   case TOKEN_PROPERTY_SUBSCRIPTION:
@@ -395,47 +402,46 @@ token2name(token_t *t)
     return "property ref";
 
   case TOKEN_PROPERTY_NAME:
-    snprintf(buf, sizeof(buf), "<property> ");
+    snprintf(buf, buflen, "<property> ");
     for(i = 0; i < t->t_elements; i++)
-      snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), "%s ",
+      snprintf(buf + strlen(buf), buflen - strlen(buf), "%s ",
                rstr_get(t->t_pnvec[i]));
     return buf;
 
   case TOKEN_RESOLVED_ATTRIBUTE:
-    snprintf(buf, sizeof(buf), "%s:", t->t_attrib->name);
+    snprintf(buf, buflen, "%s:", t->t_attrib->name);
     return buf;
 
   case TOKEN_UNRESOLVED_ATTRIBUTE:
-    snprintf(buf, sizeof(buf), "%s:", rstr_get(t->t_rstring));
+    snprintf(buf, buflen, "%s:", rstr_get(t->t_rstring));
     return buf;
 
   case TOKEN_IDENTIFIER:    return rstr_get(t->t_rstring);
   case TOKEN_ASSIGNMENT:    return "=";
 
   case TOKEN_FLOAT:
-    snprintf(buf, sizeof(buf), "%ff", t->t_float);
+    snprintf(buf, buflen, "%ff", t->t_float);
     return buf;
 
   case TOKEN_EM:
-    snprintf(buf, sizeof(buf), "%fem", t->t_float);
+    snprintf(buf, buflen, "%fem", t->t_float);
     return buf;
 
   case TOKEN_INT:
-    snprintf(buf, sizeof(buf), "%d", t->t_int);
+    snprintf(buf, buflen, "%d", t->t_int);
     return buf;
 
   case TOKEN_VOID:
     return "(void)";
 
   case TOKEN_VECTOR_FLOAT:
-    buf[0] = '[';
-    buf[1] = 0;
+    snprintf(buf, buflen, "[");
 
     for(i = 0; i < t->t_elements; i++)
-      snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), "%f ", 
-	       t->t_float_vector[i]);
+      snprintf(buf + strlen(buf), buflen - strlen(buf), "%f ",
+               t->t_float_vector[i]);
 
-    snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), "]");
+    snprintf(buf + strlen(buf), buflen - strlen(buf), "]");
     
     return buf;
 
@@ -444,7 +450,7 @@ token2name(token_t *t)
   case TOKEN_DIRECTORY:  return "<directory>";
 
   case TOKEN_URI:
-    snprintf(buf, sizeof(buf), "Link<%s, %s>",
+    snprintf(buf, buflen, "Link<%s, %s>",
 	     rstr_get(t->t_uri_title), rstr_get(t->t_uri));
     return buf;
 
@@ -452,9 +458,24 @@ token2name(token_t *t)
     return "[]";
     
   default:
-    snprintf(buf, sizeof(buf), "Tokentype<%d>", t->type);
+    snprintf(buf, buflen, "Tokentype<%d>", t->type);
     return buf;
   }
+}
+
+
+/**
+ * The convenience form, for the many callers that hold one result at a time.
+ *
+ * It owns ONE static buffer, so two live results alias each other: a caller
+ * that needs both at once -- a message with two tokens in it -- must use
+ * token2name_r() with a buffer per token. movian#258 was that mistake.
+ */
+const char *
+token2name(token_t *t)
+{
+  static char buf[GLW_TOKEN2NAME_BUFSIZE];
+  return token2name_r(t, buf, sizeof(buf));
 }
 
 
