@@ -319,7 +319,8 @@ int glw_view_unresolved_attribute_set(glw_view_eval_context_t *ec,
                                       const char *attrib,
                                       struct token *t);
 
-int glw_view_seterr(errorinfo_t *ei, token_t *b, const char *fmt, ...);
+int glw_view_seterr(errorinfo_t *ei, token_t *b, const char *fmt, ...)
+  attribute_printf(3, 4);
 
 int glw_view_eval_block(token_t *t, glw_view_eval_context_t *ec,
                         token_t **nonpure);

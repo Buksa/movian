@@ -1621,8 +1621,17 @@ glw_view_unresolved_attribute_set(glw_view_eval_context_t *ec,
                          t->t_float * w->glw_root->gr_current_size);
     break;
   default:
+    // The limit belongs to this dispatch path, not to the attribute. An
+    // attribute absent from `attribtab` is handed to the widget, and the
+    // only unresolved setters are gc_set_{int,float,rstr}_unresolved
+    // (glw.h) -- there is no float4 one -- so NO widget-private attribute
+    // can take a vector, whatever its name. Hence "handled by the widget"
+    // rather than the siblings' "expects": their constraint really is the
+    // attribute's, and an author can act on it by picking another value;
+    // here no value of that shape will ever be accepted.
     return glw_view_seterr(ec->ei, t,
-			   "Attribute '%s' expects a different type",
+			   "Attribute '%s' is handled by the widget, "
+			   "which takes a string or scalar, got %s",
 			   attrib, token2name(t));
   }
   return 0;
