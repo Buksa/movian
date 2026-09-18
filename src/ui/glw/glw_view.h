@@ -305,7 +305,26 @@ int glw_view_parse(token_t *sof, errorinfo_t *ei, glw_root_t *gr);
 
 void glw_view_free_chain(glw_root_t *gr, token_t *t);
 
+/* The buffer size token2name() uses; callers of _r have no reason to differ. */
+#define GLW_TOKEN2NAME_BUFSIZE 200
+
 const char *token2name(token_t *t);
+
+/**
+ * The form that does not alias. Needed whenever two results must be live at
+ * once, e.g. a message naming two tokens -- token2name() has one static
+ * buffer and the second call would overwrite the first (movian#258).
+ *
+ * What it returns is NOT always `buf`. Most token types have a fixed name and
+ * yield a string literal; TOKEN_RSTRING, TOKEN_CSTRING and TOKEN_IDENTIFIER
+ * yield a pointer into the token. Only the types that have to be formatted
+ * use `buf`. So the result outlives the call, but a token-owned one dies with
+ * its token -- do not hold it across a token's release.
+ *
+ * `buflen` may be anything including zero; a buffer too small truncates, and
+ * zero yields "". There is no minimum for the caller to know.
+ */
+const char *token2name_r(token_t *t, char *buf, size_t buflen);
 
 void glw_view_print_tree(token_t *f, int indent);
 
