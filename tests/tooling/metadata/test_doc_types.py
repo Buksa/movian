@@ -79,6 +79,37 @@ class BlockReader(unittest.TestCase):
         self.assertIn("ctrl", types["params"])
         self.assertNotIn("[ctrl]", types["params"])
 
+    def test_the_optional_marker_is_recorded_and_not_only_stripped(
+            self) -> None:
+        r"""`[name]` is evidence, and it was being discarded (movian#260).
+
+        `JSDOC_PARAM_NAME_RE` has captured the bracket since it was written --
+        `(\[?)` is group 1 -- and the reader used only group 2, so the fact
+        went nowhere.
+
+        Recorded, NOT emitted: making a parameter required rejects `f()`,
+        which is narrowing under AGENTS.md "Narrowing The Generated API", and
+        an author's brackets are intent rather than proof that the callee
+        rejects omission. `movian/prop.js:114` is the corpus witness -- `prop`
+        and `callback` carry no brackets, `[ctrl]` does.
+        """
+        types = gen._jsdoc_types(MODULES / "movian/prop.js", 114)
+        self.assertEqual(types.get("optionalParams"), ["ctrl"])
+
+    def test_an_unbracketed_parameter_is_not_recorded_optional(self) -> None:
+        """A real block, a real unbracketed `@param` -- and no optionality.
+
+        The first version of this test asked about `movian/xml.js:72`, which
+        is INSIDE `exports.parse` and reads no block at all: `{}`, so "no
+        optionalParams" was true of an empty dict and the test could not go
+        red. Line 70 is the declaration under
+        `/** @param {string} str ... */`, and the first assertion proves the
+        block was actually read before the second one means anything.
+        """
+        types = gen._jsdoc_types(MODULES / "movian/xml.js", 70)
+        self.assertEqual(types.get("params"), {"str": "string"})
+        self.assertNotIn("optionalParams", types)
+
 
 class ReaderLexing(unittest.TestCase):
     """The reader is a lexer, and every shortcut in it was a real misreading.
@@ -257,6 +288,33 @@ class Aliases(unittest.TestCase):
             'C.prototype.own = C.prototype.bare;\n')
         self.assertEqual(methods["own"]["docParams"], {"x": "Item"})
         self.assertNotIn("docFrom", methods["own"])
+
+    BRACKETED = ('/**\n * @param {string} [x]\n */\n'
+                 'C.prototype.original = function(x) { return x; };\n'
+                 '/**\n * @param {Item} x\n */\n'
+                 'C.prototype.plain = C.prototype.original;\n'
+                 'C.prototype.bare = C.prototype.original;\n')
+
+    def test_an_alias_does_not_keep_the_targets_brackets(self) -> None:
+        """The alias's own block says plain `x`; the target said `[x]`.
+
+        The record is copied, and `_attach_doc_types` writes
+        `docOptionalParams` only when something IS bracketed, so without an
+        explicit pop the target's `[x]` survived under a block that never
+        wrote it (movian#260, Codex review on #261).
+        """
+        methods = self.scan(self.BRACKETED)
+        self.assertEqual(methods["original"]["docOptionalParams"], ["x"])
+        self.assertEqual(methods["plain"]["docParams"], {"x": "Item"})
+        self.assertNotIn("docOptionalParams", methods["plain"])
+
+    def test_an_undocumented_alias_inherits_the_brackets_too(self) -> None:
+        """Inheritance takes the target's block whole: its types without its
+        brackets would drop half of what that block said."""
+        methods = self.scan(self.BRACKETED)
+        self.assertEqual(methods["bare"]["docParams"], {"x": "string"})
+        self.assertEqual(methods["bare"]["docOptionalParams"], ["x"])
+        self.assertEqual(methods["bare"]["docFrom"], "original")
 
 
 class TypeResolution(unittest.TestCase):

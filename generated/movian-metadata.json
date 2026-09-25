@@ -4087,6 +4087,9 @@
             }
           },
           {
+            "docOptionalParams": [
+              "opts"
+            ],
             "docParams": {
               "filename": "string",
               "opts": "*"
@@ -4154,6 +4157,9 @@
             }
           },
           {
+            "docOptionalParams": [
+              "opts"
+            ],
             "docParams": {
               "data": "string|DuktapeBuffer",
               "filename": "string",
@@ -4194,6 +4200,10 @@
       {
         "exports": [
           {
+            "docOptionalParams": [
+              "callback",
+              "https"
+            ],
             "docParams": {
               "callback": "unknown",
               "https": "boolean",
@@ -4213,6 +4223,10 @@
             }
           },
           {
+            "docOptionalParams": [
+              "callback",
+              "https"
+            ],
             "docParams": {
               "callback": "unknown",
               "https": "boolean",
@@ -4398,6 +4412,9 @@
       {
         "exports": [
           {
+            "docOptionalParams": [
+              "cb"
+            ],
             "docParams": {
               "cb": "unknown",
               "opts": "string|Object"
@@ -4414,6 +4431,9 @@
             }
           },
           {
+            "docOptionalParams": [
+              "cb"
+            ],
             "docParams": {
               "cb": "unknown",
               "opts": "string|Object"
@@ -4681,6 +4701,10 @@
             "callbackShape": "HttpResponse",
             "callbackShapeIndex": 1,
             "callbackShapeNullable": true,
+            "docOptionalParams": [
+              "ctrl",
+              "callback"
+            ],
             "docParams": {
               "callback": "(err: any, res: HttpResponse|null) => void",
               "ctrl": "import('native/io').HttpReqOptions",
@@ -4715,6 +4739,9 @@
             "kind": "prototype",
             "methods": [
               {
+                "docOptionalParams": [
+                  "encoding"
+                ],
                 "docParams": {
                   "encoding": "*"
                 },
@@ -4904,6 +4931,9 @@
             "kind": "prototype",
             "methods": [
               {
+                "docOptionalParams": [
+                  "subtype"
+                ],
                 "docParams": {
                   "func": "Function",
                   "subtype": "string",
@@ -4937,6 +4967,9 @@
                 }
               },
               {
+                "docOptionalParams": [
+                  "subtype"
+                ],
                 "docParams": {
                   "subtype": "string",
                   "title": "string",
@@ -5058,6 +5091,9 @@
                 }
               },
               {
+                "docOptionalParams": [
+                  "obj"
+                ],
                 "docParams": {
                   "obj": "*"
                 },
@@ -5109,6 +5145,9 @@
             "kind": "prototype",
             "methods": [
               {
+                "docOptionalParams": [
+                  "subtype"
+                ],
                 "docParams": {
                   "func": "Function",
                   "subtype": "string",
@@ -5129,6 +5168,10 @@
                 }
               },
               {
+                "docOptionalParams": [
+                  "type",
+                  "metadata"
+                ],
                 "docParams": {
                   "metadata": "Object",
                   "type": "string",
@@ -5149,6 +5192,10 @@
                 }
               },
               {
+                "docOptionalParams": [
+                  "data",
+                  "metadata"
+                ],
                 "docParams": {
                   "data": "*",
                   "metadata": "Object",
@@ -5487,6 +5534,9 @@
       {
         "exports": [
           {
+            "docOptionalParams": [
+              "name"
+            ],
             "docParams": {
               "name": "string"
             },
@@ -5522,6 +5572,9 @@
             }
           },
           {
+            "docOptionalParams": [
+              "ctrl"
+            ],
             "docParams": {
               "callback": "(...args: any[]) => void",
               "ctrl": "import('native/prop').SubscribeOptions|null",
@@ -5563,6 +5616,9 @@
       {
         "exports": [
           {
+            "docOptionalParams": [
+              "icon"
+            ],
             "docParams": {
               "enabled": "boolean",
               "icon": "string",
@@ -10119,6 +10175,9 @@
         "exports": [
           {
             "constructor": true,
+            "docOptionalParams": [
+              "protocol"
+            ],
             "docParams": {
               "URL": "string",
               "protocol": "string"
@@ -10154,6 +10213,9 @@
             "kind": "prototype",
             "methods": [
               {
+                "docOptionalParams": [
+                  "d"
+                ],
                 "docParams": {
                   "d": "unknown"
                 },
@@ -10370,6 +10432,6 @@
       }
     ]
   },
-  "movianRevision": "e3597e7ae932c940b17c216680d21e5b222e1df4",
+  "movianRevision": "03f81680aa2d2386db917c547bf13341279d455e",
   "schemaVersion": 1
 }
