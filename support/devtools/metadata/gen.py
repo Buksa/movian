@@ -2382,6 +2382,25 @@ def _attach_doc_types(record: dict[str, Any], path: Path) -> None:
         unmatched = sorted(set(claimed) - set(formal))
         if matched:
             record["docParams"] = matched
+            # Recorded, NOT emitted: every parameter still renders `name?:`.
+            # Dropping the `?` from an unbracketed one rejects `f()`, which
+            # compiled before -- narrowing under AGENTS.md "Narrowing The
+            # Generated API" -- and an author's brackets are intent, not
+            # proof that the callee rejects omission. Nothing in this corpus
+            # supplies that proof: the CommonJS slots that end in a prop
+            # assignment reach es_prop.c:418-439, whose final `else` stores
+            # PROP_SET_VOID. docs/adr/0003-contested-slots-record-candidates.md
+            # settles that pattern: evidence in the artifact, permissive type
+            # in the declarations.
+            #
+            # Only for the names that MATCHED a formal parameter. An
+            # annotation naming a parameter that no longer exists is already
+            # refused above; its brackets are refused with it, for the same
+            # reason -- it describes a signature the function does not have.
+            optional = [name for name in doc.get("optionalParams") or []
+                        if name in matched]
+            if optional:
+                record["docOptionalParams"] = optional
         if unmatched:
             record["docParamsUnmatched"] = unmatched
     if "returns" in doc:
@@ -2594,6 +2613,10 @@ def _jsdoc_types(path: Path, line: int) -> dict[str, Any]:
     body = "\n".join(stripped)
 
     params: dict[str, str] = {}
+    # `[name]` is the author writing "this one may be omitted". The regex has
+    # captured the bracket since it was written; the reader used only the name
+    # and dropped it, so the fact reached nothing (movian#260).
+    optional_params: list[str] = []
     returns: str | None = None
     for tag in JSDOC_TAG_RE.finditer(body):
         rest = body[tag.end():]
@@ -2614,11 +2637,15 @@ def _jsdoc_types(path: Path, line: int) -> dict[str, Any]:
                 # `options?: string`, rejecting every real call.
                 continue
             params[name.group(2)] = type_text
+            if name.group(1) and name.group(2) not in optional_params:
+                optional_params.append(name.group(2))
         elif returns is None:
             returns = type_text
     record: dict[str, Any] = {}
     if params:
         record["params"] = params
+    if optional_params:
+        record["optionalParams"] = optional_params
     if returns is not None:
         record["returns"] = returns
     return record
@@ -3224,12 +3251,21 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
                 # the alias's own block was never read at all. Inheriting is
                 # fine when the alias has nothing to say; claiming the
                 # target's words came from here is not.
+                # `docOptionalParams` belongs to the same block as `docParams`
+                # and must go with it. Left behind, the target's `[x]`
+                # survived an alias whose own block documents plain `x`:
+                # `_attach_doc_types` writes the field only when something IS
+                # bracketed, so it never overwrote the copy (movian#260).
                 for key in ("docParams", "docParamsUnmatched", "docReturns",
-                            "docFrom"):
+                            "docFrom", "docOptionalParams"):
                     method.pop(key, None)
                 _attach_doc_types(method, path)
                 if "docParams" not in method and "docReturns" not in method:
-                    for key in ("docParams", "docReturns"):
+                    # Inherit the target's block whole, or not at all: its
+                    # parameter types without its brackets would record the
+                    # types while silently dropping which ones it marked
+                    # optional -- the same loss, from the other side.
+                    for key in ("docParams", "docReturns", "docOptionalParams"):
                         inherited = methods[target].get(key)
                         if inherited is not None:
                             method[key] = inherited
