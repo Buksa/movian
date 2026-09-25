@@ -232,23 +232,31 @@ Free, because every call that compiled still does -- measured, not assumed:
 `string` to `any`, `string` to `string | number`, a required parameter becoming
 optional, an object parameter gaining an optional member.
 
+A slot whose type gives a call signature to a function inside the argument --
+the callback itself, or a method of an options object -- keeps a signature when
+widened: `Function | ((...args: any[]) => void)`, or with the shape it already
+had in place of the arrow. Widened to plain `any` or `Function`, the callback's
+parameters become implicit `any`, and an unannotated callback stops compiling
+under `--strict` (TS7006). See ADR-0005.
+
 Narrowing, and this is the case that matters here: `any` to a concrete type.
 `any` accepts every argument, so `f(42)` is fine against `any` and an error
 against `string`. An earlier draft called that widening, which would have
 licensed exactly the unproven restrictions the rule exists to prevent -- and
 #209 replaced `any` on 203 parameter slots, four of them wrongly.
 
-**Narrowing requires proof from the C**, quoted in the commit: the exact
-accessor, at the line where the callee reads that argument. Replacing `any`
+**Narrowing requires proof from the source**, quoted in the commit: the exact
+**accessor** (`CONTEXT.md`), in the C or in a core module, at the line where
+the callee reads that argument. Replacing `any`
 is narrowing and needs that proof like any other. `plugin_examples`
 and the fixtures cannot license a narrowing, because both are our own corpus
 and contain no third-party call site by construction. Four signatures were
 narrowed wrongly in one round and every one of them passed the whole battery
 green; three of the four were caught by review, not by a gate.
 
-When the C is ambiguous -- more than one branch reading a slot differently,
-with no proof that anything else is rejected -- the type stays `any` and the
-evidence goes in the artifact instead.
+When the source is ambiguous -- more than one branch reading a slot
+differently, with no proof that anything else is rejected -- the type stays
+`any` and the evidence goes in the artifact instead.
 
 ## Recovery
 
