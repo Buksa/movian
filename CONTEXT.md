@@ -125,10 +125,14 @@ A fact that cannot be derived, written by hand into a `curated_*.json` sidecar
 with the same source anchors and a recorded reason.
 
 **Accessor**:
-The read of an argument slot that names the type the callee expects: in C,
-the `duk_*` call on that slot; in a core module, an invocation of the
-parameter, when the function uses it at least once and every use is an
-invocation of the value as passed.
+The read of an argument slot that names the type the callee expects. In C, a
+call `gen.py` recognises as reading the slot as one type (`duk_require_*`,
+`duk_to_*`, `duk_get_*`, `es_get_native_obj`, `es_prop_to_*` and the rest --
+its tables are the list). A call that only asks (`duk_is_*`) is evidence
+against a type, and one that accepts anything (`es_get_native_obj_nothrow`)
+names none. In a core module, an invocation of the parameter, when the
+function uses it at least once and every use is an invocation of the value as
+passed.
 Whether a wrong value throws, is coerced or fails only later does not matter.
 See ADR-0005.
 _Avoid_: reader, getter
