@@ -125,16 +125,11 @@ A fact that cannot be derived, written by hand into a `curated_*.json` sidecar
 with the same source anchors and a recorded reason.
 
 **Accessor**:
-The read of an argument slot that names the type the callee expects. In C, a
-call `gen.py` recognises as reading the slot as one type (`duk_require_*`,
-`duk_to_*`, `duk_get_*`, `es_get_native_obj`, `es_prop_to_*` and the rest --
-its tables are the list). A call that only asks (`duk_is_*`) is evidence
-against a type, and one that accepts anything (`es_get_native_obj_nothrow`)
-names none. In a core module, an invocation of the parameter, when the
-function uses it at least once and every use is an invocation of the value as
-passed.
-Whether a wrong value throws, is coerced or fails only later does not matter.
-See ADR-0005.
+The read of an argument slot that names the type the callee expects: in C, a
+call that reads the slot as one type (`gen.py`'s tables list them); in a core
+module, an invocation of a parameter the function invokes and uses in no
+other way. Whether a wrong value throws, is coerced or fails only later does
+not matter. See ADR-0005.
 _Avoid_: reader, getter
 
 **Coercion is not contract**:
@@ -144,11 +139,9 @@ the declaration still says `string`.
 
 **Contested slot**:
 An argument index read in more than one way: by the C body, or by a
-core-module function that, say, both tests a parameter and invokes it. Its
-candidates are recorded in the artifact and it gains no type from its reads,
-because whether the union is closed is a control-flow property the scan
-cannot see: a native slot stays `any`, and a core-module slot keeps a
-signature another route already gave it.
+core-module function that, say, both tests a parameter and invokes it. It
+gains no type from those reads; ADR-0003 and ADR-0005 say what it keeps and
+what is recorded.
 
 **Rejection**:
 A call ending in an exception that reaches the caller because of the value in
