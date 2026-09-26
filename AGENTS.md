@@ -256,8 +256,9 @@ narrowed wrongly in one round and every one of them passed the whole battery
 green; three of the four were caught by review, not by a gate.
 
 When the source is ambiguous -- more than one branch reading a slot
-differently, with no proof that anything else is rejected -- the type stays
-`any` and the evidence goes in the artifact instead.
+differently, with no proof that anything else is rejected -- the slot gains no
+type from it: it stays `any`, or keeps a signature another route already gave
+it (ADR-0005), and the evidence goes in the artifact instead.
 
 ## Recovery
 

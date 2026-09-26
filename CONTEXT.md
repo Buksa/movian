@@ -141,9 +141,10 @@ the declaration still says `string`.
 **Contested slot**:
 An argument index read in more than one way: by the C body, or by a
 core-module function that, say, both tests a parameter and invokes it. Its
-candidates are recorded in the artifact and its emitted type stays `any`,
+candidates are recorded in the artifact and it gains no type from its reads,
 because whether the union is closed is a control-flow property the scan
-cannot see.
+cannot see: a native slot stays `any`, and a core-module slot keeps a
+signature another route already gave it.
 
 **Rejection**:
 A call ending in an exception that reaches the caller because of the value in

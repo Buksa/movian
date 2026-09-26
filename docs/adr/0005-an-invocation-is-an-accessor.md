@@ -90,13 +90,14 @@ declaration changes.
   a method of an options object. `AGENTS.md`'s list of free changes now says
   so, and says to keep a signature when widening such a slot.
 - The other five callbacks among #232's 72 no-ceiling annotations are not
-  accessors and stay as they are. `movian/http.request` also reads its
-  callback with `if(callback)` (`movian/http.js:110`); by ADR-0003 that makes
-  it `any`, and `any` would break exactly the callers the previous point
-  describes. `Request.on`, `Response.on` and both `onEvent`s store the
-  function instead of calling it. With the 61 annotations that are not
-  callbacks, they rest on the author's word rather than on an accessor, and
-  are not settled here.
+  accessors and stay as they are. `movian/http.request` also reads its callback
+  with `if(callback)` (`movian/http.js:110`), so the slot is contested and
+  gains nothing from its reads. It does not become `any` either: a contested
+  slot keeps a signature another route already gave it, because widening this
+  one to `any` would break exactly the callers the previous point describes.
+  `Request.on`, `Response.on` and both `onEvent`s store the function instead of
+  calling it. With the 61 annotations that are not callbacks, they rest on the
+  author's word rather than on an accessor, and are not settled here.
 - A parameter no function body uses gets nothing from this rule. The root
   `http.request`'s `callback`, `unknown` on purpose, stays `unknown`.
 - The accepted corpus is narrower than what this emits:
