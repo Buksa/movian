@@ -228,16 +228,17 @@ is written for more later, which means the moment to be careful is now.
 change that accepts strictly more is free; one that accepts less is narrowing
 and needs the proof below.
 
-Free, because every call that compiled still does -- measured, not assumed:
-`string` to `any`, `string` to `string | number`, a required parameter becoming
-optional, an object parameter gaining an optional member.
+Free, because every call that compiled still does -- measured, not assumed,
+and with the one exception in the next paragraph: `string` to `any`, `string`
+to `string | number`, a required parameter becoming optional, an object
+parameter gaining an optional member.
 
 A slot whose type gives a call signature to a function inside the argument --
 the callback itself, or a method of an options object -- keeps a signature when
-widened: `Function | ((...args: any[]) => void)`, or with the shape it already
-had in place of the arrow. Widened to plain `any` or `Function`, the callback's
-parameters become implicit `any`, and an unannotated callback stops compiling
-under `--strict` (TS7006). See ADR-0005.
+widened: `Function | ((...args: any[]) => void)`, or with the signature it
+already had in place of the arrow. Widened to plain `any` or `Function`, the
+callback's parameters become implicit `any`, and an unannotated callback stops
+compiling under `--strict` (TS7006). See ADR-0005.
 
 Narrowing, and this is the case that matters here: `any` to a concrete type.
 `any` accepts every argument, so `f(42)` is fine against `any` and an error

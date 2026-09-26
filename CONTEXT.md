@@ -127,7 +127,8 @@ with the same source anchors and a recorded reason.
 **Accessor**:
 The read of an argument slot that names the type the callee expects: in C,
 the `duk_*` call on that slot; in a core module, an invocation of the
-parameter, when every use of it is an invocation of the value as passed.
+parameter, when the function uses it at least once and every use is an
+invocation of the value as passed.
 Whether a wrong value throws, is coerced or fails only later does not matter.
 See ADR-0005.
 _Avoid_: reader, getter
@@ -138,9 +139,11 @@ full set the runtime will silently convert. `duk_to_string` accepts anything;
 the declaration still says `string`.
 
 **Contested slot**:
-An argument index the C body reads in more than one way. Its candidates are
-recorded in the artifact and its emitted type stays `any`, because whether the
-union is closed is a control-flow property the scan cannot see.
+An argument index read in more than one way: by the C body, or by a
+core-module function that, say, both tests a parameter and invokes it. Its
+candidates are recorded in the artifact and its emitted type stays `any`,
+because whether the union is closed is a control-flow property the scan
+cannot see.
 
 **Rejection**:
 A call ending in an exception that reaches the caller because of the value in
