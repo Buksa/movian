@@ -124,12 +124,31 @@ anchor: a file and the exact line, verified to still contain the anchor text.
 A fact that cannot be derived, written by hand into a `curated_*.json` sidecar
 with the same source anchors and a recorded reason.
 
+**Accessor**:
+The read of an argument slot that names the type the callee expects: in C,
+the `duk_*` call on that slot; in a core module, an invocation of the
+parameter, when the function uses it at least once and every use is an
+invocation of the value as passed.
+Whether a wrong value throws, is coerced or fails only later does not matter.
+See ADR-0005.
+_Avoid_: reader, getter
+
 **Coercion is not contract**:
 The rule that a declared type states what a caller is *meant* to pass, not the
 full set the runtime will silently convert. `duk_to_string` accepts anything;
 the declaration still says `string`.
 
 **Contested slot**:
-An argument index the C body reads in more than one way. Its candidates are
-recorded in the artifact and its emitted type stays `any`, because whether the
-union is closed is a control-flow property the scan cannot see.
+An argument index read in more than one way: by the C body, or by a
+core-module function that, say, both tests a parameter and invokes it. Its
+candidates are recorded in the artifact and it gains no type from its reads,
+because whether the union is closed is a control-flow property the scan
+cannot see: a native slot stays `any`, and a core-module slot keeps a
+signature another route already gave it.
+
+**Rejection**:
+A call ending in an exception that reaches the caller because of the value in
+one argument slot, whatever the callee already did before throwing. A failure
+that surfaces later -- in a subscription, or only in the log -- is not a
+rejection: the call accepted the value.
+_Avoid_: fails, errors, "throws" without saying where to
