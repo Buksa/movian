@@ -1991,6 +1991,9 @@ class ParamUse(NamedTuple):
     # arguments are an array, and for every use that is not a call.
     call_paren: int | None
     receiver: bool = False
+    # Set on the blocking use `UNREADABLE_BODY_RE` adds: the body cannot be
+    # read, so nothing else found in it can be trusted either.
+    unreadable: bool = False
 
 
 def _parameter_uses(
@@ -2057,7 +2060,8 @@ def _parameter_uses(
                 ParamUse(open_brace + match.start(), False, None))
     for match in UNREADABLE_BODY_RE.finditer(region, open_brace, end):
         for name in params:
-            uses[name].append(ParamUse(match.start(), False, None))
+            uses[name].append(
+                ParamUse(match.start(), False, None, unreadable=True))
     return uses
 
 
@@ -3959,10 +3963,12 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
         # contested parameter still gets its shape: `movian/http`'s
         # `request` tests `callback` and keeps the signature this route
         # gives it (ADR-0005, "a contested slot keeps a signature another
-        # route already gave it").
+        # route already gave it"). An unreadable body gives none: the call
+        # may be text inside a regex (Codex on PR #265).
         callback_params = [
             name for name in (params or [])
             if any(use.invocation for use in uses[name])
+            and not any(use.unreadable for use in uses[name])
         ]
         if callback_shapes and len(callback_params) == 1:
             record["callbackShapes"] = callback_shapes

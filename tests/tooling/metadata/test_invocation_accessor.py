@@ -338,6 +338,16 @@ class TheCallbackShapePosition(unittest.TestCase):
         record = scan_export(self.SOURCE % "cb.call(ctx, null, new Item());")
         self.assertEqual(record.get("callbackShapeIndex"), 1)
 
+    def test_an_unreadable_body_infers_no_shape(self) -> None:
+        """The accessor rule refused `/cb.call(null, new Item())/`, and the
+        shape path still read a call out of the regex and typed the slot
+        (Codex on PR #265)."""
+        record = scan_export(
+            self.SOURCE % "return /cb.call(null, new Item())/;")
+        self.assertNotIn("callbackParam", record)
+        self.assertNotIn("accessors", record)
+
+
 
 class AnUnreadableBodyBlocks(unittest.TestCase):
     """The scan reads masked text -- comments and strings blanked -- and
