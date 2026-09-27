@@ -2941,7 +2941,8 @@ def _shape_method(
         name: str, raw_params: str, path: Path, line: int,
         alias_of: str | None = None,
         region: str | None = None,
-        factories: dict[str, str] | None = None) -> dict[str, Any]:
+        factories: dict[str, dict[str, Any]] | None = None
+) -> dict[str, Any]:
     record = _member_record(
         name, _parse_params(raw_params), path, line, alias_of=alias_of)
     # Same rule the module exports get: a method that reads its own
@@ -3011,7 +3012,7 @@ def _mapped_element_shape(statement: str) -> str | None:
 
 
 def _returned_shape(
-        region: str, factories: dict[str, str] | None = None
+        region: str, factories: dict[str, dict[str, Any]] | None = None
 ) -> str | dict[str, Any] | None:
     """The shape a method returns, when it plainly returns one.
 
@@ -3059,8 +3060,8 @@ def _returned_shape(
     end their body with an unconditional `return`, measured before the change.
 
     `factories` maps a module function to the local-object shape it returns
-    (ADR-0006), and a call to one constructs that shape as surely as `new`
-    does: every `movian/settings` `sp.create*` is
+    (ADR-0006), and `_factory_result` decides when a local holds it. Four
+    `movian/settings` methods are
 
         var item = createSetting(group, 'bool', id, title);
         ...
@@ -3087,15 +3088,9 @@ def _returned_shape(
         constructed = re.findall(
             r"\b(?:var|let|const)\s+%s\s*=\s*new\s+([A-Za-z_$][A-Za-z0-9_$]*)"
             r"\s*\(" % re.escape(name), body)
-        for called in re.finditer(
-                r"\b(?:var|let|const)\s+%s\s*=\s*([A-Za-z_$][A-Za-z0-9_$]*)"
-                r"\s*\(" % re.escape(name), body):
-            # The call must BE the initializer: `F(...).model` holds a member
-            # of the object, and `F(...) || x` may hold `x`.
-            close = _balanced_call_end(body, called.end() - 1)
-            if called.group(1) in (factories or {}) and close is not None \
-                    and body[close:].lstrip()[:1] in (";", ","):
-                constructed.append(factories[called.group(1)])
+        built = _factory_result(region, name, factories or {})
+        if built is not None:
+            constructed.append(built)
         if not constructed:
             # `return someArgument;` or a value built another way -- no claim.
             return None
@@ -3446,6 +3441,39 @@ TS_PREDEFINED_TYPE_NAMES = frozenset({
     "symbol", "undefined", "unknown"})
 
 
+def _statement_at_top(region: str, open_brace: int, offset: int) -> bool:
+    """Whether a statement of the own body of the function whose body opens
+    at `open_brace` begins at `offset`.
+
+    Depth 1 is the own body: not inside a nested function, and not inside a
+    braced block. An unbraced `if (x) stmt` or an operand `x && stmt` stays
+    at depth 1, so the text must also BEGIN its statement.
+    """
+    before = region[open_brace:offset]
+    if before.count("{") - before.count("}") != 1:
+        return False
+    return not region[_statement_start(region, offset, open_brace):offset].strip()
+
+
+def _sole_return_of(region: str, open_brace: int, name: str) -> int | None:
+    """The offset of `name` in `return name` when that is the only own return
+    of the function whose body opens at `open_brace`, and is always reached;
+    `None` otherwise.
+
+    ES5.1 7.9.1: a line terminator between `return` and its value ends the
+    statement, so `return` then `name` on the next line yields `undefined`.
+    The statement is matched as written; collapsing its whitespace first hid
+    exactly that.
+    """
+    spans, _ = _scan_returns(region, open_brace)
+    if len(spans) != 1 or not _always_returns(region, open_brace):
+        return None
+    start, end = spans[0]
+    match = re.match(r"return[ \t\f\v]+(%s)\s*$" % re.escape(name),
+                     region[start:end])
+    return None if match is None else start + match.start(1)
+
+
 def _local_object_refusal(
         region: str, open_brace: int, name: str,
         declaration: re.Match[str], calls: list[re.Match[str]]
@@ -3459,42 +3487,31 @@ def _local_object_refusal(
     else, has to decline it -- the alternative is a declaration that rejects a
     member a plugin can reach, or offers one that is not there.
     """
-    def statement_at_top(offset: int) -> bool:
-        # Depth 1 is the function's own body: not inside a nested function,
-        # and not inside a braced block. An unbraced `if (x) stmt` or an
-        # operand `x && stmt` stays at depth 1, so the text must also BEGIN
-        # its statement.
-        before = region[open_brace:offset]
-        if before.count("{") - before.count("}") != 1:
-            return False
-        return not region[
-            _statement_start(region, offset, open_brace):offset].strip()
-
     # The rule ADR-0005's scan reads by: where the masked text can spell the
     # local without writing it, or hide code, no occurrence count is sound.
     if UNREADABLE_BODY_RE.search(region, open_brace):
         return "the function holds text the scan cannot read"
-    if not statement_at_top(declaration.start()):
+    # A descriptor's accessor runs with the object as `this`, so a setter can
+    # add a member without the text ever naming the local.
+    if re.search(r"(?<![.\w$])this(?![\w$])", region[open_brace:]):
+        return ("the function uses `this`, through which an accessor can "
+                "add a member")
+    if not _statement_at_top(region, open_brace, declaration.start()):
         return "the local is not declared in the function's own body"
     for call in calls:
-        if not statement_at_top(call.start()):
+        if not _statement_at_top(region, open_brace, call.start()):
             return ("Object.defineProperties(%s, ...) is not a statement of "
                     "the function's own body, so its members are not always "
                     "defined" % name)
-    # A span stops before its `;`.
-    spans, _ = _scan_returns(region, open_brace)
-    returned = [re.sub(r"\s+", " ", region[start:end].strip())
-                for start, end in spans]
-    if returned != ["return %s" % name] or \
-            not _always_returns(region, open_brace):
+    returned = _sole_return_of(region, open_brace, name)
+    if returned is None:
         return "the function does not return the local on every path"
     # A whitelist. Any other occurrence -- nested callbacks included -- may
     # add a member, replace the prototype or hand the object to code that
     # does, and telling which is the enumeration this replaced: it listed
     # write forms and passed an alias, a callee, Object.setPrototypeOf and a
     # map that is not a literal.
-    return_name = spans[0][0] + region[spans[0][0]:].index(name, len("return"))
-    allowed = {declaration.start(1), return_name,
+    allowed = {declaration.start(1), returned,
                *(call.start(1) for call in calls)}
     for use in re.finditer(r"(?<![.\w$])%s(?![\w$])" % re.escape(name),
                            region):
@@ -3502,6 +3519,64 @@ def _local_object_refusal(
             return ("the local is used other than by its declaration, "
                     "Object.defineProperties(V, {...}) and `return V`")
     return None
+
+
+def _factory_result(
+        region: str, name: str, factories: dict[str, dict[str, Any]]
+) -> str | None:
+    """The local-object shape the method at the head of `region` returns in
+    its local `name`, or `None` (ADR-0006).
+
+    A whitelist, for the reason the factory's is one: each guard added here
+    one at a time was followed by another way through -- a member read off
+    the result, a conditional declaration, a line terminator after `return`,
+    a nested function shadowing the factory's name, a reassignment. In the
+    method, `name` may occur only in an unconditional `var name = F(...)`
+    that is the whole initializer, as `name.<a member of the shape>`, and in
+    its only `return name`. F must be the module's function: it occurs in
+    the method only as that call, which also rules out a parameter of that
+    name.
+    """
+    open_brace = _own_block(region)
+    end = _balanced_end(region, open_brace) if open_brace is not None else None
+    if end is None:
+        return None
+    region = region[:end]
+    if UNREADABLE_BODY_RE.search(region, open_brace):
+        return None
+    declared = list(re.finditer(
+        r"\b(?:var|let|const)\s+(%s)\s*=\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\("
+        % re.escape(name), region))
+    if len(declared) != 1 or declared[0].group(2) not in factories:
+        return None
+    declaration = declared[0]
+    factory, shape = declaration.group(2), factories[declaration.group(2)]
+    # The region opens with the method's parameter list, so a parameter
+    # named F is an occurrence too.
+    if [use.start() for use in re.finditer(
+            r"(?<![.\w$])%s(?![\w$])" % re.escape(factory), region)
+            ] != [declaration.start(2)]:
+        return None
+    # `F(...).model` holds a member of the object, and `F(...) || x` may
+    # hold `x`.
+    close = _balanced_call_end(region, declaration.end() - 1)
+    if close is None or region[close:].lstrip()[:1] not in (";", ","):
+        return None
+    if not _statement_at_top(region, open_brace, declaration.start()):
+        return None
+    returned = _sole_return_of(region, open_brace, name)
+    if returned is None:
+        return None
+    members = {prop["name"] for prop in shape["properties"]}
+    for use in re.finditer(r"(?<![.\w$])%s(?![\w$])" % re.escape(name),
+                           region):
+        if use.start() in (declaration.start(1), returned):
+            continue
+        member = re.match(r"\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)",
+                          region[use.end():])
+        if member is None or member.group(1) not in members:
+            return None
+    return shape["name"]
 
 
 class _DefinedLocal(NamedTuple):
@@ -3537,8 +3612,16 @@ def _scan_local_object_shapes(
     unsupported-target warning does not also fire for them.
     """
     comment_text = _masked_js_text(path, mask_strings=False)
+    # Every spelling the export scanner reads, `exports['x'] =` included.
+    exported = {name for name, _, _ in _commonjs_export_regions(path)}
     found: list[_DefinedLocal] = []
     for factory in _top_level_matches(text, FACTORY_DECL_RE):
+        # A declaration, not `x = function F(...)`: a function expression's
+        # name binds only inside it, so a call of F elsewhere is not a call
+        # of this function.
+        if text[_statement_start(text, factory.start(), -1):
+                factory.start()].strip():
+            continue
         shift = factory.start()
         end = _balanced_end(text, factory.end() - 1)
         if end is None:
@@ -3560,8 +3643,7 @@ def _scan_local_object_shapes(
                     _top_level_matches(text, re.compile(
                         r"\b(?:function|var|let|const)\s+(%s)\b"
                         % re.escape(name)))
-                    or re.search(r"\bexports\s*\.\s*%s\b"
-                                 % re.escape(name), text)):
+                    or name in exported):
                 refusal = "the name is already declared in this module"
             if refusal is None and name in TS_PREDEFINED_TYPE_NAMES:
                 refusal = "the name is a type TypeScript predefines"
@@ -3578,6 +3660,11 @@ def _scan_local_object_shapes(
                                       _split_js_fields(body)
                                       if field.strip()]):
                     refusal = "a key the scan cannot read"
+                # `'foo-bar'` cannot be declared unquoted, and `'x\u0061'`
+                # is the key `xa` at runtime, not what the text says.
+                if any(not IDENT_RE.fullmatch(member)
+                       for member, _, _ in names):
+                    refusal = "a key that is not a plain identifier"
                 for member, offset, kind in names:
                     _add_property(properties, name, member, path,
                                   comment_text, offset, kind)
@@ -3627,7 +3714,7 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
     """Scan top-level prototype and shared-object assignments."""
     text = _masked_js_text(path)
     local_shapes, local_calls = _scan_local_object_shapes(path, text)
-    factories = {shape["factory"]: shape["name"] for shape in local_shapes}
+    factories = {shape["factory"]: shape for shape in local_shapes}
     by_receiver: dict[str, dict[str, dict[str, Any]]] = {}
     prototype_matches = _top_level_matches(text, PROTOTYPE_FUNCTION_RE)
     top_prototype_starts = {

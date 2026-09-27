@@ -4,8 +4,9 @@
 
 `movian/settings`' `createSetting` builds `var item = {}`, attaches its whole
 public surface with `Object.defineProperties(item, {...})` and returns it, and
-every `sp.create*` hands that object to the plugin. The generator read no such
-target, printed a warning on every run, and declared the four results `any`.
+`sp.createBool`, `createString`, `createInt` and `createAction` hand that object
+to the plugin. The generator read no such target, printed a warning on every
+run, and declared the four results `any`.
 
 The scan half is pinned on synthetic modules, because every refusal below is a
 form the corpus does not contain today and could tomorrow. The corpus half is
@@ -89,6 +90,38 @@ class TheScanReadsALocalTarget(unittest.TestCase):
             [("model", "value", 6), ("value", "accessor", 9)])
         self.assertEqual(item["methods"], [])
 
+    def test_the_factory_is_recorded_by_its_own_name(self) -> None:
+        shapes, _ = scan(FACTORY.replace("createSetting", "makeItem"))
+        self.assertEqual(by_name(shapes)["item"]["factory"], "makeItem")
+        (method,) = by_name(shapes)["sp"]["methods"]
+        self.assertEqual(method.get("returns"), "item")
+
+    def test_a_declined_namesake_does_not_decline_the_other(self) -> None:
+        """Only locals the rule accepts compete for the name; one another
+        function builds and the rule declines is no declaration at all."""
+        shapes, stderr = scan(
+            FACTORY + "function createOther() {\n"
+            "  var item = {};\n"
+            "  Object.defineProperties(item, { other: { value: 1 } });\n"
+            "  item.extra = 1;\n"
+            "  return item;\n"
+            "}\n")
+        self.assertEqual(by_name(shapes)["item"]["factory"], "createSetting")
+        self.assertIn("target item: " + USED, stderr)
+
+    def test_a_named_function_expression_is_not_a_factory(self) -> None:
+        """`exports.make = function createSetting(...) {...}` binds the name
+        only inside itself, so `createSetting(...)` elsewhere in the module
+        is not a call of it."""
+        shapes, stderr = scan(FACTORY.replace(
+            "function createSetting(group, id) {",
+            "exports.make = function createSetting(group, id) {"))
+        self.assertNotIn("item", by_name(shapes))
+        (method,) = by_name(shapes)["sp"]["methods"]
+        self.assertIsNone(method.get("returns"))
+        self.assertIn(
+            "ignored unsupported Object.defineProperties target item", stderr)
+
     def test_the_read_call_is_not_reported_as_unsupported(self) -> None:
         _, stderr = scan(FACTORY)
         self.assertNotIn("defineProperties target item", stderr)
@@ -123,6 +156,8 @@ USED = ("the local is used other than by its declaration, "
         "Object.defineProperties(V, {...}) and `return V`")
 UNREADABLE_KEY = "a key the scan cannot read"
 UNREADABLE = "the function holds text the scan cannot read"
+THIS = "the function uses `this`"
+NOT_IDENTIFIER = "a key that is not a plain identifier"
 BACKSLASH = chr(92)
 COLLIDES = "the name is already declared in this module"
 TWICE = "the name is built by more than one function"
@@ -146,6 +181,12 @@ REFUSED = [
     ("the function returns something other than the local",
      variant(("  return item;\n}\nfunction S",
               "  return model;\n}\nfunction S")),
+     RETURNS),
+    # The first return is the local; the last one, the one always reached,
+    # is not.
+    ("an early return of the local, then something else",
+     variant(("  return item;\n}\nfunction S",
+              "  if (id) return item;\n  return model;\n}\nfunction S")),
      RETURNS),
     ("the call is inside a conditional block",
      variant((CALL_OPEN, "  if (id) {\n" + CALL_OPEN),
@@ -223,6 +264,26 @@ REFUSED = [
      variant((CALL_CLOSE,
               "  });\n  " + BACKSLASH + "u0069tem.extra = 1;\n  return item;")),
      UNREADABLE),
+    # ES5.1 7.9.1: a line terminator after `return` ends the statement, so
+    # this returns undefined. Collapsing whitespace before comparing hid it.
+    ("a line terminator between `return` and the local",
+     variant(("  return item;\n}\nfunction S",
+              "  return\n  item;\n}\nfunction S")),
+     RETURNS),
+    # An accessor's `this` is the object, so a setter can add a member the
+    # text never names. No core module's factory uses `this` at all.
+    ("a descriptor writes a member through `this`",
+     variant(("      set: function(v) { model.value = v; }\n",
+              "      set: function(v) { this.extra = v; }\n")),
+     THIS),
+    ("a quoted key TypeScript cannot declare unquoted",
+     variant(("    model: {\n", "    'foo-bar': { value: 1 },\n    model: {\n")),
+     NOT_IDENTIFIER),
+    # The runtime key is `xa`; the text says something else.
+    ("a quoted key spelled with an escape",
+     variant(("    model: {\n",
+              "    'x" + BACKSLASH + "u0061': { value: 1 },\n    model: {\n")),
+     NOT_IDENTIFIER),
     # Reads decline too. The rule has no use for them, and telling a read
     # from a write is the enumeration the whitelist replaced.
     ("a read through a member",
@@ -246,8 +307,17 @@ REFUSED = [
     ("a top-level variable has the same name",
      FACTORY + "var item = {};\n",
      COLLIDES),
+    ("a top-level const has the same name",
+     FACTORY + "const item = 1;\n",
+     COLLIDES),
     ("an export has the same name",
      FACTORY + "exports.item = function() {};\n",
+     COLLIDES),
+    # The export scanner reads this spelling too, and an export that mutates
+    # its receiver is emitted as `interface item extends sp` -- which would
+    # merge with the local's.
+    ("an export has the same name, in bracket form",
+     FACTORY + "exports['item'] = function() { this.__proto__ = sp; };\n",
      COLLIDES),
     ("two functions build a local of the same name",
      FACTORY + "function createOther() {\n"
@@ -337,25 +407,67 @@ class TheScanDeclinesAnIncompleteLocal(unittest.TestCase):
 
 # `var item = createSetting(...)` holds the factory's object only when the
 # call IS the initializer.
+CALLER_DECL = "  var item = createSetting(this, id);\n"
+CALLER_RETURN = "  item.model.value = true;\n  return item;\n}\n"
+
+# The caller side is a whitelist too, for the same reason as the factory's:
+# each point guard added here was followed by another hole. In the method,
+# the local may occur only as an unconditional `var x = F(...)` that is the
+# whole initializer, as `x.<a member of the shape>`, and in one `return x`,
+# and F must be the module's function.
 CALLER_REFUSED = [
     ("a member of the result is what the local holds",
-     variant(("  var item = createSetting(this, id);\n"
-              "  item.model.value = true;\n  return item;",
+     variant((CALLER_DECL + CALLER_RETURN,
               "  var item = createSetting(this, id).model;\n"
-              "  return item;"))),
+              "  return item;\n}\n"))),
     ("the call is an operand",
-     variant(("  var item = createSetting(this, id);\n",
-              "  var item = createSetting(this, id) || null;\n"))),
+     variant((CALLER_DECL, "  var item = createSetting(this, id) || null;\n"))),
+    ("an early return of something else",
+     variant((CALLER_DECL, "  if (id) return 5;\n" + CALLER_DECL))),
+    ("the declaration is conditional",
+     variant((CALLER_DECL, "  if (id) var item = createSetting(this, id);\n"))),
+    ("a line terminator between `return` and the local",
+     variant((CALLER_RETURN,
+              "  item.model.value = true;\n  return\n  item;\n}\n"))),
+    ("the method declares its own function of the factory's name",
+     variant((CALLER_DECL,
+              "  function createSetting() { return {}; }\n" + CALLER_DECL))),
+    ("a parameter of the factory's name",
+     variant(("sp.createBool = function(id) {",
+              "sp.createBool = function(id, createSetting) {"))),
+    ("the method reassigns the factory's name",
+     variant((CALLER_DECL, "  createSetting = this.make;\n" + CALLER_DECL))),
+    ("the local is reassigned",
+     variant((CALLER_RETURN,
+              "  item = this.other;\n  return item;\n}\n"))),
+    ("a callback reassigns the local",
+     variant((CALLER_RETURN,
+              "  later(function() { item = null; });\n  return item;\n}\n"))),
+    ("a member the shape does not have is added",
+     variant((CALLER_RETURN, "  item.extra = 1;\n  return item;\n}\n"))),
+    ("the local is handed to a function",
+     variant((CALLER_RETURN, "  register(item);\n  return item;\n}\n"))),
+    ("an identifier escape spells the local",
+     variant((CALLER_RETURN,
+              "  " + BACKSLASH + "u0069tem.extra = 1;\n  return item;\n}\n"))),
 ]
 
 
 class TheCallerHoldsTheFactoryResult(unittest.TestCase):
-    def test_one_declarator_of_several_still_holds_it(self) -> None:
-        shapes, _ = scan(variant(
-            ("  var item = createSetting(this, id);\n",
-             "  var item = createSetting(this, id), n = 1;\n")))
-        (method,) = by_name(shapes)["sp"]["methods"]
-        self.assertEqual(method.get("returns"), "item")
+    def test_what_the_rule_allows_still_holds_it(self) -> None:
+        for label, source in [
+                ("one declarator of several",
+                 variant((CALLER_DECL,
+                          "  var item = createSetting(this, id), n = 1;\n"))),
+                ("members of the shape, read and written",
+                 variant((CALLER_RETURN,
+                          "  item . model.min = 1;\n  item.value = true;\n"
+                          "  prop.subscribe(item.model.eventSink);\n"
+                          "  return item;\n}\n")))]:
+            with self.subTest(label):
+                shapes, _ = scan(source)
+                (method,) = by_name(shapes)["sp"]["methods"]
+                self.assertEqual(method.get("returns"), "item")
 
     def test_anything_after_the_call_declines_the_return(self) -> None:
         for label, source in CALLER_REFUSED:

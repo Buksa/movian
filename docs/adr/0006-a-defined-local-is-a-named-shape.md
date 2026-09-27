@@ -38,11 +38,15 @@ accepts it as an interface name -- `var object = {}` is legal JavaScript and
 
 ## When it holds
 
-The scan reads a top-level `function F(...) { ... }` and requires:
+The scan reads a function DECLARATION `function F(...) { ... }` at the
+module's top level -- not `x = function F(...)`, whose name binds only inside
+itself -- and requires:
 
 - F's masked text to pass the readable-body whitelist ADR-0005's scan uses
   (`UNREADABLE_BODY_RE`): no `/`, no backslash -- `\u0069tem` is `item` --
   no non-ASCII character, and no `eval` or `with`;
+- no `this` in F: a descriptor's accessor runs with the object as `this`, so
+  a setter could add a member the text never names;
 - `var V = {}` as a statement of F's own body;
 - every `Object.defineProperties(V, {...})` a statement of the own body --
   not inside a nested function, a block, an unbraced conditional or an
@@ -52,18 +56,41 @@ The scan reads a top-level `function F(...) { ... }` and requires:
   reassignment, a member write, an alias, a call that receives V,
   `Object.setPrototypeOf`, or a map that is not a literal each decline the
   shape, and so does a plain read, which the rule has no use for;
-- `return V` as F's only own return, always reached;
-- every key of every map one the scan can read, and at least one of them.
+- `return V` as F's only own return, always reached, with no line terminator
+  between `return` and V (ES5.1 7.9.1 makes that `return;`);
+- every key of every map one the scan can read and a plain identifier --
+  `'foo-bar'` cannot be declared unquoted, and `'x\u0061'` is the key `xa` --
+  and at least one of them.
 
-Then F returns the shape, and a caller's `var x = F(...); ... return x;`
-returns it, as `var x = new C(...); ... return x;` returns `C`. The call has
-to be the whole initializer: `var x = F(...).model` holds something else. A
-local that fails any of these keeps the unsupported-target warning, now with
-the reason.
+A local that fails any of these keeps the unsupported-target warning, now
+with the reason.
+
+## The caller
+
+A method returns the shape through `var x = F(...); ... return x;` only under
+a whitelist of its own, because each caller-side guard added one at a time
+was followed by another way through: a member read off the result, a
+conditional declaration, a line terminator after `return`, a nested function
+shadowing F, a reassignment. In the method:
+
+- the text passes the same readable-body whitelist;
+- `var x = F(...)` is a statement of its own body, and the call is the whole
+  initializer -- `F(...).model` and `F(...) || y` hold something else;
+- F occurs only in that call and is not a parameter, so it is the module's
+  function and nothing in the method rebinds it;
+- x occurs otherwise only as `x.<a member of the shape>`, which reads or
+  writes a member the object already has, and in `return x`, the method's
+  only own return, always reached, on one line.
+
+`movian/settings`' four methods use `item` only as `item.model...`, and pass.
+
+## What it does not see
 
 The check is textual, over source with comments and strings masked. Within a
-readable F it sees every mention of V, and it sees nothing outside F: F's
-other variables and the callers are not traced.
+readable function it sees every mention of the name, and nothing outside it:
+other variables and callers are not traced. It assumes `Object` is the
+intrinsic, as every `Object.defineProperties` reader in the generator does --
+a module that rebinds `Object` is not detected.
 
 ## Considered
 
@@ -85,11 +112,10 @@ other variables and the callers are not traced.
   either), and there is no type parameter.
 - `Object.defineProperty(V, 'x', ...)` alone is not read and keeps its
   warning. No core module does it.
-- The caller is traced no further than `var x = new C()` already is: a
-  caller that reassigns x, or adds members to the object, before returning it
-  is not seen. `var x = F(...); x.extra = 1; return x;` and
-  `var x = F(...); x = y; return x;` both still return the shape. That limit
-  is not closed here.
+- The `new` path is unchanged. `var x = new C(); x = y; return x;` and
+  `var x = new C(); x.extra = 1; return x;` still return `C`, since
+  `_returned_shape` traces no caller of a constructor. Giving it the same
+  whitelist is outside this issue.
 - The runtime oracle calls `globalSettings` and none of the four methods, so
   `item`'s three members are reviewed exclusions. Tier3 results are matched
   to shapes by lowercased name, and `item` made the `items` key ambiguous with
