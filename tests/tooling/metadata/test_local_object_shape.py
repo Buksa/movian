@@ -119,9 +119,11 @@ CALL_CLOSE = "  });\n  return item;"
 RETURNS = "does not return the local on every path"
 NOT_A_STATEMENT = "is not a statement of the function's own body"
 NOT_DECLARED = "the local is not declared in the function's own body"
-WRITTEN = "a member of the local is written outside Object.defineProperties"
-REASSIGNED = "the local is reassigned"
-SINGULAR = "Object.defineProperty on the local is not read"
+USED = ("the local is used other than by its declaration, "
+        "Object.defineProperties(V, {...}) and `return V`")
+UNREADABLE_KEY = "a key the scan cannot read"
+UNREADABLE = "the function holds text the scan cannot read"
+BACKSLASH = chr(92)
 COLLIDES = "the name is already declared in this module"
 TWICE = "the name is built by more than one function"
 EMPTY = "no member the scan can read is defined"
@@ -154,6 +156,9 @@ REFUSED = [
     ("the call is the body of an unbraced conditional",
      variant((CALL_OPEN, "  if (id) Object.defineProperties(item, {\n")),
      NOT_A_STATEMENT),
+    ("the call is an operand, not a statement",
+     variant((CALL_OPEN, "  id && Object.defineProperties(item, {\n")),
+     NOT_A_STATEMENT),
     ("the call is inside a nested function",
      variant((CALL_OPEN, "  later(function() {\n" + CALL_OPEN),
              (CALL_CLOSE, "  });\n  });\n  return item;")),
@@ -163,28 +168,75 @@ REFUSED = [
               "  later(function() {\n    var item = {};\n  });\n"
               "  var item = group.make();\n")),
      NOT_DECLARED),
+    # A WHITELIST, not a list of write forms. The first cut enumerated writes
+    # -- reassignment, `V.x =`, `V[k] =`, compound assignment,
+    # Object.defineProperty -- and review found four more it passed silently:
+    # an alias, an escape into a callee, Object.setPrototypeOf, and a second
+    # defineProperties whose map is not a literal. Any use of the local other
+    # than the three the rule reads now declines it, whatever it does.
     ("the local is reassigned",
      variant((CALL_CLOSE, "  });\n  item = group.other;\n  return item;")),
-     REASSIGNED),
+     USED),
     ("a member is assigned directly",
      variant((CALL_CLOSE, "  });\n  item.extra = 1;\n  return item;")),
-     WRITTEN),
+     USED),
     ("a member is assigned through a computed key",
      variant((CALL_CLOSE, "  });\n  item[id] = 1;\n  return item;")),
-     WRITTEN),
+     USED),
     ("a member is created by a compound assignment",
      variant((CALL_CLOSE, "  });\n  item.count += 1;\n  return item;")),
-     WRITTEN),
+     USED),
     ("a member is assigned later, by a nested function",
      variant((CALL_CLOSE,
               "  });\n  later(function() { item.extra = 1; });\n"
               "  return item;")),
-     WRITTEN),
+     USED),
     ("Object.defineProperty adds a member the scan does not read",
      variant((CALL_CLOSE,
               "  });\n  Object.defineProperty(item, 'extra', { value: 1 });\n"
               "  return item;")),
-     SINGULAR),
+     USED),
+    ("a second defineProperties whose map is not a literal",
+     variant((CALL_CLOSE,
+              "  });\n  Object.defineProperties(item, group.extra);\n"
+              "  return item;")),
+     USED),
+    ("an alias writes a member",
+     variant((CALL_CLOSE,
+              "  });\n  var self = item;\n  self.extra = 1;\n"
+              "  return item;")),
+     USED),
+    ("the local is passed to a function that may add members",
+     variant((CALL_CLOSE, "  });\n  group.decorate(item);\n  return item;")),
+     USED),
+    # Duktape 1.8 has it (ext/duktape/duktape.c), and the new prototype's
+    # members become the object's.
+    ("the prototype is replaced",
+     variant((CALL_CLOSE,
+              "  });\n  Object.setPrototypeOf(item, group);\n"
+              "  return item;")),
+     USED),
+    # ES5 7.6: an identifier may be spelled with a Unicode escape, so this
+    # writes `item.extra` while the text never says `item`. The same
+    # whitelist of readable characters ADR-0005's scan uses refuses it.
+    ("an identifier escape spells the local",
+     variant((CALL_CLOSE,
+              "  });\n  " + BACKSLASH + "u0069tem.extra = 1;\n  return item;")),
+     UNREADABLE),
+    # Reads decline too. The rule has no use for them, and telling a read
+    # from a write is the enumeration the whitelist replaced.
+    ("a read through a member",
+     variant((CALL_CLOSE, "  });\n  item.model.value = 1;\n  return item;")),
+     USED),
+    ("a comparison",
+     variant((CALL_CLOSE,
+              "  });\n  if (item != group) {}\n  return item;")),
+     USED),
+    # `_property_names` skips a key it cannot read and says so. For a shape
+    # that claims its whole member set, skipping it would drop a member.
+    ("a key the scan cannot read",
+     variant(("    model: {\n", "    0: { value: 2 },\n    model: {\n")),
+     UNREADABLE_KEY),
     # The shape is named after the local, and a module block holds one
     # interface per name: TypeScript would MERGE a second `interface item`
     # into the first, and a return type naming it would mean both.
@@ -221,14 +273,27 @@ REFUSED = [
      EMPTY),
 ]
 
-# Writes that do NOT add a member of the local, and must not decline it.
+# The whitelist's edges: text that names the local and is not a use of it.
 STILL_ANSWERED = [
-    ("a write through a member reaches the member's own object",
-     variant((CALL_CLOSE, "  });\n  item.model.value = 1;\n  return item;"))),
-    ("a comparison is not an assignment",
+    ("another object's member of the same name",
+     variant((CALL_CLOSE, "  });\n  var other = group.item;\n  return item;"))),
+    ("the name inside a string and a comment",
      variant((CALL_CLOSE,
-              "  });\n  if (item.model == null || item != group) {}\n"
+              "  });\n  log('item.extra = 1'); // item.extra = 1\n"
               "  return item;"))),
+    # The map is balanced in text whose strings are blank. Balanced in the
+    # raw text, the `}` inside the getter's string closed the map after
+    # `label` and the other two members were never read.
+    ("a brace inside a string in a descriptor",
+     variant(("    model: {\n",
+              "    label: {\n"
+              "      get: function() { return model.value + '}'; }\n"
+              "    },\n"
+              "    model: {\n")),
+     ["label", "model", "value"]),
+    ("a trailing comma after the last descriptor",
+     variant(("    }\n  });\n  return item;",
+              "    },\n  });\n  return item;"))),
 ]
 
 
@@ -250,11 +315,55 @@ class TheScanDeclinesAnIncompleteLocal(unittest.TestCase):
                     "item: ", stderr)
                 self.assertIn(reason, stderr)
 
-    def test_a_write_that_adds_no_member_does_not_decline(self) -> None:
-        for label, source in STILL_ANSWERED:
+    def test_text_that_is_not_a_use_does_not_decline(self) -> None:
+        for label, source, *members in STILL_ANSWERED:
             with self.subTest(label):
                 shapes, stderr = scan(source)
-                self.assertIn("item", by_name(shapes), stderr)
+                self.assertEqual(
+                    [prop["name"] for prop in
+                     by_name(shapes).get("item", {}).get("properties", [])],
+                    members[0] if members else ["model", "value"], stderr)
+
+    def test_declines_a_name_typescript_reserves(self) -> None:
+        """`var object = {}` is legal JavaScript, and `interface object` is
+        TS2427 under the pinned tsc 5.7.3 -- as are `any`, `unknown`,
+        `never`, `undefined`, `string`, `number`, `boolean`, `symbol` and
+        `bigint`, the other predefined type names a `var` may take."""
+        shapes, stderr = scan(FACTORY.replace("item", "object"))
+        self.assertNotIn("object", by_name(shapes))
+        self.assertIn("target object: the name is a type TypeScript "
+                      "predefines", stderr)
+
+
+# `var item = createSetting(...)` holds the factory's object only when the
+# call IS the initializer.
+CALLER_REFUSED = [
+    ("a member of the result is what the local holds",
+     variant(("  var item = createSetting(this, id);\n"
+              "  item.model.value = true;\n  return item;",
+              "  var item = createSetting(this, id).model;\n"
+              "  return item;"))),
+    ("the call is an operand",
+     variant(("  var item = createSetting(this, id);\n",
+              "  var item = createSetting(this, id) || null;\n"))),
+]
+
+
+class TheCallerHoldsTheFactoryResult(unittest.TestCase):
+    def test_one_declarator_of_several_still_holds_it(self) -> None:
+        shapes, _ = scan(variant(
+            ("  var item = createSetting(this, id);\n",
+             "  var item = createSetting(this, id), n = 1;\n")))
+        (method,) = by_name(shapes)["sp"]["methods"]
+        self.assertEqual(method.get("returns"), "item")
+
+    def test_anything_after_the_call_declines_the_return(self) -> None:
+        for label, source in CALLER_REFUSED:
+            with self.subTest(label):
+                shapes, _ = scan(source)
+                self.assertIn("item", by_name(shapes))
+                (method,) = by_name(shapes)["sp"]["methods"]
+                self.assertIsNone(method.get("returns"))
 
 
 class TheCorpus(unittest.TestCase):

@@ -3087,11 +3087,15 @@ def _returned_shape(
         constructed = re.findall(
             r"\b(?:var|let|const)\s+%s\s*=\s*new\s+([A-Za-z_$][A-Za-z0-9_$]*)"
             r"\s*\(" % re.escape(name), body)
-        constructed += [
-            factories[called] for called in re.findall(
+        for called in re.finditer(
                 r"\b(?:var|let|const)\s+%s\s*=\s*([A-Za-z_$][A-Za-z0-9_$]*)"
-                r"\s*\(" % re.escape(name), body)
-            if called in (factories or {})]
+                r"\s*\(" % re.escape(name), body):
+            # The call must BE the initializer: `F(...).model` holds a member
+            # of the object, and `F(...) || x` may hold `x`.
+            close = _balanced_call_end(body, called.end() - 1)
+            if called.group(1) in (factories or {}) and close is not None \
+                    and body[close:].lstrip()[:1] in (";", ","):
+                constructed.append(factories[called.group(1)])
         if not constructed:
             # `return someArgument;` or a value built another way -- no claim.
             return None
@@ -3433,6 +3437,13 @@ def _scan_shape_properties(
 
 FACTORY_DECL_RE = re.compile(
     r"\bfunction\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*\{")
+# Legal JavaScript names that TypeScript rejects as an interface name
+# (TS2427, measured with the pinned tsc 5.7.3). The other predefined type
+# names -- `void`, `null`, `true`, `false`, `this` -- are reserved words no
+# `var` can take.
+TS_PREDEFINED_TYPE_NAMES = frozenset({
+    "any", "bigint", "boolean", "never", "number", "object", "string",
+    "symbol", "undefined", "unknown"})
 
 
 def _local_object_refusal(
@@ -3450,15 +3461,19 @@ def _local_object_refusal(
     """
     def statement_at_top(offset: int) -> bool:
         # Depth 1 is the function's own body: not inside a nested function,
-        # and not inside a braced block. An unbraced `if (x) stmt` stays at
-        # depth 1, so the statement must also START one -- nothing but
-        # whitespace back to a `;`, `{` or `}`, the test `_always_returns`
-        # applies to its last return.
+        # and not inside a braced block. An unbraced `if (x) stmt` or an
+        # operand `x && stmt` stays at depth 1, so the text must also BEGIN
+        # its statement.
         before = region[open_brace:offset]
         if before.count("{") - before.count("}") != 1:
             return False
-        return before.rstrip()[-1:] in (";", "{", "}")
+        return not region[
+            _statement_start(region, offset, open_brace):offset].strip()
 
+    # The rule ADR-0005's scan reads by: where the masked text can spell the
+    # local without writing it, or hide code, no occurrence count is sound.
+    if UNREADABLE_BODY_RE.search(region, open_brace):
+        return "the function holds text the scan cannot read"
     if not statement_at_top(declaration.start()):
         return "the local is not declared in the function's own body"
     for call in calls:
@@ -3466,21 +3481,6 @@ def _local_object_refusal(
             return ("Object.defineProperties(%s, ...) is not a statement of "
                     "the function's own body, so its members are not always "
                     "defined" % name)
-    # Anywhere in the function, nested callbacks included: a write a
-    # callback makes later still adds the member to the object returned.
-    # `item.model.value = v` writes the member's own object, not the local.
-    local = r"(?<![.\w$])%s" % re.escape(name)
-    assigned = r"\s*(?:[-+*/%&|^]|<<|>>>?)?=(?!=)"
-    if re.search(local + r"\s*(?:\.\s*[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]*\])"
-                 + assigned, region):
-        return ("a member of the local is written outside "
-                "Object.defineProperties")
-    if len(re.findall(local + assigned, region)) > 1:
-        return "the local is reassigned"
-    if re.search(r"\bObject\.defineProperty\(\s*%s\s*," % re.escape(name),
-                 region):
-        return ("Object.defineProperty on the local is not read, so the "
-                "member it adds would be missing")
     # A span stops before its `;`.
     spans, _ = _scan_returns(region, open_brace)
     returned = [re.sub(r"\s+", " ", region[start:end].strip())
@@ -3488,7 +3488,31 @@ def _local_object_refusal(
     if returned != ["return %s" % name] or \
             not _always_returns(region, open_brace):
         return "the function does not return the local on every path"
+    # A whitelist. Any other occurrence -- nested callbacks included -- may
+    # add a member, replace the prototype or hand the object to code that
+    # does, and telling which is the enumeration this replaced: it listed
+    # write forms and passed an alias, a callee, Object.setPrototypeOf and a
+    # map that is not a literal.
+    return_name = spans[0][0] + region[spans[0][0]:].index(name, len("return"))
+    allowed = {declaration.start(1), return_name,
+               *(call.start(1) for call in calls)}
+    for use in re.finditer(r"(?<![.\w$])%s(?![\w$])" % re.escape(name),
+                           region):
+        if use.start() not in allowed:
+            return ("the local is used other than by its declaration, "
+                    "Object.defineProperties(V, {...}) and `return V`")
     return None
+
+
+class _DefinedLocal(NamedTuple):
+    """A local `_scan_local_object_shapes` read, or declined and why."""
+
+    factory: str
+    name: str
+    # Offsets of each call's target, in the module text.
+    targets: list[int]
+    members: dict[str, dict[str, Any]]
+    refusal: str | None
 
 
 def _scan_local_object_shapes(
@@ -3513,84 +3537,87 @@ def _scan_local_object_shapes(
     unsupported-target warning does not also fire for them.
     """
     comment_text = _masked_js_text(path, mask_strings=False)
-    # `(factory, local, calls, shift, refusal)`, refusal None when it holds.
-    candidates: list[tuple[str, str, list[re.Match[str]], int,
-                           str | None]] = []
+    found: list[_DefinedLocal] = []
     for factory in _top_level_matches(text, FACTORY_DECL_RE):
-        # Offsets into `region` are offsets into `text` shifted by the two
-        # characters of the `= ` that lets `_own_block` read a declaration.
-        shift = factory.start() - 2
-        region = "= " + text[factory.start():]
-        open_brace = _own_block(region)
-        end = _balanced_end(region, open_brace) if open_brace else None
+        shift = factory.start()
+        end = _balanced_end(text, factory.end() - 1)
         if end is None:
             continue
-        region = region[:end]
+        region = text[shift:end]
+        open_brace = factory.end() - 1 - shift
         for local in SHARED_OBJECT_DECL_RE.finditer(region):
             name = local.group(1)
             calls = [call for call in DEFINE_PROPERTIES_RE.finditer(region)
                      if call.group(1) == name]
             if not calls:
                 continue
-            reason = _local_object_refusal(
+            refusal = _local_object_refusal(
                 region, open_brace, name, local, calls)
             # One interface per name in a module block: TypeScript MERGES a
             # second declaration into the first, so a return type naming it
             # would mean both.
-            if reason is None and (
+            if refusal is None and (
                     _top_level_matches(text, re.compile(
                         r"\b(?:function|var|let|const)\s+(%s)\b"
                         % re.escape(name)))
                     or re.search(r"\bexports\s*\.\s*%s\b"
                                  % re.escape(name), text)):
-                reason = "the name is already declared in this module"
-            candidates.append(
-                (factory.group(1), name, calls, shift, reason))
-
-    builders: dict[str, int] = {}
-    for _, name, _, _, reason in candidates:
-        if reason is None:
-            builders[name] = builders.get(name, 0) + 1
-    shapes: list[dict[str, Any]] = []
-    handled: set[int] = set()
-    for factory, name, calls, shift, reason in candidates:
-        if reason is None and builders[name] > 1:
-            reason = "the name is built by more than one function"
-        properties: dict[str, dict[str, dict[str, Any]]] = {}
-        if reason is None:
-            for call in calls:
-                open_index = shift + call.end() - 1
-                close = _balanced_end(comment_text, open_index)
-                if close is None:
-                    continue
-                for member, offset, kind in _property_names(
-                        comment_text[open_index + 1:close - 1],
-                        path, comment_text, open_index + 1):
+                refusal = "the name is already declared in this module"
+            if refusal is None and name in TS_PREDEFINED_TYPE_NAMES:
+                refusal = "the name is a type TypeScript predefines"
+            properties: dict[str, dict[str, dict[str, Any]]] = {}
+            for call in calls if refusal is None else []:
+                # Balanced in the masked region, which closes inside it; read
+                # from the text that keeps strings, for a quoted key.
+                open_index = call.end() - 1
+                close = _balanced_end(region, open_index)
+                body = comment_text[shift + open_index + 1:shift + close - 1]
+                names = _property_names(body, path, comment_text,
+                                        shift + open_index + 1)
+                if len(names) != len([field for field in
+                                      _split_js_fields(body)
+                                      if field.strip()]):
+                    refusal = "a key the scan cannot read"
+                for member, offset, kind in names:
                     _add_property(properties, name, member, path,
                                   comment_text, offset, kind)
-            if not properties:
-                reason = "no member the scan can read is defined"
-        for call in calls:
-            handled.add(shift + call.start(1))
-            if reason is not None:
+            if refusal is None and not properties:
+                refusal = "no member the scan can read is defined"
+            found.append(_DefinedLocal(
+                factory.group(1), name,
+                [shift + call.start(1) for call in calls],
+                properties.get(name, {}), refusal))
+
+    builders: dict[str, int] = {}
+    for local in found:
+        if local.refusal is None:
+            builders[local.name] = builders.get(local.name, 0) + 1
+    shapes: list[dict[str, Any]] = []
+    handled: set[int] = set()
+    for local in found:
+        refusal = local.refusal
+        if refusal is None and builders[local.name] > 1:
+            refusal = "the name is built by more than one function"
+        handled.update(local.targets)
+        if refusal is not None:
+            for target in local.targets:
                 _shape_diagnostic(
-                    path, comment_text, shift + call.start(1),
+                    path, comment_text, target,
                     "ignored unsupported Object.defineProperties target "
-                    "%s: %s" % (name, reason))
-        if reason is not None:
+                    "%s: %s" % (local.name, refusal))
             continue
-        members = properties[name]
         shapes.append({
-            "factory": factory,
+            "factory": local.factory,
             "kind": "local",
             "methods": [],
-            "name": name,
-            "properties": [members[key] for key in sorted(members)],
-            "receiver": name,
+            "name": local.name,
+            "properties": [local.members[key]
+                           for key in sorted(local.members)],
+            "receiver": local.name,
             "source": {
                 "file": rel(path),
                 "line": min(prop["source"]["line"]
-                            for prop in members.values()),
+                            for prop in local.members.values()),
             },
         })
     return shapes, handled
