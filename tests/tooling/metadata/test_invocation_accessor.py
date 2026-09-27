@@ -129,6 +129,18 @@ class EveryUseIsAnInvocation(unittest.TestCase):
                       "cb();")
         self.assertEqual(record.get("accessors"), {"cb": [4]})
 
+    def test_a_longer_name_is_not_an_occurrence(self) -> None:
+        """`xcb` and `$cb` are other identifiers; their calls are not calls
+        of `cb`. Found unpinned by mutation (muse review on PR #265)."""
+        record = body("xcb();", "$cb();")
+        self.assertNotIn("accessors", record)
+        self.assertNotIn("contested", record)
+
+    def test_a_name_that_continues_is_not_a_use(self) -> None:
+        """Nor are `cbx` and `cb$` uses of `cb` that could block it."""
+        record = body("cb();", "var cbx = 1, cb$ = 2;")
+        self.assertEqual(record.get("accessors"), {"cb": [2]})
+
     def test_the_name_in_a_string_or_a_comment_is_not_a_use(self) -> None:
         record = body("log('cb');  // cb is invoked below",
                       "cb();")
