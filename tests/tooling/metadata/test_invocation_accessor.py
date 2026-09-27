@@ -320,10 +320,11 @@ class LinesEndWhereJavaScriptEndsThem(unittest.TestCase):
 
 
 class TheCallbackShapePosition(unittest.TestCase):
-    """Which argument carries `new <shape>(...)`, read off the invocation.
-    Counting `.call` as an invocation made it pick the callback without
-    reading its arguments, and the shape fell back to position 0 (Codex on
-    PR #265)."""
+    """Which argument carries `new <shape>(...)`, read off the invocation --
+    a separate route from ADR-0005's, older than #262, and kept as it was:
+    the callback is chosen by a direct or `.apply` call and the position is
+    read from direct calls. Four reviews of PR #265 found it guessing
+    whenever `.call` fed it; the guess itself is #266."""
 
     SOURCE = ("function Item() {}\n"
               "exports.f = function(cb) {\n"
@@ -334,27 +335,23 @@ class TheCallbackShapePosition(unittest.TestCase):
         record = scan_export(self.SOURCE % "cb(null, new Item());")
         self.assertEqual(record.get("callbackShapeIndex"), 1)
 
-    def test_call_passes_the_receiver_first(self) -> None:
-        record = scan_export(self.SOURCE % "cb.call(ctx, null, new Item());")
-        self.assertEqual(record.get("callbackShapeIndex"), 1)
+    def test_call_is_an_accessor_and_gives_no_shape(self) -> None:
+        """Codex's last example: the first call supplies `Item` second, the
+        other supplies nothing there, and `value: Item` was emitted. `.call`
+        counts for the accessor rule and does not choose a shape."""
+        record = scan_export(
+            self.SOURCE % "cb.call(ctx, null, new Item()); cb.call(ctx);")
+        self.assertEqual(record.get("accessors"), {"cb": [3]})
+        self.assertNotIn("callbackParam", record)
 
     def test_an_unreadable_body_infers_no_shape(self) -> None:
-        """The accessor rule refused `/cb.call(null, new Item())/`, and the
-        shape path still read a call out of the regex and typed the slot
-        (Codex on PR #265)."""
+        """The accessor rule refused `/cb(null, new Item())/`, and the shape
+        path still read a call out of the regex and typed the slot (Codex
+        on PR #265)."""
         record = scan_export(
-            self.SOURCE % "return /cb.call(null, new Item())/;")
+            self.SOURCE % "return /cb(null, new Item())/;")
         self.assertNotIn("callbackParam", record)
         self.assertNotIn("accessors", record)
-
-    def test_a_call_that_supplies_no_shape_infers_none(self) -> None:
-        """Invoked only through `.call` and no call carries the shape: before
-        #262 `.call` inferred nothing, and it still does rather than put
-        `Item` at position 0 (Codex on PR #265). The same guess for direct
-        and `.apply` calls is #266."""
-        record = scan_export(
-            self.SOURCE % "var item = new Item(); cb.call(null);")
-        self.assertNotIn("callbackParam", record)
 
 
 class AnUnreadableBodyBlocks(unittest.TestCase):

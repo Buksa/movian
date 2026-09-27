@@ -1986,11 +1986,11 @@ class ParamUse(NamedTuple):
 
     offset: int
     invocation: bool
-    # The `(` of `p(...)` or `p.call(...)`, whose arguments are p's own
-    # positions -- after the receiver for `.call`. None for `.apply`, whose
-    # arguments are an array, and for every use that is not a call.
+    # The `(` of a direct `p(...)`, whose arguments are p's own positions.
+    # None for `.apply` and `.call`, and for every use that is not a call.
     call_paren: int | None
-    receiver: bool = False
+    # `apply` or `call` for an invocation through that method.
+    method: str | None = None
     # Set on the blocking use `UNREADABLE_BODY_RE` adds: the body cannot be
     # read, so nothing else found in it can be trusted either.
     unreadable: bool = False
@@ -2052,8 +2052,8 @@ def _parameter_uses(
             else:
                 uses[name].append(ParamUse(
                     match.start(), True,
-                    None if call.group(1) == "apply" else call.end() - 1,
-                    call.group(1) == "call"))
+                    None if call.group(1) else call.end() - 1,
+                    call.group(1)))
     for match in ARGUMENTS_RE.finditer(_own_body(region)):
         for name in params:
             uses[name].append(
@@ -2319,13 +2319,6 @@ def _callback_shape_index(
         if end is None:
             continue
         args = _split_js_fields(region[use.call_paren + 1:end - 1])
-        if use.receiver:
-            # `cb.call(ctx, null, new Item())` passes `Item` second, after
-            # the receiver. Left unread, the position fell back to 0 and
-            # typed the callback's first argument as the shape -- the
-            # error-first mistake this function exists to prevent (Codex on
-            # PR #265).
-            args = args[1:]
         calls.append(args)
         if index is None:
             for position, arg in enumerate(args):
@@ -3958,34 +3951,29 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
         uses = _attach_accessors(record, region)
         callback_shapes = sorted(set(re.findall(
             r"\bnew\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", region)))
-        # Invoked somewhere, whatever else the function does with it -- the
-        # same enumeration ADR-0005 reads, asked a weaker question. A
-        # contested parameter still gets its shape: `movian/http`'s
-        # `request` tests `callback` and keeps the signature this route
-        # gives it (ADR-0005, "a contested slot keeps a signature another
-        # route already gave it"). An unreadable body gives none: the call
-        # may be text inside a regex (Codex on PR #265).
+        # Invoked directly or through `.apply`, whatever else the function
+        # does with it -- the same enumeration ADR-0005 reads, asked the
+        # question this route asked before #262. A contested parameter still
+        # gets its shape: `movian/http`'s `request` tests `callback` and
+        # keeps the signature this route gives it (ADR-0005, "a contested
+        # slot keeps a signature another route already gave it").
+        #
+        # `.call` is an invocation for the accessor rule and nothing more
+        # here: reading shapes through it kept finding positions to guess,
+        # four reviews in a row on PR #265, and the guess itself is #266.
+        # An unreadable body gives none either -- the call may be text
+        # inside a regex.
         callback_params = [
             name for name in (params or [])
-            if any(use.invocation for use in uses[name])
+            if any(use.invocation and use.method != "call"
+                   for use in uses[name])
             and not any(use.unreadable for use in uses[name])
         ]
-        callback = callback_params[0] if len(callback_params) == 1 else None
-        index, nullable = None, False
-        if callback_shapes and callback is not None:
-            index, nullable = _callback_shape_index(
-                region, uses[callback], callback_shapes)
-            if index is None and all(use.receiver for use in uses[callback]
-                                     if use.invocation):
-                # Invoked only through `.call`, and no call carries the
-                # shape. Before #262 `.call` was no invocation and inferred
-                # nothing here; it still infers nothing rather than put the
-                # shape at position 0 (Codex on PR #265). The same guess
-                # for a direct or `.apply` call is #266.
-                callback = None
-        if callback_shapes and callback is not None:
+        if callback_shapes and len(callback_params) == 1:
             record["callbackShapes"] = callback_shapes
-            record["callbackParam"] = callback
+            record["callbackParam"] = callback_params[0]
+            index, nullable = _callback_shape_index(
+                region, uses[callback_params[0]], callback_shapes)
             if index is not None:
                 record["callbackShapeIndex"] = index
                 if nullable:
@@ -3999,7 +3987,7 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
             # when the callback parameter is unambiguous, above.
             if record.get("returns") is not None and \
                     _returns_without_value(region):
-                record["voidWhen"] = callback
+                record["voidWhen"] = callback_params[0]
         _attach_doc_types(record, path)
         _attach_forwarding(record, region, path)
         exports.append(record)
