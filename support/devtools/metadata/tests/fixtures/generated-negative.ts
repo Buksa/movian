@@ -84,6 +84,24 @@ new page.Route('items:(.*)', (p) => {
 
 void unguardedLoad; void unguardedStorage;
 
+// ADR-0005 (#262): the accessor union accepts whatever `Function` accepts and
+// nothing that is not callable. The five settings callbacks were `any` and
+// took this until the union.
+import subtitlesneg = require('movian/subtitles');
+instance.createBool('b', 'B', false, 42);  // EXPECT_TS2345
+instance.createString('s', 'S', '', 42);  // EXPECT_TS2345
+instance.createInt('i', 'I', 0, 0, 10, 1, 'u', 42);  // EXPECT_TS2345
+instance.createAction('a', 'A', 42);  // EXPECT_TS2345
+instance.createMultiOpt('m', 'M', [['x', 'X']], 42);  // EXPECT_TS2345
+new page.Route('n:(.*)', 42);  // EXPECT_TS2345
+new page.Searcher('N', 'icon.png', 42);  // EXPECT_TS2345
+prop.subscribeValue(prop.createRoot(), 42);  // EXPECT_TS2345
+subtitlesneg.addProvider(42);  // EXPECT_TS2345
+new page.Route('m:(.*)', (p) => {
+    p.appendItem('u', 'directory', {}).addOptAction('t', 42);  // EXPECT_TS2345
+    p.appendAction('t', 42);  // EXPECT_TS2345
+});
+
 // An array-returning selector must carry its element type. While these were
 // `any`, `interface Node` had all eleven members and caught a phantom written
 // directly on a node -- but every selector that REACHED a node discarded the

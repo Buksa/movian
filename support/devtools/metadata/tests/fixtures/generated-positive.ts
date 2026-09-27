@@ -16,6 +16,7 @@ import page = require('movian/page');
 import service = require('movian/service');
 import settings = require('movian/settings');
 import sqlite = require('movian/sqlite');
+import subtitles = require('movian/subtitles');
 import videoscrobbler = require('movian/videoscrobbler');
 
 // Legacy spelling: the loader rewrites showtime/* to movian/* at require
@@ -138,6 +139,40 @@ scrobbler.onstart = (data: any) => { void data; };
 scrobbler.onpause = (data: any) => { void data; };
 scrobbler.onresume = (data: any) => { void data; };
 scrobbler.onstop = (data: any) => { void data; };
+
+// ADR-0005 (#262): a core-module parameter the function only ever invokes is
+// typed `Function | (signature)`. One line per such slot, each taking an
+// UNANNOTATED callback that has a parameter -- under `any`, or `Function`
+// alone, that parameter is TS7006 under --strict -- and one line each taking a
+// value typed only `Function`, which the arrow alone rejects.
+declare const anyFunction: Function;
+globals.createBool('b', 'B', false, (value) => { void value; });
+globals.createString('s', 'S', '', (value) => { void value; });
+globals.createInt('i', 'I', 0, 0, 10, 1, 'u', (value) => { void value; });
+globals.createAction('a', 'A', (value) => { void value; });
+globals.createMultiOpt('m', 'M', [['x', 'X']], (value) => { void value; });
+new page.Route('accessor:(.*)', (routed, match) => {
+    void match;
+    routed.appendItem('u', 'directory', {}).addOptAction(
+        't', (value) => { void value; });
+    routed.appendAction('t', (value) => { void value; });
+    routed.appendItem('u', 'directory', {}).addOptAction('t', anyFunction);
+    routed.appendAction('t', anyFunction);
+});
+new page.Searcher('Accessor', 'icon.png', (searched, query) => {
+    void searched; void query;
+});
+prop.subscribeValue(root, (value) => { void value; });
+subtitles.addProvider((req) => { void req; });
+globals.createBool('b', 'B', false, anyFunction);
+globals.createString('s', 'S', '', anyFunction);
+globals.createInt('i', 'I', 0, 0, 10, 1, 'u', anyFunction);
+globals.createAction('a', 'A', anyFunction);
+globals.createMultiOpt('m', 'M', [['x', 'X']], anyFunction);
+new page.Route('function:(.*)', anyFunction);
+new page.Searcher('Function', 'icon.png', anyFunction);
+prop.subscribeValue(root, anyFunction);
+subtitles.addProvider(anyFunction);
 
 // Legacy aliases resolve to the same surface, local members included.
 const legacyRoot = legacyProp.createRoot('legacy');
