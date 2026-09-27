@@ -1802,6 +1802,14 @@ def _mask_js_strings(line: str) -> str:
     quote: str | None = None
     while i < len(chars):
         if quote is not None:
+            if chars[i] == "\\" and i + 1 == len(chars):
+                # A string continued onto the next line. This mask works one
+                # line at a time and loses it there -- the closing quote
+                # opens a "string" that blanks real code -- so the backslash
+                # is left visible for a reader that must not trust the next
+                # line (`_parameter_uses`, movian#262). No core module
+                # continues a string today; the artifact did not change.
+                break
             if chars[i] == "\\" and i + 1 < len(chars):
                 chars[i] = chars[i + 1] = " "
                 i += 2
@@ -1836,6 +1844,12 @@ def _parse_params(raw: str) -> list[str] | None:
             # a source we do not understand -- report nothing rather than a
             # guess.
             return None
+        if name in params:
+            # Legal in sloppy ES5, where the last one wins and the earlier
+            # argument is never read. Emitted, the name appears twice (tsc:
+            # TS2300), and anything keyed by name -- a `@param`, an accessor
+            # -- would type both positions from one of them (movian#262).
+            return None
         params.append(name)
     return params
 
@@ -1849,9 +1863,26 @@ def _function_params(region: str) -> list[str] | None:
     return _parse_params(match.group(1))
 
 
-NESTED_FUNCTION_RE = re.compile(r"\bfunction\b")
+# A nested function literal opens with the keyword, an optional name and its
+# parameter list. `function` alone is not enough: a property name may be any
+# IdentifierName in ES5, so `o.function` and `{function: 1}` open nothing, and
+# taking them for a literal blanked the rest of a body (movian#262).
+NESTED_FUNCTION_RE = re.compile(
+    r"(?<![\w$])function(?![\w$])\s*(?:[A-Za-z_$][\w$]*\s*)?\(")
 ARGUMENTS_RE = re.compile(r"\barguments\b")
 BARE_RETURN_RE = re.compile(r"\breturn\s*;")
+
+
+def _opens_function(text: str, index: int) -> bool:
+    """Whether a nested function literal starts at `index` of masked text:
+    `NESTED_FUNCTION_RE` there, and not `o.function(...)`, a call of a
+    method that happens to be named `function`."""
+    if NESTED_FUNCTION_RE.match(text, index) is None:
+        return False
+    cursor = index
+    while cursor > 0 and text[cursor - 1].isspace():
+        cursor -= 1
+    return cursor == 0 or text[cursor - 1] != "."
 
 
 def _own_body(region: str) -> str:
@@ -1867,6 +1898,13 @@ def _own_body(region: str) -> str:
     search reported the constructor as variadic because a *method* reads
     `arguments`. Comments and string literals are already masked by the
     caller, so brace counting here is safe.
+
+    Nested bodies are blanked rather than cut out: character `i` of the result
+    is character `_own_block(region) + i` of `region`, and every newline
+    survives, so a finding in the own body can be anchored to its line
+    (movian#262). No search made of this text reads across the blank -- the
+    nested function's closing brace is kept, so it separates both sides
+    exactly as the cut did.
 
     Returns the empty string when `region` does not open with a function
     literal, which reads as "no evidence" at every call site.
@@ -1893,12 +1931,14 @@ def _own_body(region: str) -> str:
                 break
             if nested_at is not None and depth <= nested_at:
                 nested_at = None
-        elif nested_at is None and NESTED_FUNCTION_RE.match(region, index):
+        elif nested_at is None and _opens_function(region, index):
             # The nested body opens one level down and closes when depth
             # comes back to here.
             nested_at = depth
-        if nested_at is None:
+        if nested_at is None or char == "\n":
             kept.append(char)
+        else:
+            kept.append(" ")
         index += 1
     return "".join(kept)
 
@@ -1907,6 +1947,166 @@ def _uses_arguments(region: str) -> bool:
     """Whether the function at the head of `region` reads its own
     `arguments`."""
     return ARGUMENTS_RE.search(_own_body(region)) is not None
+
+
+# What follows a parameter's name when the occurrence invokes the value as
+# passed: `p(...)`, `p.apply(...)` or `p.call(...)` (ADR-0005). Group 1 names
+# `apply` or `call`: `.call`'s arguments are p's positions after the receiver,
+# `.apply`'s are an array.
+PARAM_INVOCATION_RE = re.compile(r"\s*(?:\.\s*(apply|call)\s*)?\(")
+# The words that make `p(` something other than a call of the parameter:
+# `function p(` declares a binding that shadows it, `new p(` constructs, and
+# ES5's `get p(` / `set p(` define a property of that name.
+NOT_A_CALL_KEYWORDS = frozenset({"function", "new", "get", "set"})
+# What the scan cannot read in a function's masked body, anywhere in it -- a
+# closure reaches the parameter too. Found one construct at a time in review
+# of PR #265 (a regex literal, a direct eval, `\u0063b`, U+200C), so this names
+# what the scan DOES understand instead of what it does not:
+#   a character outside ASCII letters, digits, `_`, `$`, ASCII whitespace and
+#   the punctuators `{}()[];,.:?!=<>+-*%&|^~`. That refuses `/` (a regex
+#   literal or a division -- telling them apart is a guess, and a regex can
+#   hold `p(` or a quote that blanked the rest of its line), a backslash
+#   (`\u0063b` spells `cb` without writing it, ES5 7.6; or a string continued
+#   onto the next line, which the line-by-line mask loses), and anything
+#   non-ASCII (U+200C continues an identifier, so `x<U+200C>cb()` is not a
+#   call of `cb`). Strings and comments are blank by now, so none of this is
+#   text the scan was meant to skip.
+#   the token `eval` or `with` anywhere but after a `.`. `eval(` and
+#   `(eval)(` are direct and can rebind a parameter inside a masked string;
+#   other uses of the name refuse with them rather than be told apart.
+#   `o.eval(...)` is a property -- an indirect eval, which cannot reach a
+#   local -- and is read. `with (o)` resolves names through `o`.
+UNREADABLE_BODY_RE = re.compile(
+    r"[^A-Za-z0-9_$ \t\n\r\f\v{}()\[\];,.:?!=<>+\-*%&|^~]"
+    r"|(?<![A-Za-z0-9_$.])(?:eval|with)(?![A-Za-z0-9_$])")
+
+
+class ParamUse(NamedTuple):
+    """One use of a parameter by its function, at `offset` into the region."""
+
+    offset: int
+    invocation: bool
+    # The `(` of a direct `p(...)`, whose arguments are p's own positions.
+    # None for `.apply` and `.call`, and for every use that is not a call.
+    call_paren: int | None
+    # `apply` or `call` for an invocation through that method.
+    method: str | None = None
+    # Set on the blocking use `UNREADABLE_BODY_RE` adds: the body cannot be
+    # read, so nothing else found in it can be trusted either.
+    unreadable: bool = False
+
+
+def _parameter_uses(
+        region: str, params: list[str]) -> dict[str, list[ParamUse]]:
+    """Every use of each parameter by the function at the head of `region`.
+
+    ADR-0005 types a core-module parameter callable when the function uses it
+    at least once and every use is an invocation of the value as passed. The
+    question is which uses EXIST, so every occurrence of the name in the body
+    is enumerated -- nested callbacks included, because an invocation
+    deferred into a subscription is still one (`settings.js:83`).
+
+    Anything that is not an invocation is a use, and it blocks: a truthiness
+    test, `typeof`, forwarding, storing, reassignment. Nothing is resolved by
+    scope, and nothing needs to be. A binding that shadows the parameter -- a
+    nested function's parameter, a `var`, `catch (p)`, `function p(` --
+    always occurs once in a form that is not a call of it, so it refuses the
+    slot instead of letting its own calls count as the parameter's.
+
+    `obj.p` is a property sharing the name, not an occurrence. An object key
+    `{p: 1}` is not one either, and is counted as a blocking use anyway: the
+    mistake that makes is a refusal, which leaves the slot as it was.
+
+    A read of the function's own `arguments` blocks every parameter, since
+    it can reach any of them; a nested function's `arguments` is its own.
+    So does anything `UNREADABLE_BODY_RE` finds anywhere in the body: where
+    the masked text may show what is not code, hide what is, or leave a name
+    unresolved, the rule refuses rather than guess. That costs any function
+    with a division its accessors -- none in today's corpus, whose masked
+    modules hold one `/` pair, the regex at `movian/http.js:55`.
+
+    `region` is masked text -- comments and strings blanked -- opening with
+    the function. Offsets are into it.
+    """
+    uses: dict[str, list[ParamUse]] = {name: [] for name in params}
+    open_brace = _own_block(region)
+    if open_brace is None:
+        return uses
+    end = _balanced_end(region, open_brace) or len(region)
+    for name in params:
+        occurrence_re = re.compile(r"(?<![\w$])%s(?![\w$])" % re.escape(name))
+        for match in occurrence_re.finditer(region, open_brace, end):
+            cursor = match.start()
+            while region[cursor - 1].isspace():
+                cursor -= 1
+            if region[cursor - 1] == ".":
+                continue
+            word_start = cursor
+            while region[word_start - 1].isalnum() or \
+                    region[word_start - 1] in "_$":
+                word_start -= 1
+            call = PARAM_INVOCATION_RE.match(region, match.end())
+            if call is None or \
+                    region[word_start:cursor] in NOT_A_CALL_KEYWORDS:
+                uses[name].append(ParamUse(match.start(), False, None))
+            else:
+                uses[name].append(ParamUse(
+                    match.start(), True,
+                    None if call.group(1) else call.end() - 1,
+                    call.group(1)))
+    for match in ARGUMENTS_RE.finditer(_own_body(region)):
+        for name in params:
+            uses[name].append(
+                ParamUse(open_brace + match.start(), False, None))
+    for match in UNREADABLE_BODY_RE.finditer(region, open_brace, end):
+        for name in params:
+            uses[name].append(
+                ParamUse(match.start(), False, None, unreadable=True))
+    return uses
+
+
+def _attach_accessors(
+        record: dict[str, Any], region: str) -> dict[str, list[ParamUse]]:
+    """Record which parameters ADR-0005 makes accessors, with the evidence.
+
+    `accessors` maps a parameter to the lines that invoke it, for a parameter
+    used at least once and only ever invoked. `contested` maps a parameter
+    that is invoked AND used another way to both sets of lines -- the
+    invocations, and the `blocking` uses that stop the rule, which is what a
+    reader needs to see why a callback-looking slot was not typed. A
+    parameter never invoked is recorded nowhere: the rule has nothing to say
+    about it.
+
+    `region` opens on the record's source line. Returns the uses, for a
+    caller asking something else of the same invocations.
+    """
+    params = record.get("params") or []
+    uses = _parameter_uses(region, params)
+    line = record["source"]["line"]
+    accessors: dict[str, list[int]] = {}
+    contested: dict[str, dict[str, list[int]]] = {}
+    for name in params:
+        if name == "arguments":
+            # Every nested function binds its own `arguments`, which the
+            # name-keyed scan would count as this formal (review of PR #265).
+            continue
+        invocations: set[int] = set()
+        blocking: set[int] = set()
+        for use in uses[name]:
+            (invocations if use.invocation else blocking).add(
+                line + region.count("\n", 0, use.offset))
+        if not invocations:
+            continue
+        if blocking:
+            contested[name] = {"invocations": sorted(invocations),
+                               "blocking": sorted(blocking)}
+        else:
+            accessors[name] = sorted(invocations)
+    if accessors:
+        record["accessors"] = accessors
+    if contested:
+        record["contested"] = contested
+    return uses
 
 
 # The statement keyword, never a property of that name. `\b` alone matches the
@@ -1988,7 +2188,7 @@ def _scan_returns(text: str, open_brace: int) -> tuple[list[tuple[int, int]], in
                 break
             if nested_at is not None and depth <= nested_at:
                 nested_at = None
-        elif nested_at is None and NESTED_FUNCTION_RE.match(text, index):
+        elif nested_at is None and _opens_function(text, index):
             nested_at = depth
         elif nested_at is None and RETURN_KW_RE.match(text, index):
             end = _statement_end(text, index)
@@ -2092,8 +2292,10 @@ def _own_returns(region: str) -> list[str]:
 
 
 def _callback_shape_index(
-        region: str, param: str, shapes: list[str]) -> tuple[int | None, bool]:
-    """Which argument of `param`'s invocation carries a `new <shape>(...)`.
+        region: str, uses: list[ParamUse],
+        shapes: list[str]) -> tuple[int | None, bool]:
+    """Which argument of the parameter's invocation carries a
+    `new <shape>(...)`, reading the direct calls among its `uses`.
 
     Assuming position 0 typed the wrong parameter: `movian/http`'s `request`
     calls `callback(null, new HttpResponse(res))` on success and
@@ -2106,16 +2308,17 @@ def _callback_shape_index(
     `None` when no invocation carries a construction, which leaves the
     annotation off rather than guessing a position.
     """
-    call_re = re.compile(r"\b%s\s*\(" % re.escape(param))
     new_res = [re.compile(r"\bnew\s+%s\s*\(" % re.escape(shape))
                for shape in shapes]
     index = None
     calls = []
-    for call in call_re.finditer(region):
-        end = _balanced_call_end(region, call.end() - 1)
+    for use in uses:
+        if use.call_paren is None:
+            continue
+        end = _balanced_call_end(region, use.call_paren)
         if end is None:
             continue
-        args = _split_js_fields(region[call.end():end - 1])
+        args = _split_js_fields(region[use.call_paren + 1:end - 1])
         calls.append(args)
         if index is None:
             for position, arg in enumerate(args):
@@ -2432,6 +2635,23 @@ def _open_block_at(path: Path) -> list[bool]:
     return states
 
 
+# The ES5 line terminators (7.3), which Duktape's own lexer uses too
+# (`duk_unicode_is_line_terminator`). `str.splitlines` also splits at VT, FF,
+# FS, GS, RS and NEL, and every scan here masks one line at a time: split
+# there, a comment or a string restarted as code mid-way (movian#262).
+JS_LINE_TERMINATOR_RE = re.compile(r"\r\n|[\n\r\u2028\u2029]")
+
+
+def _js_lines(text: str) -> list[str]:
+    """`text` split where JavaScript ends a line, with no trailing empty
+    line for a final terminator -- as `str.splitlines` gives it, so line
+    numbers match wherever the two agree."""
+    lines = JS_LINE_TERMINATOR_RE.split(text)
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
+
+
 def _raw_lines(path: Path) -> list[str]:
     """The file's lines, uncached-comment. Every other scan in this file reads
     the MASKED text, where a comment is blanked to spaces -- so the annotations
@@ -2440,7 +2660,7 @@ def _raw_lines(path: Path) -> list[str]:
     masked scan reported."""
     lines = _RAW_LINES_CACHE.get(path)
     if lines is None:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = _js_lines(path.read_text(encoding="utf-8"))
         _RAW_LINES_CACHE[path] = lines
     return lines
 
@@ -2652,7 +2872,7 @@ def _jsdoc_types(path: Path, line: int) -> dict[str, Any]:
 
 
 def _masked_js_text(path: Path, mask_strings: bool = True) -> str:
-    raw_lines = path.read_text(encoding="utf-8").splitlines()
+    raw_lines = _js_lines(path.read_text(encoding="utf-8"))
     masked_lines: list[str] = []
     in_block_comment = False
     for raw_line in raw_lines:
@@ -2736,6 +2956,7 @@ def _shape_method(
         if returned is not None:
             record["returns"] = returned
         _attach_forwarding(record, region, path)
+        _attach_accessors(record, region)
     return record
 
 
@@ -3514,6 +3735,9 @@ def _receiver_members(
             line_index + 1 + region.count(
                 "\n", 0, match.start(1)),
             kind="function")
+        # From the member's own line, which is the record's source line.
+        _attach_accessors(functions[match.group(1)],
+                          region[match.start(1):])
 
     members: dict[str, dict[str, Any]] = dict(functions)
     for match in RECEIVER_ASSIGN_RE.finditer(region):
@@ -3535,8 +3759,10 @@ def _receiver_members(
 def _merge_receiver_members(
         members: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
+    implementations: dict[str, list[dict[str, Any]]] = {}
     for member in members:
         name = member["name"]
+        implementations.setdefault(name, []).append(member)
         previous = merged.get(name)
         if previous is None:
             merged[name] = member
@@ -3548,7 +3774,46 @@ def _merge_receiver_members(
             new_params = member.get("params") or []
             if len(new_params) > len(old_params):
                 merged[name] = member
-    return [merged[name] for name in sorted(merged)]
+    return [_agreed_accessors(merged[name], implementations[name])
+            for name in sorted(merged)]
+
+
+def _agreed_accessors(record: dict[str, Any],
+                      implementations: list[dict[str, Any]]
+                      ) -> dict[str, Any]:
+    """`record` as the one declaration of every implementation in
+    `implementations`, which includes it.
+
+    The merge keeps one record, and its `accessors` describe one function.
+    Emitted for all of them, an accessor would require a callable where
+    another initializer installs a function that stores or forwards the
+    same argument (Codex on PR #265). So a position stays an accessor only
+    where every implementation's parameter there is one. The record is
+    copied before it changes: the same object is also that export's own
+    member, which describes only its own function and keeps its evidence.
+    """
+    accessors = record.get("accessors")
+    if not accessors:
+        return record
+    params = record["params"]
+    agreed = {
+        name: lines for name, lines in accessors.items()
+        if all(_accessor_at(member, params.index(name))
+               for member in implementations)}
+    if agreed == accessors:
+        return record
+    record = dict(record)
+    if agreed:
+        record["accessors"] = agreed
+    else:
+        del record["accessors"]
+    return record
+
+
+def _accessor_at(member: dict[str, Any], position: int) -> bool:
+    params = member.get("params") or []
+    return (position < len(params)
+            and params[position] in (member.get("accessors") or {}))
 def _balanced_call_end(text: str, open_index: int) -> int | None:
     """Index just past the `)` closing the call whose `(` is at `open_index`.
 
@@ -3601,7 +3866,7 @@ def _commonjs_masked_lines(path: Path) -> list[str]:
     file reads, so a `return {` inside a comment is not code to anybody."""
     masked_lines: list[str] = []
     in_block_comment = False
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for raw_line in _js_lines(path.read_text(encoding="utf-8")):
         line, in_block_comment = _mask_js_comments(
             raw_line, in_block_comment)
         masked_lines.append(line)
@@ -3683,19 +3948,32 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
         if record.get("receiverMutation"):
             record["receiverMembers"] = _receiver_members(
                 region, path, line_index)
+        uses = _attach_accessors(record, region)
         callback_shapes = sorted(set(re.findall(
             r"\bnew\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", region)))
+        # Invoked directly or through `.apply`, whatever else the function
+        # does with it -- the same enumeration ADR-0005 reads, asked the
+        # question this route asked before #262. A contested parameter still
+        # gets its shape: `movian/http`'s `request` tests `callback` and
+        # keeps the signature this route gives it (ADR-0005, "a contested
+        # slot keeps a signature another route already gave it").
+        #
+        # `.call` is an invocation for the accessor rule and nothing more
+        # here: reading shapes through it kept finding positions to guess,
+        # four reviews in a row on PR #265, and the guess itself is #266.
+        # An unreadable body gives none either -- the call may be text
+        # inside a regex.
         callback_params = [
             name for name in (params or [])
-            if re.search(
-                r"\b%s\s*(?:\.apply\s*\(|\()" %
-                re.escape(name), region)
+            if any(use.invocation and use.method != "call"
+                   for use in uses[name])
+            and not any(use.unreadable for use in uses[name])
         ]
         if callback_shapes and len(callback_params) == 1:
             record["callbackShapes"] = callback_shapes
             record["callbackParam"] = callback_params[0]
             index, nullable = _callback_shape_index(
-                region, callback_params[0], callback_shapes)
+                region, uses[callback_params[0]], callback_shapes)
             if index is not None:
                 record["callbackShapeIndex"] = index
                 if nullable:
@@ -6695,6 +6973,25 @@ def render_doc_type(type_text: str) -> str:
     return DOC_TYPE_ANY_ALIASES.get(type_text, type_text)
 
 
+# The arrow an accessor's union carries when nothing gives the slot a
+# signature: an invocation proves "callable" and nothing about the arguments
+# or the return (ADR-0005).
+ACCESSOR_SIGNATURE = "(...args: any[]) => void"
+
+
+def _is_signature(type_text: str) -> bool:
+    """Whether `type_text` is one function type, `(...) => R`.
+
+    Beginning with a parenthesis is not enough: `((x: any) => void) | null`
+    is a union, and wrapping it as the arrow of another would keep a `null`
+    the accessor's invocation does not take.
+    """
+    if not type_text.startswith("("):
+        return False
+    end = _balanced_call_end(type_text, 0)
+    return end is not None and type_text[end:].lstrip().startswith("=>")
+
+
 class SlotType(NamedTuple):
     """What one parameter or return is emitted as, and why.
 
@@ -6762,6 +7059,41 @@ class TypeScope:
 
     def parameter(self, record: dict[str, Any], name: str,
                   shape_names: set[str] | None = None) -> SlotType:
+        slot = self._shape_or_annotation(record, name, shape_names)
+        if name not in (record.get("accessors") or {}):
+            return slot
+        return self._accessor(record, name, slot)
+
+    def _accessor(self, record: dict[str, Any], name: str,
+                  slot: SlotType) -> SlotType:
+        """ADR-0005: every use of the parameter invokes it, so the slot takes
+        whatever `Function` takes, and an unannotated callback still gets a
+        contextual signature from the arrow -- `Function` alone gives it
+        none, and fails `--strict` with TS7006.
+
+        A signature the slot already has -- the call-site shape, or a
+        `@param` that is one function type -- takes the arrow's place. Any
+        other claim loses: the invocations are read from the body, and a
+        comment must not overrule them any more than a `@returns` overrules
+        a proved return. `Function` loses nothing, since the union contains
+        it.
+        """
+        if _is_signature(slot.type):
+            return SlotType("Function | (%s)" % slot.type, None,
+                            slot.disagreement)
+        disagreement = slot.disagreement
+        documented = (record.get("docParams") or {}).get(name)
+        if slot.type not in ("any", "Function"):
+            disagreement = (
+                "@param {%s}, but every use of %s is an invocation (lines "
+                "%s); the invocations win" % (
+                    documented, name,
+                    ", ".join(map(str, record["accessors"][name]))))
+        return SlotType("Function | (%s)" % ACCESSOR_SIGNATURE, None,
+                        disagreement)
+
+    def _shape_or_annotation(self, record: dict[str, Any], name: str,
+                             shape_names: set[str] | None) -> SlotType:
         documented = (record.get("docParams") or {}).get(name)
         annotated: SlotType
         if documented is None:

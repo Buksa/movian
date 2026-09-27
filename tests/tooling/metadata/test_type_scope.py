@@ -334,7 +334,8 @@ class TheTwoConsumersAgree(unittest.TestCase):
                     % (site["slot"], site["type"], lines))
         # Every typed parameter is checked -- there is no `continue` left to
         # skip one. Measured, not a target: re-measure before changing it.
-        self.assertEqual(checked, 87)
+        # 87 -> 92: the five `movian/settings` callbacks ADR-0005 types.
+        self.assertEqual(checked, 92)
 
     def test_every_typed_return_appears_in_its_own_declaration(self) -> None:
         declarations = self.declarations()

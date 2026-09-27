@@ -705,7 +705,10 @@ class Census(unittest.TestCase):
         # the emitted file. 90 after those two corrections, 87 once the
         # native ceiling stopped three wrappers promising more than the C
         # licenses. Every step down is a claim withdrawn, not coverage lost.
-        self.assertEqual(typed, 87)  # noqa: kept, see comment above
+        # 92 once ADR-0005 typed the five `movian/settings` callbacks, whose
+        # every use is an invocation; the other six accessors were typed
+        # already and only widened (movian#262).
+        self.assertEqual(typed, 92)  # noqa: kept, see comment above
 
     def test_a_proved_return_the_module_cannot_spell_is_counted_any(
             self) -> None:
