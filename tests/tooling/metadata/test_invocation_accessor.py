@@ -191,6 +191,21 @@ class AnyOtherUseBlocks(unittest.TestCase):
         self.assertBlocked(
             body("sub(function(cb) {", "  cb();", "});"), [3], [2])
 
+    def test_a_shadowing_var_in_a_nested_function(self) -> None:
+        """`var cb` rebinds the name for the whole closure; its `cb()` calls
+        that, not the parameter. Found surviving the suite as a mutation
+        (luna review on PR #265)."""
+        self.assertBlocked(body("(function() {",
+                                "  var cb = function() {};",
+                                "  cb();",
+                                "})();"), [4], [3])
+
+    def test_a_shadowing_catch_parameter(self) -> None:
+        """Inside `catch (cb)`, `cb` is the exception."""
+        self.assertBlocked(body("try { x(); } catch (cb) {",
+                                "  cb();",
+                                "}"), [3], [2])
+
     def test_a_shadowing_function_declaration(self) -> None:
         """`function cb(` reads like a call and declares a binding."""
         self.assertBlocked(
