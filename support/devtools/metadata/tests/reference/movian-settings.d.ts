@@ -36,6 +36,12 @@ declare module 'movian/settings' {
      * Source: the `sp` object is installed as both constructors' prototype.
      * The two internal getvalue/setvalue functions are constructor
      * bookkeeping and are deliberately not part of this public interface.
+     *
+     * Every callback is `Function | (signature)`: each create* method only
+     * ever invokes it, which proves callable and nothing narrower
+     * (docs/adr/0005-an-invocation-is-an-accessor.md), so a value typed
+     * `Function` is accepted. The arrow still gives an unannotated callback
+     * its argument type.
      */
     interface SettingsMethods {
         /** Source: sp.destroy. */
@@ -49,7 +55,7 @@ declare module 'movian/settings' {
             id: string,
             title: string,
             defaultValue: boolean,
-            callback: (value: boolean) => void,
+            callback: Function | ((value: boolean) => void),
             persistent?: boolean
         ): SettingItem<boolean>;
 
@@ -58,7 +64,7 @@ declare module 'movian/settings' {
             id: string,
             title: string,
             defaultValue: string,
-            callback: (value: string) => void,
+            callback: Function | ((value: string) => void),
             persistent?: boolean
         ): SettingItem<string>;
 
@@ -71,7 +77,7 @@ declare module 'movian/settings' {
             max: number,
             step: number,
             unit: string,
-            callback: (value: number) => void,
+            callback: Function | ((value: number) => void),
             persistent?: boolean
         ): SettingItem<number>;
 
@@ -91,7 +97,7 @@ declare module 'movian/settings' {
         createAction(
             id: string,
             title: string,
-            callback: () => void
+            callback: Function | (() => void)
         ): SettingItem<unknown>;
 
         /**
@@ -102,7 +108,7 @@ declare module 'movian/settings' {
             id: string,
             title: string,
             options: readonly [MultiOptOption, ...MultiOptOption[]],
-            callback: (value: string) => void,
+            callback: Function | ((value: string) => void),
             persistent?: boolean
         ): void;
     }

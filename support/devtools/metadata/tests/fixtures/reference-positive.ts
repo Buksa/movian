@@ -178,6 +178,16 @@ pagePrefs.createBool('page-enabled', 'Enabled', false, value => {
     const callbackValue: boolean = value;
     void callbackValue;
 });
+// ADR-0005: each create* method only invokes its callback, so a value typed
+// `Function` is a callback too. The narrower `(value: boolean) => void` alone
+// rejected these.
+declare const anyCallback: Function;
+pagePrefs.createBool('function-bool', 'Bool', false, anyCallback);
+pagePrefs.createString('function-string', 'String', '', anyCallback);
+pagePrefs.createInt('function-int', 'Int', 1, 0, 10, 1, 'u', anyCallback);
+pagePrefs.createAction('function-action', 'Action', anyCallback);
+pagePrefs.createMultiOpt('function-multiopt', 'Multi', [['a', 'A']],
+                         anyCallback);
 
 const registeredService: service.Service = service.create(
     'Reference',
