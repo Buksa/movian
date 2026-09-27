@@ -85,9 +85,11 @@ other variables and the callers are not traced.
   either), and there is no type parameter.
 - `Object.defineProperty(V, 'x', ...)` alone is not read and keeps its
   warning. No core module does it.
-- A caller that adds members to the object after the factory returns it is
-  not seen: `var x = F(...); x.extra = 1; return x;` still returns the shape.
-  That is the limit `var x = new C()` already has, and it is not closed here.
+- The caller is traced no further than `var x = new C()` already is: a
+  caller that reassigns x, or adds members to the object, before returning it
+  is not seen. `var x = F(...); x.extra = 1; return x;` and
+  `var x = F(...); x = y; return x;` both still return the shape. That limit
+  is not closed here.
 - The runtime oracle calls `globalSettings` and none of the four methods, so
   `item`'s three members are reviewed exclusions. Tier3 results are matched
   to shapes by lowercased name, and `item` made the `items` key ambiguous with
