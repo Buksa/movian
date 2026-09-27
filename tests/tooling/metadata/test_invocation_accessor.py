@@ -347,6 +347,14 @@ class TheCallbackShapePosition(unittest.TestCase):
         self.assertNotIn("callbackParam", record)
         self.assertNotIn("accessors", record)
 
+    def test_a_call_that_supplies_no_shape_infers_none(self) -> None:
+        """Invoked only through `.call` and no call carries the shape: before
+        #262 `.call` inferred nothing, and it still does rather than put
+        `Item` at position 0 (Codex on PR #265). The same guess for direct
+        and `.apply` calls is #266."""
+        record = scan_export(
+            self.SOURCE % "var item = new Item(); cb.call(null);")
+        self.assertNotIn("callbackParam", record)
 
 
 class AnUnreadableBodyBlocks(unittest.TestCase):

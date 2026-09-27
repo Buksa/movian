@@ -3970,11 +3970,22 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
             if any(use.invocation for use in uses[name])
             and not any(use.unreadable for use in uses[name])
         ]
-        if callback_shapes and len(callback_params) == 1:
-            record["callbackShapes"] = callback_shapes
-            record["callbackParam"] = callback_params[0]
+        callback = callback_params[0] if len(callback_params) == 1 else None
+        index, nullable = None, False
+        if callback_shapes and callback is not None:
             index, nullable = _callback_shape_index(
-                region, uses[callback_params[0]], callback_shapes)
+                region, uses[callback], callback_shapes)
+            if index is None and all(use.receiver for use in uses[callback]
+                                     if use.invocation):
+                # Invoked only through `.call`, and no call carries the
+                # shape. Before #262 `.call` was no invocation and inferred
+                # nothing here; it still infers nothing rather than put the
+                # shape at position 0 (Codex on PR #265). The same guess
+                # for a direct or `.apply` call is #266.
+                callback = None
+        if callback_shapes and callback is not None:
+            record["callbackShapes"] = callback_shapes
+            record["callbackParam"] = callback
             if index is not None:
                 record["callbackShapeIndex"] = index
                 if nullable:
@@ -3988,7 +3999,7 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
             # when the callback parameter is unambiguous, above.
             if record.get("returns") is not None and \
                     _returns_without_value(region):
-                record["voidWhen"] = callback_params[0]
+                record["voidWhen"] = callback
         _attach_doc_types(record, path)
         _attach_forwarding(record, region, path)
         exports.append(record)
