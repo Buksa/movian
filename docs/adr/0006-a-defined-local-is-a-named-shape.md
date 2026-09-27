@@ -47,7 +47,8 @@ itself -- and requires:
   no non-ASCII character, and no `eval` or `with`;
 - no `this` in F: a descriptor's accessor runs with the object as `this`, so
   a setter could add a member the text never names;
-- `var V = {}` as a statement of F's own body;
+- `var V = {};` as a statement of F's own body, `{}` the whole initializer --
+  `var V = {} && x` holds `x`;
 - every `Object.defineProperties(V, {...})` a statement of the own body --
   not inside a nested function, a block, an unbraced conditional or an
   expression -- whose map is the whole second argument and whose call is the
@@ -63,8 +64,13 @@ itself -- and requires:
   `Object.setPrototypeOf`, or a map that is not a literal each decline the
   shape, and so does a plain read, which the rule has no use for. Text that
   only spells the name -- an object key, a label -- counts too, and declines;
-- F declared once at the module's top level, and its name assigned nowhere
-  else in the module: a call of F runs whatever F holds by then;
+- F declared once at the module's top level, and its name occurring
+  anywhere in the module only in that declaration and in calls `F(...)`: a
+  call of F runs whatever F holds by then, and `F = g`, `(F) = g`, `var F`
+  or a parameter named F would each change that. A whitelist again, after
+  a list of assignment forms missed the parenthesized one;
+- no `new V(...)` anywhere in the module: the generator reads it as the
+  shape named V, and a module block holds one type of that name;
 - `return V` as F's only own return, always reached, with no line terminator
   between `return` and V (ES5.1 7.9.1 makes that `return;`);
 - every key of every map one the scan can read and a plain identifier --

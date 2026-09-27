@@ -3531,6 +3531,10 @@ def _local_object_refusal(
                 "add a member")
     if not _statement_at_top(region, open_brace, declaration.start()):
         return "the local is not declared in the function's own body"
+    # SHARED_OBJECT_DECL_RE ends in an optional `;`, so `var V = {} && x;`
+    # matches its `{}` prefix -- and holds `x`.
+    if not declaration.group(0).rstrip().endswith(";"):
+        return "the local's initializer is not exactly `{}`"
     for call in calls:
         if not _statement_at_top(region, open_brace, call.start()):
             return ("Object.defineProperties(%s, ...) is not a statement of "
@@ -3688,15 +3692,26 @@ def _scan_local_object_shapes(
             # A call of F runs whatever F holds by then, and the last
             # top-level declaration of F is the one that holds. One nested in
             # a method shadows F there only; the caller rule reads that.
+            # The declaration and the calls are the only uses allowed below.
             if refusal is None and len(_top_level_matches(text, re.compile(
                     r"\bfunction\s+(%s)\s*\(" % re.escape(factory.group(1)))
             )) > 1:
                 refusal = ("the function is declared more than once in the "
                            "module")
+            # A whitelist here as well: `F = g`, `(F) = g` and `var F = g`
+            # each rebind it, and listing assignment forms missed the second.
+            if refusal is None and any(
+                    not re.match(r"\s*\(", text[use.end():])
+                    for use in re.finditer(
+                        r"(?<![.\w$])%s(?![\w$])"
+                        % re.escape(factory.group(1)), text)):
+                refusal = ("the function's name is used in the module other "
+                           "than to declare it and call it")
+            # `_returned_shape` reads `new V()` as the shape V, and a module
+            # block holds one type of that name.
             if refusal is None and re.search(
-                    r"(?<![.\w$])%s\s*(?:[-+*/%%&|^]|<<|>>>?)?=(?!=)"
-                    % re.escape(factory.group(1)), text):
-                refusal = ("the function's name is assigned elsewhere in the "
+                    r"\bnew\s+%s\s*\(" % re.escape(name), text):
+                refusal = ("the name is also constructed with `new` in this "
                            "module")
             properties: dict[str, dict[str, dict[str, Any]]] = {}
             for call in calls if refusal is None else []:

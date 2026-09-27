@@ -162,7 +162,10 @@ BACKSLASH = chr(92)
 COLLIDES = "the name is already declared in this module"
 TWICE = "the name is built by more than one function"
 EMPTY = "no member the scan can read is defined"
-REBOUND = "the function's name is assigned elsewhere in the module"
+REBOUND = ("the function's name is used in the module other than to declare "
+           "it and call it")
+INITIALIZER = "the local's initializer is not exactly `{}`"
+CONSTRUCTED = "the name is also constructed with `new` in this module"
 DECLARED_TWICE = "the function is declared more than once in the module"
 NOT_INLINE = ("a descriptor that is not an object literal of value, get and "
               "set written in place")
@@ -210,6 +213,10 @@ REFUSED = [
      variant((CALL_OPEN, "  later(function() {\n" + CALL_OPEN),
              (CALL_CLOSE, "  });\n  });\n  return item;")),
      NOT_A_STATEMENT),
+    # `{} && x` holds `x`.
+    ("the initializer is more than `{}`",
+     variant(("  var item = {};\n", "  var item = {} && group.other;\n")),
+     INITIALIZER),
     ("the local is declared inside a nested function",
      variant(("  var item = {};\n",
               "  later(function() {\n    var item = {};\n  });\n"
@@ -350,11 +357,27 @@ REFUSED = [
     ("the factory is declared again",
      FACTORY + "function createSetting() { return { actual: 1 }; }\n",
      DECLARED_TWICE),
+    # Not an assignment operator after the name, and still an assignment.
+    ("a parameter of the factory's name",
+     variant(("sp.createBool = function(id) {",
+              "sp.createBool = function(id, createSetting) {")),
+     REBOUND),
+    ("a parenthesized assignment rebinds the factory",
+     FACTORY + "(createSetting) = function() { return {}; };\n",
+     REBOUND),
     ("a method reassigns the factory's name",
      variant(("  var item = createSetting(this, id);\n",
               "  createSetting = this.make;\n"
               "  var item = createSetting(this, id);\n")),
      REBOUND),
+    # `_returned_shape` reads `new item()` as the shape `item`, and a
+    # module block has one type of that name.
+    ("a constructor of the same name elsewhere in the module",
+     FACTORY + "function other() {\n"
+     "  function item() { this.actual = 1; }\n"
+     "  return new item();\n"
+     "}\n",
+     CONSTRUCTED),
     ("two functions build a local of the same name",
      FACTORY + "function createOther() {\n"
      "  var item = {};\n"
@@ -472,9 +495,6 @@ CALLER_REFUSED = [
     ("the method declares that function after the call",
      variant((CALLER_DECL,
               CALLER_DECL + "  function createSetting() { return {}; }\n"))),
-    ("a parameter of the factory's name",
-     variant(("sp.createBool = function(id) {",
-              "sp.createBool = function(id, createSetting) {"))),
     ("the local is reassigned",
      variant((CALLER_RETURN,
               "  item = this.other;\n  return item;\n}\n"))),
