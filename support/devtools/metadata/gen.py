@@ -1927,9 +1927,10 @@ def _uses_arguments(region: str) -> bool:
 
 
 # What follows a parameter's name when the occurrence invokes the value as
-# passed: `p(...)`, `p.apply(...)` or `p.call(...)` (ADR-0005). Group 1 is set
-# for `.apply` and `.call`, whose arguments are not the callee's positions.
-PARAM_INVOCATION_RE = re.compile(r"\s*(\.\s*(?:apply|call)\s*)?\(")
+# passed: `p(...)`, `p.apply(...)` or `p.call(...)` (ADR-0005). Group 1 names
+# `apply` or `call`: `.call`'s arguments are p's positions after the receiver,
+# `.apply`'s are an array.
+PARAM_INVOCATION_RE = re.compile(r"\s*(?:\.\s*(apply|call)\s*)?\(")
 # The words that make `p(` something other than a call of the parameter:
 # `function p(` declares a binding that shadows it, `new p(` constructs, and
 # ES5's `get p(` / `set p(` define a property of that name.
@@ -1955,9 +1956,11 @@ class ParamUse(NamedTuple):
 
     offset: int
     invocation: bool
-    # The `(` of a direct `p(...)`, whose arguments are p's own positions.
-    # None for `.apply` and `.call`, and for every use that is not a call.
+    # The `(` of `p(...)` or `p.call(...)`, whose arguments are p's own
+    # positions -- after the receiver for `.call`. None for `.apply`, whose
+    # arguments are an array, and for every use that is not a call.
     call_paren: int | None
+    receiver: bool = False
 
 
 def _parameter_uses(
@@ -2016,7 +2019,8 @@ def _parameter_uses(
             else:
                 uses[name].append(ParamUse(
                     match.start(), True,
-                    None if call.group(1) else call.end() - 1))
+                    None if call.group(1) == "apply" else call.end() - 1,
+                    call.group(1) == "call"))
     for match in ARGUMENTS_RE.finditer(_own_body(region)):
         for name in params:
             uses[name].append(
@@ -2277,6 +2281,13 @@ def _callback_shape_index(
         if end is None:
             continue
         args = _split_js_fields(region[use.call_paren + 1:end - 1])
+        if use.receiver:
+            # `cb.call(ctx, null, new Item())` passes `Item` second, after
+            # the receiver. Left unread, the position fell back to 0 and
+            # typed the callback's first argument as the shape -- the
+            # error-first mistake this function exists to prevent (Codex on
+            # PR #265).
+            args = args[1:]
         calls.append(args)
         if index is None:
             for position, arg in enumerate(args):

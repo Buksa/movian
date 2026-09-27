@@ -238,6 +238,26 @@ class AnyOtherUseBlocks(unittest.TestCase):
                                 "cb();"), [6], [5])
 
 
+class TheCallbackShapePosition(unittest.TestCase):
+    """Which argument carries `new <shape>(...)`, read off the invocation.
+    Counting `.call` as an invocation made it pick the callback without
+    reading its arguments, and the shape fell back to position 0 (Codex on
+    PR #265)."""
+
+    SOURCE = ("function Item() {}\n"
+              "exports.f = function(cb) {\n"
+              "  %s\n"
+              "}\n")
+
+    def test_a_direct_call(self) -> None:
+        record = scan_export(self.SOURCE % "cb(null, new Item());")
+        self.assertEqual(record.get("callbackShapeIndex"), 1)
+
+    def test_call_passes_the_receiver_first(self) -> None:
+        record = scan_export(self.SOURCE % "cb.call(ctx, null, new Item());")
+        self.assertEqual(record.get("callbackShapeIndex"), 1)
+
+
 class AnUnreadableBodyBlocks(unittest.TestCase):
     """The scan reads masked text -- comments and strings blanked -- and
     trusts that every name left in it is code, and that every name the
