@@ -3262,13 +3262,13 @@ def _shape_diagnostic(path: Path, text: str, offset: int, message: str) -> None:
         file=sys.stderr)
 def _scan_shape_properties(
         path: Path, text: str, receivers: set[str],
-        shared_receivers: set[str], handled: set[int] = frozenset()
+        shared_receivers: set[str], handled: set[int] | None = None
 ) -> dict[str, dict[str, dict[str, Any]]]:
     comment_text = _masked_js_text(path, mask_strings=False)
     properties: dict[str, dict[str, dict[str, Any]]] = {}
     # Seeded with the calls another reader already took, so an
     # unsupported-target warning names only what nothing read.
-    handled_calls: set[int] = set(handled)
+    handled_calls: set[int] = set(handled or ())
 
     def add_call_properties(
             source: str, match: re.Match[str], receiver: str,
@@ -5114,14 +5114,17 @@ def render_field_type(field: dict[str, Any], shape_names: set[str]) -> str:
         return field_type
     return "any"
 
-def returnable_shape_names(module: dict[str, Any]) -> set[str]:
-    """The shapes a return type in `module`'s block may name.
+def shape_type_names(module: dict[str, Any]) -> set[str]:
+    """The shape names a type written in `module`'s block may use.
 
-    Each is emitted as an interface of its own name: a prototype shape, and a
-    local object a module function builds and returns (ADR-0006). A shared
-    object's methods are hoisted onto the module instead, and nothing returns
-    one. The renderer and the census ask this one question, so they cannot
-    disagree about which returns are typed (movian#230).
+    Each is an interface of its own name that stands for an instance: a
+    prototype shape, and a local object a module function builds and returns
+    (ADR-0006). Return types, callback payloads and construct results all
+    resolve against it. A shared object is left out, as it was before: its
+    methods are declared on the module and on its own interface, and an
+    instance is typed by the export that installs it. The renderer and the
+    census ask this one question, so they cannot disagree about which slots
+    are typed (movian#230).
     """
     return {shape["name"] for shape in module.get("shapes", [])
             if shape.get("kind") in ("prototype", "local")}
@@ -5216,8 +5219,8 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
     modules = artifact.get("js", {}).get("modules", [])
     global_names, by_module = doc_type_scopes(modules)
     native_slots = _native_slot_types(modules)
-    prototype_shapes = {
-        module["name"]: returnable_shape_names(module) for module in modules}
+    shape_names_by_module = {
+        module["name"]: shape_type_names(module) for module in modules}
     census: list[dict[str, Any]] = []
     for module, display, record in _commonjs_callables(artifact):
         if record.get("kind") == "value":
@@ -5228,7 +5231,7 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         scope = TypeScope(global_names | by_module.get(module, set()),
                           by_module, native_slots)
-        shape_names = prototype_shapes.get(module, set())
+        shape_names = shape_names_by_module.get(module, set())
         params = record.get("params")
         if params is None:
             # `params_signature(None)` emits `...args: any[]`. One real `any`
@@ -5658,8 +5661,9 @@ RUNTIME_ORACLE_UNREACHABLE: tuple[tuple[str, str, str], ...] = (
     # `item` is the object `createSetting` returns (movian/settings.js:5-42,
     # ADR-0006), and only `sp.createBool`, `createString`, `createInt` and
     # `createAction` call it (:73, :99, :129, :193). Each adds a node to a
-    # live settings group and invokes the plugin's callback. The capture
-    # calls `globalSettings` and stops there (introspector.js:1073-1083).
+    # live settings group, and all but `createAction` invoke the plugin's
+    # callback at once. The capture calls `globalSettings` and stops there
+    # (introspector.js:1073-1083).
     ("movian/settings", "item", "enabled"),
     ("movian/settings", "item", "model"),
     ("movian/settings", "item", "value"),
@@ -7683,7 +7687,7 @@ def render_dts(artifact: dict[str, Any]) -> str:
             # emission needs it to render a return type, and it used to be
             # assigned further down -- which would have read the PREVIOUS
             # module's set, making the output depend on module order.
-            shape_names = returnable_shape_names(mod)
+            shape_names = shape_type_names(mod)
             if prototype_shapes:
                 lines.append("  // CommonJS prototype shapes")
                 for shape in prototype_shapes:
