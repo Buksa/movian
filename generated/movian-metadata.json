@@ -5975,6 +5975,7 @@
                   "title",
                   "callback"
                 ],
+                "returns": "item",
                 "source": {
                   "file": "res/ecmascript/modules/movian/settings.js",
                   "line": 190
@@ -5996,6 +5997,7 @@
                   "callback",
                   "persistent"
                 ],
+                "returns": "item",
                 "source": {
                   "file": "res/ecmascript/modules/movian/settings.js",
                   "line": 71
@@ -6045,6 +6047,7 @@
                   "callback",
                   "persistent"
                 ],
+                "returns": "item",
                 "source": {
                   "file": "res/ecmascript/modules/movian/settings.js",
                   "line": 125
@@ -6087,6 +6090,7 @@
                   "callback",
                   "persistent"
                 ],
+                "returns": "item",
                 "source": {
                   "file": "res/ecmascript/modules/movian/settings.js",
                   "line": 97
@@ -6126,6 +6130,43 @@
             "source": {
               "file": "res/ecmascript/modules/movian/settings.js",
               "line": 52
+            }
+          },
+          {
+            "factory": "createSetting",
+            "kind": "local",
+            "methods": [],
+            "name": "item",
+            "properties": [
+              {
+                "kind": "accessor",
+                "name": "enabled",
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 31
+                }
+              },
+              {
+                "kind": "value",
+                "name": "model",
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 17
+                }
+              },
+              {
+                "kind": "accessor",
+                "name": "value",
+                "source": {
+                  "file": "res/ecmascript/modules/movian/settings.js",
+                  "line": 21
+                }
+              }
+            ],
+            "receiver": "item",
+            "source": {
+              "file": "res/ecmascript/modules/movian/settings.js",
+              "line": 17
             }
           }
         ],
@@ -10502,6 +10543,6 @@
       }
     ]
   },
-  "movianRevision": "b99307ced374964acf625017206ae2a6c2636f9b",
+  "movianRevision": "f2c48c82a9cc5e2ea1b435072d0b8a5c415323f8",
   "schemaVersion": 1
 }

@@ -2940,7 +2940,9 @@ def _member_record(
 def _shape_method(
         name: str, raw_params: str, path: Path, line: int,
         alias_of: str | None = None,
-        region: str | None = None) -> dict[str, Any]:
+        region: str | None = None,
+        factories: dict[str, dict[str, Any]] | None = None
+) -> dict[str, Any]:
     record = _member_record(
         name, _parse_params(raw_params), path, line, alias_of=alias_of)
     # Same rule the module exports get: a method that reads its own
@@ -2952,7 +2954,7 @@ def _shape_method(
     if region is not None and "params" in record and _uses_arguments(region):
         record["variadic"] = True
     if region is not None:
-        returned = _returned_shape(region)
+        returned = _returned_shape(region, factories)
         if returned is not None:
             record["returns"] = returned
         _attach_forwarding(record, region, path)
@@ -3009,7 +3011,9 @@ def _mapped_element_shape(statement: str) -> str | None:
     return next(iter(shapes))
 
 
-def _returned_shape(region: str) -> str | dict[str, Any] | None:
+def _returned_shape(
+        region: str, factories: dict[str, dict[str, Any]] | None = None
+) -> str | dict[str, Any] | None:
     """The shape a method returns, when it plainly returns one.
 
     Three forms. `return new Item(...)` directly; the construct-then-return
@@ -3055,6 +3059,14 @@ def _returned_shape(region: str) -> str | dict[str, Any] | None:
     (movian#190). It cost nothing: all eleven members that carry a return type
     end their body with an unconditional `return`, measured before the change.
 
+    `factories` maps a module function to the local-object shape it returns
+    (ADR-0006), and `_factory_result` decides when a local holds it. Four
+    `movian/settings` methods are
+
+        var item = createSetting(group, 'bool', id, title);
+        ...
+        return item;
+
     Returns a shape name, or `{"kind": "array", "element": name}`.
     """
     body = _own_body(region)
@@ -3076,6 +3088,9 @@ def _returned_shape(region: str) -> str | dict[str, Any] | None:
         constructed = re.findall(
             r"\b(?:var|let|const)\s+%s\s*=\s*new\s+([A-Za-z_$][A-Za-z0-9_$]*)"
             r"\s*\(" % re.escape(name), body)
+        built = _factory_result(region, name, factories or {})
+        if built is not None:
+            constructed.append(built)
         if not constructed:
             # `return someArgument;` or a value built another way -- no claim.
             return None
@@ -3242,11 +3257,13 @@ def _shape_diagnostic(path: Path, text: str, offset: int, message: str) -> None:
         file=sys.stderr)
 def _scan_shape_properties(
         path: Path, text: str, receivers: set[str],
-        shared_receivers: set[str]
+        shared_receivers: set[str], handled: set[int] | None = None
 ) -> dict[str, dict[str, dict[str, Any]]]:
     comment_text = _masked_js_text(path, mask_strings=False)
     properties: dict[str, dict[str, dict[str, Any]]] = {}
-    handled_calls: set[int] = set()
+    # Seeded with the calls another reader already took, so an
+    # unsupported-target warning names only what nothing read.
+    handled_calls: set[int] = set(handled or ())
 
     def add_call_properties(
             source: str, match: re.Match[str], receiver: str,
@@ -3412,9 +3429,373 @@ def _scan_shape_properties(
                 match.group(1).strip())
     return properties
 
+
+FACTORY_DECL_RE = re.compile(
+    r"\bfunction\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*\{")
+# Legal JavaScript names that TypeScript rejects as an interface name
+# (TS2427, measured with the pinned tsc 5.7.3). The other predefined type
+# names -- `void`, `null`, `true`, `false`, `this` -- are reserved words no
+# `var` can take.
+TS_PREDEFINED_TYPE_NAMES = frozenset({
+    "any", "bigint", "boolean", "never", "number", "object", "string",
+    "symbol", "undefined", "unknown"})
+
+
+DESCRIPTOR_KEYS = frozenset({
+    "value", "get", "set", "writable", "enumerable", "configurable"})
+
+
+def _inline_descriptor(text: str) -> bool:
+    """Whether `text`, a field's value in an `Object.defineProperties` map,
+    is an object literal of descriptor keys whose `get` and `set` are
+    function literals written in place.
+
+    An accessor runs with the object as `this`, so a local-object shape
+    holds only where every accessor is text the scan reads. `set: mutate`
+    or a descriptor built elsewhere could add or remove members.
+    """
+    text = text.strip()
+    end = _balanced_end(text, 0) if text.startswith("{") else None
+    if end is None or text[end:].strip():
+        return False
+    for field in _split_js_fields(text[1:end - 1]):
+        if not field.strip():
+            continue
+        entry = re.fullmatch(r"\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*(.*?)\s*",
+                             field, re.S)
+        if entry is None or entry.group(1) not in DESCRIPTOR_KEYS:
+            return False
+        if entry.group(1) in ("get", "set"):
+            function = FIELD_FUNCTION_RE.match(entry.group(2))
+            close = (_balanced_end(entry.group(2), function.end() - 1)
+                     if function else None)
+            if close is None or entry.group(2)[close:].strip():
+                return False
+    return True
+
+
+def _statement_at_top(region: str, open_brace: int, offset: int) -> bool:
+    """Whether a statement of the own body of the function whose body opens
+    at `open_brace` begins at `offset`.
+
+    Depth 1 is the own body: not inside a nested function, and not inside a
+    braced block. An unbraced `if (x) stmt` or an operand `x && stmt` stays
+    at depth 1, so the text must also BEGIN its statement.
+    """
+    before = region[open_brace:offset]
+    if before.count("{") - before.count("}") != 1:
+        return False
+    return not region[_statement_start(region, offset, open_brace):offset].strip()
+
+
+def _sole_return_of(region: str, open_brace: int, name: str) -> int | None:
+    """The offset of `name` in `return name` when that is the only own return
+    of the function whose body opens at `open_brace`, and is always reached;
+    `None` otherwise.
+
+    ES5.1 7.9.1: a line terminator between `return` and its value ends the
+    statement, so `return` then `name` on the next line yields `undefined`.
+    The statement is matched as written; collapsing its whitespace first hid
+    exactly that.
+    """
+    spans, _ = _scan_returns(region, open_brace)
+    if len(spans) != 1 or not _always_returns(region, open_brace):
+        return None
+    start, end = spans[0]
+    match = re.match(r"return[ \t\f\v]+(%s)\s*$" % re.escape(name),
+                     region[start:end])
+    return None if match is None else start + match.start(1)
+
+
+def _local_object_refusal(
+        region: str, open_brace: int, name: str,
+        declaration: re.Match[str], calls: list[re.Match[str]]
+) -> str | None:
+    """Why the local `name` built in `region` is NOT fully described by its
+    `Object.defineProperties` calls, or `None` when it is.
+
+    Every refusal is a member the shape would miss or promise wrongly. The
+    shape is built from what the calls define and nothing else, so anything
+    that makes that set conditional, or lets the function hand back something
+    else, has to decline it -- the alternative is a declaration that rejects a
+    member a plugin can reach, or offers one that is not there.
+    """
+    # The rule ADR-0005's scan reads by: where the masked text can spell the
+    # local without writing it, or hide code, no occurrence count is sound.
+    if UNREADABLE_BODY_RE.search(region, open_brace):
+        return "the function holds text the scan cannot read"
+    # A descriptor's accessor runs with the object as `this`, so a setter can
+    # add a member without the text ever naming the local.
+    if re.search(r"(?<![.\w$])this(?![\w$])", region[open_brace:]):
+        return ("the function uses `this`, through which an accessor can "
+                "add a member")
+    if not _statement_at_top(region, open_brace, declaration.start()):
+        return "the local is not declared in the function's own body"
+    # SHARED_OBJECT_DECL_RE ends in an optional `;`, so `var V = {} && x;`
+    # matches its `{}` prefix -- and holds `x`.
+    if not declaration.group(0).rstrip().endswith(";"):
+        return "the local's initializer is not exactly `{}`"
+    for call in calls:
+        if not _statement_at_top(region, open_brace, call.start()):
+            return ("Object.defineProperties(%s, ...) is not a statement of "
+                    "the function's own body, so its members are not always "
+                    "defined" % name)
+    returned = _sole_return_of(region, open_brace, name)
+    if returned is None:
+        return "the function does not return the local on every path"
+    # A whitelist. Any other occurrence -- nested callbacks included -- may
+    # add a member, replace the prototype or hand the object to code that
+    # does, and telling which is the enumeration this replaced: it listed
+    # write forms and passed an alias, a callee, Object.setPrototypeOf and a
+    # map that is not a literal.
+    allowed = {declaration.start(1), returned,
+               *(call.start(1) for call in calls)}
+    for use in re.finditer(r"(?<![.\w$])%s(?![\w$])" % re.escape(name),
+                           region):
+        if use.start() not in allowed:
+            return ("the local is used other than by its declaration, "
+                    "Object.defineProperties(V, {...}) and `return V`")
+    return None
+
+
+def _factory_result(
+        region: str, name: str, factories: dict[str, dict[str, Any]]
+) -> str | None:
+    """The local-object shape the method at the head of `region` returns in
+    its local `name`, or `None` (ADR-0006).
+
+    A whitelist, for the reason the factory's is one: each guard added here
+    one at a time was followed by another way through -- a member read off
+    the result, a conditional declaration, a line terminator after `return`,
+    a nested function shadowing the factory's name, a reassignment. In the
+    method, `name` may occur only in an unconditional `var name = F(...)`
+    that is the whole initializer, as `name.<a member of the shape>`, and in
+    its only `return name`. F must be the module's function: it occurs in
+    the method only as that call, which also rules out a parameter of that
+    name.
+    """
+    open_brace = _own_block(region)
+    end = _balanced_end(region, open_brace) if open_brace is not None else None
+    if end is None:
+        return None
+    region = region[:end]
+    if UNREADABLE_BODY_RE.search(region, open_brace):
+        return None
+    declared = list(re.finditer(
+        r"\b(?:var|let|const)\s+(%s)\s*=\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\("
+        % re.escape(name), region))
+    if len(declared) != 1 or declared[0].group(2) not in factories:
+        return None
+    declaration = declared[0]
+    factory, shape = declaration.group(2), factories[declaration.group(2)]
+    # The region opens with the method's parameter list, so a parameter
+    # named F is an occurrence too.
+    if [use.start() for use in re.finditer(
+            r"(?<![.\w$])%s(?![\w$])" % re.escape(factory), region)
+            ] != [declaration.start(2)]:
+        return None
+    # `F(...).model` holds a member of the object, and `F(...) || x` may
+    # hold `x`.
+    close = _balanced_call_end(region, declaration.end() - 1)
+    if close is None or region[close:].lstrip()[:1] not in (";", ","):
+        return None
+    if not _statement_at_top(region, open_brace, declaration.start()):
+        return None
+    returned = _sole_return_of(region, open_brace, name)
+    if returned is None:
+        return None
+    members = {prop["name"] for prop in shape["properties"]}
+    for use in re.finditer(r"(?<![.\w$])%s(?![\w$])" % re.escape(name),
+                           region):
+        if use.start() in (declaration.start(1), returned):
+            continue
+        member = re.match(r"\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)",
+                          region[use.end():])
+        if member is None or member.group(1) not in members:
+            return None
+        # `delete x.value` names a member the shape has and removes it, and
+        # `x.model()` runs what the member holds with the object as `this`.
+        if re.search(r"\bdelete[\s(]*$", region[:use.start()]) or \
+                re.match(r"\s*\(", region[use.end() + member.end():]):
+            return None
+    return shape["name"]
+
+
+class _DefinedLocal(NamedTuple):
+    """A local `_scan_local_object_shapes` read, or declined and why."""
+
+    factory: str
+    name: str
+    # Offsets of each call's target, in the module text.
+    targets: list[int]
+    members: dict[str, dict[str, Any]]
+    refusal: str | None
+
+
+def _scan_local_object_shapes(
+        path: Path, text: str
+) -> tuple[list[dict[str, Any]], set[int]]:
+    """`(shapes, handled calls)` for the locals a module function builds with
+    `Object.defineProperties` and returns (ADR-0006).
+
+    `movian/settings`' `createSetting` is the form:
+
+        var item = {};
+        Object.defineProperties(item, { model: {...}, value: {...}, ... });
+        return item;
+
+    The descriptors are the ones `Object.defineProperties(this, ...)` already
+    gives `Service`, read by the same `_property_names`, so the result is a
+    named shape of the same kind: it claims the member SET and types every
+    member `any`. The shape is named after the local, the way the shared
+    object `sp` is named after its variable.
+
+    `handled calls` are the offsets of the targets read here, so the
+    unsupported-target warning does not also fire for them.
+    """
+    comment_text = _masked_js_text(path, mask_strings=False)
+    # Every spelling the export scanner reads, `exports['x'] =` included.
+    exported = {name for name, _, _ in _commonjs_export_regions(path)}
+    found: list[_DefinedLocal] = []
+    for factory in _top_level_matches(text, FACTORY_DECL_RE):
+        # A declaration, not `x = function F(...)`: a function expression's
+        # name binds only inside it, so a call of F elsewhere is not a call
+        # of this function.
+        if text[_statement_start(text, factory.start(), -1):
+                factory.start()].strip():
+            continue
+        shift = factory.start()
+        end = _balanced_end(text, factory.end() - 1)
+        if end is None:
+            continue
+        region = text[shift:end]
+        open_brace = factory.end() - 1 - shift
+        for local in SHARED_OBJECT_DECL_RE.finditer(region):
+            name = local.group(1)
+            calls = [call for call in DEFINE_PROPERTIES_RE.finditer(region)
+                     if call.group(1) == name]
+            if not calls:
+                continue
+            refusal = _local_object_refusal(
+                region, open_brace, name, local, calls)
+            # One interface per name in a module block: TypeScript MERGES a
+            # second declaration into the first, so a return type naming it
+            # would mean both.
+            if refusal is None and (
+                    _top_level_matches(text, re.compile(
+                        r"\b(?:function|var|let|const)\s+(%s)\b"
+                        % re.escape(name)))
+                    or name in exported):
+                refusal = "the name is already declared in this module"
+            if refusal is None and name in TS_PREDEFINED_TYPE_NAMES:
+                refusal = "the name is a type TypeScript predefines"
+            # A call of F runs whatever F holds by then, and the last
+            # top-level declaration of F is the one that holds. One nested in
+            # a method shadows F there only; the caller rule reads that.
+            # The declaration and the calls are the only uses allowed below.
+            if refusal is None and len(_top_level_matches(text, re.compile(
+                    r"\bfunction\s+(%s)\s*\(" % re.escape(factory.group(1)))
+            )) > 1:
+                refusal = ("the function is declared more than once in the "
+                           "module")
+            # A whitelist here as well: `F = g`, `(F) = g` and `var F = g`
+            # each rebind it, and listing assignment forms missed the second.
+            if refusal is None and any(
+                    not re.match(r"\s*\(", text[use.end():])
+                    for use in re.finditer(
+                        r"(?<![.\w$])%s(?![\w$])"
+                        % re.escape(factory.group(1)), text)):
+                refusal = ("the function's name is used in the module other "
+                           "than to declare it and call it")
+            # `_returned_shape` reads `new V()` as the shape V, and a module
+            # block holds one type of that name.
+            if refusal is None and re.search(
+                    r"\bnew\s+%s\s*\(" % re.escape(name), text):
+                refusal = ("the name is also constructed with `new` in this "
+                           "module")
+            properties: dict[str, dict[str, dict[str, Any]]] = {}
+            for call in calls if refusal is None else []:
+                # Balanced in the masked region, which closes inside it; read
+                # from the text that keeps strings, for a quoted key.
+                open_index = call.end() - 1
+                close = _balanced_end(region, open_index)
+                # `{...} && d` passes `d`, and `(...).x = 1` writes to the
+                # object the call returns.
+                if not re.match(r"\s*\)\s*;", region[close:]):
+                    refusal = ("the map is not the whole second argument, or "
+                               "the call not a whole statement")
+                if not all(
+                        _inline_descriptor(field[key.end():])
+                        for field in _split_js_fields(
+                            region[open_index + 1:close - 1])
+                        for key in [re.match(
+                            r"\s*(?:[A-Za-z_$][A-Za-z0-9_$]*"
+                            r"|(['\"])[^'\"]*\1)\s*:", field)]
+                        if key is not None):
+                    refusal = ("a descriptor that is not an object literal of "
+                               "value, get and set written in place")
+                body = comment_text[shift + open_index + 1:shift + close - 1]
+                names = _property_names(body, path, comment_text,
+                                        shift + open_index + 1)
+                if len(names) != len([field for field in
+                                      _split_js_fields(body)
+                                      if field.strip()]):
+                    refusal = "a key the scan cannot read"
+                # `'foo-bar'` cannot be declared unquoted, and `'x\u0061'`
+                # is the key `xa` at runtime, not what the text says.
+                if any(not IDENT_RE.fullmatch(member)
+                       for member, _, _ in names):
+                    refusal = "a key that is not a plain identifier"
+                for member, offset, kind in names:
+                    _add_property(properties, name, member, path,
+                                  comment_text, offset, kind)
+            if refusal is None and not properties:
+                refusal = "no member the scan can read is defined"
+            found.append(_DefinedLocal(
+                factory.group(1), name,
+                [shift + call.start(1) for call in calls],
+                properties.get(name, {}), refusal))
+
+    builders: dict[str, int] = {}
+    for local in found:
+        if local.refusal is None:
+            builders[local.name] = builders.get(local.name, 0) + 1
+    shapes: list[dict[str, Any]] = []
+    handled: set[int] = set()
+    for local in found:
+        refusal = local.refusal
+        if refusal is None and builders[local.name] > 1:
+            refusal = "the name is built by more than one function"
+        handled.update(local.targets)
+        if refusal is not None:
+            for target in local.targets:
+                _shape_diagnostic(
+                    path, comment_text, target,
+                    "ignored unsupported Object.defineProperties target "
+                    "%s: %s" % (local.name, refusal))
+            continue
+        shapes.append({
+            "factory": local.factory,
+            "kind": "local",
+            "methods": [],
+            "name": local.name,
+            "properties": [local.members[key]
+                           for key in sorted(local.members)],
+            "receiver": local.name,
+            "source": {
+                "file": rel(path),
+                "line": min(prop["source"]["line"]
+                            for prop in local.members.values()),
+            },
+        })
+    return shapes, handled
+
+
 def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
     """Scan top-level prototype and shared-object assignments."""
     text = _masked_js_text(path)
+    local_shapes, local_calls = _scan_local_object_shapes(path, text)
+    factories = {shape["factory"]: shape for shape in local_shapes}
     by_receiver: dict[str, dict[str, dict[str, Any]]] = {}
     prototype_matches = _top_level_matches(text, PROTOTYPE_FUNCTION_RE)
     top_prototype_starts = {
@@ -3433,7 +3814,7 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
         methods[match.group(2)] = _shape_method(
             match.group(2), match.group(3), path,
             _source_line(text, match.start(1)),
-            region=text[match.start(1):])
+            region=text[match.start(1):], factories=factories)
 
     unresolved_aliases: list[tuple[str, str, str, int]] = []
     alias_matches = list(PROTOTYPE_ALIAS_RE.finditer(text))
@@ -3530,9 +3911,9 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
         methods[name] = _shape_method(
             name, match.group(3), path,
             _source_line(text, match.start(1)),
-            region=text[match.start(1):])
+            region=text[match.start(1):], factories=factories)
     properties_by_receiver = _scan_shape_properties(
-        path, text, set(by_receiver), consumed_shared_names)
+        path, text, set(by_receiver), consumed_shared_names, local_calls)
 
     shapes: list[dict[str, Any]] = []
     for receiver in sorted(
@@ -3560,6 +3941,7 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
             shape["properties"] = [
                 properties[name] for name in sorted(properties)]
         shapes.append(shape)
+    shapes.extend(sorted(local_shapes, key=lambda shape: shape["name"]))
     return shapes
 
 
@@ -4900,6 +5282,22 @@ def render_field_type(field: dict[str, Any], shape_names: set[str]) -> str:
         return field_type
     return "any"
 
+def shape_type_names(module: dict[str, Any]) -> set[str]:
+    """The shape names a type written in `module`'s block may use.
+
+    Each is an interface of its own name that stands for an instance: a
+    prototype shape, and a local object a module function builds and returns
+    (ADR-0006). Return types, callback payloads and construct results all
+    resolve against it. A shared object is left out, as it was before: its
+    methods are declared on the module and on its own interface, and an
+    instance is typed by the export that installs it. The renderer and the
+    census ask this one question, so they cannot disagree about which slots
+    are typed (movian#230).
+    """
+    return {shape["name"] for shape in module.get("shapes", [])
+            if shape.get("kind") in ("prototype", "local")}
+
+
 def render_return_type(
         returned: Any, shape_names: set[str]) -> str:
     if isinstance(returned, str):
@@ -4989,10 +5387,8 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
     modules = artifact.get("js", {}).get("modules", [])
     global_names, by_module = doc_type_scopes(modules)
     native_slots = _native_slot_types(modules)
-    prototype_shapes = {
-        module["name"]: {shape["name"] for shape in module.get("shapes", [])
-                         if shape.get("kind") == "prototype"}
-        for module in modules}
+    shape_names_by_module = {
+        module["name"]: shape_type_names(module) for module in modules}
     census: list[dict[str, Any]] = []
     for module, display, record in _commonjs_callables(artifact):
         if record.get("kind") == "value":
@@ -5003,7 +5399,7 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         scope = TypeScope(global_names | by_module.get(module, set()),
                           by_module, native_slots)
-        shape_names = prototype_shapes.get(module, set())
+        shape_names = shape_names_by_module.get(module, set())
         params = record.get("params")
         if params is None:
             # `params_signature(None)` emits `...args: any[]`. One real `any`
@@ -5430,6 +5826,15 @@ RUNTIME_ORACLE_UNREACHABLE: tuple[tuple[str, str, str], ...] = (
     # means destroying a live settings group -- global state the capture
     # must leave alone. Corrected while the list was open (movian#237).
     ("movian/settings", "sp", "zombie"),
+    # `item` is the object `createSetting` returns (movian/settings.js:5-42,
+    # ADR-0006), and only `sp.createBool`, `createString`, `createInt` and
+    # `createAction` call it (:73, :99, :129, :193). Each adds a node to a
+    # live settings group, and all but `createAction` invoke the plugin's
+    # callback at once. The capture calls `globalSettings` and stops there
+    # (introspector.js:1073-1083).
+    ("movian/settings", "item", "enabled"),
+    ("movian/settings", "item", "model"),
+    ("movian/settings", "item", "value"),
     # Opening a DB creates a file in the persistent path. Re-read in
     # movian#237 and it holds: `exports.DB` calls `sqlite.create(dbname)` in
     # its body (movian/sqlite.js:5-7). Only the constructor-set `db` is
@@ -6373,22 +6778,31 @@ def _check_runtime_oracle(
     if not isinstance(tier3, dict):
         tier3 = {}
 
+    def constructed(module: dict[str, Any]) -> list[dict[str, Any]]:
+        # A tier3 entry is what a construction yielded, and a local object
+        # shape (ADR-0006) is returned by a module function, never
+        # constructed. Matched on the lowercased name, `movian/settings`'
+        # `item` made `items` ambiguous with `movian/page`'s `Item`, and all
+        # sixteen Item members fell out of the comparison.
+        return [shape for shape in module.get("shapes", [])
+                if shape.get("kind") != "local"]
+
     def tier3_candidates(key: str) -> list[tuple[str, dict[str, Any]]]:
         candidates: list[tuple[str, dict[str, Any]]] = []
         if key == "items":
             for module_name, module in modules.items():
-                for shape in module.get("shapes", []):
+                for shape in constructed(module):
                     if str(shape.get("name", "")).lower() == "item":
                         candidates.append((module_name, shape))
         else:
             for module_name, module in modules.items():
-                for shape in module.get("shapes", []):
+                for shape in constructed(module):
                     if str(shape.get("name", "")).lower() == key.lower():
                         candidates.append((module_name, shape))
             if not candidates and key in modules:
                 module = modules[key]
                 candidates = [
-                    (key, shape) for shape in module.get("shapes", [])
+                    (key, shape) for shape in constructed(module)
                     if any(
                         entry.get("constructor") and
                         entry.get("name") == shape.get("receiver", "")[8:]
@@ -6397,7 +6811,7 @@ def _check_runtime_oracle(
                 ]
             if not candidates:
                 for module_name, module in modules.items():
-                    for shape in module.get("shapes", []):
+                    for shape in constructed(module):
                         receiver = str(shape.get("receiver", ""))
                         if receiver.lower() == "exports." + key.lower():
                             candidates.append((module_name, shape))
@@ -7433,11 +7847,15 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 shape for shape in shapes
                 if shape.get("kind") == "shared"
             ]
+            local_shapes = [
+                shape for shape in shapes
+                if shape.get("kind") == "local"
+            ]
             # Defined before the first use below, not after it. The prototype
             # emission needs it to render a return type, and it used to be
             # assigned further down -- which would have read the PREVIOUS
             # module's set, making the output depend on module order.
-            shape_names = {shape["name"] for shape in prototype_shapes}
+            shape_names = shape_type_names(mod)
             if prototype_shapes:
                 lines.append("  // CommonJS prototype shapes")
                 for shape in prototype_shapes:
@@ -7464,6 +7882,18 @@ def render_dts(artifact: dict[str, Any]) -> str:
                         lines.append("    %s%s: any;" % (
                             prop["name"],
                             "?" if prop.get("optional") else ""))
+                    lines.append("  }")
+                lines.append("")
+
+            if local_shapes:
+                # ADR-0006. Named after the local, and every member `any`:
+                # the scan proves which members the object has, not what
+                # they hold.
+                lines.append("  // CommonJS local object shapes")
+                for shape in local_shapes:
+                    lines.append("  interface %s {" % shape["name"])
+                    for prop in shape["properties"]:
+                        lines.append("    %s: any;" % prop["name"])
                     lines.append("  }")
                 lines.append("")
 

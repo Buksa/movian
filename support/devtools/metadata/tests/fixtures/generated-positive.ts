@@ -80,6 +80,18 @@ const settingsNodes = kvstore.nodes;
 // same members are also reachable off the module itself.
 settings.globalSettings('example', 'Example', 'icon.png', 'Description');
 settings.createBool('module-flag', 'Flag', false, () => { }, true);
+// ADR-0006 (#260): createBool, createString, createInt and createAction return
+// the object `createSetting` builds with Object.defineProperties
+// (settings.js:5-42). The scan proves which members it has, not what they
+// hold, so each one is `any`.
+const flagItem = globals.createBool('f', 'F', false, () => { });
+flagItem.value = true;
+flagItem.enabled = false;
+void flagItem.model;
+void globals.createString('s', 'S', '', () => { }).value;
+void globals.createInt('i', 'I', 0, 0, 10, 1, 'u', () => { }).enabled;
+void globals.createAction('a', 'A', () => { }).model;
+void settings.createBool('module-item', 'I', false, () => { }).value;
 
 // movian/sqlite -- `DB.prototype.query` names no parameter and forwards
 // everything in `arguments` (sqlite.js:12-19), so a zero-argument method

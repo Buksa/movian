@@ -309,11 +309,14 @@ class ReturnedShape(unittest.TestCase):
         # through `duk_put_prop_*`. 11 CommonJS until movian#229 taught the
         # object-return recogniser one more field form, which added
         # `movian/itemhook.create` and, with it, the first `returnField`.
+        # 16 once ADR-0006 read the object `createSetting` builds, which
+        # `sp.createBool`, `createString`, `createInt` and `createAction`
+        # return (movian#260).
         # All three are measurements, not targets -- if this fails,
         # re-measure before adjusting it.
         self.assertEqual(
             dict(counted),
-            {"commonjs": 12, "native": 91, "returnField": 1},
+            {"commonjs": 16, "native": 91, "returnField": 1},
             members)
 
 

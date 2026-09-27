@@ -364,7 +364,9 @@ class TheTwoConsumersAgree(unittest.TestCase):
                         for line in lines),
                     "%s has a third return form: %s"
                     % (site["member"], lines))
-        self.assertEqual(checked, 19)
+        # Measured, not a target. 19 -> 23: the four `movian/settings`
+        # methods that return ADR-0006's `item` (movian#260).
+        self.assertEqual(checked, 23)
 
     def test_no_parameter_counted_typed_renders_any(self) -> None:
         """The exact defect, as a property over the whole corpus."""
