@@ -109,3 +109,9 @@ reads the same enumeration, so `movian/http.request` is recorded contested
   signature>)`, which still gives an unannotated callback its argument type.
 - Only invocation is admitted. Other reads in a core module (`x + ''`, a
   property read) are not accessors under this decision.
+- The scan reads masked text, so a body it cannot read refuses every
+  parameter: a `/` (a regex literal or a division -- telling them apart is a
+  guess), a backslash (an identifier escape or a continued string), a direct
+  `eval(` or a `with (`, anywhere in the function. Reviews of PR #265 found
+  each hiding a use or showing a non-use; none is in today's corpus. The
+  cost, accepted on #262: a function that divides gets no accessor.
