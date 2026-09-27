@@ -64,12 +64,14 @@ contradict ADR-0003's "a control-flow property the scanner cannot see": the
 condition is which uses exist, not which paths reach them. A corpus test is to
 pin one accepted and one refused slot.
 
-**None of this is implemented yet.** Today `gen.py` only finds that a
-parameter is invoked somewhere (`gen.py:3687-3692`), in order to read the
-callback's shape. It does not look at the other uses, and it records
-`callbackParam` for `movian/http.request` despite that function's
-`if(callback)`. Until the generator does what this section says, no
-declaration changes.
+**Implemented in #262.** Before it, `gen.py` only found that a parameter
+was invoked somewhere, in order to read the callback's shape, and never
+looked at the other uses. `_parameter_uses` now enumerates them and
+`_attach_accessors` records the result on every callable: `accessors` maps a
+parameter to its invocation lines, `contested` maps one that is also used
+another way to its `invocations` and `blocking` lines. The callback shape
+reads the same enumeration, so `movian/http.request` is recorded contested
+(`if(callback)`, `movian/http.js:110`) and keeps the signature it had.
 
 ## Consequences
 
@@ -100,9 +102,10 @@ declaration changes.
   author's word rather than on an accessor, and are not settled here.
 - A parameter no function body uses gets nothing from this rule. The root
   `http.request`'s `callback`, `unknown` on purpose, stays `unknown`.
-- The accepted corpus is narrower than what this emits:
+- The accepted corpus was narrower than what this emits:
   `support/devtools/metadata/tests/reference/movian-settings.d.ts:48-54`
-  gives `createBool` a `(value: boolean) => void` callback. The implementing
-  change has to reconcile the two.
+  gave `createBool` a `(value: boolean) => void` callback. #262 moved the
+  corpus: all five settings callbacks there are `Function | (<their
+  signature>)`, which still gives an unannotated callback its argument type.
 - Only invocation is admitted. Other reads in a core module (`x + ''`, a
   property read) are not accessors under this decision.
