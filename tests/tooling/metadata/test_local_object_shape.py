@@ -163,6 +163,11 @@ COLLIDES = "the name is already declared in this module"
 TWICE = "the name is built by more than one function"
 EMPTY = "no member the scan can read is defined"
 REBOUND = "the function's name is assigned elsewhere in the module"
+DECLARED_TWICE = "the function is declared more than once in the module"
+NOT_INLINE = ("a descriptor that is not an object literal of value, get and "
+              "set written in place")
+NOT_WHOLE = ("the map is not the whole second argument, or the call not a "
+             "whole statement")
 
 # Each one leaves the object's members NOT fully stated by the call the scan
 # reads, so a shape built from that call alone would be missing a member a
@@ -277,6 +282,23 @@ REFUSED = [
      variant(("      set: function(v) { model.value = v; }\n",
               "      set: function(v) { this.extra = v; }\n")),
      THIS),
+    # An accessor written elsewhere runs with the object as `this` too, and
+    # the `this` check can only read one written in place.
+    ("an accessor written elsewhere",
+     variant(("      set: function(v) { model.value = v; }\n",
+              "      set: group.mutate\n")),
+     NOT_INLINE),
+    ("a descriptor that is not an object literal",
+     variant(("    model: {\n      value: model\n    },\n",
+              "    model: group.descriptor,\n")),
+     NOT_INLINE),
+    # `{...} && d` passes `d` at runtime; the scan read the literal.
+    ("the map is only part of the second argument",
+     variant((CALL_CLOSE, "  } && group.more);\n  return item;")),
+     NOT_WHOLE),
+    ("the call's result is written to",
+     variant((CALL_CLOSE, "  }).extra = 1;\n  return item;")),
+     NOT_WHOLE),
     ("a quoted key TypeScript cannot declare unquoted",
      variant(("    model: {\n", "    'foo-bar': { value: 1 },\n    model: {\n")),
      NOT_IDENTIFIER),
@@ -324,6 +346,10 @@ REFUSED = [
     ("the factory's name is reassigned in the module",
      FACTORY + "createSetting = function(group, id) { return {}; };\n",
      REBOUND),
+    # The later declaration is the one a call reaches.
+    ("the factory is declared again",
+     FACTORY + "function createSetting() { return { actual: 1 }; }\n",
+     DECLARED_TWICE),
     ("a method reassigns the factory's name",
      variant(("  var item = createSetting(this, id);\n",
               "  createSetting = this.make;\n"
@@ -463,6 +489,9 @@ CALLER_REFUSED = [
      variant((CALLER_RETURN,
               "  later(function() { delete item.model; });\n"
               "  return item;\n}\n"))),
+    # A function held in a value member runs with the object as `this`.
+    ("a member of the shape is called",
+     variant((CALLER_RETURN, "  item.model();\n  return item;\n}\n"))),
     ("a member the shape does not have is added",
      variant((CALLER_RETURN, "  item.extra = 1;\n  return item;\n}\n"))),
     ("the local is handed to a function",

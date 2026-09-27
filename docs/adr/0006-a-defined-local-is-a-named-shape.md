@@ -50,15 +50,21 @@ itself -- and requires:
 - `var V = {}` as a statement of F's own body;
 - every `Object.defineProperties(V, {...})` a statement of the own body --
   not inside a nested function, a block, an unbraced conditional or an
-  expression;
+  expression -- whose map is the whole second argument and whose call is the
+  whole statement: `{...} && d` passes `d`, and `(...).x = 1` writes to the
+  object;
+- every descriptor an object literal of `value`, `get`, `set`, `writable`,
+  `enumerable` and `configurable`, with `get` and `set` function literals
+  written in place: an accessor runs with the object as `this`, and only
+  one written in place is text the `this` rule above reads;
 - no other occurrence of V anywhere in F, nested functions included, beyond
   the declaration, those calls and `return V`. This is a whitelist: a
   reassignment, a member write, an alias, a call that receives V,
   `Object.setPrototypeOf`, or a map that is not a literal each decline the
   shape, and so does a plain read, which the rule has no use for. Text that
   only spells the name -- an object key, a label -- counts too, and declines;
-- F's name assigned nowhere else in the module: a call of F runs whatever F
-  holds by then;
+- F declared once at the module's top level, and its name assigned nowhere
+  else in the module: a call of F runs whatever F holds by then;
 - `return V` as F's only own return, always reached, with no line terminator
   between `return` and V (ES5.1 7.9.1 makes that `return;`);
 - every key of every map one the scan can read and a plain identifier --
@@ -83,8 +89,9 @@ shadowing F, a reassignment. In the method:
   function and nothing in the method rebinds it;
 - x occurs otherwise only as `x.<a member of the shape>`, which reads or
   writes a member the object already has -- not after `delete`, which
-  removes it -- and in `return x`, the method's only own return, always
-  reached, on one line.
+  removes it, and not called, which runs what the member holds with the
+  object as `this` -- and in `return x`, the method's only own return,
+  always reached, on one line.
 
 `movian/settings`' four methods use `item` only as `item.model...`, and pass.
 

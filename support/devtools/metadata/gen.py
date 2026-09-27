@@ -3441,6 +3441,39 @@ TS_PREDEFINED_TYPE_NAMES = frozenset({
     "symbol", "undefined", "unknown"})
 
 
+DESCRIPTOR_KEYS = frozenset({
+    "value", "get", "set", "writable", "enumerable", "configurable"})
+
+
+def _inline_descriptor(text: str) -> bool:
+    """Whether `text`, a field's value in an `Object.defineProperties` map,
+    is an object literal of descriptor keys whose `get` and `set` are
+    function literals written in place.
+
+    An accessor runs with the object as `this`, so a local-object shape
+    holds only where every accessor is text the scan reads. `set: mutate`
+    or a descriptor built elsewhere could add or remove members.
+    """
+    text = text.strip()
+    end = _balanced_end(text, 0) if text.startswith("{") else None
+    if end is None or text[end:].strip():
+        return False
+    for field in _split_js_fields(text[1:end - 1]):
+        if not field.strip():
+            continue
+        entry = re.fullmatch(r"\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*(.*?)\s*",
+                             field, re.S)
+        if entry is None or entry.group(1) not in DESCRIPTOR_KEYS:
+            return False
+        if entry.group(1) in ("get", "set"):
+            function = FIELD_FUNCTION_RE.match(entry.group(2))
+            close = (_balanced_end(entry.group(2), function.end() - 1)
+                     if function else None)
+            if close is None or entry.group(2)[close:].strip():
+                return False
+    return True
+
+
 def _statement_at_top(region: str, open_brace: int, offset: int) -> bool:
     """Whether a statement of the own body of the function whose body opens
     at `open_brace` begins at `offset`.
@@ -3576,8 +3609,10 @@ def _factory_result(
                           region[use.end():])
         if member is None or member.group(1) not in members:
             return None
-        # `delete x.value` names a member the shape has and removes it.
-        if re.search(r"\bdelete[\s(]*$", region[:use.start()]):
+        # `delete x.value` names a member the shape has and removes it, and
+        # `x.model()` runs what the member holds with the object as `this`.
+        if re.search(r"\bdelete[\s(]*$", region[:use.start()]) or \
+                re.match(r"\s*\(", region[use.end() + member.end():]):
             return None
     return shape["name"]
 
@@ -3650,7 +3685,14 @@ def _scan_local_object_shapes(
                 refusal = "the name is already declared in this module"
             if refusal is None and name in TS_PREDEFINED_TYPE_NAMES:
                 refusal = "the name is a type TypeScript predefines"
-            # A call of F runs whatever F holds by then.
+            # A call of F runs whatever F holds by then, and the last
+            # top-level declaration of F is the one that holds. One nested in
+            # a method shadows F there only; the caller rule reads that.
+            if refusal is None and len(_top_level_matches(text, re.compile(
+                    r"\bfunction\s+(%s)\s*\(" % re.escape(factory.group(1)))
+            )) > 1:
+                refusal = ("the function is declared more than once in the "
+                           "module")
             if refusal is None and re.search(
                     r"(?<![.\w$])%s\s*(?:[-+*/%%&|^]|<<|>>>?)?=(?!=)"
                     % re.escape(factory.group(1)), text):
@@ -3662,6 +3704,21 @@ def _scan_local_object_shapes(
                 # from the text that keeps strings, for a quoted key.
                 open_index = call.end() - 1
                 close = _balanced_end(region, open_index)
+                # `{...} && d` passes `d`, and `(...).x = 1` writes to the
+                # object the call returns.
+                if not re.match(r"\s*\)\s*;", region[close:]):
+                    refusal = ("the map is not the whole second argument, or "
+                               "the call not a whole statement")
+                if not all(
+                        _inline_descriptor(field[key.end():])
+                        for field in _split_js_fields(
+                            region[open_index + 1:close - 1])
+                        for key in [re.match(
+                            r"\s*(?:[A-Za-z_$][A-Za-z0-9_$]*"
+                            r"|(['\"])[^'\"]*\1)\s*:", field)]
+                        if key is not None):
+                    refusal = ("a descriptor that is not an object literal of "
+                               "value, get and set written in place")
                 body = comment_text[shift + open_index + 1:shift + close - 1]
                 names = _property_names(body, path, comment_text,
                                         shift + open_index + 1)
