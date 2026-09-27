@@ -162,6 +162,7 @@ BACKSLASH = chr(92)
 COLLIDES = "the name is already declared in this module"
 TWICE = "the name is built by more than one function"
 EMPTY = "no member the scan can read is defined"
+REBOUND = "the function's name is assigned elsewhere in the module"
 
 # Each one leaves the object's members NOT fully stated by the call the scan
 # reads, so a shape built from that call alone would be missing a member a
@@ -319,6 +320,15 @@ REFUSED = [
     ("an export has the same name, in bracket form",
      FACTORY + "exports['item'] = function() { this.__proto__ = sp; };\n",
      COLLIDES),
+    # A call of F is a call of whatever F holds when it runs.
+    ("the factory's name is reassigned in the module",
+     FACTORY + "createSetting = function(group, id) { return {}; };\n",
+     REBOUND),
+    ("a method reassigns the factory's name",
+     variant(("  var item = createSetting(this, id);\n",
+              "  createSetting = this.make;\n"
+              "  var item = createSetting(this, id);\n")),
+     REBOUND),
     ("two functions build a local of the same name",
      FACTORY + "function createOther() {\n"
      "  var item = {};\n"
@@ -432,17 +442,27 @@ CALLER_REFUSED = [
     ("the method declares its own function of the factory's name",
      variant((CALLER_DECL,
               "  function createSetting() { return {}; }\n" + CALLER_DECL))),
+    # Declarations hoist, so one written after the call still shadows it.
+    ("the method declares that function after the call",
+     variant((CALLER_DECL,
+              CALLER_DECL + "  function createSetting() { return {}; }\n"))),
     ("a parameter of the factory's name",
      variant(("sp.createBool = function(id) {",
               "sp.createBool = function(id, createSetting) {"))),
-    ("the method reassigns the factory's name",
-     variant((CALLER_DECL, "  createSetting = this.make;\n" + CALLER_DECL))),
     ("the local is reassigned",
      variant((CALLER_RETURN,
               "  item = this.other;\n  return item;\n}\n"))),
     ("a callback reassigns the local",
      variant((CALLER_RETURN,
               "  later(function() { item = null; });\n  return item;\n}\n"))),
+    # `item.value` names a member the shape has, and `delete` removes it --
+    # for good when the descriptor says `configurable: true`.
+    ("a member of the shape is deleted",
+     variant((CALLER_RETURN, "  delete item.value;\n  return item;\n}\n"))),
+    ("a callback deletes a member",
+     variant((CALLER_RETURN,
+              "  later(function() { delete item.model; });\n"
+              "  return item;\n}\n"))),
     ("a member the shape does not have is added",
      variant((CALLER_RETURN, "  item.extra = 1;\n  return item;\n}\n"))),
     ("the local is handed to a function",
@@ -456,6 +476,9 @@ CALLER_REFUSED = [
 class TheCallerHoldsTheFactoryResult(unittest.TestCase):
     def test_what_the_rule_allows_still_holds_it(self) -> None:
         for label, source in [
+                ("a const declaration",
+                 variant((CALLER_DECL,
+                          "  const item = createSetting(this, id);\n"))),
                 ("one declarator of several",
                  variant((CALLER_DECL,
                           "  var item = createSetting(this, id), n = 1;\n"))),

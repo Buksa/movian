@@ -3576,6 +3576,9 @@ def _factory_result(
                           region[use.end():])
         if member is None or member.group(1) not in members:
             return None
+        # `delete x.value` names a member the shape has and removes it.
+        if re.search(r"\bdelete[\s(]*$", region[:use.start()]):
+            return None
     return shape["name"]
 
 
@@ -3647,6 +3650,12 @@ def _scan_local_object_shapes(
                 refusal = "the name is already declared in this module"
             if refusal is None and name in TS_PREDEFINED_TYPE_NAMES:
                 refusal = "the name is a type TypeScript predefines"
+            # A call of F runs whatever F holds by then.
+            if refusal is None and re.search(
+                    r"(?<![.\w$])%s\s*(?:[-+*/%%&|^]|<<|>>>?)?=(?!=)"
+                    % re.escape(factory.group(1)), text):
+                refusal = ("the function's name is assigned elsewhere in the "
+                           "module")
             properties: dict[str, dict[str, dict[str, Any]]] = {}
             for call in calls if refusal is None else []:
                 # Balanced in the masked region, which closes inside it; read
