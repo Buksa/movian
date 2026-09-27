@@ -113,9 +113,10 @@ reads the same enumeration, so `movian/http.request` is recorded contested
   parameter. Review of PR #265 found such constructs one at a time, so the
   rule names what the scan understands instead of what it does not: every
   character of the function must be an ASCII letter, digit, `_`, `$`, ASCII
-  whitespace or one of `{}()[];,.:?!=<>+-*%&|^~`, and the tokens `eval` and
-  `with` must not occur. That refuses a `/` (a regex literal or a division --
-  telling them apart is a guess), a backslash (an identifier escape or a
-  continued string) and anything non-ASCII. Today's corpus holds one such
-  character, a regex in a function that invokes no parameter. The cost,
-  accepted on #262: a function that divides gets no accessor.
+  whitespace or one of `{}()[];,.:?!=<>+-*%&|^~`, and the names `eval` and
+  `with` must not occur except as a property after `.`. That refuses a `/`
+  (a regex literal or a division -- telling them apart is a guess), a
+  backslash (an identifier escape or a continued string) and anything
+  non-ASCII. Today's corpus holds one such construct, a regex (two `/`) in a
+  function that invokes no parameter. The cost, accepted on #262: a function
+  that divides gets no accessor.

@@ -1971,10 +1971,11 @@ NOT_A_CALL_KEYWORDS = frozenset({"function", "new", "get", "set"})
 #   non-ASCII (U+200C continues an identifier, so `x<U+200C>cb()` is not a
 #   call of `cb`). Strings and comments are blank by now, so none of this is
 #   text the scan was meant to skip.
-#   the token `eval` or `with`, however it is used. `eval(` and `(eval)(` are
-#   direct and can rebind a parameter inside a masked string; other uses of
-#   `eval` refuse with them rather than be told apart. `with (o)` resolves
-#   names through `o`.
+#   the token `eval` or `with` anywhere but after a `.`. `eval(` and
+#   `(eval)(` are direct and can rebind a parameter inside a masked string;
+#   other uses of the name refuse with them rather than be told apart.
+#   `o.eval(...)` is a property -- an indirect eval, which cannot reach a
+#   local -- and is read. `with (o)` resolves names through `o`.
 UNREADABLE_BODY_RE = re.compile(
     r"[^A-Za-z0-9_$ \t\n\r\f\v{}()\[\];,.:?!=<>+\-*%&|^~]"
     r"|(?<![A-Za-z0-9_$.])(?:eval|with)(?![A-Za-z0-9_$])")
