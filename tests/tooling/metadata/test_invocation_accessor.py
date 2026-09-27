@@ -275,6 +275,52 @@ class AnUnreadableBodyBlocks(unittest.TestCase):
         self.assertBlocked(body("with (o) {", "  cb();", "}"), [3], [2])
 
 
+def build_probe_module(source: str) -> dict:
+    """The `movian/_accessor_probe` record `build_commonjs_modules` makes."""
+    modules = scan(source, lambda path: gen.build_commonjs_modules())
+    return next(m for m in modules if m["name"] == "movian/_accessor_probe")
+
+
+class MergedReceiverMembers(unittest.TestCase):
+    """One module-level declaration describes every implementation of a
+    receiver member, so it may call a slot an accessor only where every one
+    of them does (Codex on PR #265)."""
+
+    TWO = ("exports.A = function() {\n"
+           "  this.__proto__ = sp;\n"
+           "  this.m = function(cb) { cb(); };\n"
+           "}\n"
+           "exports.B = function() {\n"
+           "  this.__proto__ = sp;\n"
+           "  this.m = function(fn) { %s };\n"
+           "}\n")
+
+    def merged(self, module: dict) -> dict:
+        return {m["name"]: m for m in module["receiverMembers"]}["m"]
+
+    def own(self, module: dict, export: str) -> dict:
+        record = {e["name"]: e for e in module["exports"]}[export]
+        return {m["name"]: m for m in record["receiverMembers"]}["m"]
+
+    def test_one_implementation_that_stores_withholds_it(self) -> None:
+        module = build_probe_module(self.TWO % "this.handler = fn; fn();")
+        self.assertNotIn("accessors", self.merged(module))
+        # Each export's own interface still describes its own function.
+        self.assertEqual(self.own(module, "A").get("accessors"), {"cb": [3]})
+
+    def test_an_implementation_without_the_parameter_withholds_it(
+            self) -> None:
+        """It never uses the argument, so it takes anything."""
+        module = build_probe_module(self.TWO.replace("function(fn)",
+                                                     "function()")
+                                    % "return 1;")
+        self.assertNotIn("accessors", self.merged(module))
+
+    def test_every_implementation_invoking_keeps_it(self) -> None:
+        module = build_probe_module(self.TWO % "fn();")
+        self.assertEqual(self.merged(module).get("accessors"), {"cb": [3]})
+
+
 UNION = "Function | ((...args: any[]) => void)"
 
 

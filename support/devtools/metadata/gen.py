@@ -3697,8 +3697,10 @@ def _receiver_members(
 def _merge_receiver_members(
         members: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
+    implementations: dict[str, list[dict[str, Any]]] = {}
     for member in members:
         name = member["name"]
+        implementations.setdefault(name, []).append(member)
         previous = merged.get(name)
         if previous is None:
             merged[name] = member
@@ -3710,7 +3712,46 @@ def _merge_receiver_members(
             new_params = member.get("params") or []
             if len(new_params) > len(old_params):
                 merged[name] = member
-    return [merged[name] for name in sorted(merged)]
+    return [_agreed_accessors(merged[name], implementations[name])
+            for name in sorted(merged)]
+
+
+def _agreed_accessors(record: dict[str, Any],
+                      implementations: list[dict[str, Any]]
+                      ) -> dict[str, Any]:
+    """`record` as the one declaration of every implementation in
+    `implementations`, which includes it.
+
+    The merge keeps one record, and its `accessors` describe one function.
+    Emitted for all of them, an accessor would require a callable where
+    another initializer installs a function that stores or forwards the
+    same argument (Codex on PR #265). So a position stays an accessor only
+    where every implementation's parameter there is one. The record is
+    copied before it changes: the same object is also that export's own
+    member, which describes only its own function and keeps its evidence.
+    """
+    accessors = record.get("accessors")
+    if not accessors:
+        return record
+    params = record["params"]
+    agreed = {
+        name: lines for name, lines in accessors.items()
+        if all(_accessor_at(member, params.index(name))
+               for member in implementations)}
+    if agreed == accessors:
+        return record
+    record = dict(record)
+    if agreed:
+        record["accessors"] = agreed
+    else:
+        del record["accessors"]
+    return record
+
+
+def _accessor_at(member: dict[str, Any], position: int) -> bool:
+    params = member.get("params") or []
+    return (position < len(params)
+            and params[position] in (member.get("accessors") or {}))
 def _balanced_call_end(text: str, open_index: int) -> int | None:
     """Index just past the `)` closing the call whose `(` is at `open_index`.
 
