@@ -5087,6 +5087,19 @@ def render_field_type(field: dict[str, Any], shape_names: set[str]) -> str:
         return field_type
     return "any"
 
+def returnable_shape_names(module: dict[str, Any]) -> set[str]:
+    """The shapes a return type in `module`'s block may name.
+
+    Each is emitted as an interface of its own name: a prototype shape, and a
+    local object a module function builds and returns (ADR-0006). A shared
+    object's methods are hoisted onto the module instead, and nothing returns
+    one. The renderer and the census ask this one question, so they cannot
+    disagree about which returns are typed (movian#230).
+    """
+    return {shape["name"] for shape in module.get("shapes", [])
+            if shape.get("kind") in ("prototype", "local")}
+
+
 def render_return_type(
         returned: Any, shape_names: set[str]) -> str:
     if isinstance(returned, str):
@@ -5177,9 +5190,7 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
     global_names, by_module = doc_type_scopes(modules)
     native_slots = _native_slot_types(modules)
     prototype_shapes = {
-        module["name"]: {shape["name"] for shape in module.get("shapes", [])
-                         if shape.get("kind") == "prototype"}
-        for module in modules}
+        module["name"]: returnable_shape_names(module) for module in modules}
     census: list[dict[str, Any]] = []
     for module, display, record in _commonjs_callables(artifact):
         if record.get("kind") == "value":
@@ -7637,11 +7648,15 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 shape for shape in shapes
                 if shape.get("kind") == "shared"
             ]
+            local_shapes = [
+                shape for shape in shapes
+                if shape.get("kind") == "local"
+            ]
             # Defined before the first use below, not after it. The prototype
             # emission needs it to render a return type, and it used to be
             # assigned further down -- which would have read the PREVIOUS
             # module's set, making the output depend on module order.
-            shape_names = {shape["name"] for shape in prototype_shapes}
+            shape_names = returnable_shape_names(mod)
             if prototype_shapes:
                 lines.append("  // CommonJS prototype shapes")
                 for shape in prototype_shapes:
@@ -7668,6 +7683,18 @@ def render_dts(artifact: dict[str, Any]) -> str:
                         lines.append("    %s%s: any;" % (
                             prop["name"],
                             "?" if prop.get("optional") else ""))
+                    lines.append("  }")
+                lines.append("")
+
+            if local_shapes:
+                # ADR-0006. Named after the local, and every member `any`:
+                # the scan proves which members the object has, not what
+                # they hold.
+                lines.append("  // CommonJS local object shapes")
+                for shape in local_shapes:
+                    lines.append("  interface %s {" % shape["name"])
+                    for prop in shape["properties"]:
+                        lines.append("    %s: any;" % prop["name"])
                     lines.append("  }")
                 lines.append("")
 

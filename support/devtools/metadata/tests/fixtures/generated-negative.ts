@@ -102,6 +102,17 @@ new page.Route('m:(.*)', (p) => {
     p.appendAction('t', 42);  // EXPECT_TS2345
 });
 
+// ADR-0006 (#260): the object those four settings methods return has the
+// three members `createSetting` defines (settings.js:5-42). While they returned
+// `any`, an invented one type-checked and wrote a property nothing reads -- the
+// title lives on `item.model.metadata`. One line each, and one through the
+// module-level form a plain call installs.
+instance.createBool('b', 'B', false, () => { }).title = 'B';  // EXPECT_TS2339
+instance.createString('s', 'S', '', () => { }).title = 'S';  // EXPECT_TS2339
+instance.createInt('i', 'I', 0, 0, 10, 1, 'u', () => { }).title = 'I';  // EXPECT_TS2339
+instance.createAction('a', 'A', () => { }).onSelect = () => { };  // EXPECT_TS2339
+settings.createBool('b', 'B', false, () => { }).title = 'B';  // EXPECT_TS2339
+
 // An array-returning selector must carry its element type. While these were
 // `any`, `interface Node` had all eleven members and caught a phantom written
 // directly on a node -- but every selector that REACHED a node discarded the

@@ -2477,6 +2477,12 @@ GENERATED_COVERAGE_FLOOR = (
     # globalSettings from kvstoreSettings.
     ("movian/settings", None, "globalSettings"),
     ("movian/settings", "globalSettings", "id"),
+    # What `createBool`, `createString`, `createInt` and `createAction`
+    # return (ADR-0006). While it was `any`, an invented member type-checked
+    # and wrote a property nothing reads.
+    ("movian/settings", "item", "enabled"),
+    ("movian/settings", "item", "model"),
+    ("movian/settings", "item", "value"),
     # The globals -- reachable without require(), so they live above the first
     # `declare module` rather than inside one. Measured before these existed:
     # deleting the whole `declare const Core` block failed the checker, but
