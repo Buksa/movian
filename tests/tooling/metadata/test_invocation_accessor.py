@@ -223,6 +223,58 @@ class AnyOtherUseBlocks(unittest.TestCase):
                                 "cb();"), [6], [5])
 
 
+class AnUnreadableBodyBlocks(unittest.TestCase):
+    """The scan reads masked text -- comments and strings blanked -- and
+    trusts that every name left in it is code, and that every name the
+    function can reach is resolved statically. Where either fails, the rule
+    refuses, because a guess here is a narrowing on nobody's evidence
+    (Codex on PR #265)."""
+
+    def assertBlocked(self, record: dict, invocations: list[int],
+                      blocking: list[int]) -> None:
+        self.assertNotIn("accessors", record)
+        self.assertEqual(record.get("contested"), {
+            "cb": {"invocations": invocations, "blocking": blocking}})
+
+    def test_a_regex_literal(self) -> None:
+        """`/cb()/` is not masked, and reads as a call."""
+        record = body("return /cb()/;")
+        self.assertNotIn("accessors", record)
+
+    def test_a_quote_inside_a_regex_hides_the_rest_of_its_line(self) -> None:
+        """The string mask opens at the `'` and blanks `store(cb)`."""
+        self.assertBlocked(body("cb();",
+                                "if(/'/.test(s)) store(cb);"), [2], [3])
+
+    def test_division_refuses_too(self) -> None:
+        """A `/` left in masked text is a regex or a division, and telling
+        them apart is a guess. Measured: the only `/` in every masked core
+        module is one regex literal, `movian/http.js:55`."""
+        self.assertBlocked(body("cb();", "var half = width / 2;"),
+                           [2], [3])
+
+    def test_a_string_continued_onto_the_next_line(self) -> None:
+        """The continuation's closing quote opens a string to the mask, and
+        `store(cb)` vanishes with it."""
+        self.assertBlocked(body("var s = 'a\\",
+                                "b'; store(cb);",
+                                "cb();"), [4], [2])
+
+    def test_direct_eval(self) -> None:
+        """`eval("cb = ...")` rebinds the parameter inside a masked
+        string."""
+        self.assertBlocked(body("eval(source);", "cb();"), [3], [2])
+
+    def test_direct_eval_in_a_nested_function(self) -> None:
+        """A closure's `eval` reaches the parameter as well."""
+        self.assertBlocked(body("sub(function() { eval(source); });",
+                                "cb();"), [3], [2])
+
+    def test_with(self) -> None:
+        """Inside `with (o)`, `cb` may be `o.cb`."""
+        self.assertBlocked(body("with (o) {", "  cb();", "}"), [3], [2])
+
+
 UNION = "Function | ((...args: any[]) => void)"
 
 

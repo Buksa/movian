@@ -1802,6 +1802,14 @@ def _mask_js_strings(line: str) -> str:
     quote: str | None = None
     while i < len(chars):
         if quote is not None:
+            if chars[i] == "\\" and i + 1 == len(chars):
+                # A string continued onto the next line. This mask works one
+                # line at a time and loses it there -- the closing quote
+                # opens a "string" that blanks real code -- so the backslash
+                # is left visible for a reader that must not trust the next
+                # line (`_parameter_uses`, movian#262). No core module
+                # continues a string today; the artifact did not change.
+                break
             if chars[i] == "\\" and i + 1 < len(chars):
                 chars[i] = chars[i + 1] = " "
                 i += 2
@@ -1926,6 +1934,17 @@ PARAM_INVOCATION_RE = re.compile(r"\s*(\.\s*(?:apply|call)\s*)?\(")
 # `function p(` declares a binding that shadows it, `new p(` constructs, and
 # ES5's `get p(` / `set p(` define a property of that name.
 NOT_A_CALL_KEYWORDS = frozenset({"function", "new", "get", "set"})
+# What leaves a function's masked body unreadable, or its names unresolved,
+# anywhere in it -- a closure reaches the parameter too (Codex on PR #265):
+#   `/`        a regex literal or a division. The mask blanks neither, and
+#              telling them apart is a guess; a regex can hold `p(`, or a
+#              quote that blanked the rest of its line.
+#   `\` at the end of a line: a string continued onto the next, which the
+#              line-by-line mask loses (`_mask_js_strings`).
+#   `eval(`    can rebind a parameter inside a masked string.
+#   `with (`   resolves names through an object.
+UNREADABLE_BODY_RE = re.compile(
+    r"/|\\$|(?<![\w$.])(?:eval|with)\s*\(", re.M)
 
 
 class ParamUse(NamedTuple):
@@ -1961,6 +1980,11 @@ def _parameter_uses(
 
     A read of the function's own `arguments` blocks every parameter, since
     it can reach any of them; a nested function's `arguments` is its own.
+    So does anything `UNREADABLE_BODY_RE` finds anywhere in the body: where
+    the masked text may show what is not code, hide what is, or leave a name
+    unresolved, the rule refuses rather than guess. That costs any function
+    with a division its accessors -- none in today's corpus, whose masked
+    modules hold one `/` pair, the regex at `movian/http.js:55`.
 
     `region` is masked text -- comments and strings blanked -- opening with
     the function. Offsets are into it.
@@ -1994,6 +2018,9 @@ def _parameter_uses(
         for name in params:
             uses[name].append(
                 ParamUse(open_brace + match.start(), False, None))
+    for match in UNREADABLE_BODY_RE.finditer(region, open_brace, end):
+        for name in params:
+            uses[name].append(ParamUse(match.start(), False, None))
     return uses
 
 
