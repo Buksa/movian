@@ -1844,6 +1844,12 @@ def _parse_params(raw: str) -> list[str] | None:
             # a source we do not understand -- report nothing rather than a
             # guess.
             return None
+        if name in params:
+            # Legal in sloppy ES5, where the last one wins and the earlier
+            # argument is never read. Emitted, the name appears twice (tsc:
+            # TS2300), and anything keyed by name -- a `@param`, an accessor
+            # -- would type both positions from one of them (movian#262).
+            return None
         params.append(name)
     return params
 
@@ -2058,6 +2064,10 @@ def _attach_accessors(
     accessors: dict[str, list[int]] = {}
     contested: dict[str, dict[str, list[int]]] = {}
     for name in params:
+        if name == "arguments":
+            # Every nested function binds its own `arguments`, which the
+            # name-keyed scan would count as this formal (review of PR #265).
+            continue
         invocations: set[int] = set()
         blocking: set[int] = set()
         for use in uses[name]:

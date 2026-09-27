@@ -250,6 +250,31 @@ class AnyOtherUseBlocks(unittest.TestCase):
                                 "cb();"), [6], [5])
 
 
+class TheFormalListIsResolvedByName(unittest.TestCase):
+    """The scan keys uses by NAME. Two formals the name cannot tell apart
+    refuse the rule rather than share one record (reviews of PR #265)."""
+
+    def test_a_repeated_formal_name_is_not_understood(self) -> None:
+        """In sloppy ES5 the second `cb` wins and the first argument is
+        never read, yet both positions took the union -- and a declaration
+        naming `cb` twice fails tsc with TS2300. Like a destructured or
+        defaulted formal, the list is reported as not understood, which
+        emits `...args: any[]`."""
+        record = scan_export("exports.f = function(cb, cb) {\n"
+                             "  cb();\n"
+                             "}\n")
+        self.assertIsNone(record.get("params"))
+        self.assertNotIn("accessors", record)
+
+    def test_a_formal_named_arguments_is_not_an_accessor(self) -> None:
+        """A nested function's `arguments` is its own object, not the outer
+        formal; the scan resolves nothing by scope, so it cannot tell."""
+        record = scan_export("exports.f = function(arguments) {\n"
+                             "  (function() { arguments(); })();\n"
+                             "}\n")
+        self.assertNotIn("accessors", record)
+
+
 class TheCallbackShapePosition(unittest.TestCase):
     """Which argument carries `new <shape>(...)`, read off the invocation.
     Counting `.call` as an invocation made it pick the callback without
