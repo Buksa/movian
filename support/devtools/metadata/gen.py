@@ -2940,7 +2940,8 @@ def _member_record(
 def _shape_method(
         name: str, raw_params: str, path: Path, line: int,
         alias_of: str | None = None,
-        region: str | None = None) -> dict[str, Any]:
+        region: str | None = None,
+        factories: dict[str, str] | None = None) -> dict[str, Any]:
     record = _member_record(
         name, _parse_params(raw_params), path, line, alias_of=alias_of)
     # Same rule the module exports get: a method that reads its own
@@ -2952,7 +2953,7 @@ def _shape_method(
     if region is not None and "params" in record and _uses_arguments(region):
         record["variadic"] = True
     if region is not None:
-        returned = _returned_shape(region)
+        returned = _returned_shape(region, factories)
         if returned is not None:
             record["returns"] = returned
         _attach_forwarding(record, region, path)
@@ -3009,7 +3010,9 @@ def _mapped_element_shape(statement: str) -> str | None:
     return next(iter(shapes))
 
 
-def _returned_shape(region: str) -> str | dict[str, Any] | None:
+def _returned_shape(
+        region: str, factories: dict[str, str] | None = None
+) -> str | dict[str, Any] | None:
     """The shape a method returns, when it plainly returns one.
 
     Three forms. `return new Item(...)` directly; the construct-then-return
@@ -3055,6 +3058,14 @@ def _returned_shape(region: str) -> str | dict[str, Any] | None:
     (movian#190). It cost nothing: all eleven members that carry a return type
     end their body with an unconditional `return`, measured before the change.
 
+    `factories` maps a module function to the local-object shape it returns
+    (ADR-0006), and a call to one constructs that shape as surely as `new`
+    does: every `movian/settings` `sp.create*` is
+
+        var item = createSetting(group, 'bool', id, title);
+        ...
+        return item;
+
     Returns a shape name, or `{"kind": "array", "element": name}`.
     """
     body = _own_body(region)
@@ -3076,6 +3087,11 @@ def _returned_shape(region: str) -> str | dict[str, Any] | None:
         constructed = re.findall(
             r"\b(?:var|let|const)\s+%s\s*=\s*new\s+([A-Za-z_$][A-Za-z0-9_$]*)"
             r"\s*\(" % re.escape(name), body)
+        constructed += [
+            factories[called] for called in re.findall(
+                r"\b(?:var|let|const)\s+%s\s*=\s*([A-Za-z_$][A-Za-z0-9_$]*)"
+                r"\s*\(" % re.escape(name), body)
+            if called in (factories or {})]
         if not constructed:
             # `return someArgument;` or a value built another way -- no claim.
             return None
@@ -3242,11 +3258,13 @@ def _shape_diagnostic(path: Path, text: str, offset: int, message: str) -> None:
         file=sys.stderr)
 def _scan_shape_properties(
         path: Path, text: str, receivers: set[str],
-        shared_receivers: set[str]
+        shared_receivers: set[str], handled: set[int] = frozenset()
 ) -> dict[str, dict[str, dict[str, Any]]]:
     comment_text = _masked_js_text(path, mask_strings=False)
     properties: dict[str, dict[str, dict[str, Any]]] = {}
-    handled_calls: set[int] = set()
+    # Seeded with the calls another reader already took, so an
+    # unsupported-target warning names only what nothing read.
+    handled_calls: set[int] = set(handled)
 
     def add_call_properties(
             source: str, match: re.Match[str], receiver: str,
@@ -3412,9 +3430,177 @@ def _scan_shape_properties(
                 match.group(1).strip())
     return properties
 
+
+FACTORY_DECL_RE = re.compile(
+    r"\bfunction\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*\{")
+
+
+def _local_object_refusal(
+        region: str, open_brace: int, name: str,
+        declaration: re.Match[str], calls: list[re.Match[str]]
+) -> str | None:
+    """Why the local `name` built in `region` is NOT fully described by its
+    `Object.defineProperties` calls, or `None` when it is.
+
+    Every refusal is a member the shape would miss or promise wrongly. The
+    shape is built from what the calls define and nothing else, so anything
+    that makes that set conditional, or lets the function hand back something
+    else, has to decline it -- the alternative is a declaration that rejects a
+    member a plugin can reach, or offers one that is not there.
+    """
+    def statement_at_top(offset: int) -> bool:
+        # Depth 1 is the function's own body: not inside a nested function,
+        # and not inside a braced block. An unbraced `if (x) stmt` stays at
+        # depth 1, so the statement must also START one -- nothing but
+        # whitespace back to a `;`, `{` or `}`, the test `_always_returns`
+        # applies to its last return.
+        before = region[open_brace:offset]
+        if before.count("{") - before.count("}") != 1:
+            return False
+        return before.rstrip()[-1:] in (";", "{", "}")
+
+    if not statement_at_top(declaration.start()):
+        return "the local is not declared in the function's own body"
+    for call in calls:
+        if not statement_at_top(call.start()):
+            return ("Object.defineProperties(%s, ...) is not a statement of "
+                    "the function's own body, so its members are not always "
+                    "defined" % name)
+    # Anywhere in the function, nested callbacks included: a write a
+    # callback makes later still adds the member to the object returned.
+    # `item.model.value = v` writes the member's own object, not the local.
+    local = r"(?<![.\w$])%s" % re.escape(name)
+    assigned = r"\s*(?:[-+*/%&|^]|<<|>>>?)?=(?!=)"
+    if re.search(local + r"\s*(?:\.\s*[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]*\])"
+                 + assigned, region):
+        return ("a member of the local is written outside "
+                "Object.defineProperties")
+    if len(re.findall(local + assigned, region)) > 1:
+        return "the local is reassigned"
+    if re.search(r"\bObject\.defineProperty\(\s*%s\s*," % re.escape(name),
+                 region):
+        return ("Object.defineProperty on the local is not read, so the "
+                "member it adds would be missing")
+    # A span stops before its `;`.
+    spans, _ = _scan_returns(region, open_brace)
+    returned = [re.sub(r"\s+", " ", region[start:end].strip())
+                for start, end in spans]
+    if returned != ["return %s" % name] or \
+            not _always_returns(region, open_brace):
+        return "the function does not return the local on every path"
+    return None
+
+
+def _scan_local_object_shapes(
+        path: Path, text: str
+) -> tuple[list[dict[str, Any]], set[int]]:
+    """`(shapes, handled calls)` for the locals a module function builds with
+    `Object.defineProperties` and returns (ADR-0006).
+
+    `movian/settings`' `createSetting` is the form:
+
+        var item = {};
+        Object.defineProperties(item, { model: {...}, value: {...}, ... });
+        return item;
+
+    The descriptors are the ones `Object.defineProperties(this, ...)` already
+    gives `Service`, read by the same `_property_names`, so the result is a
+    named shape of the same kind: it claims the member SET and types every
+    member `any`. The shape is named after the local, the way the shared
+    object `sp` is named after its variable.
+
+    `handled calls` are the offsets of the targets read here, so the
+    unsupported-target warning does not also fire for them.
+    """
+    comment_text = _masked_js_text(path, mask_strings=False)
+    # `(factory, local, calls, shift, refusal)`, refusal None when it holds.
+    candidates: list[tuple[str, str, list[re.Match[str]], int,
+                           str | None]] = []
+    for factory in _top_level_matches(text, FACTORY_DECL_RE):
+        # Offsets into `region` are offsets into `text` shifted by the two
+        # characters of the `= ` that lets `_own_block` read a declaration.
+        shift = factory.start() - 2
+        region = "= " + text[factory.start():]
+        open_brace = _own_block(region)
+        end = _balanced_end(region, open_brace) if open_brace else None
+        if end is None:
+            continue
+        region = region[:end]
+        for local in SHARED_OBJECT_DECL_RE.finditer(region):
+            name = local.group(1)
+            calls = [call for call in DEFINE_PROPERTIES_RE.finditer(region)
+                     if call.group(1) == name]
+            if not calls:
+                continue
+            reason = _local_object_refusal(
+                region, open_brace, name, local, calls)
+            # One interface per name in a module block: TypeScript MERGES a
+            # second declaration into the first, so a return type naming it
+            # would mean both.
+            if reason is None and (
+                    _top_level_matches(text, re.compile(
+                        r"\b(?:function|var|let|const)\s+(%s)\b"
+                        % re.escape(name)))
+                    or re.search(r"\bexports\s*\.\s*%s\b"
+                                 % re.escape(name), text)):
+                reason = "the name is already declared in this module"
+            candidates.append(
+                (factory.group(1), name, calls, shift, reason))
+
+    builders: dict[str, int] = {}
+    for _, name, _, _, reason in candidates:
+        if reason is None:
+            builders[name] = builders.get(name, 0) + 1
+    shapes: list[dict[str, Any]] = []
+    handled: set[int] = set()
+    for factory, name, calls, shift, reason in candidates:
+        if reason is None and builders[name] > 1:
+            reason = "the name is built by more than one function"
+        properties: dict[str, dict[str, dict[str, Any]]] = {}
+        if reason is None:
+            for call in calls:
+                open_index = shift + call.end() - 1
+                close = _balanced_end(comment_text, open_index)
+                if close is None:
+                    continue
+                for member, offset, kind in _property_names(
+                        comment_text[open_index + 1:close - 1],
+                        path, comment_text, open_index + 1):
+                    _add_property(properties, name, member, path,
+                                  comment_text, offset, kind)
+            if not properties:
+                reason = "no member the scan can read is defined"
+        for call in calls:
+            handled.add(shift + call.start(1))
+            if reason is not None:
+                _shape_diagnostic(
+                    path, comment_text, shift + call.start(1),
+                    "ignored unsupported Object.defineProperties target "
+                    "%s: %s" % (name, reason))
+        if reason is not None:
+            continue
+        members = properties[name]
+        shapes.append({
+            "factory": factory,
+            "kind": "local",
+            "methods": [],
+            "name": name,
+            "properties": [members[key] for key in sorted(members)],
+            "receiver": name,
+            "source": {
+                "file": rel(path),
+                "line": min(prop["source"]["line"]
+                            for prop in members.values()),
+            },
+        })
+    return shapes, handled
+
+
 def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
     """Scan top-level prototype and shared-object assignments."""
     text = _masked_js_text(path)
+    local_shapes, local_calls = _scan_local_object_shapes(path, text)
+    factories = {shape["factory"]: shape["name"] for shape in local_shapes}
     by_receiver: dict[str, dict[str, dict[str, Any]]] = {}
     prototype_matches = _top_level_matches(text, PROTOTYPE_FUNCTION_RE)
     top_prototype_starts = {
@@ -3433,7 +3619,7 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
         methods[match.group(2)] = _shape_method(
             match.group(2), match.group(3), path,
             _source_line(text, match.start(1)),
-            region=text[match.start(1):])
+            region=text[match.start(1):], factories=factories)
 
     unresolved_aliases: list[tuple[str, str, str, int]] = []
     alias_matches = list(PROTOTYPE_ALIAS_RE.finditer(text))
@@ -3530,9 +3716,9 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
         methods[name] = _shape_method(
             name, match.group(3), path,
             _source_line(text, match.start(1)),
-            region=text[match.start(1):])
+            region=text[match.start(1):], factories=factories)
     properties_by_receiver = _scan_shape_properties(
-        path, text, set(by_receiver), consumed_shared_names)
+        path, text, set(by_receiver), consumed_shared_names, local_calls)
 
     shapes: list[dict[str, Any]] = []
     for receiver in sorted(
@@ -3560,6 +3746,7 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
             shape["properties"] = [
                 properties[name] for name in sorted(properties)]
         shapes.append(shape)
+    shapes.extend(sorted(local_shapes, key=lambda shape: shape["name"]))
     return shapes
 
 
@@ -5430,6 +5617,14 @@ RUNTIME_ORACLE_UNREACHABLE: tuple[tuple[str, str, str], ...] = (
     # means destroying a live settings group -- global state the capture
     # must leave alone. Corrected while the list was open (movian#237).
     ("movian/settings", "sp", "zombie"),
+    # `item` is the object `createSetting` returns (movian/settings.js:5-42,
+    # ADR-0006), and only `sp.createBool`, `createString`, `createInt` and
+    # `createAction` call it (:73, :99, :129, :193). Each adds a node to a
+    # live settings group and invokes the plugin's callback. The capture
+    # calls `globalSettings` and stops there (introspector.js:1073-1083).
+    ("movian/settings", "item", "enabled"),
+    ("movian/settings", "item", "model"),
+    ("movian/settings", "item", "value"),
     # Opening a DB creates a file in the persistent path. Re-read in
     # movian#237 and it holds: `exports.DB` calls `sqlite.create(dbname)` in
     # its body (movian/sqlite.js:5-7). Only the constructor-set `db` is
@@ -6373,22 +6568,31 @@ def _check_runtime_oracle(
     if not isinstance(tier3, dict):
         tier3 = {}
 
+    def constructed(module: dict[str, Any]) -> list[dict[str, Any]]:
+        # A tier3 entry is what a construction yielded, and a local object
+        # shape (ADR-0006) is returned by a module function, never
+        # constructed. Matched on the lowercased name, `movian/settings`'
+        # `item` made `items` ambiguous with `movian/page`'s `Item`, and all
+        # sixteen Item members fell out of the comparison.
+        return [shape for shape in module.get("shapes", [])
+                if shape.get("kind") != "local"]
+
     def tier3_candidates(key: str) -> list[tuple[str, dict[str, Any]]]:
         candidates: list[tuple[str, dict[str, Any]]] = []
         if key == "items":
             for module_name, module in modules.items():
-                for shape in module.get("shapes", []):
+                for shape in constructed(module):
                     if str(shape.get("name", "")).lower() == "item":
                         candidates.append((module_name, shape))
         else:
             for module_name, module in modules.items():
-                for shape in module.get("shapes", []):
+                for shape in constructed(module):
                     if str(shape.get("name", "")).lower() == key.lower():
                         candidates.append((module_name, shape))
             if not candidates and key in modules:
                 module = modules[key]
                 candidates = [
-                    (key, shape) for shape in module.get("shapes", [])
+                    (key, shape) for shape in constructed(module)
                     if any(
                         entry.get("constructor") and
                         entry.get("name") == shape.get("receiver", "")[8:]
@@ -6397,7 +6601,7 @@ def _check_runtime_oracle(
                 ]
             if not candidates:
                 for module_name, module in modules.items():
-                    for shape in module.get("shapes", []):
+                    for shape in constructed(module):
                         receiver = str(shape.get("receiver", ""))
                         if receiver.lower() == "exports." + key.lower():
                             candidates.append((module_name, shape))
