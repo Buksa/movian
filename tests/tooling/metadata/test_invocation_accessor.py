@@ -275,6 +275,29 @@ class TheFormalListIsResolvedByName(unittest.TestCase):
         self.assertNotIn("accessors", record)
 
 
+class LinesEndWhereJavaScriptEndsThem(unittest.TestCase):
+    """ES5 ends a line at LF, CR, U+2028 and U+2029 (7.3; Duktape's
+    `duk_unicode_is_line_terminator` agrees). Python's `splitlines` also
+    splits at VT, FF, FS, GS, RS and NEL, and the line-by-line mask then
+    restarted inside a comment or a string -- whose rest was read as code,
+    with the separator itself gone where the whitelist could not see it
+    (review of PR #265)."""
+
+    def test_a_form_feed_inside_a_comment(self) -> None:
+        record = body("// page break \x0c cb(1);", "return 2;")
+        self.assertNotIn("accessors", record)
+
+    def test_a_next_line_character_inside_a_string(self) -> None:
+        record = body('var s = "x \x85 cb(1)";', "return s;")
+        self.assertNotIn("accessors", record)
+
+    def test_a_form_feed_between_statements_is_whitespace(self) -> None:
+        """Outside a comment or string it is ES5 whitespace, and the line
+        numbers after it are the source's."""
+        record = body("var a = 1;\x0c", "cb();")
+        self.assertEqual(record.get("accessors"), {"cb": [3]})
+
+
 class TheCallbackShapePosition(unittest.TestCase):
     """Which argument carries `new <shape>(...)`, read off the invocation.
     Counting `.call` as an invocation made it pick the callback without

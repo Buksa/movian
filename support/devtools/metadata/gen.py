@@ -2620,6 +2620,23 @@ def _open_block_at(path: Path) -> list[bool]:
     return states
 
 
+# The ES5 line terminators (7.3), which Duktape's own lexer uses too
+# (`duk_unicode_is_line_terminator`). `str.splitlines` also splits at VT, FF,
+# FS, GS, RS and NEL, and every scan here masks one line at a time: split
+# there, a comment or a string restarted as code mid-way (movian#262).
+JS_LINE_TERMINATOR_RE = re.compile(r"\r\n|[\n\r\u2028\u2029]")
+
+
+def _js_lines(text: str) -> list[str]:
+    """`text` split where JavaScript ends a line, with no trailing empty
+    line for a final terminator -- as `str.splitlines` gives it, so line
+    numbers match wherever the two agree."""
+    lines = JS_LINE_TERMINATOR_RE.split(text)
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
+
+
 def _raw_lines(path: Path) -> list[str]:
     """The file's lines, uncached-comment. Every other scan in this file reads
     the MASKED text, where a comment is blanked to spaces -- so the annotations
@@ -2628,7 +2645,7 @@ def _raw_lines(path: Path) -> list[str]:
     masked scan reported."""
     lines = _RAW_LINES_CACHE.get(path)
     if lines is None:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = _js_lines(path.read_text(encoding="utf-8"))
         _RAW_LINES_CACHE[path] = lines
     return lines
 
@@ -2840,7 +2857,7 @@ def _jsdoc_types(path: Path, line: int) -> dict[str, Any]:
 
 
 def _masked_js_text(path: Path, mask_strings: bool = True) -> str:
-    raw_lines = path.read_text(encoding="utf-8").splitlines()
+    raw_lines = _js_lines(path.read_text(encoding="utf-8"))
     masked_lines: list[str] = []
     in_block_comment = False
     for raw_line in raw_lines:
@@ -3834,7 +3851,7 @@ def _commonjs_masked_lines(path: Path) -> list[str]:
     file reads, so a `return {` inside a comment is not code to anybody."""
     masked_lines: list[str] = []
     in_block_comment = False
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for raw_line in _js_lines(path.read_text(encoding="utf-8")):
         line, in_block_comment = _mask_js_comments(
             raw_line, in_block_comment)
         masked_lines.append(line)
