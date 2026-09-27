@@ -187,6 +187,11 @@ class AnyOtherUseBlocks(unittest.TestCase):
         self.assertBlocked(
             body("if(typeof cb == 'function')", "  cb();"), [3], [2])
 
+    def test_a_computed_property_key(self) -> None:
+        """`o[cb]` uses the value as a key. Unpinned until a mutation that
+        read `[` like `.` passed the suite (review of PR #265)."""
+        self.assertBlocked(body("o[cb] = 1;", "cb();"), [3], [2])
+
     def test_forwarding(self) -> None:
         self.assertBlocked(body("g(cb);", "cb();"), [3], [2])
 
@@ -346,6 +351,17 @@ class AnUnreadableBodyBlocks(unittest.TestCase):
         self.assertNotIn("accessors", record)
         self.assertEqual(record.get("contested"), {
             "cb": {"invocations": invocations, "blocking": blocking}})
+
+    def test_every_character_the_scan_knows_is_read(self) -> None:
+        """The other side of the whitelist: a body using every punctuator
+        it names, and the ES5 whitespace it names, is read and admitted.
+        Only the dangerous admissions were pinned; dropping `~` from the
+        set passed the suite (review of PR #265)."""
+        record = body("var a = [1, 2], o = {k: a[0]};\t",
+                      "a[0] = (a[1] + 2 - 3 * 4 % 5) & 6 | 7 ^ ~8;\x0b\x0c",
+                      "if (!o.k || a < 1 && a > 2 ? a : a) {}",
+                      "cb();")
+        self.assertEqual(record.get("accessors"), {"cb": [5]})
 
     def test_a_regex_literal(self) -> None:
         """`/cb()/` is not masked, and reads as a call."""
