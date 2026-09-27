@@ -1935,20 +1935,26 @@ PARAM_INVOCATION_RE = re.compile(r"\s*(?:\.\s*(apply|call)\s*)?\(")
 # `function p(` declares a binding that shadows it, `new p(` constructs, and
 # ES5's `get p(` / `set p(` define a property of that name.
 NOT_A_CALL_KEYWORDS = frozenset({"function", "new", "get", "set"})
-# What leaves a function's masked body unreadable, or its names unresolved,
-# anywhere in it -- a closure reaches the parameter too (Codex on PR #265):
-#   `/`        a regex literal or a division. The mask blanks neither, and
-#              telling them apart is a guess; a regex can hold `p(`, or a
-#              quote that blanked the rest of its line.
-#   `\`        with strings and comments blanked and every `/` already
-#              refused, one of two things: `cb`, an escape that spells
-#              the name `cb` without writing it (ES5 7.6), or the end of a
-#              string continued onto the next line, which the line-by-line
-#              mask loses (`_mask_js_strings`).
-#   `eval(`    can rebind a parameter inside a masked string.
-#   `with (`   resolves names through an object.
+# What the scan cannot read in a function's masked body, anywhere in it -- a
+# closure reaches the parameter too. Found one construct at a time in review
+# of PR #265 (a regex literal, a direct eval, `\u0063b`, U+200C), so this names
+# what the scan DOES understand instead of what it does not:
+#   a character outside ASCII letters, digits, `_`, `$`, ASCII whitespace and
+#   the punctuators `{}()[];,.:?!=<>+-*%&|^~`. That refuses `/` (a regex
+#   literal or a division -- telling them apart is a guess, and a regex can
+#   hold `p(` or a quote that blanked the rest of its line), a backslash
+#   (`\u0063b` spells `cb` without writing it, ES5 7.6; or a string continued
+#   onto the next line, which the line-by-line mask loses), and anything
+#   non-ASCII (U+200C continues an identifier, so `x<U+200C>cb()` is not a
+#   call of `cb`). Strings and comments are blank by now, so none of this is
+#   text the scan was meant to skip.
+#   the token `eval` or `with`, however it is used. `eval(` and `(eval)(` are
+#   direct and can rebind a parameter inside a masked string; other uses of
+#   `eval` refuse with them rather than be told apart. `with (o)` resolves
+#   names through `o`.
 UNREADABLE_BODY_RE = re.compile(
-    r"[/\\]|(?<![\w$.])(?:eval|with)\s*\(")
+    r"[^A-Za-z0-9_$ \t\n\r\f\v{}()\[\];,.:?!=<>+\-*%&|^~]"
+    r"|(?<![A-Za-z0-9_$.])(?:eval|with)(?![A-Za-z0-9_$])")
 
 
 class ParamUse(NamedTuple):

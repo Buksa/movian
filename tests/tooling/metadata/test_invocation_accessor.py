@@ -302,6 +302,18 @@ class AnUnreadableBodyBlocks(unittest.TestCase):
         42. Found by the muse review on PR #265."""
         self.assertBlocked(body("cb();", "\\u0063b = 1;"), [2], [3])
 
+    def test_a_parenthesised_direct_eval(self) -> None:
+        """`(eval)(...)` is still direct: the grouping operator returns the
+        Reference unchanged (ES5 11.1.6). Codex on PR #265."""
+        self.assertBlocked(body("(eval)(source);", "cb();"), [3], [2])
+
+    def test_a_character_outside_the_known_set(self) -> None:
+        """U+200C may continue an ES5 identifier, so `x\\u200ccb()` calls
+        `x\\u200ccb`, not `cb`. The scan knows what an ASCII body means and
+        nothing else, so any other character refuses (Codex on PR #265)."""
+        record = body("x\u200ccb();")
+        self.assertNotIn("accessors", record)
+
     def test_direct_eval(self) -> None:
         """`eval("cb = ...")` rebinds the parameter inside a masked
         string."""
