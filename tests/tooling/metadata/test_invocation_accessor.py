@@ -239,6 +239,22 @@ class AnyOtherUseBlocks(unittest.TestCase):
         self.assertBlocked(body("g.apply(null, arguments);", "cb();"),
                            [3], [2])
 
+    def test_a_property_named_function_opens_no_function(self) -> None:
+        """`o.function` and `{function: 1}` are legal ES5 -- a property name
+        may be any IdentifierName -- and open no function. Taken for one, the
+        rest of the body was blanked as a nested function and the own
+        `arguments` below it went unseen (review of PR #265)."""
+        self.assertBlocked(body("var o = {};",
+                                "o.function;",
+                                "if (arguments.length) cb(1);"), [4], [4])
+        # A key: taken for a literal, the blank ran to the object's `}` and
+        # hid what follows the key inside it.
+        self.assertBlocked(body("var k = {function: 1, n: arguments.length};",
+                                "cb(1);"), [3], [2])
+        # A method of that name, called: `function(` follows a `.`.
+        self.assertBlocked(body("o.function(1);",
+                                "if (arguments.length) cb(1);"), [3], [3])
+
     def test_arguments_after_a_nested_function_keeps_its_line(self) -> None:
         """Found in the own body, whose nested functions are blanked rather
         than cut out -- cut out, the lines they held vanish and the anchor

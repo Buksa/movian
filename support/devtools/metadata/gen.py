@@ -1863,9 +1863,26 @@ def _function_params(region: str) -> list[str] | None:
     return _parse_params(match.group(1))
 
 
-NESTED_FUNCTION_RE = re.compile(r"\bfunction\b")
+# A nested function literal opens with the keyword, an optional name and its
+# parameter list. `function` alone is not enough: a property name may be any
+# IdentifierName in ES5, so `o.function` and `{function: 1}` open nothing, and
+# taking them for a literal blanked the rest of a body (movian#262).
+NESTED_FUNCTION_RE = re.compile(
+    r"(?<![\w$])function(?![\w$])\s*(?:[A-Za-z_$][\w$]*\s*)?\(")
 ARGUMENTS_RE = re.compile(r"\barguments\b")
 BARE_RETURN_RE = re.compile(r"\breturn\s*;")
+
+
+def _opens_function(text: str, index: int) -> bool:
+    """Whether a nested function literal starts at `index` of masked text:
+    `NESTED_FUNCTION_RE` there, and not `o.function(...)`, a call of a
+    method that happens to be named `function`."""
+    if NESTED_FUNCTION_RE.match(text, index) is None:
+        return False
+    cursor = index
+    while cursor > 0 and text[cursor - 1].isspace():
+        cursor -= 1
+    return cursor == 0 or text[cursor - 1] != "."
 
 
 def _own_body(region: str) -> str:
@@ -1914,7 +1931,7 @@ def _own_body(region: str) -> str:
                 break
             if nested_at is not None and depth <= nested_at:
                 nested_at = None
-        elif nested_at is None and NESTED_FUNCTION_RE.match(region, index):
+        elif nested_at is None and _opens_function(region, index):
             # The nested body opens one level down and closes when depth
             # comes back to here.
             nested_at = depth
@@ -2166,7 +2183,7 @@ def _scan_returns(text: str, open_brace: int) -> tuple[list[tuple[int, int]], in
                 break
             if nested_at is not None and depth <= nested_at:
                 nested_at = None
-        elif nested_at is None and NESTED_FUNCTION_RE.match(text, index):
+        elif nested_at is None and _opens_function(text, index):
             nested_at = depth
         elif nested_at is None and RETURN_KW_RE.match(text, index):
             end = _statement_end(text, index)
