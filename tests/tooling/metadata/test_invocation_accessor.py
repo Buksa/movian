@@ -275,6 +275,13 @@ class AnUnreadableBodyBlocks(unittest.TestCase):
                                 "b'; store(cb);",
                                 "cb();"), [4], [2])
 
+    def test_a_unicode_escape_in_an_identifier(self) -> None:
+        """`\\u0063b` is the identifier `cb` (ES5 7.6), so `\\u0063b = 1`
+        reassigns the parameter where no literal `cb` appears. Checked in
+        a JS engine: `function f(cb){ \\u0063b = 42; return cb; }` returns
+        42. Found by the muse review on PR #265."""
+        self.assertBlocked(body("cb();", "\\u0063b = 1;"), [2], [3])
+
     def test_direct_eval(self) -> None:
         """`eval("cb = ...")` rebinds the parameter inside a masked
         string."""

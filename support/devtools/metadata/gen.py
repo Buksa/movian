@@ -1939,12 +1939,15 @@ NOT_A_CALL_KEYWORDS = frozenset({"function", "new", "get", "set"})
 #   `/`        a regex literal or a division. The mask blanks neither, and
 #              telling them apart is a guess; a regex can hold `p(`, or a
 #              quote that blanked the rest of its line.
-#   `\` at the end of a line: a string continued onto the next, which the
-#              line-by-line mask loses (`_mask_js_strings`).
+#   `\`        with strings and comments blanked and every `/` already
+#              refused, one of two things: `cb`, an escape that spells
+#              the name `cb` without writing it (ES5 7.6), or the end of a
+#              string continued onto the next line, which the line-by-line
+#              mask loses (`_mask_js_strings`).
 #   `eval(`    can rebind a parameter inside a masked string.
 #   `with (`   resolves names through an object.
 UNREADABLE_BODY_RE = re.compile(
-    r"/|\\$|(?<![\w$.])(?:eval|with)\s*\(", re.M)
+    r"[/\\]|(?<![\w$.])(?:eval|with)\s*\(")
 
 
 class ParamUse(NamedTuple):
