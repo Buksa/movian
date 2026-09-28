@@ -324,7 +324,8 @@ class TheCallbackShapePosition(unittest.TestCase):
     a separate route from ADR-0005's, older than #262, and kept as it was:
     the callback is chosen by a direct or `.apply` call and the position is
     read from direct calls. Four reviews of PR #265 found it guessing
-    whenever `.call` fed it; the guess itself is #266."""
+    whenever `.call` fed it; what is emitted without a position is #266,
+    pinned below."""
 
     SOURCE = ("function Item() {}\n"
               "exports.f = function(cb) {\n"
@@ -352,6 +353,68 @@ class TheCallbackShapePosition(unittest.TestCase):
             self.SOURCE % "return /cb(null, new Item())/;")
         self.assertNotIn("callbackParam", record)
         self.assertNotIn("accessors", record)
+
+
+class TheCallSiteShapeNeedsAReadPosition(unittest.TestCase):
+    """movian#266: the call-site shape is emitted only at a position read
+    from the calls, and only when every invocation passes an argument there.
+    Otherwise the slot is typed as if there were no call site -- here, with
+    nothing else said, the plain accessor union.
+
+    Each probe is a module body a core-module author could write, rendered
+    to the declaration a plugin sees. `Item` is a declared shape in all of
+    them, which the first test proves: a probe module in which `Item` could
+    never be emitted would pass the rest for free."""
+
+    SOURCE = ("function Item() {}\n"
+              "Item.prototype.x = function() {};\n"
+              "exports.f = function(cb) {\n"
+              "  %s\n"
+              "}\n")
+
+    def declared(self, body: str) -> str:
+        module = build_probe_module(self.SOURCE % body)
+        lines = [line.strip() for line in
+                 gen.render_dts({"js": {"modules": [module]}}).splitlines()
+                 if line.strip().startswith("function f(")]
+        self.assertEqual(len(lines), 1, lines)
+        return lines[0]
+
+    def test_a_position_read_from_every_call_is_emitted(self) -> None:
+        self.assertEqual(
+            self.declared("cb(null, new Item());"),
+            "function f(cb?: Function | "
+            "((arg0: any, value: Item, ...args: any[]) => any)): any;")
+
+    def test_a_call_passing_null_there_admits_null(self) -> None:
+        """`movian/http`'s failure path, which the brief keeps."""
+        self.assertIn("value: Item | null",
+                      self.declared("cb(null, new Item()); cb(err, null);"))
+
+    def test_an_array_passed_to_apply(self) -> None:
+        """The runtime passes `null` first; position 0 was the default."""
+        self.assertNotIn(
+            "Item", self.declared("cb.apply(null, [null, new Item()]);"))
+
+    def test_a_construction_held_in_a_local(self) -> None:
+        self.assertNotIn(
+            "Item", self.declared("var item = new Item(); cb(null, item);"))
+
+    def test_a_call_that_passes_nothing_there(self) -> None:
+        """The comment on #266: position 1 is read from the first call, and
+        the second passes nothing there."""
+        self.assertNotIn(
+            "Item", self.declared("cb(null, new Item()); cb();"))
+
+    def test_a_call_with_no_arguments_passes_none_at_0(self) -> None:
+        """`cb()` splits into one empty field, which is not an argument."""
+        self.assertNotIn("Item", self.declared("cb(new Item()); cb();"))
+
+    def test_a_call_invocation_passes_nothing_that_was_read(self) -> None:
+        """`.call` does not choose a callback (PR #265), and where it
+        invokes one a direct call chose, its positions are not read."""
+        self.assertNotIn(
+            "Item", self.declared("cb(null, new Item()); cb.call(ctx);"))
 
 
 class AnUnreadableBodyBlocks(unittest.TestCase):
@@ -513,12 +576,26 @@ class TheAccessorIsEmitted(unittest.TestCase):
         self.assertEqual(slot, gen.SlotType(UNION))
 
     def test_the_call_site_shape_takes_the_arrows_place(self) -> None:
-        """`page.Route`: what `new Page(...)` proves stays, names and return
-        type included."""
+        """What `new Item(...)` at a read position proves stays, names and
+        return type included."""
         slot = emitted({"accessors": {"cb": [2]}, "callbackParam": "cb",
-                        "callbackShape": "Item"})
+                        "callbackShape": "Item", "callbackShapeIndex": 1})
         self.assertEqual(
-            slot.type, "Function | ((value: Item, ...args: any[]) => any)")
+            slot.type,
+            "Function | ((arg0: any, value: Item, ...args: any[]) => any)")
+
+    def test_a_shape_without_a_position_is_no_signature(self) -> None:
+        """movian#266: `page.Searcher` records `Page` and no position, and
+        its `@param` takes the arrow's place -- not `value: Page` at a
+        position 0 nobody read."""
+        record = {"accessors": {"cb": [2]}, "callbackParam": "cb",
+                  "callbackShape": "Item"}
+        self.assertEqual(emitted(record), gen.SlotType(UNION))
+        slot = emitted({**record, "docParams": {
+            "cb": "(page: Item, query: string) => void"}})
+        self.assertEqual(
+            slot, gen.SlotType("Function | ((page: Item, query: string) "
+                               "=> void)"))
 
     def test_an_annotated_signature_takes_the_arrows_place(self) -> None:
         """`subtitles.addProvider`."""
@@ -607,6 +684,26 @@ class TheCorpusStillSaysSo(unittest.TestCase):
         self.assertEqual(
             self.census[("movian/http", "request", "callback")]["type"],
             "(arg0: any, value: HttpResponse | null, ...args: any[]) => any")
+
+    def test_route_and_searcher_take_their_annotations(self) -> None:
+        """movian#266: each constructs `Page` for its callback where the scan
+        cannot read the position -- in an array handed to `.apply`, and in a
+        local -- so each emits its `@param` instead of `value: Page`."""
+        for member, line, text, annotated in (
+                ("Route", 465, "callback.apply(null, args)",
+                 "(page: Page, ...matches: any[]) => void"),
+                ("Searcher", 508, "callback(page, query)",
+                 "(page: Page, query: string) => void")):
+            with self.subTest(member):
+                record = self.records[("movian/page", member)]
+                self.assertEqual(record.get("callbackShape"), "Page")
+                self.assertNotIn("callbackShapeIndex", record)
+                self.assertEqual(record.get("accessors"),
+                                 {"callback": [line]})
+                self.assertAnchored("movian/page.js", [line], text)
+                site = self.census[("movian/page", member, "callback")]
+                self.assertEqual(site["type"], "Function | (%s)" % annotated)
+                self.assertNotIn("disagreement", site)
 
 
 if __name__ == "__main__":

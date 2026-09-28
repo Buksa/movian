@@ -2306,35 +2306,44 @@ def _callback_shape_index(
     `_own_body` deliberately does not look.
 
     `None` when no invocation carries a construction, which leaves the
-    annotation off rather than guessing a position.
+    annotation off rather than guessing a position -- and equally when any
+    invocation does not pass an argument there (movian#266). The shape is a
+    claim about what the callback receives, so `cb(null, new Item()); cb();`
+    proves nothing about position 1, and neither does an invocation whose
+    arguments are not read: `.apply(null, args)` passes an array, and
+    `.call`'s positions are not read here at all (PR #265).
     """
     new_res = [re.compile(r"\bnew\s+%s\s*\(" % re.escape(shape))
                for shape in shapes]
     index = None
     calls = []
     for use in uses:
-        if use.call_paren is None:
+        if not use.invocation:
             continue
+        if use.call_paren is None:
+            return None, False
         end = _balanced_call_end(region, use.call_paren)
         if end is None:
-            continue
+            return None, False
         args = _split_js_fields(region[use.call_paren + 1:end - 1])
+        if len(args) == 1 and not args[0].strip():
+            # `cb()` splits into one empty field, which would pass for an
+            # argument at position 0.
+            args = []
         calls.append(args)
         if index is None:
             for position, arg in enumerate(args):
                 if any(pattern.search(arg) for pattern in new_res):
                     index = position
                     break
-    if index is None:
+    if index is None or any(len(args) <= index for args in calls):
         return None, False
     # `callback(err, null)` on the failure path means the shape argument is
     # not always a value. The hand-written canon already had
     # `HttpResponse | null`; emitting it non-null let the new positive fixture
     # dereference it unguarded, which is exactly the runtime crash the
     # declaration is supposed to prevent.
-    nullable = any(
-        len(args) > index and args[index].strip() == "null"
-        for args in calls)
+    nullable = any(args[index].strip() == "null" for args in calls)
     return index, nullable
 
 
@@ -4340,11 +4349,11 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
         # keeps the signature this route gives it (ADR-0005, "a contested
         # slot keeps a signature another route already gave it").
         #
-        # `.call` is an invocation for the accessor rule and nothing more
-        # here: reading shapes through it kept finding positions to guess,
-        # four reviews in a row on PR #265, and the guess itself is #266.
-        # An unreadable body gives none either -- the call may be text
-        # inside a regex.
+        # `.call` does not choose the callback here: reading shapes through
+        # it kept finding positions to guess, four reviews in a row on PR
+        # #265. Where it invokes a chosen one, `_callback_shape_index`
+        # counts it as passing nothing it read (#266). An unreadable body
+        # gives none either -- the call may be text inside a regex.
         callback_params = [
             name for name in (params or [])
             if any(use.invocation and use.method != "call"
@@ -7463,7 +7472,14 @@ class TypeScope:
         # response-first one. The positions ahead of it are named `argN`
         # rather than `err`: their position is measured from the call site,
         # their meaning is not, and TypeScript requires some name.
-        index = record.get("callbackShapeIndex", 0)
+        #
+        # No index, no signature: a shape whose position was not read from
+        # the calls is not evidence of any position, and defaulting to 0 put
+        # `Item` where `cb.apply(null, [null, new Item()])` passes `null`
+        # (movian#266). The slot is typed as if there were no call site.
+        index = record.get("callbackShapeIndex")
+        if index is None:
+            return None
         spelling = shape
         if record.get("callbackShapeNullable"):
             spelling += " | null"

@@ -95,6 +95,12 @@ instance.createAction('a', 'A', 42);  // EXPECT_TS2345
 instance.createMultiOpt('m', 'M', [['x', 'X']], 42);  // EXPECT_TS2345
 new page.Route('n:(.*)', 42);  // EXPECT_TS2345
 new page.Searcher('N', 'icon.png', 42);  // EXPECT_TS2345
+// #266: Searcher's `query` is a string, so the callback cannot take it for a
+// number. Under the guessed `(value: Page, ...args: any[])` it was `any`.
+new page.Searcher('Q', 'icon.png', (searched, query) => {
+    const queryNumber: number = query;  // EXPECT_TS2322
+    void searched; void queryNumber;
+});
 prop.subscribeValue(prop.createRoot(), 42);  // EXPECT_TS2345
 subtitlesneg.addProvider(42);  // EXPECT_TS2345
 new page.Route('m:(.*)', (p) => {

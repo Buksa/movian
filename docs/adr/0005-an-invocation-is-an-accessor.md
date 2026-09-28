@@ -50,7 +50,10 @@ the generator already emits a signature for the slot -- from what the call
 site passes (`new Page(...)`) or from a `@param` annotation -- that signature
 takes the arrow's place, parameter names and return type included:
 `Function | ((value: Page, ...args: any[]) => any)`,
-`Function | ((req: any) => void)`.
+`Function | ((req: any) => void)`. Since #266 a call-site signature needs the
+construction's position read from every invocation. `page.Route` and
+`page.Searcher`, the first example here, have none and now take their
+`@param` signatures instead.
 
 ## How it is recorded
 
