@@ -2405,6 +2405,10 @@ def _fileless_failure(subject: str, output: str) -> str | None:
     `--moduleResolution node` this way (TS5107, exit 2) and checks nothing:
     the example gate printed OK, and the core-module gate advised deleting
     every curated entry (movian#270).
+
+    The fixture compiles do not call this. A positive fixture fails on its
+    exit status and a negative one on the diagnostics it is missing, so
+    neither reads a refused compile as a pass.
     """
     fileless = FILELESS_DIAGNOSTIC_RE.findall(output)
     if not fileless:
@@ -2725,6 +2729,11 @@ def _coverage_probe(tsc: str, entry: tuple[str, str | None, str],
     dts = scratch / ("%s.d.ts" % abs(hash(label)))
     dts.write_text(mutated, encoding="utf-8")
     probe = _run_generated_tsc(tsc, fixture, dts, companions)
+    # This probe passes on a failing compile, so a refused one would count
+    # as coverage of the member it removed.
+    fileless = _fileless_failure("coverage floor: %s" % label, probe.stdout)
+    if fileless is not None:
+        return fileless
     if probe.returncode == 0:
         return ("coverage floor: removing %s from the artifact leaves the "
                 "positive fixture compiling -- the fixture no longer "

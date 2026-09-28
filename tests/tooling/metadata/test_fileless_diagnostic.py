@@ -15,6 +15,10 @@ nothing compiles.
 
 The supported band ends below 6.0 for the same reason, so `gen.py --check`
 refuses 6.x before it runs any compile at all.
+
+The coverage floor reads a failing compile as a covered member, so there a
+refused compile covered everything it probed. The real tsc refuses one when
+the fixture it names is missing.
 """
 
 from __future__ import annotations
@@ -139,6 +143,21 @@ class TheBandEndsBelowSix(unittest.TestCase):
             str(replaying_tsc(self.directory, "5.9.3"))))
 
 
+def supported_tsc(test: unittest.TestCase) -> str:
+    """The tsc `gen.py --check` would use.
+
+    Failing, not skipping: the checker itself refuses to run without a
+    supported tsc, and CI installs one before these tests.
+    """
+    tsc = shutil.which("tsc")
+    if tsc is None:
+        test.fail("tsc not on PATH")
+    refusal = crd._check_tsc_version(tsc)
+    if refusal is not None:
+        test.fail(refusal)
+    return tsc
+
+
 def with_create_info_icon(icon_type: str) -> str:
     """The artifact with both declarations of `createInfo` taking `icon` as
     `icon_type`. Raises if they are not both there, so a reshaped artifact
@@ -157,15 +176,7 @@ class TheExampleGateStillReadsARealCompile(unittest.TestCase):
     """Under the tsc `gen.py --check` would use, a real compile."""
 
     def setUp(self) -> None:
-        tsc = shutil.which("tsc")
-        # Failing, not skipping: the checker itself refuses to run without
-        # a supported tsc, and CI installs one before these tests.
-        if tsc is None:
-            self.fail("tsc not on PATH")
-        refusal = crd._check_tsc_version(tsc)
-        if refusal is not None:
-            self.fail(refusal)
-        self.tsc = tsc
+        self.tsc = supported_tsc(self)
         self.scratch = scratch_directory(self)
 
     def compile_against(self, declarations: str) -> tuple[str | None, str]:
@@ -209,6 +220,37 @@ class TheExampleGateStillReadsARealCompile(unittest.TestCase):
                         "the probe raised nothing in the declarations:\n"
                         + output)
         self.assertIsNone(error)
+
+
+class ARefusedCoverageProbeIsNotCoverage(unittest.TestCase):
+    """43 of the floor's 75 members are v1, and only their probes compile
+    the v1 fixture. With it deleted, tsc answered every one of them
+    `error TS6053: File '...' not found.`, and the floor printed OK."""
+
+    def setUp(self) -> None:
+        self.tsc = supported_tsc(self)
+        self.scratch = scratch_directory(self)
+        self.entry = next(entry for entry in crd.GENERATED_COVERAGE_FLOOR
+                          if entry[0] == crd.V1_SCOPE)
+        self.artifacts = {str(path): crd._read(path) for path
+                          in (crd.GENERATED_DTS, crd.GENERATED_V1_DTS)}
+
+    def probe(self) -> str | None:
+        return crd._coverage_probe(
+            self.tsc, self.entry, self.scratch, self.artifacts)
+
+    def test_a_member_the_fixture_uses_is_covered(self) -> None:
+        # The control: the same probe, with the fixture there.
+        self.assertIsNone(self.probe())
+
+    def test_a_missing_fixture_covers_nothing(self) -> None:
+        missing = self.scratch / crd.GENERATED_V1_FIXTURE.name
+        with mock.patch.object(crd, "GENERATED_V1_FIXTURE", missing):
+            error = self.probe()
+        self.assertIsNotNone(
+            error, "a compile that checked nothing counted as coverage")
+        self.assertRegex(error or "", r"(?m)^error TS\d+: .*%s"
+                         % re.escape(missing.name))
 
 
 if __name__ == "__main__":
