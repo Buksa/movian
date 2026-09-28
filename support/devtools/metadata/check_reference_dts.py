@@ -2396,27 +2396,41 @@ def _actual_diagnostics(output: str) -> set[tuple[str, int, int]]:
     }
 
 
-def _fileless_failure(subject: str, output: str) -> str | None:
-    """Fail `subject` when tsc reported an error attached to no file.
+def _unchecked_compile(
+        subject: str,
+        result: subprocess.CompletedProcess[str]) -> str | None:
+    """Fail `subject` when tsc did not check its inputs.
 
-    Such an error is raised against the compile, not at a position in any
-    input, and a gate that reads only diagnostics against inputs reads that
-    compile as clean. tsc 6.0.3 rejects `--target ES5` and
-    `--moduleResolution node` this way (TS5107, exit 2) and checks nothing:
-    the example gate printed OK, and the core-module gate advised deleting
-    every curated entry (movian#270).
+    A gate that reads only diagnostics against inputs reads such a compile
+    as clean. It shows in two ways, both measured (movian#270):
+
+    - An error attached to no file, raised against the compile rather than
+      at a position in any input. tsc 6.0.3 rejects `--target ES5` and
+      `--moduleResolution node` this way (TS5107, exit 2) and checks
+      nothing: the example gate printed OK, and the core-module gate advised
+      deleting every curated entry.
+    - A non-zero exit with no diagnostic at all: tsc crashed. With node's
+      heap capped, 5.7.3 aborted out of memory printing only node's own
+      report, and the example gate and the coverage probe both passed.
 
     The fixture compiles do not call this. A positive fixture fails on its
     exit status and a negative one on the diagnostics it is missing, so
-    neither reads a refused compile as a pass.
+    neither reads a refused or crashed compile as a pass.
     """
+    output = result.stdout or ""
     fileless = FILELESS_DIAGNOSTIC_RE.findall(output)
-    if not fileless:
-        return None
-    return ("%s: tsc reported an error attached to no file, a fault in the "
-            "compile itself rather than in any input, so the absence of "
-            "other diagnostics proves nothing:\n%s"
-            % (subject, "\n".join(fileless)))
+    if fileless:
+        return ("%s: tsc reported an error attached to no file, a fault in "
+                "the compile itself rather than in any input, so the absence "
+                "of other diagnostics proves nothing:\n%s"
+                % (subject, "\n".join(fileless)))
+    if result.returncode != 0 and not DIAGNOSTIC_RE.search(output):
+        printed = [line for line in output.splitlines() if line.strip()]
+        return ("%s: tsc exited %d without reporting a diagnostic, so it did "
+                "not finish checking its inputs; it printed:\n%s"
+                % (subject, result.returncode,
+                   "\n".join(printed[:6]) or "(nothing)"))
+    return None
 
 
 def check_typescript(tsc: str) -> list[str]:
@@ -2729,11 +2743,11 @@ def _coverage_probe(tsc: str, entry: tuple[str, str | None, str],
     dts = scratch / ("%s.d.ts" % abs(hash(label)))
     dts.write_text(mutated, encoding="utf-8")
     probe = _run_generated_tsc(tsc, fixture, dts, companions)
-    # This probe passes on a failing compile, so a refused one would count
-    # as coverage of the member it removed.
-    fileless = _fileless_failure("coverage floor: %s" % label, probe.stdout)
-    if fileless is not None:
-        return fileless
+    # This probe passes on a failing compile, so a refused or crashed one
+    # would count as coverage of the member it removed.
+    unchecked = _unchecked_compile("coverage floor: %s" % label, probe)
+    if unchecked is not None:
+        return unchecked
     if probe.returncode == 0:
         return ("coverage floor: removing %s from the artifact leaves the "
                 "positive fixture compiling -- the fixture no longer "
@@ -3009,10 +3023,10 @@ def _check_one_example(tsc: str, entry: Path) -> str | None:
         command, cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, check=False,
         timeout=SUBPROCESS_TIMEOUT_SECONDS)
-    fileless = _fileless_failure(
-        "plugin_examples/%s" % _example_name(entry), result.stdout)
-    if fileless is not None:
-        return fileless
+    unchecked = _unchecked_compile(
+        "plugin_examples/%s" % _example_name(entry), result)
+    if unchecked is not None:
+        return unchecked
     # Only diagnostics against the example itself. A declaration file's
     # own diagnostics belong to the fixtures above, and counting them here
     # would make this gate fail for a reason it cannot explain.
@@ -3188,12 +3202,12 @@ def check_core_modules(tsc: str) -> tuple[list[str], dict[str, int]]:
         check=False,
         timeout=SUBPROCESS_TIMEOUT_SECONDS,
     )
-    # Before the comparison, not beside it: a compile tsc refused reports
-    # none of the listed diagnostics, and the comparison would then call
-    # every entry stale and advise removing it.
-    fileless = _fileless_failure("core modules", result.stdout)
-    if fileless is not None:
-        errors.append(fileless)
+    # Before the comparison, not beside it: a compile tsc refused, or one
+    # that crashed, reports none of the listed diagnostics, and the
+    # comparison would then call every entry stale and advise removing it.
+    unchecked = _unchecked_compile("core modules", result)
+    if unchecked is not None:
+        errors.append(unchecked)
         return errors, {}
     actual = _core_module_diagnostics(result.stdout)
 

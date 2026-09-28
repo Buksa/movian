@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A tsc diagnostic attached to no file fails the gate (movian#270).
+"""A compile tsc did not finish checking fails the gate (movian#270).
 
 tsc 6.0.3 rejects the `--target ES5` and `--moduleResolution node` that the
 plugin_examples and core-module compiles pass, exits 2, and checks nothing.
@@ -19,6 +19,9 @@ refuses 6.x before it runs any compile at all.
 The coverage floor reads a failing compile as a covered member, so there a
 refused compile covered everything it probed. The real tsc refuses one when
 the fixture it names is missing.
+
+A tsc that crashes reports no diagnostic at all, and the example gate and the
+coverage probe read that as a pass too.
 """
 
 from __future__ import annotations
@@ -64,6 +67,30 @@ TSC_6_0_3_OUTPUT = (
     "'\"ignoreDeprecations\": \"6.0\"' to silence this error.\n")
 TSC_6_0_3_ERRORS = [line for line in TSC_6_0_3_OUTPUT.splitlines()
                     if line.startswith("error TS")]
+
+
+# Captured from tsc 5.7.3 running `_check_one_example`'s command on EXAMPLE
+# with node's heap capped: at `NODE_OPTIONS=--max-old-space-size=8` node
+# printed this and aborted, at `=4` it segfaulted printing nothing. Verbatim
+# except the native stack trace, cut after two frames. The statuses are the
+# ones the shell reported (SIGABRT, SIGSEGV); Python reads the same crashes
+# as -6 and -11. The rule reads only that the status is non-zero and that no
+# diagnostic was printed, and replaying the status spares a core dump.
+TSC_OOM_OUTPUT = (
+    "\n<--- Last few GCs --->\n\n"
+    "[2371340:0x1ecd6000]      134 ms: Mark-Compact 12.4 (13.9) -> 11.7 "
+    "(16.4) MB, pooled: 0 MB, 7.53 / 0.00 ms  (average mu = 0.895, current "
+    "mu = 0.913) allocation failure; scavenge might not succeed\n\n"
+    "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out "
+    "of memory\n"
+    "----- Native stack trace -----\n\n"
+    " 1: 0x73f8c4 node::OOMErrorHandler(char const*, v8::OOMDetails const&) "
+    "[node]\n"
+    " 2: 0xc06f90  [node]\n")
+TSC_CRASHES = {
+    "out of memory": (TSC_OOM_OUTPUT, 134),
+    "segfault": ("", 139),
+}
 
 
 def scratch_directory(test: unittest.TestCase) -> Path:
@@ -115,6 +142,47 @@ class AFilelessDiagnosticFailsTheGate(unittest.TestCase):
             self.assertIn(line, report)
         # The curated list is fine; telling the reader to empty it is wrong.
         self.assertNotIn("no longer fires", report)
+
+
+class ACrashedCompileFailsTheGate(unittest.TestCase):
+    def crashing_tsc(self, crash: str) -> str:
+        output, status = TSC_CRASHES[crash]
+        return str(replaying_tsc(
+            scratch_directory(self), "5.7.3", output, status))
+
+    def test_the_example_gate_reports_the_crash(self) -> None:
+        for crash, (_output, status) in TSC_CRASHES.items():
+            with self.subTest(crash):
+                error = crd._check_one_example(
+                    self.crashing_tsc(crash), EXAMPLE)
+                self.assertIsNotNone(error, "a crashed compile passed")
+                self.assertIn("exited %d" % status, error or "")
+        error = crd._check_one_example(
+            self.crashing_tsc("out of memory"), EXAMPLE)
+        self.assertIn("JavaScript heap out of memory", error or "")
+
+    def test_the_core_module_gate_reports_it_instead_of_blaming_the_list(
+            self) -> None:
+        for crash, (_output, status) in TSC_CRASHES.items():
+            with self.subTest(crash):
+                errors, _counts = crd.check_core_modules(
+                    self.crashing_tsc(crash))
+                report = "\n".join(errors)
+                self.assertIn("exited %d" % status, report)
+                self.assertNotIn("no longer fires", report)
+
+    def test_the_coverage_probe_does_not_count_it_as_coverage(self) -> None:
+        entry = crd.GENERATED_COVERAGE_FLOOR[0]
+        artifacts = {str(path): crd._read(path) for path
+                     in (crd.GENERATED_DTS, crd.GENERATED_V1_DTS)}
+        for crash, (_output, status) in TSC_CRASHES.items():
+            with self.subTest(crash):
+                error = crd._coverage_probe(
+                    self.crashing_tsc(crash), entry,
+                    scratch_directory(self), artifacts)
+                self.assertIsNotNone(
+                    error, "a crashed compile counted as coverage")
+                self.assertIn("exited %d" % status, error or "")
 
 
 class TheBandEndsBelowSix(unittest.TestCase):
