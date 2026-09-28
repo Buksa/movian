@@ -508,6 +508,8 @@ THIS_FIELD_RE = re.compile(
     r"(?<![.\w])this\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
 DIAGNOSTIC_RE = re.compile(
     r"^(.*?)\((\d+),(\d+)\): error TS(\d+):", re.MULTILINE)
+# A diagnostic tsc attaches to no file: no `path(line,col): ` before it.
+FILELESS_DIAGNOSTIC_RE = re.compile(r"^error TS\d+:.*$", re.MULTILINE)
 EXPECTED_DIAGNOSTIC_RE = re.compile(r"EXPECT_TS(\d+)")
 PLUGIN_ASSIGN_RE = re.compile(
     r'duk_put_prop_string\(\s*ctx\s*,\s*plugin_obj_idx\s*,\s*"([^"]+)"'
@@ -2394,6 +2396,43 @@ def _actual_diagnostics(output: str) -> set[tuple[str, int, int]]:
     }
 
 
+def _unchecked_compile(
+        subject: str,
+        result: subprocess.CompletedProcess[str]) -> str | None:
+    """Fail `subject` when tsc did not check its inputs.
+
+    A gate that reads only diagnostics against inputs reads such a compile
+    as clean. It shows in two ways, both measured (movian#270):
+
+    - An error attached to no file, raised against the compile rather than
+      at a position in any input. tsc 6.0.3 rejects `--target ES5` and
+      `--moduleResolution node` this way (TS5107, exit 2) and checks
+      nothing: the example gate printed OK, and the core-module gate advised
+      deleting every curated entry.
+    - A non-zero exit with no diagnostic at all: tsc crashed. With node's
+      heap capped, 5.7.3 aborted out of memory printing only node's own
+      report, and the example gate and the coverage probe both passed.
+
+    The fixture compiles do not call this. A positive fixture fails on its
+    exit status and a negative one on the diagnostics it is missing, so
+    neither reads a refused or crashed compile as a pass.
+    """
+    output = result.stdout or ""
+    fileless = FILELESS_DIAGNOSTIC_RE.findall(output)
+    if fileless:
+        return ("%s: tsc reported an error attached to no file, a fault in "
+                "the compile itself rather than in any input, so the absence "
+                "of other diagnostics proves nothing:\n%s"
+                % (subject, "\n".join(fileless)))
+    if result.returncode != 0 and not DIAGNOSTIC_RE.search(output):
+        printed = [line for line in output.splitlines() if line.strip()]
+        return ("%s: tsc exited %d without reporting a diagnostic, so it did "
+                "not finish checking its inputs; it printed:\n%s"
+                % (subject, result.returncode,
+                   "\n".join(printed[:6]) or "(nothing)"))
+    return None
+
+
 def check_typescript(tsc: str) -> list[str]:
     errors: list[str] = []
     positive = _run_tsc(tsc, POSITIVE_FIXTURE)
@@ -2577,17 +2616,27 @@ def _declaration_re(member: str) -> re.Pattern[str]:
 # The negative fixtures pin exact diagnostic CODES, and TypeScript renumbers
 # them across releases: on this tree 5.2.2 reports TS2345 where the fixture
 # pins TS2353, and 7.0.2 reports TS2739 where it pins TS2345 -- both on a
-# correct tree. Measured pass: 5.3.3, 5.7.3, 5.9.3, 6.0.3. Since the tsc gate
-# is mandatory, an unsupported compiler on PATH would otherwise red a clean
-# checkout with a message blaming the fixture. Widen the band only after
-# running the fixtures under the new compiler.
+# correct tree. Measured pass: 5.3.3, 5.6.3, 5.7.3, 5.9.3.
+#
+# 6.0.3 passes the fixtures, and the band still ends below it: the
+# plugin_examples and core-module compiles pass `--target ES5` and
+# `--moduleResolution node`, which 6.0.3 rejects (TS5107, exit 2) before
+# checking anything. `--ignoreDeprecations 6.0` lets them run, but 5.7.3
+# rejects that value (TS5103), and under it the core-module compile reports
+# 119 diagnostics the curated list does not account for, 57 of them TS7006
+# (movian#270).
+#
+# Since the tsc gate is mandatory, an unsupported compiler on PATH would
+# otherwise red a clean checkout with a message blaming the fixture. Widen the
+# band only after running the fixtures AND those two compiles under the new
+# compiler.
 TSC_VERSION_RE = re.compile(r"Version\s+(\d+)\.(\d+)\.(\d+)")
 TSC_SUPPORTED_MIN = (5, 3)
-TSC_SUPPORTED_BELOW = (7, 0)
+TSC_SUPPORTED_BELOW = (6, 0)
 
 
 def _check_tsc_version(tsc: str) -> str | None:
-    """Reject a compiler whose diagnostic numbering the fixtures do not pin."""
+    """Reject a compiler the gates were not measured to pass under."""
     result = subprocess.run(
         [tsc, "--version"], text=True, stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, check=False,
@@ -2600,10 +2649,11 @@ def _check_tsc_version(tsc: str) -> str | None:
                 % (tsc, (result.stdout or "").strip()[:120]))
     version = tuple(int(part) for part in match.groups())
     if not TSC_SUPPORTED_MIN <= version[:2] < TSC_SUPPORTED_BELOW:
-        return ("tsc %s (%s) is outside the supported range >=%s,<%s; the "
-                "negative fixtures pin exact diagnostic codes, so an "
-                "unsupported compiler reports a fixture mismatch on a "
-                "CORRECT tree. Install a supported tsc or put one earlier "
+        return ("tsc %s (%s) is outside the supported range >=%s,<%s; a "
+                "CORRECT tree fails under it, because releases outside the "
+                "band renumber the diagnostic codes the negative fixtures "
+                "pin or reject options the plugin_examples and core-module "
+                "compiles pass. Install a supported tsc or put one earlier "
                 "on PATH."
                 % (".".join(str(part) for part in version), tsc,
                    ".".join(str(part) for part in TSC_SUPPORTED_MIN),
@@ -2693,6 +2743,11 @@ def _coverage_probe(tsc: str, entry: tuple[str, str | None, str],
     dts = scratch / ("%s.d.ts" % abs(hash(label)))
     dts.write_text(mutated, encoding="utf-8")
     probe = _run_generated_tsc(tsc, fixture, dts, companions)
+    # This probe passes on a failing compile, so a refused or crashed one
+    # would count as coverage of the member it removed.
+    unchecked = _unchecked_compile("coverage floor: %s" % label, probe)
+    if unchecked is not None:
+        return unchecked
     if probe.returncode == 0:
         return ("coverage floor: removing %s from the artifact leaves the "
                 "positive fixture compiling -- the fixture no longer "
@@ -2968,6 +3023,10 @@ def _check_one_example(tsc: str, entry: Path) -> str | None:
         command, cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, check=False,
         timeout=SUBPROCESS_TIMEOUT_SECONDS)
+    unchecked = _unchecked_compile(
+        "plugin_examples/%s" % _example_name(entry), result)
+    if unchecked is not None:
+        return unchecked
     # Only diagnostics against the example itself. A declaration file's
     # own diagnostics belong to the fixtures above, and counting them here
     # would make this gate fail for a reason it cannot explain.
@@ -3143,6 +3202,13 @@ def check_core_modules(tsc: str) -> tuple[list[str], dict[str, int]]:
         check=False,
         timeout=SUBPROCESS_TIMEOUT_SECONDS,
     )
+    # Before the comparison, not beside it: a compile tsc refused, or one
+    # that crashed, reports none of the listed diagnostics, and the
+    # comparison would then call every entry stale and advise removing it.
+    unchecked = _unchecked_compile("core modules", result)
+    if unchecked is not None:
+        errors.append(unchecked)
+        return errors, {}
     actual = _core_module_diagnostics(result.stdout)
 
     for key in sorted(actual - set(expected)):
