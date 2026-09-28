@@ -2291,11 +2291,37 @@ def _own_returns(region: str) -> list[str]:
     return [] if open_brace is None else _returns_after(region, open_brace)
 
 
+# A construction, `new <Class>(`. The callback route enumerates a region's
+# classes with it and reads the class at a position with it, and the two must
+# agree: the shape is chosen from the first and has to be the second.
+CONSTRUCTION_RE = re.compile(r"\bnew\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
+
+
+def _whole_construction(arg: str) -> str | None:
+    """The class `arg` constructs when `new <Class>(...)` is the whole
+    argument, balanced, with nothing before or after it; else `None`.
+
+    `wrap(new Item())` passes what `wrap` returns and `new Item().page` what
+    `.page` reads, and matching the construction anywhere in the text typed
+    both as `Item` (round 2 of movian#266). `arg` is cut from a region whose
+    strings `_export_region` has already blanked, so a parenthesis inside
+    one is not counted here.
+    """
+    text = arg.strip()
+    match = CONSTRUCTION_RE.match(text)
+    if match is None or \
+            _balanced_call_end(text, match.end() - 1) != len(text):
+        return None
+    return match.group(1)
+
+
 def _callback_shape_index(
-        region: str, uses: list[ParamUse],
-        shapes: list[str]) -> tuple[int | None, bool]:
-    """Which argument of the parameter's invocation carries a
-    `new <shape>(...)`, reading the direct calls among its `uses`.
+        region: str,
+        uses: list[ParamUse]) -> tuple[int, str, bool] | None:
+    """Which argument of the parameter's invocation is a whole
+    `new <Class>(...)`, reading the direct calls among its `uses`: the
+    position, the class constructed there, and whether a call passes `null`
+    there instead.
 
     Assuming position 0 typed the wrong parameter: `movian/http`'s `request`
     calls `callback(null, new HttpResponse(res))` on success and
@@ -2305,26 +2331,26 @@ def _callback_shape_index(
     invocation usually sits inside a nested callback, which is the one place
     `_own_body` deliberately does not look.
 
-    `None` when no invocation carries a construction, which leaves the
+    `None` when no invocation passes a whole construction, which leaves the
     annotation off rather than guessing a position -- and equally when any
-    invocation does not pass an argument there (movian#266). The shape is a
-    claim about what the callback receives, so `cb(null, new Item()); cb();`
-    proves nothing about position 1, and neither does an invocation whose
-    arguments are not read: `.apply(null, args)` passes an array, and
-    `.call`'s positions are not read here at all (PR #265).
+    invocation passes anything there but that class's construction or
+    `null` (movian#266). The shape is a claim about what the callback
+    receives, so `cb(null, new Item()); cb();` proves nothing about position
+    1, nor does `cb(null, undefined)` or `cb(null, new Other())` in place of
+    the second call, and neither does an invocation whose arguments are not
+    read: `.apply(null, args)` passes an array, and `.call`'s positions are
+    not read here at all (PR #265).
     """
-    new_res = [re.compile(r"\bnew\s+%s\s*\(" % re.escape(shape))
-               for shape in shapes]
-    index = None
+    index = constructed = None
     calls = []
     for use in uses:
         if not use.invocation:
             continue
         if use.call_paren is None:
-            return None, False
+            return None
         end = _balanced_call_end(region, use.call_paren)
         if end is None:
-            return None, False
+            return None
         args = _split_js_fields(region[use.call_paren + 1:end - 1])
         if len(args) == 1 and not args[0].strip():
             # `cb()` splits into one empty field, which would pass for an
@@ -2333,18 +2359,26 @@ def _callback_shape_index(
         calls.append(args)
         if index is None:
             for position, arg in enumerate(args):
-                if any(pattern.search(arg) for pattern in new_res):
+                constructed = _whole_construction(arg)
+                if constructed is not None:
                     index = position
                     break
-    if index is None or any(len(args) <= index for args in calls):
-        return None, False
+    if index is None:
+        return None
     # `callback(err, null)` on the failure path means the shape argument is
     # not always a value. The hand-written canon already had
     # `HttpResponse | null`; emitting it non-null let the new positive fixture
     # dereference it unguarded, which is exactly the runtime crash the
     # declaration is supposed to prevent.
-    nullable = any(args[index].strip() == "null" for args in calls)
-    return index, nullable
+    nullable = False
+    for args in calls:
+        if len(args) <= index:
+            return None
+        if args[index].strip() == "null":
+            nullable = True
+        elif _whole_construction(args[index]) != constructed:
+            return None
+    return index, constructed, nullable
 
 
 def _returns_without_value(region: str) -> bool:
@@ -4340,8 +4374,7 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
             record["receiverMembers"] = _receiver_members(
                 region, path, line_index)
         uses = _attach_accessors(record, region)
-        callback_shapes = sorted(set(re.findall(
-            r"\bnew\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", region)))
+        callback_shapes = sorted(set(CONSTRUCTION_RE.findall(region)))
         # Invoked directly or through `.apply`, whatever else the function
         # does with it -- the same enumeration ADR-0005 reads, asked the
         # question this route asked before #262. A contested parameter still
@@ -4363,10 +4396,14 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
         if callback_shapes and len(callback_params) == 1:
             record["callbackShapes"] = callback_shapes
             record["callbackParam"] = callback_params[0]
-            index, nullable = _callback_shape_index(
-                region, uses[callback_params[0]], callback_shapes)
-            if index is not None:
+            found = _callback_shape_index(region, uses[callback_params[0]])
+            if found is not None:
+                index, constructed, nullable = found
                 record["callbackShapeIndex"] = index
+                # The shape itself is chosen later, among the declared
+                # classes this region constructs anywhere, and the position
+                # holds only for the one constructed there.
+                record["callbackClassAtIndex"] = constructed
                 if nullable:
                     record["callbackShapeNullable"] = True
             # `movian/http`'s `request` returns `new HttpResponse(res)` on the
@@ -4961,7 +4998,11 @@ def build_commonjs_modules() -> list[dict[str, Any]]:
             if len(callback_shapes) == 1 and callback_param is not None:
                 export["callbackShape"] = callback_shapes[0]
                 export["callbackParam"] = callback_param
-            else:
+            # The position holds only for the class constructed there:
+            # `cb(null, new Other()); var item = new Item();` reads position
+            # 1 from `Other`, and the shape chosen is `Item` (movian#266).
+            if export.get("callbackShape") != \
+                    export.pop("callbackClassAtIndex", None):
                 export.pop("callbackShapeIndex", None)
                 export.pop("callbackShapeNullable", None)
         receiver_members = _merge_receiver_members(receiver_members)

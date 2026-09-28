@@ -357,9 +357,10 @@ class TheCallbackShapePosition(unittest.TestCase):
 
 class TheCallSiteShapeNeedsAReadPosition(unittest.TestCase):
     """movian#266: the call-site shape is emitted only at a position read
-    from the calls, and only when every invocation passes an argument there.
-    Otherwise the slot is typed as if there were no call site -- here, with
-    nothing else said, the plain accessor union.
+    from the calls, and only when every invocation passes there either the
+    construction itself -- `new <Shape>(...)` as the whole argument -- or
+    `null`. Otherwise the slot is typed as if there were no call site --
+    here, with nothing else said, the plain accessor union.
 
     Each probe is a module body a core-module author could write, rendered
     to the declaration a plugin sees. `Item` is a declared shape in all of
@@ -386,10 +387,59 @@ class TheCallSiteShapeNeedsAReadPosition(unittest.TestCase):
             "function f(cb?: Function | "
             "((arg0: any, value: Item, ...args: any[]) => any)): any;")
 
+    def test_a_whole_construction_at_0_is_emitted(self) -> None:
+        """Spacing and constructor arguments do not make it less whole."""
+        for body in ("cb(new Item());", "cb( new Item(a, (b)) );"):
+            with self.subTest(body):
+                self.assertEqual(
+                    self.declared(body),
+                    "function f(cb?: Function | "
+                    "((value: Item, ...args: any[]) => any)): any;")
+
     def test_a_call_passing_null_there_admits_null(self) -> None:
         """`movian/http`'s failure path, which the brief keeps."""
-        self.assertIn("value: Item | null",
-                      self.declared("cb(null, new Item()); cb(err, null);"))
+        for body in ("cb(null, new Item()); cb(err, null);",
+                     "cb(null, new Item()); cb(null, null);"):
+            with self.subTest(body):
+                self.assertEqual(
+                    self.declared(body),
+                    "function f(cb?: Function | ((arg0: any, "
+                    "value: Item | null, ...args: any[]) => any)): any;")
+
+    def test_any_other_value_there_declines(self) -> None:
+        """Round 2 of #266: an argument at the position was all the first
+        round asked for, and each of these declared `value: Item` -- the
+        first at 0, the rest at 1. `undefined` is not modelled as
+        `| undefined`; declining is the rule."""
+        for body in ("cb(undefined); cb(new Item());",
+                     "cb(null, new Item()); cb(null, undefined);",
+                     "cb(null, new Item()); cb(null, void 0);",
+                     "cb(null, new Item()); cb(null, 5);",
+                     "cb(null, new Item()); cb(null, 'text');",
+                     "cb(null, new Item()); cb(null, other);"):
+            with self.subTest(body):
+                self.assertNotIn("Item", self.declared(body))
+
+    def test_a_construction_inside_a_larger_expression_declines(
+            self) -> None:
+        """The runtime passes what `wrap` returns, and what `.page` reads.
+        The construction was matched anywhere in the argument text, so each
+        declared `value: Item` at 0."""
+        for body in ("cb(wrap(new Item()));",
+                     "cb(new Item().page);"):
+            with self.subTest(body):
+                self.assertNotIn("Item", self.declared(body))
+
+    def test_a_construction_of_another_class_declines(self) -> None:
+        """`Other` is not a declared shape, so `Item` is the only one the
+        module can emit -- and each of these declared it where a call
+        passes an `Other`. The position was read from any construction in
+        the region, and the shape chosen from all of them."""
+        for body in ("cb(new Other()); cb(new Item());",
+                     "cb(new Item()); cb(new Other());",
+                     "cb(null, new Other()); var item = new Item();"):
+            with self.subTest(body):
+                self.assertNotIn("Item", self.declared(body))
 
     def test_an_array_passed_to_apply(self) -> None:
         """The runtime passes `null` first; position 0 was the default."""
