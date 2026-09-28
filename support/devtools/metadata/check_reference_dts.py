@@ -2934,13 +2934,31 @@ def check_plugin_examples(tsc: str) -> list[str]:
 
 
 def _check_one_example(tsc: str, entry: Path) -> str | None:
-    """One example plugin against the declarations its apiversion gets."""
+    """One example plugin against the declarations its apiversion gets.
+
+    `--strict`, as the generated-dts fixtures are compiled, except for
+    `noImplicitAny` and `useUnknownInCatchVariables`. Without
+    `strictNullChecks` a `null` fits every type, so `createInfo`'s `icon`
+    annotated `string` passed this gate while rejecting the `null`
+    `01-basic/03-all-settings-types` passes (movian#260).
+
+    Measured when this was written, the two left off add 69 diagnostics.
+    34 are the examples' own code: unannotated helper parameters,
+    `catch (err)`, `this[...]`. 35 are callbacks passed to slots typed
+    `any` -- the scrobbler's `on*` and, in v1, `addURI`, `addItemHook`'s
+    `handler` and the `create*` of what `createSettings` returns -- and
+    giving those a signature is a narrowing that needs its own proof. A
+    slot that HAS a signature losing it (TS7006, ADR-0005) is pinned slot by
+    slot in `generated-positive.ts`.
+    """
     sources = sorted(entry.glob("*.js"))
     declarations = [GENERATED_DTS]
     if _example_apiversion(entry) == 1:
         declarations.append(GENERATED_V1_DTS)
     command = [
         tsc, "--noEmit", "--allowJs", "--checkJs",
+        "--strict", "--noImplicitAny", "false",
+        "--useUnknownInCatchVariables", "false",
         "--target", "ES5", "--lib", "ES5",
         "--module", "commonjs", "--moduleResolution", "node",
         "--pretty", "false", "--noErrorTruncation",
