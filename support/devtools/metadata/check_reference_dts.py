@@ -508,6 +508,8 @@ THIS_FIELD_RE = re.compile(
     r"(?<![.\w])this\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
 DIAGNOSTIC_RE = re.compile(
     r"^(.*?)\((\d+),(\d+)\): error TS(\d+):", re.MULTILINE)
+# A diagnostic tsc attaches to no file: no `path(line,col): ` before it.
+FILELESS_DIAGNOSTIC_RE = re.compile(r"^error TS\d+:.*$", re.MULTILINE)
 EXPECTED_DIAGNOSTIC_RE = re.compile(r"EXPECT_TS(\d+)")
 PLUGIN_ASSIGN_RE = re.compile(
     r'duk_put_prop_string\(\s*ctx\s*,\s*plugin_obj_idx\s*,\s*"([^"]+)"'
@@ -2394,6 +2396,25 @@ def _actual_diagnostics(output: str) -> set[tuple[str, int, int]]:
     }
 
 
+def _fileless_failure(subject: str, output: str) -> str | None:
+    """Fail `subject` when tsc reported an error attached to no file.
+
+    Such an error is raised against the compile, not at a position in any
+    input, and a gate that reads only diagnostics against inputs reads that
+    compile as clean. tsc 6.0.3 rejects `--target ES5` and
+    `--moduleResolution node` this way (TS5107, exit 2) and checks nothing:
+    the example gate printed OK, and the core-module gate advised deleting
+    every curated entry (movian#270).
+    """
+    fileless = FILELESS_DIAGNOSTIC_RE.findall(output)
+    if not fileless:
+        return None
+    return ("%s: tsc reported an error attached to no file, a fault in the "
+            "compile itself rather than in any input, so the absence of "
+            "other diagnostics proves nothing:\n%s"
+            % (subject, "\n".join(fileless)))
+
+
 def check_typescript(tsc: str) -> list[str]:
     errors: list[str] = []
     positive = _run_tsc(tsc, POSITIVE_FIXTURE)
@@ -2968,6 +2989,10 @@ def _check_one_example(tsc: str, entry: Path) -> str | None:
         command, cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, check=False,
         timeout=SUBPROCESS_TIMEOUT_SECONDS)
+    fileless = _fileless_failure(
+        "plugin_examples/%s" % _example_name(entry), result.stdout)
+    if fileless is not None:
+        return fileless
     # Only diagnostics against the example itself. A declaration file's
     # own diagnostics belong to the fixtures above, and counting them here
     # would make this gate fail for a reason it cannot explain.
@@ -3143,6 +3168,13 @@ def check_core_modules(tsc: str) -> tuple[list[str], dict[str, int]]:
         check=False,
         timeout=SUBPROCESS_TIMEOUT_SECONDS,
     )
+    # Before the comparison, not beside it: a compile tsc refused reports
+    # none of the listed diagnostics, and the comparison would then call
+    # every entry stale and advise removing it.
+    fileless = _fileless_failure("core modules", result.stdout)
+    if fileless is not None:
+        errors.append(fileless)
+        return errors, {}
     actual = _core_module_diagnostics(result.stdout)
 
     for key in sorted(actual - set(expected)):
