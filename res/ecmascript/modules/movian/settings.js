@@ -266,7 +266,7 @@ sp.createMultiOpt = function(id, title, options, callback, persistent) {
 /**
  * @param {string} id
  * @param {string} title
- * @param {string} icon
+ * @param {string|null} icon
  * @param {string} desc
  */
 exports.globalSettings = function(id, title, icon, desc) {
