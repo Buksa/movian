@@ -1567,7 +1567,7 @@
       "type": "object"
     }
   },
-  "capturedAt": 1788745644681,
+  "capturedAt": 1790554872702,
   "globalSettingsError": null,
   "inputs": {
     "configuration": {
@@ -1712,7 +1712,7 @@
     "showtime/xml",
     "showtime/xmlrpc"
   ],
-  "movianVersion": "5.0.1017.gf1c26",
+  "movianVersion": "5.0.1048.ga4945",
   "runtimeInputs": {
     "plugin/introspector.js": "a9ac1ac66c2dcac7b5cf5c371b9a41b9b12e88185be9a153a55011ddfaad71da",
     "plugin/plugin.json": "fd18086f0d952ee9ef1391ac3f443bb53a7b4f994063c9c6675f560852812e85",
@@ -1727,7 +1727,7 @@
     "res/ecmascript/modules/movian/popup.js": "a66c8f6e7f98b38221c994929a0266d9757c8898e7d1d77b26830f2aa3546b7d",
     "res/ecmascript/modules/movian/prop.js": "e6755e37f95ec6d123f42c021433baed9c6c3e0cc680dc8f673626552e01d9cf",
     "res/ecmascript/modules/movian/service.js": "37f6833df41fda1f8f28f3930c5e83a18c96fc1cee6dc66b96e86eb33e8abeee",
-    "res/ecmascript/modules/movian/settings.js": "6e5119406a7be436c8253ff9a8fac7ea6b1866c629a3d1ccf5357c0a5eb31e58",
+    "res/ecmascript/modules/movian/settings.js": "fbdcdef9e899dba2a3106f3cc6644118ff1eacba9fd6b0151eabe0cc89735dc3",
     "res/ecmascript/modules/movian/sqlite.js": "4f6fc04b357d6cdc61570b866f8e1908ed3f4e7bf103528d0c8538d0ca42e559",
     "res/ecmascript/modules/movian/store.js": "10890fc9a9c0b21cc8929efd3c6678e1e5ff1f696c57dd95ad0abdb6ea6977a2",
     "res/ecmascript/modules/movian/subtitles.js": "1ec2e9525234df0fabadbf089c8f0e7a7930a657a6d11f8f046bda177b5544f8",

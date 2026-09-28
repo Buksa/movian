@@ -5758,7 +5758,7 @@
           {
             "docParams": {
               "desc": "string",
-              "icon": "string",
+              "icon": "string|null",
               "id": "string",
               "title": "string"
             },
@@ -10543,6 +10543,6 @@
       }
     ]
   },
-  "movianRevision": "f2c48c82a9cc5e2ea1b435072d0b8a5c415323f8",
+  "movianRevision": "a4945b6bfae5d0e71c40435419bc8e076ee2ae0b",
   "schemaVersion": 1
 }
