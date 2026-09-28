@@ -73,11 +73,13 @@ jobs:
           node-version: '22'
 
       # Pinned inside the band `check_reference_dts.py` enforces
-      # (TSC_SUPPORTED_MIN 5.3 .. TSC_SUPPORTED_BELOW 7.0). The negative
+      # (TSC_SUPPORTED_MIN 5.3 .. TSC_SUPPORTED_BELOW 6.0). The negative
       # fixtures pin exact diagnostic codes and TypeScript renumbers them across
       # releases, so `latest` would eventually red a CORRECT tree -- measured on
-      # 5.2.2 and 7.0.2 during #165. The checker refuses an out-of-band compiler
-      # by design; pinning here means it never has to.
+      # 5.2.2 and 7.0.2 during #165. 6.0.3 reds it another way: it refuses the
+      # options the example and core-module compiles pass (#270). The checker
+      # refuses an out-of-band compiler by design; pinning here means it never
+      # has to.
       - name: Install TypeScript
         run: npm install -g typescript@5.7.3
 

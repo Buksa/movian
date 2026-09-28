@@ -2598,17 +2598,27 @@ def _declaration_re(member: str) -> re.Pattern[str]:
 # The negative fixtures pin exact diagnostic CODES, and TypeScript renumbers
 # them across releases: on this tree 5.2.2 reports TS2345 where the fixture
 # pins TS2353, and 7.0.2 reports TS2739 where it pins TS2345 -- both on a
-# correct tree. Measured pass: 5.3.3, 5.7.3, 5.9.3, 6.0.3. Since the tsc gate
-# is mandatory, an unsupported compiler on PATH would otherwise red a clean
-# checkout with a message blaming the fixture. Widen the band only after
-# running the fixtures under the new compiler.
+# correct tree. Measured pass: 5.3.3, 5.6.3, 5.7.3, 5.9.3.
+#
+# 6.0.3 passes the fixtures, and the band still ends below it: the
+# plugin_examples and core-module compiles pass `--target ES5` and
+# `--moduleResolution node`, which 6.0.3 rejects (TS5107, exit 2) before
+# checking anything. `--ignoreDeprecations 6.0` lets them run, but 5.7.3
+# rejects that value (TS5103), and under it the core-module compile reports
+# 119 diagnostics the curated list does not account for, 57 of them TS7006
+# (movian#270).
+#
+# Since the tsc gate is mandatory, an unsupported compiler on PATH would
+# otherwise red a clean checkout with a message blaming the fixture. Widen the
+# band only after running the fixtures AND those two compiles under the new
+# compiler.
 TSC_VERSION_RE = re.compile(r"Version\s+(\d+)\.(\d+)\.(\d+)")
 TSC_SUPPORTED_MIN = (5, 3)
-TSC_SUPPORTED_BELOW = (7, 0)
+TSC_SUPPORTED_BELOW = (6, 0)
 
 
 def _check_tsc_version(tsc: str) -> str | None:
-    """Reject a compiler whose diagnostic numbering the fixtures do not pin."""
+    """Reject a compiler the gates were not measured to pass under."""
     result = subprocess.run(
         [tsc, "--version"], text=True, stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, check=False,
@@ -2621,10 +2631,11 @@ def _check_tsc_version(tsc: str) -> str | None:
                 % (tsc, (result.stdout or "").strip()[:120]))
     version = tuple(int(part) for part in match.groups())
     if not TSC_SUPPORTED_MIN <= version[:2] < TSC_SUPPORTED_BELOW:
-        return ("tsc %s (%s) is outside the supported range >=%s,<%s; the "
-                "negative fixtures pin exact diagnostic codes, so an "
-                "unsupported compiler reports a fixture mismatch on a "
-                "CORRECT tree. Install a supported tsc or put one earlier "
+        return ("tsc %s (%s) is outside the supported range >=%s,<%s; a "
+                "CORRECT tree fails under it, because releases outside the "
+                "band renumber the diagnostic codes the negative fixtures "
+                "pin or reject options the plugin_examples and core-module "
+                "compiles pass. Install a supported tsc or put one earlier "
                 "on PATH."
                 % (".".join(str(part) for part in version), tsc,
                    ".".join(str(part) for part in TSC_SUPPORTED_MIN),

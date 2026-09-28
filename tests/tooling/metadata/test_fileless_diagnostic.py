@@ -12,17 +12,23 @@ what 6.0.3 printed. The other half compiles for real under the tsc on PATH:
 a diagnostic against a declaration file must still not fail the example gate,
 and an API break must still turn it red -- the check that goes green when
 nothing compiles.
+
+The supported band ends below 6.0 for the same reason, so `gen.py --check`
+refuses 6.x before it runs any compile at all.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import io
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -105,6 +111,32 @@ class AFilelessDiagnosticFailsTheGate(unittest.TestCase):
             self.assertIn(line, report)
         # The curated list is fine; telling the reader to empty it is wrong.
         self.assertNotIn("no longer fires", report)
+
+
+class TheBandEndsBelowSix(unittest.TestCase):
+    def setUp(self) -> None:
+        self.directory = scratch_directory(self)
+
+    def test_tsc_6_is_refused_before_anything_compiles(self) -> None:
+        replaying_tsc(self.directory, "6.0.3")
+        stderr = io.StringIO()
+        with mock.patch.dict(os.environ, {"PATH": str(self.directory)}), \
+                mock.patch.object(sys, "argv", [str(CHECKER)]), \
+                redirect_stdout(io.StringIO()), redirect_stderr(stderr):
+            status = crd.main()
+        self.assertEqual(status, 1)
+        self.assertIn("is outside the supported range >=5.3,<6.0",
+                      stderr.getvalue())
+        compiles = self.directory / "compiles.log"
+        if compiles.exists():
+            self.fail("tsc compiled before the band refused it:\n"
+                      + compiles.read_text())
+
+    def test_the_last_measured_5_x_is_still_admitted(self) -> None:
+        # The other side of the edge, so a check refusing everything
+        # cannot pass the test above.
+        self.assertIsNone(crd._check_tsc_version(
+            str(replaying_tsc(self.directory, "5.9.3"))))
 
 
 def with_create_info_icon(icon_type: str) -> str:
