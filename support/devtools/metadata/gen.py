@@ -2438,15 +2438,14 @@ ALIAS_MEMBER_ASSIGN_RE = re.compile(
     r"\b([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
 NESTED_FUNCTION_HEAD_RE = re.compile(
     r"\bfunction\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\([^)]*\)\s*\{")
-# The name alone, not a call form, in text whose comments and strings are
-# masked: a spelling the readers do not take still says `defineProperties`.
+# The name alone, not a call form, in code: a spelling the readers do not
+# take still says `defineProperties`.
 DEFINE_PROPERTIES_CALL_RE = re.compile(
     r"(?<![A-Za-z0-9_$])defineProperties(?![A-Za-z0-9_$])")
-# `['defineProperties']`, in text whose strings are intact. Where the
-# brackets are code and read a member, `Object['defineProperties']`, it is the
-# one string that spells the call; any other string only mentions the name.
-DEFINE_PROPERTIES_MEMBER_RE = re.compile(
-    r"\[\s*(['\"])(defineProperties)\1\s*\]")
+# The one string that spells the call, where brackets read a member with it:
+# `Object['defineProperties']`. Any other string only mentions the name.
+DEFINE_PROPERTIES_LITERALS = frozenset({
+    "'defineProperties'", '"defineProperties"'})
 DEFINE_PROPERTY_CALL_RE = re.compile(
     r"Object\.defineProperty\(\s*([^,]+?)\s*,\s*([^,]+?)\s*,\s*\{")
 NATIVE_CALL_RE = re.compile(
@@ -3442,7 +3441,7 @@ def _scan_shape_properties(
     # readers take `Object.defineProperties(` alone, and
     # `Object['defineProperties'](...)`, a space before `(` or an alias
     # gave the shape no members and no warning (movian#272).
-    for offset in _define_properties_occurrences(text, comment_text):
+    for offset in _define_properties_occurrences(path):
         if offset not in read_calls:
             _shape_diagnostic(
                 path, comment_text, offset,
@@ -3512,34 +3511,54 @@ def _census_offset(call: re.Match[str], base: int = 0) -> int:
     return base + call.start() + len("Object.")
 
 
-def _define_properties_occurrences(text: str, kept: str) -> list[int]:
+def _define_properties_occurrences(path: Path) -> list[int]:
     """Where the module spells `defineProperties` as code, in source order:
-    the name in `text`, whose comments and strings are masked, and the
-    string `['defineProperties']` in `kept`, whose strings are intact, where
-    the brackets are code and read a member.
+    the name in a code span, and a literal span `'defineProperties'` or
+    `"defineProperties"` in brackets that are code and read a member.
+
+    A census needs an enumerator independent of the builder (ADR-0004), so
+    this walks the module again with `_js_spans`, not the readers' mask:
+    `var r = /'/;` or a string continued onto the next line makes the mask
+    hide the code after it, and a census reading the masked text was blind
+    to a call there exactly where the readers were. The offsets are in the
+    readers' coordinates all the same -- both read the lines `_js_lines`
+    gives, and the masks keep every column -- so each compares with the
+    offset `_census_offset` gives a call a reader took.
 
     A string is not a call. Read with strings intact, `var s =
     'defineProperties';` and `"Object.defineProperties"` were reported as
     calls no reader takes (movian#272). `var k = 'defineProperties';
     Object[k](...)` was reported only for its string, and is not now: a name
     computed through a variable is not seen.
-
-    The census reads the text the readers read, so a string the mask
-    misreads -- a regex literal holding a quote, a string continued onto the
-    next line -- hides a call from both.
     """
+    source = "\n".join(_js_lines(path.read_text(encoding="utf-8")))
+    # The source with every literal and comment blanked, newlines kept, so
+    # an offset into it is an offset into the source.
+    parts: list[str] = []
+    literals: list[tuple[int, str]] = []
+    position = 0
+    for kind, span in _js_spans(source):
+        if kind == "literal":
+            literals.append((position, span))
+        parts.append(span if kind == "code" else re.sub(r"[^\n]", " ", span))
+        position += len(span)
+    code = "".join(parts)
     offsets = [match.start()
-               for match in DEFINE_PROPERTIES_CALL_RE.finditer(text)]
-    offsets += [match.start(2)
-                for match in DEFINE_PROPERTIES_MEMBER_RE.finditer(kept)
-                if text[match.start()] == "["
-                and _reads_a_member(text, match.start())]
+               for match in DEFINE_PROPERTIES_CALL_RE.finditer(code)]
+    for start, span in literals:
+        if span not in DEFINE_PROPERTIES_LITERALS:
+            continue
+        before = code[:start].rstrip()
+        if (before.endswith("[")
+                and code[start + len(span):].lstrip().startswith("]")
+                and _reads_a_member(code, len(before) - 1)):
+            offsets.append(start + 1)
     return sorted(offsets)
 
 
 def _reads_a_member(text: str, bracket: int) -> bool:
-    """Whether the `[` at `bracket` in `text`, whose comments and strings are
-    masked, reads a member of what precedes it: a name, `)` or `]`. After
+    """Whether the `[` at `bracket` in `text`, whose comments and literals
+    are blanked, reads a member of what precedes it: a name, `)` or `]`. After
     anything else it opens an array literal, and after a word
     `_JS_REGEX_KEYWORDS` names too: an expression begins there, so
     `return ['defineProperties']` returns an array, as `return /x/` returns

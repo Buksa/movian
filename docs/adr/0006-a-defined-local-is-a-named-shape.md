@@ -134,9 +134,12 @@ brackets that read a member -- is read by nothing and reported with its line
 (#272). A string that only mentions the name, an array literal
 `['defineProperties']` included, is not a call and is not reported. A name
 built at run time, `Object[k]`, is not seen, even when `k` holds
-`'defineProperties'`. The census reads the text the readers read, so a string
-the mask misreads -- a regex literal holding a quote, a string continued onto
-the next line -- hides a call from both.
+`'defineProperties'`. The census walks the module again with its own scanner
+of code, literals and comments, not the readers' mask: a census needs an
+enumerator independent of the builder (ADR-0004), and a regex literal holding
+a quote or a string continued onto the next line makes the mask hide the code
+after it, so a census reading the masked text was blind exactly where the
+readers were.
 
 ## Considered
 

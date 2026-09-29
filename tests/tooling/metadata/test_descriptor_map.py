@@ -274,6 +274,16 @@ UNREAD = [
     ("a call inside a callback",
      "later(function() {\n"
      "    Object.defineProperties(this, { a: { value: 1 } });\n  });", 3),
+    # The readers' string mask misreads both lines: the regex's quote, and
+    # the quote closing the continued string, each open a "string" that
+    # hides the call. The census walks the module with its own scanner, so
+    # it is not blind where they are (ADR-0004).
+    ("a call after a regex literal holding a quote",
+     "var r = /'/; Object.defineProperties (this, { a: { value: 1 } }); "
+     "var q = '';", 2),
+    ("a call after a string continued onto the next line",
+     "var s = 'x\\\n"
+     "  y'; Object.defineProperties (this, { a: { value: 1 } });", 3),
 ]
 
 # `(label, constructor body, what C records)`. A string is not a call. The
@@ -304,6 +314,13 @@ MENTIONED = [
      "var names = ['defineProperties'];", []),
     ("an array literal after a keyword that takes an operand",
      "if (d) {\n    return ['defineProperties'];\n  }", []),
+    ("the name as a later element of an array literal",
+     "var names = [d, 'defineProperties'];", []),
+    # A member read, but its name is not `defineProperties`.
+    ("a member keyed by a string that says more than the name",
+     "d['Object.defineProperties'] = 1;", []),
+    ("a member name built from the string",
+     "var v = d['defineProperties' + d];", []),
 ]
 
 
