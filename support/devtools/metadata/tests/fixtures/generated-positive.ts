@@ -171,8 +171,12 @@ new page.Route('accessor:(.*)', (routed, match) => {
     routed.appendItem('u', 'directory', {}).addOptAction('t', anyFunction);
     routed.appendAction('t', anyFunction);
 });
+// #266: the `@param` signature, `(page: Page, query: string) => void`. That
+// `query` is no longer the `any` of a rest parameter is pinned in the
+// negative fixture.
 new page.Searcher('Accessor', 'icon.png', (searched, query) => {
-    void searched; void query;
+    const queryPayload: string = query;
+    searched.appendItem('search:' + queryPayload, 'video', {});
 });
 prop.subscribeValue(root, (value) => { void value; });
 subtitles.addProvider((req) => { void req; });
