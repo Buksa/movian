@@ -3707,9 +3707,11 @@ def _factory_result(
         if member is None or member.group(1) not in members:
             return None
         # `delete x.value` names a member the shape has and removes it, and
-        # `x.model()` runs what the member holds with the object as `this`.
+        # `x.model()` runs what the member holds with the object as `this`
+        # -- as does `(x.model)()`, since a parenthesized reference keeps
+        # its base (ES5.1 11.1.6).
         if re.search(r"\bdelete[\s(]*$", region[:use.start()]) or \
-                re.match(r"\s*\(", region[use.end() + member.end():]):
+                re.match(r"[\s)]*\(", region[use.end() + member.end():]):
             return None
     return shape["name"]
 

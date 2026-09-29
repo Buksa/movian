@@ -108,7 +108,8 @@ shadowing F, a reassignment. In the method:
 - x occurs otherwise only as `x.<a member of the shape>`, which reads or
   writes a member the object already has -- not after `delete`, which
   removes it, and not called, which runs what the member holds with the
-  object as `this` -- and in `return x`, the method's only own return,
+  object as `this`, parenthesized or not: `(x.m)()` keeps the reference
+  (ES5.1 11.1.6) -- and in `return x`, the method's only own return,
   always reached, on one line.
 
 `movian/settings`' four methods use `item` only as `item.model...`, and pass.

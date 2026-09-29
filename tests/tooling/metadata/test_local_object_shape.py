@@ -528,6 +528,13 @@ CALLER_REFUSED = [
     # A function held in a value member runs with the object as `this`.
     ("a member of the shape is called",
      variant((CALLER_RETURN, "  item.model();\n  return item;\n}\n"))),
+    # A parenthesized reference keeps its base (ES5.1 11.1.6), so `this` is
+    # still the object.
+    ("a member of the shape is called through parentheses",
+     variant((CALLER_RETURN, "  (item.model)();\n  return item;\n}\n"))),
+    ("a member of the shape is called through two pairs of parentheses",
+     variant((CALLER_RETURN,
+              "  ((item.model))\n  ();\n  return item;\n}\n"))),
     ("a member the shape does not have is added",
      variant((CALLER_RETURN, "  item.extra = 1;\n  return item;\n}\n"))),
     ("the local is handed to a function",
