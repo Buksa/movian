@@ -3530,6 +3530,13 @@ def _define_properties_occurrences(path: Path) -> list[int]:
     calls no reader takes (movian#272). `var k = 'defineProperties';
     Object[k](...)` was reported only for its string, and is not now: a name
     computed through a variable is not seen.
+
+    `_js_spans` has its own blind spot. `_js_regex_allowed` reads a `/`
+    right after `}` as a regex, which is safe for stripping comments,
+    because a mistaken regex is copied out verbatim. It is not safe here:
+    this blanks every literal, so `{} / Object['defineProperties'](...) /
+    2` hides the call. That is accepted (#272): dividing an object literal
+    is absurd, and no lexer settles `}` then `/` without parsing.
     """
     source = "\n".join(_js_lines(path.read_text(encoding="utf-8")))
     # The source with every literal and comment blanked, newlines kept, so

@@ -139,7 +139,12 @@ of code, literals and comments, not the readers' mask: a census needs an
 enumerator independent of the builder (ADR-0004), and a regex literal holding
 a quote or a string continued onto the next line makes the mask hide the code
 after it, so a census reading the masked text was blind exactly where the
-readers were.
+readers were. The scanner has a blind spot of its own: it reads a `/` right
+after `}` as the start of a regex, the half that is safe for stripping
+comments. Here a literal is blanked, so a division there --
+`{} / Object['defineProperties'](...) / 2`, valid ES5 and absurd -- hides
+the call from the census as well. No lexer settles `}` then `/` without
+parsing, so it is accepted.
 
 ## Considered
 
