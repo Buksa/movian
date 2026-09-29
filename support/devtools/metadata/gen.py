@@ -3730,7 +3730,7 @@ class _DefinedLocal(NamedTuple):
 
 
 def _scan_local_object_shapes(
-        path: Path, text: str
+        path: Path, text: str, shape_names: set[str]
 ) -> tuple[list[dict[str, Any]], set[int]]:
     """`(shapes, handled calls)` for the locals a module function builds with
     `Object.defineProperties` and returns (ADR-0006).
@@ -3746,6 +3746,9 @@ def _scan_local_object_shapes(
     is a named shape of the same kind: it claims the member SET and types
     every member `any`. The shape is named after the local, the way the
     shared object `sp` is named after its variable.
+
+    `shape_names` are the names the module's prototype shapes take, which a
+    local may not.
 
     `handled calls` are where each call read here spells `defineProperties`,
     so the census does not also report them.
@@ -3777,12 +3780,15 @@ def _scan_local_object_shapes(
                 region, open_brace, name, local, calls)
             # One interface per name in a module block: TypeScript MERGES a
             # second declaration into the first, so a return type naming it
-            # would mean both.
+            # would mean both. A prototype shape is one whether or not its
+            # constructor is declared: `item = function () {}` is an
+            # implicit global, and `item.prototype.actual` still emits
+            # `interface item`.
             if refusal is None and (
                     _top_level_matches(text, re.compile(
                         r"\b(?:function|var|let|const)\s+(%s)\b"
                         % re.escape(name)))
-                    or name in exported):
+                    or name in exported or name in shape_names):
                 refusal = "the name is already declared in this module"
             if refusal is None and name in TS_PREDEFINED_TYPE_NAMES:
                 refusal = "the name is a type TypeScript predefines"
@@ -3865,10 +3871,16 @@ def _scan_local_object_shapes(
 def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
     """Scan top-level prototype and shared-object assignments."""
     text = _masked_js_text(path)
-    local_shapes, local_calls = _scan_local_object_shapes(path, text)
+    prototype_matches = _top_level_matches(text, PROTOTYPE_FUNCTION_RE)
+    top_alias_matches = _top_level_matches(text, PROTOTYPE_ALIAS_RE)
+    # The receivers below are keyed on these, and each is named before any
+    # of its members is read -- so a local that would take a prototype
+    # shape's name is declined before a method is typed as returning it.
+    local_shapes, local_calls = _scan_local_object_shapes(
+        path, text, {_shape_owner(match.group(1), text)
+                     for match in prototype_matches + top_alias_matches})
     factories = {shape["factory"]: shape for shape in local_shapes}
     by_receiver: dict[str, dict[str, dict[str, Any]]] = {}
-    prototype_matches = _top_level_matches(text, PROTOTYPE_FUNCTION_RE)
     top_prototype_starts = {
         match.start(1) for match in prototype_matches
     }
@@ -3889,9 +3901,7 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
 
     unresolved_aliases: list[tuple[str, str, str, int]] = []
     alias_matches = list(PROTOTYPE_ALIAS_RE.finditer(text))
-    top_alias_starts = {
-        match.start(1) for match in _top_level_matches(text, PROTOTYPE_ALIAS_RE)
-    }
+    top_alias_starts = {match.start(1) for match in top_alias_matches}
     for match in alias_matches:
         receiver, name, target_receiver, target = match.groups()
         line = _source_line(text, match.start(1))

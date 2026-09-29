@@ -32,9 +32,12 @@ its variable. `SettingItem`, the accepted corpus's name, is not in the source
 and would need a curated sidecar. A module block holds one interface per name
 and TypeScript merges a second declaration into the first, so a local is
 declared only when its name is not already declared at the module's top level
-or exported, no other function builds a local of that name, and TypeScript
-accepts it as an interface name -- `var object = {}` is legal JavaScript and
-`interface object` is TS2427.
+or exported, no prototype shape of the module has it, no other function builds
+a local of that name, and TypeScript accepts it as an interface name -- `var
+object = {}` is legal JavaScript and `interface object` is TS2427. A prototype
+shape takes its receiver's name whether or not a constructor is declared:
+`item = function () {}` is an implicit global, and `item.prototype.actual =
+...` still emits `interface item` (#272).
 
 ## When it holds
 
