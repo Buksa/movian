@@ -123,6 +123,11 @@ not the code that calls the four methods. It assumes `Object` is the
 intrinsic, as every `Object.defineProperties` reader in the generator does --
 a module that rebinds `Object` is not detected.
 
+The readers take the call spelled `Object.defineProperties(` only. Every
+other mention of the name in the module -- `Object['defineProperties']`, a
+space before `(`, an alias -- is read by nothing and reported with its line
+(#272). A name built at run time, `Object[k]`, is not seen.
+
 ## Considered
 
 - **Record only.** Read the descriptors into the artifact, silence the

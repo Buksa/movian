@@ -2438,8 +2438,11 @@ ALIAS_MEMBER_ASSIGN_RE = re.compile(
     r"\b([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
 NESTED_FUNCTION_HEAD_RE = re.compile(
     r"\bfunction\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\([^)]*\)\s*\{")
+# The name alone, not a call form, in text whose strings are intact: a
+# spelling the readers do not take still says `defineProperties`, and
+# `Object['defineProperties']` says it in a string.
 DEFINE_PROPERTIES_CALL_RE = re.compile(
-    r"Object\.defineProperties\(\s*([^,]+?)\s*,\s*\{")
+    r"(?<![A-Za-z0-9_$])defineProperties(?![A-Za-z0-9_$])")
 DEFINE_PROPERTY_CALL_RE = re.compile(
     r"Object\.defineProperty\(\s*([^,]+?)\s*,\s*([^,]+?)\s*,\s*\{")
 NATIVE_CALL_RE = re.compile(
@@ -3276,9 +3279,12 @@ def _scan_shape_properties(
 ) -> dict[str, dict[str, dict[str, Any]]]:
     comment_text = _masked_js_text(path, mask_strings=False)
     properties: dict[str, dict[str, dict[str, Any]]] = {}
-    # Seeded with the calls another reader already took, so an
-    # unsupported-target warning names only what nothing read.
-    handled_calls: set[int] = set(handled or ())
+    # The `Object.defineProperty` targets the readers below took.
+    handled_calls: set[int] = set()
+    # Where each `Object.defineProperties` a reader took spells the method,
+    # seeded with the local scan's, so the census below reports only what
+    # nothing read.
+    read_calls: set[int] = set(handled or ())
 
     def add_call_properties(
             match: re.Match[str], receiver: str, base_offset: int
@@ -3361,15 +3367,14 @@ def _scan_shape_properties(
             target = match.group(1)
             receiver = owner_receiver if target == "this" \
                 else target_receiver(target)
+            read_calls.add(_census_offset(match, base_offset))
             if receiver not in receivers and receiver not in shared_receivers:
                 _shape_diagnostic(
                     path, comment_text, base_offset + match.start(1),
                     "ignored unsupported Object.defineProperties target %s" %
                     target)
-                handled_calls.add(base_offset + match.start(1))
                 continue
             add_call_properties(match, receiver, base_offset)
-            handled_calls.add(base_offset + match.start(1))
 
         for match in _top_level_matches(body, DEFINE_PROPERTY_RE):
             target = match.group(1)
@@ -3388,15 +3393,14 @@ def _scan_shape_properties(
     for match in _top_level_matches(text, DEFINE_PROPERTIES_RE):
         target = match.group(1)
         receiver = target_receiver(target)
+        read_calls.add(_census_offset(match))
         if receiver not in receivers:
             _shape_diagnostic(
                 path, comment_text, match.start(1),
                 "ignored unsupported Object.defineProperties target %s" %
                 target)
-            handled_calls.add(match.start(1))
             continue
         add_call_properties(match, receiver, 0)
-        handled_calls.add(match.start(1))
 
     for match in _top_level_matches(comment_text, DEFINE_PROPERTY_RE):
         target = match.group(1)
@@ -3430,12 +3434,16 @@ def _scan_shape_properties(
             comment_text[open_index + 1:end - 1],
             receiver, open_index + 1)
 
+    # A census of the method's name, however the call is spelled: the
+    # readers take `Object.defineProperties(` alone, and
+    # `Object['defineProperties'](...)`, a space before `(` or an alias
+    # gave the shape no members and no warning (movian#272).
     for match in DEFINE_PROPERTIES_CALL_RE.finditer(comment_text):
-        if match.start(1) not in handled_calls:
+        if match.start() not in read_calls:
             _shape_diagnostic(
-                path, comment_text, match.start(1),
-                "ignored unsupported Object.defineProperties target %s" %
-                match.group(1).strip())
+                path, comment_text, match.start(),
+                "ignored unsupported Object.defineProperties call: no reader "
+                "takes this spelling or target")
     for match in DEFINE_PROPERTY_CALL_RE.finditer(comment_text):
         if match.start(1) not in handled_calls:
             _shape_diagnostic(
@@ -3492,6 +3500,12 @@ def _descriptor_keys(text: str) -> set[str] | None:
                 return None
         keys.add(entry.group(1))
     return keys
+
+
+def _census_offset(call: re.Match[str], base: int = 0) -> int:
+    """Where a `DEFINE_PROPERTIES_RE` call spells `defineProperties`: the
+    offset `DEFINE_PROPERTIES_CALL_RE` finds it at."""
+    return base + call.start() + len("Object.")
 
 
 DESCRIPTOR_MAP_KEY_RE = re.compile(
@@ -3707,6 +3721,8 @@ class _DefinedLocal(NamedTuple):
     name: str
     # Offsets of each call's target, in the module text.
     targets: list[int]
+    # Where each call spells `defineProperties`, for the census.
+    calls: list[int]
     members: dict[str, dict[str, Any]]
     refusal: str | None
 
@@ -3729,8 +3745,8 @@ def _scan_local_object_shapes(
     every member `any`. The shape is named after the local, the way the
     shared object `sp` is named after its variable.
 
-    `handled calls` are the offsets of the targets read here, so the
-    unsupported-target warning does not also fire for them.
+    `handled calls` are where each call read here spells `defineProperties`,
+    so the census does not also report them.
     """
     comment_text = _masked_js_text(path, mask_strings=False)
     # Every spelling the export scanner reads, `exports['x'] =` included.
@@ -3806,6 +3822,7 @@ def _scan_local_object_shapes(
             found.append(_DefinedLocal(
                 factory.group(1), name,
                 [shift + call.start(1) for call in calls],
+                [_census_offset(call, shift) for call in calls],
                 properties.get(name, {}), refusal))
 
     builders: dict[str, int] = {}
@@ -3818,7 +3835,7 @@ def _scan_local_object_shapes(
         refusal = local.refusal
         if refusal is None and builders[local.name] > 1:
             refusal = "the name is built by more than one function"
-        handled.update(local.targets)
+        handled.update(local.calls)
         if refusal is not None:
             for target in local.targets:
                 _shape_diagnostic(

@@ -119,12 +119,14 @@ class TheScanReadsALocalTarget(unittest.TestCase):
         self.assertNotIn("item", by_name(shapes))
         (method,) = by_name(shapes)["sp"]["methods"]
         self.assertIsNone(method.get("returns"))
+        # No reader takes it, so the census does, at the call's line.
         self.assertIn(
-            "ignored unsupported Object.defineProperties target item", stderr)
+            ":5: warning: ignored unsupported Object.defineProperties call",
+            stderr)
 
     def test_the_read_call_is_not_reported_as_unsupported(self) -> None:
         _, stderr = scan(FACTORY)
-        self.assertNotIn("defineProperties target item", stderr)
+        self.assertNotIn("Object.defineProperties", stderr)
 
     def test_a_method_returning_the_factory_result_returns_the_shape(
             self) -> None:
@@ -596,8 +598,9 @@ class TheCorpus(unittest.TestCase):
              "createInt": "item", "createString": "item"})
 
     def test_no_defineProperties_target_is_left_unread(self) -> None:
-        """The warning #260 opened on, which printed on every run."""
-        self.assertNotIn("defineProperties target", self.stderr)
+        """The warning #260 opened on, which printed on every run -- and
+        the census's, which would name a spelling no reader takes."""
+        self.assertNotIn("Object.defineProperties", self.stderr)
 
 
 if __name__ == "__main__":

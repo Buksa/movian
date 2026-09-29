@@ -9,6 +9,9 @@ checked the map, so the other two recorded `a` from `{ a: {...} } && d`,
 which passes `d`. All three read a member's kind from text whose strings were
 intact.
 
+A call spelled other than `Object.defineProperties(` was neither read nor
+reported.
+
 Every probe is a form the corpus does not contain today and could tomorrow;
 `gen.py --check` pins the six calls it does contain, kinds included.
 """
@@ -240,7 +243,43 @@ class OneReadingForEveryTarget(unittest.TestCase):
                     self.assertEqual(members(shapes, shape), expected, stderr)
 
 
+# `(label, constructor body, the line that spells defineProperties)`. The
+# body sits in `function C(d) {` on line 1, so its own first line is line 2.
+UNREAD = [
+    # movian#272, as filed.
+    ("computed member access",
+     "Object['defineProperties'](this, { a: { value: 1 } });", 2),
+    ("a space before the argument list",
+     "Object.defineProperties (this, { a: { value: 1 } });", 2),
+    ("computed member access, double-quoted",
+     "Object[\"defineProperties\"](this, { a: { value: 1 } });", 2),
+    ("a line break before the argument list",
+     "Object.defineProperties\n  (this, { a: { value: 1 } });", 2),
+    ("a line break before the member name",
+     "Object\n    .defineProperties(this, { a: { value: 1 } });", 3),
+    ("an alias of the method",
+     "var define = Object.defineProperties;\n"
+     "  define(this, { a: { value: 1 } });", 2),
+    # Literal, but at a depth the constructor's reader does not take.
+    ("a call inside a block",
+     "if (d) {\n    Object.defineProperties(this, { a: { value: 1 } });\n"
+     "  }", 3),
+    ("a call inside a callback",
+     "later(function() {\n"
+     "    Object.defineProperties(this, { a: { value: 1 } });\n  });", 3),
+]
+
+
 class EveryCallIsReadOrReported(unittest.TestCase):
+    def test_a_call_no_reader_takes_is_reported_at_its_line(self) -> None:
+        for label, body, line in UNREAD:
+            with self.subTest(label):
+                shapes, stderr = scan(in_constructor(body))
+                self.assertEqual(members(shapes, "C"), [], stderr)
+                self.assertIn(
+                    "_descriptor_map_probe.js:%d: warning: ignored "
+                    "unsupported Object.defineProperties call" % line, stderr)
+
     def test_a_call_a_reader_takes_is_not_also_reported(self) -> None:
         for target, (build, shape, _) in TARGETS.items():
             with self.subTest(target=target):
