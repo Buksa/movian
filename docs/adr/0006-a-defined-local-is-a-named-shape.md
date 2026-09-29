@@ -80,6 +80,18 @@ itself -- and requires:
 A local that fails any of these keeps the unsupported-target warning, now
 with the reason.
 
+What the list says about a map is not the local's alone. The generator also
+reads `Object.defineProperties` on `this` in a constructor and on
+`X.prototype`, and all three targets share one reading of the call (#272): it
+begins and ends its statement, the map is the whole second argument, every
+descriptor is an object literal of descriptor keys with `get` and `set`
+written in place, and every key is one the scan can read and a plain
+identifier. A call that fails records no member and is reported with the
+reason. Where the call may sit differs by target -- the constructor's own
+body, the module's top level, F's own body. A member is an `accessor` when its
+descriptor has `get` or `set` among its own keys, read with strings masked:
+`value: 'get: x'` is a value.
+
 ## The caller
 
 A method returns the shape through `var x = F(...); ... return x;` only under

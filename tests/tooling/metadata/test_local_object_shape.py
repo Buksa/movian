@@ -306,6 +306,20 @@ REFUSED = [
     ("the call's result is written to",
      variant((CALL_CLOSE, "  }).extra = 1;\n  return item;")),
      NOT_WHOLE),
+    # The key was matched where strings are masked, so a quoted one never
+    # matched and its descriptor went unchecked.
+    ("a quoted key whose accessor is written elsewhere",
+     variant(("    value: {\n", "    'value': {\n"),
+             ("      set: function(v) { model.value = v; }\n",
+              "      set: group.mutate\n")),
+     NOT_INLINE),
+    # A refusal of the first call is not undone by a second that reads.
+    ("the first of two calls fails",
+     variant((CALL_CLOSE,
+              "  } && group.more);\n"
+              "  Object.defineProperties(item, { extra: { value: 1 } });\n"
+              "  return item;")),
+     NOT_WHOLE),
     ("a quoted key TypeScript cannot declare unquoted",
      variant(("    model: {\n", "    'foo-bar': { value: 1 },\n    model: {\n")),
      NOT_IDENTIFIER),

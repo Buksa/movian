@@ -3232,34 +3232,6 @@ def _shape_receiver_for_owner(
     return None
 
 
-def _property_names(
-        body: str, path: Path, text: str, offset: int
-) -> list[tuple[str, int, str]]:
-    names: list[tuple[str, int, str]] = []
-    cursor = 0
-    for field in _split_js_fields(body):
-        entry = re.match(
-            r"\s*(?:([A-Za-z_$][A-Za-z0-9_$]*)|"
-            r"(['\"])([^'\"]+)\2)\s*:", field, re.S)
-        if entry is None:
-            if field.strip():
-                _shape_diagnostic(
-                    path, text, offset + cursor,
-                    "ignored unsupported defineProperties key")
-            cursor += len(field) + 1
-            continue
-        descriptor = field[entry.end():]
-        kind = ("accessor"
-                if re.search(r"\b(?:get|set)\s*:", descriptor)
-                else "value")
-        names.append((
-            entry.group(1) or entry.group(3),
-            offset + cursor + field.find(entry.group(0).lstrip()),
-            kind))
-        cursor += len(field) + 1
-    return names
-
-
 def _add_property(
         properties: dict[str, dict[str, dict[str, Any]]],
         receiver: str, name: str, path: Path, text: str, offset: int,
@@ -3309,20 +3281,17 @@ def _scan_shape_properties(
     handled_calls: set[int] = set(handled or ())
 
     def add_call_properties(
-            source: str, match: re.Match[str], receiver: str,
-            base_offset: int
+            match: re.Match[str], receiver: str, base_offset: int
     ) -> None:
-        open_index = match.end() - 1
-        end = _balanced_end(source, open_index)
-        if end is None:
+        members, refusal = _read_descriptor_map(
+            path, text, comment_text, match, base_offset)
+        if refusal is not None:
             _shape_diagnostic(
                 path, comment_text, base_offset + match.start(1),
-                "ignored unterminated Object.defineProperties call")
+                "ignored unsupported Object.defineProperties target %s: %s"
+                % (match.group(1), refusal))
             return
-        body_start = base_offset + open_index + 1
-        for name, offset, kind in _property_names(
-                source[open_index + 1:end - 1],
-                path, comment_text, body_start):
+        for name, offset, kind in members:
             _add_property(properties, receiver, name,
                           path, comment_text, offset, kind)
 
@@ -3385,7 +3354,10 @@ def _scan_shape_properties(
                     base_offset + assignment.start(2),
                     kind=assignment_kind(assignment))
 
-        for match in _top_level_matches(body, DEFINE_PROPERTIES_RE):
+        # Matched and balanced where strings are masked, as every map is.
+        for match in _top_level_matches(
+                text[base_offset:base_offset + len(body)],
+                DEFINE_PROPERTIES_RE):
             target = match.group(1)
             receiver = owner_receiver if target == "this" \
                 else target_receiver(target)
@@ -3396,7 +3368,7 @@ def _scan_shape_properties(
                     target)
                 handled_calls.add(base_offset + match.start(1))
                 continue
-            add_call_properties(body, match, receiver, base_offset)
+            add_call_properties(match, receiver, base_offset)
             handled_calls.add(base_offset + match.start(1))
 
         for match in _top_level_matches(body, DEFINE_PROPERTY_RE):
@@ -3413,7 +3385,7 @@ def _scan_shape_properties(
             add_property_call(body, match, receiver, base_offset)
             handled_calls.add(base_offset + match.start(1))
 
-    for match in _top_level_matches(comment_text, DEFINE_PROPERTIES_RE):
+    for match in _top_level_matches(text, DEFINE_PROPERTIES_RE):
         target = match.group(1)
         receiver = target_receiver(target)
         if receiver not in receivers:
@@ -3423,7 +3395,7 @@ def _scan_shape_properties(
                 target)
             handled_calls.add(match.start(1))
             continue
-        add_call_properties(comment_text, match, receiver, 0)
+        add_call_properties(match, receiver, 0)
         handled_calls.add(match.start(1))
 
     for match in _top_level_matches(comment_text, DEFINE_PROPERTY_RE):
@@ -3488,33 +3460,97 @@ DESCRIPTOR_KEYS = frozenset({
     "value", "get", "set", "writable", "enumerable", "configurable"})
 
 
-def _inline_descriptor(text: str) -> bool:
-    """Whether `text`, a field's value in an `Object.defineProperties` map,
-    is an object literal of descriptor keys whose `get` and `set` are
-    function literals written in place.
+def _descriptor_keys(text: str) -> set[str] | None:
+    """The keys of `text`, a field's value in an `Object.defineProperties`
+    map, when it is an object literal of descriptor keys whose `get` and
+    `set` are function literals written in place; `None` otherwise.
 
     An accessor runs with the object as `this`, so a local-object shape
     holds only where every accessor is text the scan reads. `set: mutate`
     or a descriptor built elsewhere could add or remove members.
+
+    `text` has its strings and comments masked, so a key is one the
+    descriptor has: `value: 'get: x'` is a value descriptor.
     """
     text = text.strip()
     end = _balanced_end(text, 0) if text.startswith("{") else None
     if end is None or text[end:].strip():
-        return False
+        return None
+    keys: set[str] = set()
     for field in _split_js_fields(text[1:end - 1]):
         if not field.strip():
             continue
         entry = re.fullmatch(r"\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*(.*?)\s*",
                              field, re.S)
         if entry is None or entry.group(1) not in DESCRIPTOR_KEYS:
-            return False
+            return None
         if entry.group(1) in ("get", "set"):
             function = FIELD_FUNCTION_RE.match(entry.group(2))
             close = (_balanced_end(entry.group(2), function.end() - 1)
                      if function else None)
             if close is None or entry.group(2)[close:].strip():
-                return False
-    return True
+                return None
+        keys.add(entry.group(1))
+    return keys
+
+
+DESCRIPTOR_MAP_KEY_RE = re.compile(
+    r"\s*(?:([A-Za-z_$][A-Za-z0-9_$]*)|(['\"])([^'\"]+)\2)\s*:")
+
+
+def _read_descriptor_map(
+        path: Path, text: str, kept: str, call: re.Match[str], base: int = 0
+) -> tuple[list[tuple[str, int, str]], str | None]:
+    """`(members, refusal)` for the `Object.defineProperties(<target>, {...})`
+    that `call` matched `base` into `text`.
+
+    The one reading of a descriptor map, for every target the generator
+    reads -- `this` in a constructor, `X.prototype`, and a local
+    (ADR-0006). Each reader had its own, and only the local one checked
+    the map: the other two recorded `a` from `{ a: {...} } && d`, which
+    passes `d` (movian#272). A call that fails a check records no member,
+    and the reason is returned for the caller's warning.
+
+    `text` is the module with strings and comments masked, where the map
+    is balanced and each kind is read; `kept` is the same module with its
+    strings intact, where a quoted key is read. Masking keeps every
+    column, so one offset serves both. Each member is `(name, offset of
+    its key, "value" or "accessor")`.
+    """
+    start, open_index = base + call.start(), base + call.end() - 1
+    close = _balanced_end(text, open_index)
+    # `x && Object.defineProperties(...)` defines its members on one path,
+    # `{...} && d` passes `d`, and `(...).x = 1` writes to the object the
+    # call returns.
+    if (text[_statement_start(text, start, -1):start].strip()
+            or close is None
+            or not re.match(r"\s*\)\s*;", text[close:])):
+        return [], ("the map is not the whole second argument, or the call "
+                    "not a whole statement")
+    members: list[tuple[str, int, str]] = []
+    cursor = open_index + 1
+    for field in _split_js_fields(text[open_index + 1:close - 1]):
+        field_end = cursor + len(field)
+        key = DESCRIPTOR_MAP_KEY_RE.match(kept, cursor, field_end)
+        if key is not None:
+            name = key.group(1) or key.group(3)
+            # `'foo-bar'` cannot be declared unquoted, and `'x\u0061'` is
+            # the key `xa` at runtime, not what the text says.
+            if not IDENT_RE.fullmatch(name):
+                return [], "a key that is not a plain identifier"
+            keys = _descriptor_keys(text[key.end():field_end])
+            if keys is None:
+                return [], ("a descriptor that is not an object literal of "
+                            "value, get and set written in place")
+            members.append((
+                name, key.start(1) if key.group(1) else key.start(2),
+                "accessor" if keys & {"get", "set"} else "value"))
+        elif field.strip():
+            # A member the call defines and the scan cannot name: recording
+            # the others would claim a partial set.
+            return [], "a key the scan cannot read"
+        cursor = field_end + 1
+    return members, None
 
 
 def _statement_at_top(region: str, open_brace: int, offset: int) -> bool:
@@ -3688,10 +3724,10 @@ def _scan_local_object_shapes(
         return item;
 
     The descriptors are the ones `Object.defineProperties(this, ...)` already
-    gives `Service`, read by the same `_property_names`, so the result is a
-    named shape of the same kind: it claims the member SET and types every
-    member `any`. The shape is named after the local, the way the shared
-    object `sp` is named after its variable.
+    gives `Service`, read by the same `_read_descriptor_map`, so the result
+    is a named shape of the same kind: it claims the member SET and types
+    every member `any`. The shape is named after the local, the way the
+    shared object `sp` is named after its variable.
 
     `handled calls` are the offsets of the targets read here, so the
     unsupported-target warning does not also fire for them.
@@ -3758,38 +3794,11 @@ def _scan_local_object_shapes(
                            "module")
             properties: dict[str, dict[str, dict[str, Any]]] = {}
             for call in calls if refusal is None else []:
-                # Balanced in the masked region, which closes inside it; read
-                # from the text that keeps strings, for a quoted key.
-                open_index = call.end() - 1
-                close = _balanced_end(region, open_index)
-                # `{...} && d` passes `d`, and `(...).x = 1` writes to the
-                # object the call returns.
-                if not re.match(r"\s*\)\s*;", region[close:]):
-                    refusal = ("the map is not the whole second argument, or "
-                               "the call not a whole statement")
-                if not all(
-                        _inline_descriptor(field[key.end():])
-                        for field in _split_js_fields(
-                            region[open_index + 1:close - 1])
-                        for key in [re.match(
-                            r"\s*(?:[A-Za-z_$][A-Za-z0-9_$]*"
-                            r"|(['\"])[^'\"]*\1)\s*:", field)]
-                        if key is not None):
-                    refusal = ("a descriptor that is not an object literal of "
-                               "value, get and set written in place")
-                body = comment_text[shift + open_index + 1:shift + close - 1]
-                names = _property_names(body, path, comment_text,
-                                        shift + open_index + 1)
-                if len(names) != len([field for field in
-                                      _split_js_fields(body)
-                                      if field.strip()]):
-                    refusal = "a key the scan cannot read"
-                # `'foo-bar'` cannot be declared unquoted, and `'x\u0061'`
-                # is the key `xa` at runtime, not what the text says.
-                if any(not IDENT_RE.fullmatch(member)
-                       for member, _, _ in names):
-                    refusal = "a key that is not a plain identifier"
-                for member, offset, kind in names:
+                members, refusal = _read_descriptor_map(
+                    path, text, comment_text, call, shift)
+                if refusal is not None:
+                    break
+                for member, offset, kind in members:
                     _add_property(properties, name, member, path,
                                   comment_text, offset, kind)
             if refusal is None and not properties:
