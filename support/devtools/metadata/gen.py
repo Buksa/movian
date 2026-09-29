@@ -2438,11 +2438,15 @@ ALIAS_MEMBER_ASSIGN_RE = re.compile(
     r"\b([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
 NESTED_FUNCTION_HEAD_RE = re.compile(
     r"\bfunction\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\([^)]*\)\s*\{")
-# The name alone, not a call form, in text whose strings are intact: a
-# spelling the readers do not take still says `defineProperties`, and
-# `Object['defineProperties']` says it in a string.
+# The name alone, not a call form, in text whose comments and strings are
+# masked: a spelling the readers do not take still says `defineProperties`.
 DEFINE_PROPERTIES_CALL_RE = re.compile(
     r"(?<![A-Za-z0-9_$])defineProperties(?![A-Za-z0-9_$])")
+# `['defineProperties']`, in text whose strings are intact. Where the
+# brackets are code and read a member, `Object['defineProperties']`, it is the
+# one string that spells the call; any other string only mentions the name.
+DEFINE_PROPERTIES_MEMBER_RE = re.compile(
+    r"\[\s*(['\"])(defineProperties)\1\s*\]")
 DEFINE_PROPERTY_CALL_RE = re.compile(
     r"Object\.defineProperty\(\s*([^,]+?)\s*,\s*([^,]+?)\s*,\s*\{")
 NATIVE_CALL_RE = re.compile(
@@ -3438,10 +3442,10 @@ def _scan_shape_properties(
     # readers take `Object.defineProperties(` alone, and
     # `Object['defineProperties'](...)`, a space before `(` or an alias
     # gave the shape no members and no warning (movian#272).
-    for match in DEFINE_PROPERTIES_CALL_RE.finditer(comment_text):
-        if match.start() not in read_calls:
+    for offset in _define_properties_occurrences(text, comment_text):
+        if offset not in read_calls:
             _shape_diagnostic(
-                path, comment_text, match.start(),
+                path, comment_text, offset,
                 "ignored unsupported Object.defineProperties call: no reader "
                 "takes this spelling or target")
     for match in DEFINE_PROPERTY_CALL_RE.finditer(comment_text):
@@ -3506,6 +3510,50 @@ def _census_offset(call: re.Match[str], base: int = 0) -> int:
     """Where a `DEFINE_PROPERTIES_RE` call spells `defineProperties`: the
     offset `DEFINE_PROPERTIES_CALL_RE` finds it at."""
     return base + call.start() + len("Object.")
+
+
+def _define_properties_occurrences(text: str, kept: str) -> list[int]:
+    """Where the module spells `defineProperties` as code, in source order:
+    the name in `text`, whose comments and strings are masked, and the
+    string `['defineProperties']` in `kept`, whose strings are intact, where
+    the brackets are code and read a member.
+
+    A string is not a call. Read with strings intact, `var s =
+    'defineProperties';` and `"Object.defineProperties"` were reported as
+    calls no reader takes (movian#272). `var k = 'defineProperties';
+    Object[k](...)` was reported only for its string, and is not now: a name
+    computed through a variable is not seen.
+
+    The census reads the text the readers read, so a string the mask
+    misreads -- a regex literal holding a quote, a string continued onto the
+    next line -- hides a call from both.
+    """
+    offsets = [match.start()
+               for match in DEFINE_PROPERTIES_CALL_RE.finditer(text)]
+    offsets += [match.start(2)
+                for match in DEFINE_PROPERTIES_MEMBER_RE.finditer(kept)
+                if text[match.start()] == "["
+                and _reads_a_member(text, match.start())]
+    return sorted(offsets)
+
+
+def _reads_a_member(text: str, bracket: int) -> bool:
+    """Whether the `[` at `bracket` in `text`, whose comments and strings are
+    masked, reads a member of what precedes it: a name, `)` or `]`. After
+    anything else it opens an array literal, and after a word
+    `_JS_REGEX_KEYWORDS` names too: an expression begins there, so
+    `return ['defineProperties']` returns an array, as `return /x/` returns
+    a regex.
+
+    A `)` that closes a condition, `if (d) [...]`, and a label after `break`
+    or `continue` are taken as ending an expression, so an array there still
+    counts: the census errs toward reporting.
+    """
+    before = text[:bracket].rstrip()
+    if before.endswith((")", "]")):
+        return True
+    word = re.search(r"[A-Za-z0-9_$]+$", before)
+    return word is not None and word.group() not in _JS_REGEX_KEYWORDS
 
 
 DESCRIPTOR_MAP_KEY_RE = re.compile(

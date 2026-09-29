@@ -253,6 +253,13 @@ UNREAD = [
      "Object.defineProperties (this, { a: { value: 1 } });", 2),
     ("computed member access, double-quoted",
      "Object[\"defineProperties\"](this, { a: { value: 1 } });", 2),
+    ("computed member access, spaced inside the brackets",
+     "Object[ 'defineProperties' ](this, { a: { value: 1 } });", 2),
+    ("computed member access after a parenthesis",
+     "(0, Object)['defineProperties'](this, { a: { value: 1 } });", 2),
+    ("computed member access after a bracket",
+     "var o = [Object];\n"
+     "  o[0]['defineProperties'](this, { a: { value: 1 } });", 3),
     ("a line break before the argument list",
      "Object.defineProperties\n  (this, { a: { value: 1 } });", 2),
     ("a line break before the member name",
@@ -269,6 +276,36 @@ UNREAD = [
      "    Object.defineProperties(this, { a: { value: 1 } });\n  });", 3),
 ]
 
+# `(label, constructor body, what C records)`. A string is not a call. The
+# census read strings intact so that `Object['defineProperties']` is seen,
+# and every other string that said the word was reported too, at its own
+# line, beside a call the reader took or with no call at all (movian#272,
+# both reviews).
+MENTIONED = [
+    ("the name alone in a string",
+     "var s = 'defineProperties';", []),
+    ("the name in a string beside a call the reader takes",
+     "var s = 'defineProperties';\n"
+     "  Object.defineProperties(this, { a: { value: 1 } });",
+     [("a", "value")]),
+    ("the call's spelling in a string",
+     "var help = \"Object.defineProperties\";", []),
+    # The computed member's spelling, but inside a string: the brackets are
+    # not code.
+    ("the computed member's spelling in a string",
+     "var help = \"Object['defineProperties']\";", []),
+    # ASI ends the first line, so a name is the code just before the
+    # string's own bracket.
+    ("the computed member's spelling in a string after a name",
+     "var help = d\n  \"Object['defineProperties']\";", []),
+    # The brackets are code but read no member: nothing precedes them that
+    # a member could be read from.
+    ("the name alone in an array literal",
+     "var names = ['defineProperties'];", []),
+    ("an array literal after a keyword that takes an operand",
+     "if (d) {\n    return ['defineProperties'];\n  }", []),
+]
+
 
 class EveryCallIsReadOrReported(unittest.TestCase):
     def test_a_call_no_reader_takes_is_reported_at_its_line(self) -> None:
@@ -279,6 +316,14 @@ class EveryCallIsReadOrReported(unittest.TestCase):
                 self.assertIn(
                     "_descriptor_map_probe.js:%d: warning: ignored "
                     "unsupported Object.defineProperties call" % line, stderr)
+
+    def test_a_string_that_only_mentions_the_name_is_not_reported(
+            self) -> None:
+        for label, body, expected in MENTIONED:
+            with self.subTest(label):
+                shapes, stderr = scan(in_constructor(body))
+                self.assertEqual(members(shapes, "C"), expected, stderr)
+                self.assertEqual(stderr, "")
 
     def test_a_call_a_reader_takes_is_not_also_reported(self) -> None:
         for target, (build, shape, _) in TARGETS.items():

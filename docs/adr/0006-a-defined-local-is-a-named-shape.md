@@ -128,9 +128,15 @@ intrinsic, as every `Object.defineProperties` reader in the generator does --
 a module that rebinds `Object` is not detected.
 
 The readers take the call spelled `Object.defineProperties(` only. Every
-other mention of the name in the module -- `Object['defineProperties']`, a
-space before `(`, an alias -- is read by nothing and reported with its line
-(#272). A name built at run time, `Object[k]`, is not seen.
+other spelling of the name in the module's code -- a space before `(`, an
+alias, and `Object['defineProperties']`, the one string that spells it, in
+brackets that read a member -- is read by nothing and reported with its line
+(#272). A string that only mentions the name, an array literal
+`['defineProperties']` included, is not a call and is not reported. A name
+built at run time, `Object[k]`, is not seen, even when `k` holds
+`'defineProperties'`. The census reads the text the readers read, so a string
+the mask misreads -- a regex literal holding a quote, a string continued onto
+the next line -- hides a call from both.
 
 ## Considered
 
