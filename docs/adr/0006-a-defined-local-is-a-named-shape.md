@@ -56,7 +56,8 @@ itself -- and requires:
   not inside a nested function, a block, an unbraced conditional or an
   expression -- whose map is the whole second argument and whose call is the
   whole statement: `{...} && d` passes `d`, and `(...).x = 1` writes to the
-  object;
+  object. The statement before the call must end in `;`, `{` or `}`; the
+  call's own statement ends as every target's does, below;
 - every descriptor an object literal of `value`, `get`, `set`, `writable`,
   `enumerable` and `configurable`, with `get` and `set` function literals
   written in place: an accessor runs with the object as `this`, and only
@@ -92,8 +93,33 @@ written in place, and every key is one the scan can read and a plain
 identifier. A call that fails records no member and is reported with the
 reason. Where the call may sit differs by target -- the constructor's own
 body, the module's top level, F's own body. A member is an `accessor` when its
-descriptor has `get` or `set` among its own keys, read with strings masked:
+descriptor has `get` or `set` among its own keys, read with literals masked:
 `value: 'get: x'` is a value.
+
+The map is read on the module's scanner, `_js_spans`, where a regex literal is
+a literal: the comma in `value: /x,y/` separates no fields, and the brace in
+`/}/` closes nothing. The mask the calls are found in works a line at a time
+and knows neither, so the first reading split `/x,y/` into two fields and
+refused the call. A statement is the scanner's too, ended as ES5.1 7.9.1 ends
+it:
+
+- after the call's `)` it ends at `;`, at `}`, at the end of the module, or
+  at a line terminator followed by a token that cannot continue the
+  expression -- anything but `(`, `[`, `.`, `,`, `?`, `:`, `=`, `+`, `-`, `*`,
+  `/`, `%`, `&`, `|`, `^`, `<`, `>`, `!`, `in` and `instanceof`, a comment
+  counting as whitespace. So the call then `(f)()` on the next line is one
+  statement, `f` an argument to what the call returns;
+- before the call, the previous one ends at `;`, `{` or `}`, or at a line
+  terminator after a token no expression may begin after -- a name, a
+  literal, `]`, or a `)` that is not a control header's. `d &&` or `if (d)`
+  at the end of the line makes the call part of what they begin.
+
+The first reading required the `;` written and nothing but `;`, `{` or `}`
+before the call, and refused every call that relied on ASI. For a local the
+end is shared and the start is not: `Object.defineProperties(V, {...})`, a
+line terminator and `return V` now read, while the local's own rule above
+still wants `;`, `{` or `}` before the call, `var V = {};` with its `;`, and
+`return V` as written.
 
 ## The caller
 
@@ -139,12 +165,16 @@ of code, literals and comments, not the readers' mask: a census needs an
 enumerator independent of the builder (ADR-0004), and a regex literal holding
 a quote or a string continued onto the next line makes the mask hide the code
 after it, so a census reading the masked text was blind exactly where the
-readers were. The scanner has a blind spot of its own: it reads a `/` right
+readers were. The readers now read a map on that scanner, but they still find
+their calls in the mask, and it is what they found that the census is
+compared with. The scanner has a blind spot of its own: it reads a `/` right
 after `}` as the start of a regex, the half that is safe for stripping
 comments. Here a literal is blanked, so a division there --
 `{} / Object['defineProperties'](...) / 2`, valid ES5 and absurd -- hides
-the call from the census as well. No lexer settles `}` then `/` without
-parsing, so it is accepted.
+the call from the census as well. Inside a map it hides fields from the
+readers: in `{ a: { value: {} / 2 }, b: { value: 4 / 2 } }` the scanner takes
+`/ 2 }, b: { value: 4 /` for a regex, and `b` is not recorded, without a
+warning. No lexer settles `}` then `/` without parsing, so it is accepted.
 
 ## Considered
 

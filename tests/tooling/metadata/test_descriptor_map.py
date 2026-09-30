@@ -145,6 +145,38 @@ REFUSED = [
     ("a key the scan cannot read",
      "Object.defineProperties({t}, { b: { value: 2 }, 0: { value: 1 } });",
      UNREADABLE_KEY, TARGETS),
+    # A line terminator ends the statement only where the next token cannot
+    # continue the expression (ES5.1 7.9.1). Each of these continues it:
+    # the first calls what the call returns with `d`.
+    ("a line terminator, then `(`",
+     "Object.defineProperties({t}, { a: { value: 1 } })\n  (d)();",
+     NOT_WHOLE, TARGETS),
+    ("a line terminator, then `[`",
+     "Object.defineProperties({t}, { a: { value: 1 } })\n  [d].pop();",
+     NOT_WHOLE, TARGETS),
+    ("a line terminator, then `.`",
+     "Object.defineProperties({t}, { a: { value: 1 } })\n  .b = 1;",
+     NOT_WHOLE, TARGETS),
+    ("a line terminator, then `instanceof`",
+     "Object.defineProperties({t}, { a: { value: 1 } })\n  instanceof d;",
+     NOT_WHOLE, TARGETS),
+    # And before the call: the token ending the line takes an operand, so
+    # the call is one. The local's own rule refuses both first.
+    ("an operator, then a line terminator, then the call",
+     "d &&\n  Object.defineProperties({t}, { a: { value: 1 } });",
+     NOT_WHOLE, ("this", "X.prototype")),
+    ("a control header, then a line terminator, then the call",
+     "if (d)\n  Object.defineProperties({t}, { a: { value: 1 } });",
+     NOT_WHOLE, ("this", "X.prototype")),
+    # The readers find a call in the masked text, whose string mask works a
+    # line at a time: it shows this string's second line as code. The
+    # module's scanner knows it is a string, and there is no call to read.
+    # The local's whitelist refuses the backslash first.
+    ("the call inside a string continued onto the next line",
+     "var s = 'x\\\n"
+     "Object.defineProperties({t}, { a: { value: 1 } })';",
+     "the module's scanner reads it as part of a literal or a comment",
+     ("this", "X.prototype")),
 ]
 
 # The map's edges: text around the members that must not stop them being
@@ -181,6 +213,47 @@ STILL_READ = [
      "Object.defineProperties({t}, { a: { value: 1 }, /* b: {} */ "
      "c: { value: 2 } });",
      [("a", "value"), ("c", "value")]),
+    # ES5.1 7.9.1 inserts the `;` where the next token cannot continue the
+    # expression. Before this branch, `this` and `X.prototype` read all of
+    # these; its first commit required the `;` spelled, and recorded no
+    # member (PR #277, Codex).
+    ("a line terminator ends the call's statement",
+     "Object.defineProperties({t}, { a: { value: 1 } })",
+     [("a", "value")]),
+    ("a comment, then a line terminator",
+     "Object.defineProperties({t}, { a: { value: 1 } }) // a\n  d = 1;",
+     [("a", "value")]),
+    # ES5.1 7.4: a comment holding a line terminator counts as one.
+    ("a block comment holding a line terminator",
+     "Object.defineProperties({t}, { a: { value: 1 } }) /*\n  */ d = 1;",
+     [("a", "value")]),
+]
+
+# Read on the module's scanner, `_js_spans`, where a regex literal is a
+# literal, and a statement ends where ES5.1 7.9.1 ends it. The first commit
+# of this branch read these on the per-line mask and refused each; the
+# readers before it recorded `a`, and missed `b` beside a regex brace.
+#
+# `(label, statement, what each target records, targets)`. The local is left
+# out where its own whitelist refuses first: `/` is text it cannot read, and
+# the statement before its call must end in `;`, `{` or `}`.
+READ_ON_THE_SCANNER = [
+    # PR #277, Codex.
+    ("a comma inside a regex literal in a descriptor",
+     "Object.defineProperties({t}, { a: { value: /x,y/ } });",
+     [("a", "value")], ("this", "X.prototype")),
+    ("a brace inside a regex literal in a descriptor",
+     "Object.defineProperties({t}, { a: { value: /}/ }, b: { value: 1 } });",
+     [("a", "value"), ("b", "value")], ("this", "X.prototype")),
+    ("a line terminator ends the statement before the call",
+     "var x = d\n  Object.defineProperties({t}, { a: { value: 1 } });",
+     [("a", "value")], ("this", "X.prototype")),
+    ("a string ends the statement before the call",
+     "var s = 'x'\n  Object.defineProperties({t}, { a: { value: 1 } });",
+     [("a", "value")], ("this", "X.prototype")),
+    ("a call ends the statement before the call",
+     "d()\n  Object.defineProperties({t}, { a: { value: 1 } });",
+     [("a", "value")], ("this", "X.prototype")),
 ]
 
 # The kind is the descriptor's own: `get` or `set` among its keys. It was read
@@ -230,6 +303,15 @@ class OneReadingForEveryTarget(unittest.TestCase):
     def test_the_edges_of_a_map_still_read(self) -> None:
         for label, statement, expected in STILL_READ:
             for target, (build, shape, _) in TARGETS.items():
+                with self.subTest(label, target=target):
+                    shapes, stderr = scan(build(statement))
+                    self.assertEqual(members(shapes, shape), expected, stderr)
+                    self.assertNotIn("Object.defineProperties", stderr)
+
+    def test_literals_and_statements_are_the_scanners(self) -> None:
+        for label, statement, expected, targets in READ_ON_THE_SCANNER:
+            for target in targets:
+                build, shape, _ = TARGETS[target]
                 with self.subTest(label, target=target):
                     shapes, stderr = scan(build(statement))
                     self.assertEqual(members(shapes, shape), expected, stderr)

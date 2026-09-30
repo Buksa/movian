@@ -3281,6 +3281,7 @@ def _scan_shape_properties(
         shared_receivers: set[str], handled: set[int] | None = None
 ) -> dict[str, dict[str, dict[str, Any]]]:
     comment_text = _masked_js_text(path, mask_strings=False)
+    lexed = _lexed_js(path)
     properties: dict[str, dict[str, dict[str, Any]]] = {}
     # The `Object.defineProperty` targets the readers below took.
     handled_calls: set[int] = set()
@@ -3292,8 +3293,7 @@ def _scan_shape_properties(
     def add_call_properties(
             match: re.Match[str], receiver: str, base_offset: int
     ) -> None:
-        members, refusal = _read_descriptor_map(
-            path, text, comment_text, match, base_offset)
+        members, refusal = _read_descriptor_map(lexed, match, base_offset)
         if refusal is not None:
             _shape_diagnostic(
                 path, comment_text, base_offset + match.start(1),
@@ -3363,7 +3363,8 @@ def _scan_shape_properties(
                     base_offset + assignment.start(2),
                     kind=assignment_kind(assignment))
 
-        # Matched and balanced where strings are masked, as every map is.
+        # Found where strings are masked, as every call is; the map is read
+        # on the scanner (`_read_descriptor_map`).
         for match in _top_level_matches(
                 text[base_offset:base_offset + len(body)],
                 DEFINE_PROPERTIES_RE):
@@ -3480,8 +3481,9 @@ def _descriptor_keys(text: str) -> set[str] | None:
     holds only where every accessor is text the scan reads. `set: mutate`
     or a descriptor built elsewhere could add or remove members.
 
-    `text` has its strings and comments masked, so a key is one the
-    descriptor has: `value: 'get: x'` is a value descriptor.
+    `text` is `_LexedJs.code`, where a literal is `0` and a comment blank,
+    so a key is one the descriptor has: `value: 'get: x'` is a value
+    descriptor, and the comma in `value: /x,y/` separates nothing.
     """
     text = text.strip()
     end = _balanced_end(text, 0) if text.startswith("{") else None
@@ -3586,11 +3588,121 @@ DESCRIPTOR_MAP_KEY_RE = re.compile(
     r"\s*(?:([A-Za-z_$][A-Za-z0-9_$]*)|(['\"])([^'\"]+)\2)\s*:")
 
 
+class _LexedJs(NamedTuple):
+    """A module as `_js_spans` reads it, in the coordinates of its masked
+    text: both split the source into the lines `_js_lines` gives, and keep
+    every column."""
+
+    # Comments blank, and each literal the operand `0` followed by blanks:
+    # one token wherever it stands, with nothing inside it -- a comma, a
+    # brace -- left as code. Line terminators are kept, inside a comment
+    # too, where ES5.1 7.4 counts one.
+    code: str
+    # Comments blank, literals as written.
+    kept: str
+
+
+def _lexed_js(path: Path) -> _LexedJs:
+    source = "\n".join(_js_lines(path.read_text(encoding="utf-8")))
+    code: list[str] = []
+    kept: list[str] = []
+    for kind, span in _js_spans(source):
+        blank = re.sub(r"[^\n]", " ", span)
+        if kind == "code":
+            code.append(span)
+            kept.append(span)
+        elif kind == "literal":
+            code.append("0" + blank[1:])
+            kept.append(span)
+        else:
+            code.append(blank)
+            kept.append(blank)
+    return _LexedJs("".join(code), "".join(kept))
+
+
+def _open_paren_of(text: str, close: int) -> int | None:
+    """The index of the `(` matching the `)` at `close`, or None."""
+    depth = 0
+    for index in range(close, -1, -1):
+        if text[index] == ")":
+            depth += 1
+        elif text[index] == "(":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
+def _expression_may_begin(text: str, index: int) -> bool:
+    """Whether an expression may begin at `index` in `text`, whose literals
+    and comments are blank or `0`.
+
+    The question `_js_regex_allowed` asks of the token before a `/`, asked
+    of the token before `index` and read from the text around it, not the
+    lexer's running state: after `(`, `&&`, `return` or the `)` of
+    `if (x)` it may, and after a name, a literal, `]` or the `)` of
+    `f(x)` it may not.
+    """
+    before = text[:index].rstrip()
+    word = re.search(r"[A-Za-z0-9_$]+$", before)
+    prev_word = word.group() if word else ""
+    # `break outer` puts a label where the keyword was.
+    jump = re.search(r"([A-Za-z0-9_$]+)\s+$",
+                     before[:len(before) - len(prev_word)]) if word else None
+    closed_word = ""
+    if before.endswith(")"):
+        opening = _open_paren_of(before, len(before) - 1)
+        if opening is not None:
+            closed = re.search(r"[A-Za-z0-9_$]+$", before[:opening].rstrip())
+            closed_word = closed.group() if closed else ""
+    return _js_regex_allowed(before[-1:], prev_word,
+                             jump.group(1) if jump else "", closed_word)
+
+
+def _statement_begins_at(code: str, index: int) -> bool:
+    """Whether a statement begins at `index` in `code` (`_LexedJs.code`):
+    the token before it is `;`, `{` or `}`, or none, or ends a line where
+    ES5.1 7.9.1 inserts a semicolon -- no expression may begin after it,
+    so the token at `index` cannot continue one. `x = d` then a call on
+    the next line are two statements; `d &&` or `if (d)` then the call are
+    one."""
+    before = code[:index].rstrip()
+    if not before or before[-1] in ";{}":
+        return True
+    return ("\n" in code[len(before):index]
+            and not _expression_may_begin(code, index))
+
+
+# What continues an expression across a line terminator, so ES5.1 7.9.1
+# inserts no semicolon before it: `f()` then `(g)()` on the next line is
+# `f()(g)()`. `+` and `-` take `++` and `--` too, and `!` takes `!=`: a
+# prefix `++` or a `!` there would begin a statement, and reading it as a
+# continuation only refuses.
+_JS_CONTINUING_PUNCTUATORS = "([.,?:=+-*/%&|^<>!"
+_JS_CONTINUING_WORDS = frozenset(("in", "instanceof"))
+
+
+def _statement_ends_at(code: str, index: int) -> bool:
+    """Whether the statement ends at `index` in `code` (`_LexedJs.code`):
+    the next token is `;` or `}`, or there is none, or it follows a line
+    terminator and cannot continue the expression (ES5.1 7.9.1)."""
+    rest = code[index:]
+    token = rest.lstrip()
+    if not token or token[0] in ";}":
+        return True
+    if "\n" not in rest[:len(rest) - len(token)]:
+        return False
+    word = re.match(r"[A-Za-z0-9_$]+", token)
+    if word is not None:
+        return word.group() not in _JS_CONTINUING_WORDS
+    return token[0] not in _JS_CONTINUING_PUNCTUATORS
+
+
 def _read_descriptor_map(
-        path: Path, text: str, kept: str, call: re.Match[str], base: int = 0
+        lexed: _LexedJs, call: re.Match[str], base: int = 0
 ) -> tuple[list[tuple[str, int, str]], str | None]:
     """`(members, refusal)` for the `Object.defineProperties(<target>, {...})`
-    that `call` matched `base` into `text`.
+    that `call` matched `base` into the module's masked text.
 
     The one reading of a descriptor map, for every target the generator
     reads -- `this` in a constructor, `X.prototype`, and a local
@@ -3599,34 +3711,45 @@ def _read_descriptor_map(
     passes `d` (movian#272). A call that fails a check records no member,
     and the reason is returned for the caller's warning.
 
-    `text` is the module with strings and comments masked, where the map
-    is balanced and each kind is read; `kept` is the same module with its
-    strings intact, where a quoted key is read. Masking keeps every
-    column, so one offset serves both. Each member is `(name, offset of
-    its key, "value" or "accessor")`.
+    The map is read on the module's scanner, `lexed`, not on the masked
+    text the call was found in. That mask works a line at a time and knows
+    no regex literal, so `/x,y/` split a descriptor at its comma, and it
+    knows no statement, so a call ended by a line terminator was refused
+    for want of a `;`. The scanner's own blind spot comes with it: a `/`
+    right after `}` starts a regex (`_define_properties_occurrences`), so
+    `{ a: { value: {} / 2 }, b: { value: 4 / 2 } }` loses `b`, silently.
+    Each member is `(name, offset of its key, "value" or "accessor")`.
     """
+    code = lexed.code
     start, open_index = base + call.start(), base + call.end() - 1
-    close = _balanced_end(text, open_index)
+    # The mask's string reading may show code the scanner reads as a
+    # string -- the second line of one continued with a backslash -- and
+    # there is no call there to read.
+    if code[start:open_index + 1] != call.group(0):
+        return [], ("the module's scanner reads it as part of a literal or a "
+                    "comment")
+    close = _balanced_end(code, open_index)
+    paren = re.match(r"\s*\)", code[close:]) if close is not None else None
     # `x && Object.defineProperties(...)` defines its members on one path,
     # `{...} && d` passes `d`, and `(...).x = 1` writes to the object the
     # call returns.
-    if (text[_statement_start(text, start, -1):start].strip()
-            or close is None
-            or not re.match(r"\s*\)\s*;", text[close:])):
+    if (not _statement_begins_at(code, start) or close is None
+            or paren is None
+            or not _statement_ends_at(code, close + paren.end())):
         return [], ("the map is not the whole second argument, or the call "
                     "not a whole statement")
     members: list[tuple[str, int, str]] = []
     cursor = open_index + 1
-    for field in _split_js_fields(text[open_index + 1:close - 1]):
+    for field in _split_js_fields(code[open_index + 1:close - 1]):
         field_end = cursor + len(field)
-        key = DESCRIPTOR_MAP_KEY_RE.match(kept, cursor, field_end)
+        key = DESCRIPTOR_MAP_KEY_RE.match(lexed.kept, cursor, field_end)
         if key is not None:
             name = key.group(1) or key.group(3)
             # `'foo-bar'` cannot be declared unquoted, and `'x\u0061'` is
             # the key `xa` at runtime, not what the text says.
             if not IDENT_RE.fullmatch(name):
                 return [], "a key that is not a plain identifier"
-            keys = _descriptor_keys(text[key.end():field_end])
+            keys = _descriptor_keys(code[key.end():field_end])
             if keys is None:
                 return [], ("a descriptor that is not an object literal of "
                             "value, get and set written in place")
@@ -3828,6 +3951,7 @@ def _scan_local_object_shapes(
     so the census does not also report them.
     """
     comment_text = _masked_js_text(path, mask_strings=False)
+    lexed = _lexed_js(path)
     # Every spelling the export scanner reads, `exports['x'] =` included.
     exported = {name for name, _, _ in _commonjs_export_regions(path)}
     found: list[_DefinedLocal] = []
@@ -3892,8 +4016,7 @@ def _scan_local_object_shapes(
                            "module")
             properties: dict[str, dict[str, dict[str, Any]]] = {}
             for call in calls if refusal is None else []:
-                members, refusal = _read_descriptor_map(
-                    path, text, comment_text, call, shift)
+                members, refusal = _read_descriptor_map(lexed, call, shift)
                 if refusal is not None:
                     break
                 for member, offset, kind in members:
