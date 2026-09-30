@@ -253,7 +253,10 @@ def _js_spans(source: str) -> list[tuple[str, str]]:
             flush(index)
             spans.append(("literal", source[index:cursor]))
             code_start = cursor
-            prev, word, prev_word = char, "", ""
+            # A literal is an operand, as `_LexedJs.code` writes it: `0`.
+            # A `/` after it divides, and read one character back, after the
+            # quote, it began a regex.
+            prev, word, prev_word, prev_word2 = "0", "", "", ""
             index = cursor
             continue
         if char == "/" and index + 1 < length and source[index + 1] == "/":
@@ -280,7 +283,7 @@ def _js_spans(source: str) -> list[tuple[str, str]]:
                 flush(index)
                 spans.append(("literal", source[index:stop]))
                 code_start = stop
-                prev, word, prev_word = "/", "", ""
+                prev, word, prev_word, prev_word2 = "0", "", "", ""
                 index = stop
                 continue
         if char == "(":

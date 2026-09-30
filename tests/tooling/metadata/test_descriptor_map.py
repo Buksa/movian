@@ -302,6 +302,12 @@ READ_ON_THE_SCANNER = [
     ("a postfix `--` ends the statement before the call",
      "var x = d--\n  Object.defineProperties({t}, { a: { value: 1 } });",
      [("a", "value")], ("this", "X.prototype")),
+    # A literal is an operand too, and a `/` after one divides. Read one
+    # character back, the quote let `/ 2 }, b: { value: 4 /` be a regex.
+    ("a division after a string, then another descriptor",
+     "Object.defineProperties({t}, { a: { value: '10' / 2 }, "
+     "b: { value: 4 / 2 } });",
+     [("a", "value"), ("b", "value")], ("this", "X.prototype")),
     # `}` then a regex refuses a call only inside its map.
     ("a regex after a block, after the call",
      "Object.defineProperties({t}, { a: { value: 1 } });\n"
@@ -325,6 +331,11 @@ SCANNING = [
     ("a regex after `---`, which ends in `-`", "a---/x/;", ["/x/"]),
     ("a regex after two `+` a space apart", "a+ +/x/;", ["/x/"]),
     ("a regex after two `+` a comment apart", "a+/**/+/x/;", ["/x/"]),
+    # A literal ends an operand as a name does, across a line terminator
+    # too: `'x'`, a line terminator and `/re/.test(s)` is a SyntaxError.
+    ("a division after a string", "'x' / 2 / b;", []),
+    ("a division after a string, a line apart", "'x'\n/ 2 / b;", []),
+    ("a division after a regex", "/x/ / 2 / b;", ["/x/"]),
 ]
 
 
@@ -393,7 +404,7 @@ class OneReadingForEveryTarget(unittest.TestCase):
                     self.assertEqual(members(shapes, shape), expected, stderr)
                     self.assertNotIn("Object.defineProperties", stderr)
 
-    def test_a_slash_after_increment_is_the_tokens(self) -> None:
+    def test_a_slash_reads_the_token_before_it(self) -> None:
         for label, source, expected in SCANNING:
             with self.subTest(label):
                 self.assertEqual(regexes(source), expected)
