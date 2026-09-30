@@ -89,12 +89,12 @@ reads `Object.defineProperties` on `this` in a constructor and on
 `X.prototype`, and all three targets share one reading of the call (#272): it
 begins and ends its statement, the map is the whole second argument, every
 descriptor is an object literal of descriptor keys with `get` and `set`
-written in place, and every key is one the scan can read and a plain
-identifier. A call that fails records no member and is reported with the
-reason. Where the call may sit differs by target -- the constructor's own
-body, the module's top level, F's own body. A member is an `accessor` when its
-descriptor has `get` or `set` among its own keys, read with literals masked:
-`value: 'get: x'` is a value.
+written in place, every key is one the scan can read and a plain
+identifier, and no `/` in the map follows a `}` (below). A call that fails
+records no member and is reported with the reason. Where the call may sit
+differs by target -- the constructor's own body, the module's top level, F's
+own body. A member is an `accessor` when its descriptor has `get` or `set`
+among its own keys, read with literals masked: `value: 'get: x'` is a value.
 
 The map is read on the module's scanner, `_js_spans`, where a regex literal is
 a literal: the comma in `value: /x,y/` separates no fields, and the brace in
@@ -174,10 +174,18 @@ compared with. The scanner has a blind spot of its own: it reads a `/` right
 after `}` as the start of a regex, the half that is safe for stripping
 comments. Here a literal is blanked, so a division there --
 `{} / Object['defineProperties'](...) / 2`, valid ES5 and absurd -- hides
-the call from the census as well. Inside a map it hides fields from the
-readers: in `{ a: { value: {} / 2 }, b: { value: 4 / 2 } }` the scanner takes
-`/ 2 }, b: { value: 4 /` for a regex, and `b` is not recorded, without a
-warning. No lexer settles `}` then `/` without parsing, so it is accepted.
+the call from the census as well. No lexer settles `}` then `/` without
+parsing, so for the census it is accepted.
+
+For the readers it is not. Inside a map the same reading hid fields: in
+`{ a: { value: {} / 2 }, b: { value: 4 / 2 } }` the scanner takes
+`/ 2 }, b: { value: 4 /` for a regex, and `b` went unrecorded without a
+warning. A reader now refuses a call whose map holds a regex right after
+`}`, comments between them counting as whitespace, in a nested descriptor
+or an accessor's body as well, and reports that the `/` cannot be told from
+a division. That refuses a real regex too -- `if (x) {} /re/.test(y)` in a
+getter -- because telling it from a division is what the scanner cannot do.
+A member may still be lost there, but not silently.
 
 ## Considered
 

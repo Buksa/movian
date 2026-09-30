@@ -94,6 +94,7 @@ NOT_INLINE = ("a descriptor that is not an object literal of value, get and "
               "set written in place")
 NOT_IDENTIFIER = "a key that is not a plain identifier"
 UNREADABLE_KEY = "a key the scan cannot read"
+AFTER_BRACE = "a `/` after `}`, read as a regex, cannot be told from a division"
 
 # Each call defines a member set the map text does not state, so recording
 # what it names would claim members the object may not have, or leave out
@@ -177,6 +178,28 @@ REFUSED = [
      "Object.defineProperties({t}, { a: { value: 1 } })';",
      "the module's scanner reads it as part of a literal or a comment",
      ("this", "X.prototype")),
+    # A `/` right after `}` divides after an object literal and begins a
+    # regex after a block, and no lexer tells them apart without parsing.
+    # The scanner reads a regex, so in the first `/ 2 }, b: { value: 4 /`
+    # was one, and `b` was lost without a warning (PR #277, round 3); in the
+    # second the map never closed. A regex that follows a block, as in the
+    # getter, is refused all the same. The local's whitelist refuses `/`.
+    ("a division after `{}`, then another descriptor",
+     "Object.defineProperties({t}, { a: { value: {} / 2 }, "
+     "b: { value: 4 / 2 } });",
+     AFTER_BRACE, ("this", "X.prototype")),
+    ("a division after `{}`, then another after the call",
+     "Object.defineProperties({t}, { a: { value: {} / 2 } }); "
+     "var n = 3 / 4;",
+     AFTER_BRACE, ("this", "X.prototype")),
+    ("a comment between `}` and the division",
+     "Object.defineProperties({t}, { a: { value: {} /* x */ / 2 }, "
+     "b: { value: 4 / 2 } });",
+     AFTER_BRACE, ("this", "X.prototype")),
+    ("a regex after a block in a getter",
+     "Object.defineProperties({t}, { a: { get: function() "
+     "{ if (d) {} /x/.test(d); return 1; } }, b: { value: 1 } });",
+     AFTER_BRACE, ("this", "X.prototype")),
 ]
 
 # The map's edges: text around the members that must not stop them being
@@ -278,6 +301,11 @@ READ_ON_THE_SCANNER = [
      [("a", "value")], ("this", "X.prototype")),
     ("a postfix `--` ends the statement before the call",
      "var x = d--\n  Object.defineProperties({t}, { a: { value: 1 } });",
+     [("a", "value")], ("this", "X.prototype")),
+    # `}` then a regex refuses a call only inside its map.
+    ("a regex after a block, after the call",
+     "Object.defineProperties({t}, { a: { value: 1 } });\n"
+     "  if (d) {} /x/.test(d);",
      [("a", "value")], ("this", "X.prototype")),
 ]
 

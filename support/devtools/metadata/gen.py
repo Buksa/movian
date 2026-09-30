@@ -332,7 +332,8 @@ def _js_regex_allowed(prev: str, run: int, prev_word: str, prev_word2: str,
     # `}` ends a block (regex legal after it) or an object literal (division
     # legal, and absurd). Reading it as a regex start is the safe half: a
     # span wrongly taken for a regex is copied out verbatim, which can only
-    # keep a comment, never drop code.
+    # keep a comment, never drop code. A reader that blanks literals has no
+    # safe half, and `_read_descriptor_map` refuses a map holding one.
     return True
 
 
@@ -3733,8 +3734,10 @@ def _read_descriptor_map(
     knows no statement, so a call ended by a line terminator was refused
     for want of a `;`. The scanner's own blind spot comes with it: a `/`
     right after `}` starts a regex (`_define_properties_occurrences`), so
-    `{ a: { value: {} / 2 }, b: { value: 4 / 2 } }` loses `b`, silently.
-    Each member is `(name, offset of its key, "value" or "accessor")`.
+    in `{ a: { value: {} / 2 }, b: { value: 4 / 2 } }` it swallows `b`. A
+    map holding such a regex is refused, so the loss is reported, not
+    silent. Each member is `(name, offset of its key, "value" or
+    "accessor")`.
     """
     code = lexed.code
     start, open_index = base + call.start(), base + call.end() - 1
@@ -3745,6 +3748,15 @@ def _read_descriptor_map(
         return [], ("the module's scanner reads it as part of a literal or a "
                     "comment")
     close = _balanced_end(code, open_index)
+    # A regex literal starts where `kept` has `/` and `code` its `0`. Right
+    # after `}` the scanner cannot tell it from a division, and either
+    # reading can hide a field. A map that never closes on this reading runs
+    # to the end of the module.
+    for brace in re.compile(r"\}\s*0").finditer(
+            code, open_index, len(code) if close is None else close):
+        if lexed.kept[brace.end() - 1] == "/":
+            return [], ("a `/` after `}`, read as a regex, cannot be told "
+                        "from a division")
     paren = re.match(r"\s*\)", code[close:]) if close is not None else None
     # `x && Object.defineProperties(...)` defines its members on one path,
     # `{...} && d` passes `d`, and `(...).x = 1` writes to the object the
