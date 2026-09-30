@@ -335,6 +335,10 @@ SCANNING = [
     # too: `'x'`, a line terminator and `/re/.test(s)` is a SyntaxError.
     ("a division after a string", "'x' / 2 / b;", []),
     ("a division after a string, a line apart", "'x'\n/ 2 / b;", []),
+    # A regex may follow a label after `break` (`break outer`, a line
+    # terminator, `/x/`), and the string between them is the last token.
+    ("a division after a string after a labelled jump",
+     "break outer\n'x' / 2 / b;", []),
     ("a division after a regex", "/x/ / 2 / b;", ["/x/"]),
 ]
 
