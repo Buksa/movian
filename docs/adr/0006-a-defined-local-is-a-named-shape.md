@@ -139,7 +139,10 @@ shadowing F, a reassignment. In the method:
   removes it, and not called, which runs what the member holds with the
   object as `this`, parenthesized or not: `(x.m)()` keeps the reference
   (ES5.1 11.1.6) -- and in `return x`, the method's only own return,
-  always reached, on one line.
+  always reached, on one line. Only a grouping keeps it. The `)` of a
+  control header, `if (x.m) (f)();`, or of an argument list, `g(x.m)()`,
+  ends the reference, and the `(` after it calls something else; a `(`
+  opens a grouping where an expression may begin.
 
 `movian/settings`' four methods use `item` only as `item.model...`, and pass.
 

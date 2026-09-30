@@ -553,6 +553,10 @@ CALLER_REFUSED = [
     ("a member of the shape is called through two pairs of parentheses",
      variant((CALLER_RETURN,
               "  ((item.model))\n  ();\n  return item;\n}\n"))),
+    # The grouping follows a control header, where an expression begins.
+    ("a member of the shape is called through parentheses after a "
+     "control header",
+     variant((CALLER_RETURN, "  if (id) (item.model)();\n  return item;\n}\n"))),
     ("a member the shape does not have is added",
      variant((CALLER_RETURN, "  item.extra = 1;\n  return item;\n}\n"))),
     ("the local is handed to a function",
@@ -576,6 +580,28 @@ class TheCallerHoldsTheFactoryResult(unittest.TestCase):
                  variant((CALLER_RETURN,
                           "  item . model.min = 1;\n  item.value = true;\n"
                           "  prop.subscribe(item.model.eventSink);\n"
+                          "  return item;\n}\n"))),
+                # Only a grouping keeps the reference (ES5.1 11.1.6). A
+                # control header's `)` or an argument list's ends it, and
+                # the `(` after it calls something else. Before this
+                # branch all five held `item`; its `(item.model)()` check
+                # took any `)` for a grouping's (PR #277, Codex).
+                ("a member read in a control header",
+                 variant((CALLER_RETURN,
+                          "  if (item.model) (callback)();\n"
+                          "  return item;\n}\n"))),
+                ("a member read in a while header",
+                 variant((CALLER_RETURN,
+                          "  while (item.model) (f)();\n  return item;\n}\n"))),
+                ("a member read in a for header",
+                 variant((CALLER_RETURN,
+                          "  for (;item.model;) (f)();\n  return item;\n}\n"))),
+                ("a member passed to a call whose result is called",
+                 variant((CALLER_RETURN,
+                          "  f(item.model)();\n  return item;\n}\n"))),
+                ("a member passed to a call in a control header",
+                 variant((CALLER_RETURN,
+                          "  if (f(item.model)) (g)();\n"
                           "  return item;\n}\n")))]:
             with self.subTest(label):
                 shapes, _ = scan(source)

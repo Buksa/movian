@@ -3904,13 +3904,36 @@ def _factory_result(
         if member is None or member.group(1) not in members:
             return None
         # `delete x.value` names a member the shape has and removes it, and
-        # `x.model()` runs what the member holds with the object as `this`
-        # -- as does `(x.model)()`, since a parenthesized reference keeps
-        # its base (ES5.1 11.1.6).
+        # `x.model()` runs what the member holds with the object as `this`.
         if re.search(r"\bdelete[\s(]*$", region[:use.start()]) or \
-                re.match(r"[\s)]*\(", region[use.end() + member.end():]):
+                _is_called(region, use.end() + member.end()):
             return None
     return shape["name"]
+
+
+def _is_called(text: str, index: int) -> bool:
+    """Whether the member reference ending at `index` in `text` is called:
+    a `(` follows it, directly or past `)`s that close groupings around it.
+
+    A grouping keeps the reference, so `(x.m)()` and `((x.m))()` call `m`
+    with `x` as `this`, as `x.m()` does (ES5.1 11.1.6). Any other `)` ends
+    the reference, and a `(` after it calls something else: a control
+    header's, `if (x.m) (f)();`, or an argument list's, `f(x.m)()`, which
+    passes the value. A `(` opens a grouping where an expression may begin.
+
+    `text` is a method that passed `UNREADABLE_BODY_RE`, strings and
+    comments masked: no `/`, so no regex literal holds a paren.
+    """
+    while True:
+        token = re.compile(r"\s*(\S)").match(text, index)
+        if token is None or token.group(1) not in "()":
+            return False
+        if token.group(1) == "(":
+            return True
+        opening = _open_paren_of(text, token.start(1))
+        if opening is None or not _expression_may_begin(text, opening):
+            return False
+        index = token.end()
 
 
 class _DefinedLocal(NamedTuple):
