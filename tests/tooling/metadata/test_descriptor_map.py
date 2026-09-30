@@ -242,8 +242,13 @@ READ_ON_THE_SCANNER = [
     ("a comma inside a regex literal in a descriptor",
      "Object.defineProperties({t}, { a: { value: /x,y/ } });",
      [("a", "value")], ("this", "X.prototype")),
-    ("a brace inside a regex literal in a descriptor",
-     "Object.defineProperties({t}, { a: { value: /}/ }, b: { value: 1 } });",
+    # Two splits read the map: its fields, and each descriptor's. The comma
+    # above is inside a descriptor; this brace, on the mask, closes it
+    # early, so the comma after it split the map. The readers before this
+    # branch recorded `a` and a member `writable`, and no `b`.
+    ("a brace inside a regex literal, then another descriptor key",
+     "Object.defineProperties({t}, { a: { value: /[}]/, writable: true }, "
+     "b: { value: 1 } });",
      [("a", "value"), ("b", "value")], ("this", "X.prototype")),
     ("a line terminator ends the statement before the call",
      "var x = d\n  Object.defineProperties({t}, { a: { value: 1 } });",
