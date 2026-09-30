@@ -221,6 +221,7 @@ def _js_spans(source: str) -> list[tuple[str, str]]:
     index = 0
     length = len(source)
     prev = ""
+    run = 0
     word = ""
     prev_word = ""
     prev_word2 = ""
@@ -272,7 +273,7 @@ def _js_spans(source: str) -> list[tuple[str, str]]:
             index = stop
             continue
         if char == "/" and _js_regex_allowed(
-                prev, word or prev_word,
+                prev, run, word or prev_word,
                 prev_word if word else prev_word2, closed_word):
             stop = _js_regex_end(source, index)
             if stop > index:
@@ -298,19 +299,32 @@ def _js_spans(source: str) -> list[tuple[str, str]]:
             if not char.isspace():
                 prev_word2, prev_word = "", ""
         if not char.isspace():
+            # Whitespace or a comment between two `+` makes two tokens.
+            run = (run + 1 if char == prev and source[index - 1] == char
+                   else 1)
             prev = char
         index += 1
     flush(length)
     return spans
 
 
-def _js_regex_allowed(prev: str, prev_word: str, prev_word2: str,
+def _js_regex_allowed(prev: str, run: int, prev_word: str, prev_word2: str,
                       closed_word: str) -> bool:
+    """Whether a `/` may begin a regex literal after `prev`, the last
+    character of code before it. `run` counts the copies of `prev` that end
+    there with nothing between them: `a++` is 2, `a+ +` is 1."""
     if prev == "":
         return True
     if prev == ")":
         return closed_word in _JS_CONDITION_KEYWORDS
     if prev == "]":
+        return False
+    # Tokens are greedy (ES5.1 7.7): a run of `+` ends in the token `++` when
+    # its length is even, and in `+` when it is odd. After a postfix `++`
+    # only an operator may follow, so `a++ / 2` divides and `a+++/x/` adds a
+    # regex. A prefix `++` takes an operand, and `++/re/.lastIndex` -- valid,
+    # and absurd -- is the one regex this reads as division.
+    if prev in "+-" and run % 2 == 0:
         return False
     if prev.isalnum() or prev in "_$":
         return (prev_word in _JS_REGEX_KEYWORDS
@@ -3640,7 +3654,7 @@ def _expression_may_begin(text: str, index: int) -> bool:
     The question `_js_regex_allowed` asks of the token before a `/`, asked
     of the token before `index` and read from the text around it, not the
     lexer's running state: after `(`, `&&`, `return` or the `)` of
-    `if (x)` it may, and after a name, a literal, `]` or the `)` of
+    `if (x)` it may, and after a name, a literal, `]`, `++` or the `)` of
     `f(x)` it may not.
     """
     before = text[:index].rstrip()
@@ -3655,8 +3669,10 @@ def _expression_may_begin(text: str, index: int) -> bool:
         if opening is not None:
             closed = re.search(r"[A-Za-z0-9_$]+$", before[:opening].rstrip())
             closed_word = closed.group() if closed else ""
-    return _js_regex_allowed(before[-1:], prev_word,
-                             jump.group(1) if jump else "", closed_word)
+    prev = before[-1:]
+    return _js_regex_allowed(prev, len(before) - len(before.rstrip(prev)),
+                             prev_word, jump.group(1) if jump else "",
+                             closed_word)
 
 
 def _statement_begins_at(code: str, index: int) -> bool:

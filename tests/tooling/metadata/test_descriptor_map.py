@@ -259,7 +259,50 @@ READ_ON_THE_SCANNER = [
     ("a call ends the statement before the call",
      "d()\n  Object.defineProperties({t}, { a: { value: 1 } });",
      [("a", "value")], ("this", "X.prototype")),
+    # A `/` after a `++` or `--` token divides (ES5.1 7.7, SCANNING below).
+    # Read one character back, it began a regex that ran to the next `/` on
+    # the line: `/ 2 }, b: { value: 3 /` lost `b` without a warning, and a
+    # regex running past the call's `)` refused it (PR #277, round 3).
+    ("a division after a postfix `++`, then another descriptor",
+     "Object.defineProperties({t}, { a: { value: d++ / 2 }, "
+     "b: { value: 3 / 4 } });",
+     [("a", "value"), ("b", "value")], ("this", "X.prototype")),
+    ("a division after a postfix `++`, then another after the call",
+     "Object.defineProperties({t}, { a: { value: d++ / 2 } }); "
+     "var n = 3 / 4;",
+     [("a", "value")], ("this", "X.prototype")),
+    # The same question, asked of the line before the call: after a postfix
+    # `++` no expression may begin, so ES5.1 7.9.1 ends the statement there.
+    ("a postfix `++` ends the statement before the call",
+     "var x = d++\n  Object.defineProperties({t}, { a: { value: 1 } });",
+     [("a", "value")], ("this", "X.prototype")),
+    ("a postfix `--` ends the statement before the call",
+     "var x = d--\n  Object.defineProperties({t}, { a: { value: 1 } });",
+     [("a", "value")], ("this", "X.prototype")),
 ]
+
+# `(label, source, the spans `_js_spans` takes for regex literals)`. Tokens
+# are greedy (ES5.1 7.7): a run of `+` ends in the token `++` when its length
+# is even, and in `+` when it is odd, and whitespace or a comment ends a run.
+# After `++` or `--` a `/` divides; after `+` or `-` it may begin a regex. Each
+# division has a second `/` on its line, where a regex read in its place would
+# end.
+SCANNING = [
+    ("a division after `++`", "a++/2/b;", []),
+    ("a division after `++` and a space", "a++ / 2 / b;", []),
+    ("a division after `--`", "a--/2/b;", []),
+    ("a division-assignment after `++`", "a++ /= 2 / b;", []),
+    ("a comment between `++` and the division", "a++/**/ / 2 / b;", []),
+    ("a regex after `+++`, which ends in `+`", "a+++/x/;", ["/x/"]),
+    ("a regex after `---`, which ends in `-`", "a---/x/;", ["/x/"]),
+    ("a regex after two `+` a space apart", "a+ +/x/;", ["/x/"]),
+    ("a regex after two `+` a comment apart", "a+/**/+/x/;", ["/x/"]),
+]
+
+
+def regexes(source: str) -> list[str]:
+    return [span for kind, span in gen._js_spans(source)
+            if kind == "literal" and span.startswith("/")]
 
 # The kind is the descriptor's own: `get` or `set` among its keys. It was read
 # by searching the descriptor's text, strings included, for `get:`.
@@ -321,6 +364,11 @@ class OneReadingForEveryTarget(unittest.TestCase):
                     shapes, stderr = scan(build(statement))
                     self.assertEqual(members(shapes, shape), expected, stderr)
                     self.assertNotIn("Object.defineProperties", stderr)
+
+    def test_a_slash_after_increment_is_the_tokens(self) -> None:
+        for label, source, expected in SCANNING:
+            with self.subTest(label):
+                self.assertEqual(regexes(source), expected)
 
     def test_a_kind_is_the_descriptors_own(self) -> None:
         for label, statement, expected in KINDS:
