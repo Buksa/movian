@@ -32,9 +32,12 @@ its variable. `SettingItem`, the accepted corpus's name, is not in the source
 and would need a curated sidecar. A module block holds one interface per name
 and TypeScript merges a second declaration into the first, so a local is
 declared only when its name is not already declared at the module's top level
-or exported, no other function builds a local of that name, and TypeScript
-accepts it as an interface name -- `var object = {}` is legal JavaScript and
-`interface object` is TS2427.
+or exported, no prototype shape of the module has it, no other function builds
+a local of that name, and TypeScript accepts it as an interface name -- `var
+object = {}` is legal JavaScript and `interface object` is TS2427. A prototype
+shape takes its receiver's name whether or not a constructor is declared:
+`item = function () {}` is an implicit global, and `item.prototype.actual =
+...` still emits `interface item` (#272).
 
 ## When it holds
 
@@ -53,7 +56,8 @@ itself -- and requires:
   not inside a nested function, a block, an unbraced conditional or an
   expression -- whose map is the whole second argument and whose call is the
   whole statement: `{...} && d` passes `d`, and `(...).x = 1` writes to the
-  object;
+  object. The statement before the call must end in `;`, `{` or `}`; the
+  call's own statement ends as every target's does, below;
 - every descriptor an object literal of `value`, `get`, `set`, `writable`,
   `enumerable` and `configurable`, with `get` and `set` function literals
   written in place: an accessor runs with the object as `this`, and only
@@ -80,6 +84,43 @@ itself -- and requires:
 A local that fails any of these keeps the unsupported-target warning, now
 with the reason.
 
+What the list says about a map is not the local's alone. The generator also
+reads `Object.defineProperties` on `this` in a constructor and on
+`X.prototype`, and all three targets share one reading of the call (#272): it
+begins and ends its statement, the map is the whole second argument, every
+descriptor is an object literal of descriptor keys with `get` and `set`
+written in place, every key is one the scan can read and a plain
+identifier, and no `/` in the map follows a `}` (below). A call that fails
+records no member and is reported with the reason. Where the call may sit
+differs by target -- the constructor's own body, the module's top level, F's
+own body. A member is an `accessor` when its descriptor has `get` or `set`
+among its own keys, read with literals masked: `value: 'get: x'` is a value.
+
+The map is read on the module's scanner, `_js_spans`, where a regex literal is
+a literal: the comma in `value: /x,y/` separates no fields, and the brace in
+`/}/` closes nothing. The mask the calls are found in works a line at a time
+and knows neither, so the first reading split `/x,y/` into two fields and
+refused the call. A statement is the scanner's too, ended as ES5.1 7.9.1 ends
+it:
+
+- after the call's `)` it ends at `;`, at `}`, at the end of the module, or
+  at a line terminator followed by a token that cannot continue the
+  expression -- anything but `(`, `[`, `.`, `,`, `?`, `:`, `=`, `+`, `-`, `*`,
+  `/`, `%`, `&`, `|`, `^`, `<`, `>`, `!`, `in` and `instanceof`, a comment
+  counting as whitespace. So the call then `(f)()` on the next line is one
+  statement, `f` an argument to what the call returns;
+- before the call, the previous one ends at `;`, `{` or `}`, or at a line
+  terminator after a token no expression may begin after -- a name, a
+  literal, `]`, or a `)` that is not a control header's. `d &&` or `if (d)`
+  at the end of the line makes the call part of what they begin.
+
+The first reading required the `;` written and nothing but `;`, `{` or `}`
+before the call, and refused every call that relied on ASI. For a local the
+end is shared and the start is not: `Object.defineProperties(V, {...})`, a
+line terminator and `return V` now read, while the local's own rule above
+still wants `;`, `{` or `}` before the call, `var V = {};` with its `;`, and
+`return V` as written.
+
 ## The caller
 
 A method returns the shape through `var x = F(...); ... return x;` only under
@@ -96,8 +137,12 @@ shadowing F, a reassignment. In the method:
 - x occurs otherwise only as `x.<a member of the shape>`, which reads or
   writes a member the object already has -- not after `delete`, which
   removes it, and not called, which runs what the member holds with the
-  object as `this` -- and in `return x`, the method's only own return,
-  always reached, on one line.
+  object as `this`, parenthesized or not: `(x.m)()` keeps the reference
+  (ES5.1 11.1.6) -- and in `return x`, the method's only own return,
+  always reached, on one line. Only a grouping keeps it. The `)` of a
+  control header, `if (x.m) (f)();`, or of an argument list, `g(x.m)()`,
+  ends the reference, and the `(` after it calls something else; a `(`
+  opens a grouping where an expression may begin.
 
 `movian/settings`' four methods use `item` only as `item.model...`, and pass.
 
@@ -110,6 +155,37 @@ Nothing else is traced: not an object reached through another variable, and
 not the code that calls the four methods. It assumes `Object` is the
 intrinsic, as every `Object.defineProperties` reader in the generator does --
 a module that rebinds `Object` is not detected.
+
+The readers take the call spelled `Object.defineProperties(` only. Every
+other spelling of the name in the module's code -- a space before `(`, an
+alias, and `Object['defineProperties']`, the one string that spells it, in
+brackets that read a member -- is read by nothing and reported with its line
+(#272). A string that only mentions the name, an array literal
+`['defineProperties']` included, is not a call and is not reported. A name
+built at run time, `Object[k]`, is not seen, even when `k` holds
+`'defineProperties'`. The census walks the module again with its own scanner
+of code, literals and comments, not the readers' mask: a census needs an
+enumerator independent of the builder (ADR-0004), and a regex literal holding
+a quote or a string continued onto the next line makes the mask hide the code
+after it, so a census reading the masked text was blind exactly where the
+readers were. The readers now read a map on that scanner, but they still find
+their calls in the mask, and it is what they found that the census is
+compared with. The scanner has a blind spot of its own: it reads a `/` right
+after `}` as the start of a regex, the half that is safe for stripping
+comments. Here a literal is blanked, so a division there --
+`{} / Object['defineProperties'](...) / 2`, valid ES5 and absurd -- hides
+the call from the census as well. No lexer settles `}` then `/` without
+parsing, so for the census it is accepted.
+
+For the readers it is not. Inside a map the same reading hid fields: in
+`{ a: { value: {} / 2 }, b: { value: 4 / 2 } }` the scanner takes
+`/ 2 }, b: { value: 4 /` for a regex, and `b` went unrecorded without a
+warning. A reader now refuses a call whose map holds a regex right after
+`}`, comments between them counting as whitespace, in a nested descriptor
+or an accessor's body as well, and reports that the `/` cannot be told from
+a division. That refuses a real regex too -- `if (x) {} /re/.test(y)` in a
+getter -- because telling it from a division is what the scanner cannot do.
+A member may still be lost there, but not silently.
 
 ## Considered
 

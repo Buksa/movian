@@ -119,12 +119,14 @@ class TheScanReadsALocalTarget(unittest.TestCase):
         self.assertNotIn("item", by_name(shapes))
         (method,) = by_name(shapes)["sp"]["methods"]
         self.assertIsNone(method.get("returns"))
+        # No reader takes it, so the census does, at the call's line.
         self.assertIn(
-            "ignored unsupported Object.defineProperties target item", stderr)
+            ":5: warning: ignored unsupported Object.defineProperties call",
+            stderr)
 
     def test_the_read_call_is_not_reported_as_unsupported(self) -> None:
         _, stderr = scan(FACTORY)
-        self.assertNotIn("defineProperties target item", stderr)
+        self.assertNotIn("Object.defineProperties", stderr)
 
     def test_a_method_returning_the_factory_result_returns_the_shape(
             self) -> None:
@@ -306,6 +308,20 @@ REFUSED = [
     ("the call's result is written to",
      variant((CALL_CLOSE, "  }).extra = 1;\n  return item;")),
      NOT_WHOLE),
+    # The key was matched where strings are masked, so a quoted one never
+    # matched and its descriptor went unchecked.
+    ("a quoted key whose accessor is written elsewhere",
+     variant(("    value: {\n", "    'value': {\n"),
+             ("      set: function(v) { model.value = v; }\n",
+              "      set: group.mutate\n")),
+     NOT_INLINE),
+    # A refusal of the first call is not undone by a second that reads.
+    ("the first of two calls fails",
+     variant((CALL_CLOSE,
+              "  } && group.more);\n"
+              "  Object.defineProperties(item, { extra: { value: 1 } });\n"
+              "  return item;")),
+     NOT_WHOLE),
     ("a quoted key TypeScript cannot declare unquoted",
      variant(("    model: {\n", "    'foo-bar': { value: 1 },\n    model: {\n")),
      NOT_IDENTIFIER),
@@ -342,6 +358,21 @@ REFUSED = [
      COLLIDES),
     ("an export has the same name",
      FACTORY + "exports.item = function() {};\n",
+     COLLIDES),
+    # A prototype shape is emitted under its receiver's name whether or not
+    # the constructor is declared. Here it is an implicit global, and both
+    # `interface item` declarations merged: the factory's callers were
+    # promised `actual`.
+    ("a prototype shape has the same name",
+     FACTORY + "item = function () {};\n"
+     "item.prototype.actual = function () {};\n",
+     COLLIDES),
+    # A receiver that only aliases a method still carries a shape, here
+    # with the member the prototype map defines.
+    ("a prototype shape of the same name, through an alias",
+     FACTORY + "item = function () {};\n"
+     "item.prototype.a = item.prototype.b;\n"
+     "Object.defineProperties(item.prototype, { actual: { value: 1 } });\n",
      COLLIDES),
     # The export scanner reads this spelling too, and an export that mutates
     # its receiver is emitted as `interface item extends sp` -- which would
@@ -431,7 +462,10 @@ class TheScanDeclinesAnIncompleteLocal(unittest.TestCase):
         for label, source, _ in REFUSED:
             with self.subTest(label):
                 shapes, _ = scan(source)
-                self.assertNotIn("item", by_name(shapes))
+                # A prototype shape of that name may stay: it is what the
+                # local collided with.
+                self.assertNotEqual(
+                    by_name(shapes).get("item", {}).get("kind"), "local")
                 (method,) = by_name(shapes)["sp"]["methods"]
                 self.assertIsNone(method.get("returns"))
 
@@ -512,6 +546,17 @@ CALLER_REFUSED = [
     # A function held in a value member runs with the object as `this`.
     ("a member of the shape is called",
      variant((CALLER_RETURN, "  item.model();\n  return item;\n}\n"))),
+    # A parenthesized reference keeps its base (ES5.1 11.1.6), so `this` is
+    # still the object.
+    ("a member of the shape is called through parentheses",
+     variant((CALLER_RETURN, "  (item.model)();\n  return item;\n}\n"))),
+    ("a member of the shape is called through two pairs of parentheses",
+     variant((CALLER_RETURN,
+              "  ((item.model))\n  ();\n  return item;\n}\n"))),
+    # The grouping follows a control header, where an expression begins.
+    ("a member of the shape is called through parentheses after a "
+     "control header",
+     variant((CALLER_RETURN, "  if (id) (item.model)();\n  return item;\n}\n"))),
     ("a member the shape does not have is added",
      variant((CALLER_RETURN, "  item.extra = 1;\n  return item;\n}\n"))),
     ("the local is handed to a function",
@@ -535,6 +580,28 @@ class TheCallerHoldsTheFactoryResult(unittest.TestCase):
                  variant((CALLER_RETURN,
                           "  item . model.min = 1;\n  item.value = true;\n"
                           "  prop.subscribe(item.model.eventSink);\n"
+                          "  return item;\n}\n"))),
+                # Only a grouping keeps the reference (ES5.1 11.1.6). A
+                # control header's `)` or an argument list's ends it, and
+                # the `(` after it calls something else. Before this
+                # branch all five held `item`; its `(item.model)()` check
+                # took any `)` for a grouping's (PR #277, Codex).
+                ("a member read in a control header",
+                 variant((CALLER_RETURN,
+                          "  if (item.model) (callback)();\n"
+                          "  return item;\n}\n"))),
+                ("a member read in a while header",
+                 variant((CALLER_RETURN,
+                          "  while (item.model) (f)();\n  return item;\n}\n"))),
+                ("a member read in a for header",
+                 variant((CALLER_RETURN,
+                          "  for (;item.model;) (f)();\n  return item;\n}\n"))),
+                ("a member passed to a call whose result is called",
+                 variant((CALLER_RETURN,
+                          "  f(item.model)();\n  return item;\n}\n"))),
+                ("a member passed to a call in a control header",
+                 variant((CALLER_RETURN,
+                          "  if (f(item.model)) (g)();\n"
                           "  return item;\n}\n")))]:
             with self.subTest(label):
                 shapes, _ = scan(source)
@@ -582,8 +649,9 @@ class TheCorpus(unittest.TestCase):
              "createInt": "item", "createString": "item"})
 
     def test_no_defineProperties_target_is_left_unread(self) -> None:
-        """The warning #260 opened on, which printed on every run."""
-        self.assertNotIn("defineProperties target", self.stderr)
+        """The warning #260 opened on, which printed on every run -- and
+        the census's, which would name a spelling no reader takes."""
+        self.assertNotIn("Object.defineProperties", self.stderr)
 
 
 if __name__ == "__main__":

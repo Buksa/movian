@@ -221,6 +221,7 @@ def _js_spans(source: str) -> list[tuple[str, str]]:
     index = 0
     length = len(source)
     prev = ""
+    run = 0
     word = ""
     prev_word = ""
     prev_word2 = ""
@@ -252,7 +253,10 @@ def _js_spans(source: str) -> list[tuple[str, str]]:
             flush(index)
             spans.append(("literal", source[index:cursor]))
             code_start = cursor
-            prev, word, prev_word = char, "", ""
+            # A literal is an operand, as `_LexedJs.code` writes it: `0`.
+            # A `/` after it divides, and read one character back, after the
+            # quote, it began a regex.
+            prev, word, prev_word, prev_word2 = "0", "", "", ""
             index = cursor
             continue
         if char == "/" and index + 1 < length and source[index + 1] == "/":
@@ -272,14 +276,14 @@ def _js_spans(source: str) -> list[tuple[str, str]]:
             index = stop
             continue
         if char == "/" and _js_regex_allowed(
-                prev, word or prev_word,
+                prev, run, word or prev_word,
                 prev_word if word else prev_word2, closed_word):
             stop = _js_regex_end(source, index)
             if stop > index:
                 flush(index)
                 spans.append(("literal", source[index:stop]))
                 code_start = stop
-                prev, word, prev_word = "/", "", ""
+                prev, word, prev_word, prev_word2 = "0", "", "", ""
                 index = stop
                 continue
         if char == "(":
@@ -298,19 +302,32 @@ def _js_spans(source: str) -> list[tuple[str, str]]:
             if not char.isspace():
                 prev_word2, prev_word = "", ""
         if not char.isspace():
+            # Whitespace or a comment between two `+` makes two tokens.
+            run = (run + 1 if char == prev and source[index - 1] == char
+                   else 1)
             prev = char
         index += 1
     flush(length)
     return spans
 
 
-def _js_regex_allowed(prev: str, prev_word: str, prev_word2: str,
+def _js_regex_allowed(prev: str, run: int, prev_word: str, prev_word2: str,
                       closed_word: str) -> bool:
+    """Whether a `/` may begin a regex literal after `prev`, the last
+    character of code before it. `run` counts the copies of `prev` that end
+    there with nothing between them: `a++` is 2, `a+ +` is 1."""
     if prev == "":
         return True
     if prev == ")":
         return closed_word in _JS_CONDITION_KEYWORDS
     if prev == "]":
+        return False
+    # Tokens are greedy (ES5.1 7.7): a run of `+` ends in the token `++` when
+    # its length is even, and in `+` when it is odd. After a postfix `++`
+    # only an operator may follow, so `a++ / 2` divides and `a+++/x/` adds a
+    # regex. A prefix `++` takes an operand, and `++/re/.lastIndex` -- valid,
+    # and absurd -- is the one regex this reads as division.
+    if prev in "+-" and run % 2 == 0:
         return False
     if prev.isalnum() or prev in "_$":
         return (prev_word in _JS_REGEX_KEYWORDS
@@ -318,7 +335,8 @@ def _js_regex_allowed(prev: str, prev_word: str, prev_word2: str,
     # `}` ends a block (regex legal after it) or an object literal (division
     # legal, and absurd). Reading it as a regex start is the safe half: a
     # span wrongly taken for a regex is copied out verbatim, which can only
-    # keep a comment, never drop code.
+    # keep a comment, never drop code. A reader that blanks literals has no
+    # safe half, and `_read_descriptor_map` refuses a map holding one.
     return True
 
 
@@ -2438,8 +2456,14 @@ ALIAS_MEMBER_ASSIGN_RE = re.compile(
     r"\b([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
 NESTED_FUNCTION_HEAD_RE = re.compile(
     r"\bfunction\s*(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\([^)]*\)\s*\{")
+# The name alone, not a call form, in code: a spelling the readers do not
+# take still says `defineProperties`.
 DEFINE_PROPERTIES_CALL_RE = re.compile(
-    r"Object\.defineProperties\(\s*([^,]+?)\s*,\s*\{")
+    r"(?<![A-Za-z0-9_$])defineProperties(?![A-Za-z0-9_$])")
+# The one string that spells the call, where brackets read a member with it:
+# `Object['defineProperties']`. Any other string only mentions the name.
+DEFINE_PROPERTIES_LITERALS = frozenset({
+    "'defineProperties'", '"defineProperties"'})
 DEFINE_PROPERTY_CALL_RE = re.compile(
     r"Object\.defineProperty\(\s*([^,]+?)\s*,\s*([^,]+?)\s*,\s*\{")
 NATIVE_CALL_RE = re.compile(
@@ -3232,34 +3256,6 @@ def _shape_receiver_for_owner(
     return None
 
 
-def _property_names(
-        body: str, path: Path, text: str, offset: int
-) -> list[tuple[str, int, str]]:
-    names: list[tuple[str, int, str]] = []
-    cursor = 0
-    for field in _split_js_fields(body):
-        entry = re.match(
-            r"\s*(?:([A-Za-z_$][A-Za-z0-9_$]*)|"
-            r"(['\"])([^'\"]+)\2)\s*:", field, re.S)
-        if entry is None:
-            if field.strip():
-                _shape_diagnostic(
-                    path, text, offset + cursor,
-                    "ignored unsupported defineProperties key")
-            cursor += len(field) + 1
-            continue
-        descriptor = field[entry.end():]
-        kind = ("accessor"
-                if re.search(r"\b(?:get|set)\s*:", descriptor)
-                else "value")
-        names.append((
-            entry.group(1) or entry.group(3),
-            offset + cursor + field.find(entry.group(0).lstrip()),
-            kind))
-        cursor += len(field) + 1
-    return names
-
-
 def _add_property(
         properties: dict[str, dict[str, dict[str, Any]]],
         receiver: str, name: str, path: Path, text: str, offset: int,
@@ -3303,26 +3299,26 @@ def _scan_shape_properties(
         shared_receivers: set[str], handled: set[int] | None = None
 ) -> dict[str, dict[str, dict[str, Any]]]:
     comment_text = _masked_js_text(path, mask_strings=False)
+    lexed = _lexed_js(path)
     properties: dict[str, dict[str, dict[str, Any]]] = {}
-    # Seeded with the calls another reader already took, so an
-    # unsupported-target warning names only what nothing read.
-    handled_calls: set[int] = set(handled or ())
+    # The `Object.defineProperty` targets the readers below took.
+    handled_calls: set[int] = set()
+    # Where each `Object.defineProperties` a reader took spells the method,
+    # seeded with the local scan's, so the census below reports only what
+    # nothing read.
+    read_calls: set[int] = set(handled or ())
 
     def add_call_properties(
-            source: str, match: re.Match[str], receiver: str,
-            base_offset: int
+            match: re.Match[str], receiver: str, base_offset: int
     ) -> None:
-        open_index = match.end() - 1
-        end = _balanced_end(source, open_index)
-        if end is None:
+        members, refusal = _read_descriptor_map(lexed, match, base_offset)
+        if refusal is not None:
             _shape_diagnostic(
                 path, comment_text, base_offset + match.start(1),
-                "ignored unterminated Object.defineProperties call")
+                "ignored unsupported Object.defineProperties target %s: %s"
+                % (match.group(1), refusal))
             return
-        body_start = base_offset + open_index + 1
-        for name, offset, kind in _property_names(
-                source[open_index + 1:end - 1],
-                path, comment_text, body_start):
+        for name, offset, kind in members:
             _add_property(properties, receiver, name,
                           path, comment_text, offset, kind)
 
@@ -3385,19 +3381,22 @@ def _scan_shape_properties(
                     base_offset + assignment.start(2),
                     kind=assignment_kind(assignment))
 
-        for match in _top_level_matches(body, DEFINE_PROPERTIES_RE):
+        # Found where strings are masked, as every call is; the map is read
+        # on the scanner (`_read_descriptor_map`).
+        for match in _top_level_matches(
+                text[base_offset:base_offset + len(body)],
+                DEFINE_PROPERTIES_RE):
             target = match.group(1)
             receiver = owner_receiver if target == "this" \
                 else target_receiver(target)
+            read_calls.add(_census_offset(match, base_offset))
             if receiver not in receivers and receiver not in shared_receivers:
                 _shape_diagnostic(
                     path, comment_text, base_offset + match.start(1),
                     "ignored unsupported Object.defineProperties target %s" %
                     target)
-                handled_calls.add(base_offset + match.start(1))
                 continue
-            add_call_properties(body, match, receiver, base_offset)
-            handled_calls.add(base_offset + match.start(1))
+            add_call_properties(match, receiver, base_offset)
 
         for match in _top_level_matches(body, DEFINE_PROPERTY_RE):
             target = match.group(1)
@@ -3413,18 +3412,17 @@ def _scan_shape_properties(
             add_property_call(body, match, receiver, base_offset)
             handled_calls.add(base_offset + match.start(1))
 
-    for match in _top_level_matches(comment_text, DEFINE_PROPERTIES_RE):
+    for match in _top_level_matches(text, DEFINE_PROPERTIES_RE):
         target = match.group(1)
         receiver = target_receiver(target)
+        read_calls.add(_census_offset(match))
         if receiver not in receivers:
             _shape_diagnostic(
                 path, comment_text, match.start(1),
                 "ignored unsupported Object.defineProperties target %s" %
                 target)
-            handled_calls.add(match.start(1))
             continue
-        add_call_properties(comment_text, match, receiver, 0)
-        handled_calls.add(match.start(1))
+        add_call_properties(match, receiver, 0)
 
     for match in _top_level_matches(comment_text, DEFINE_PROPERTY_RE):
         target = match.group(1)
@@ -3458,12 +3456,16 @@ def _scan_shape_properties(
             comment_text[open_index + 1:end - 1],
             receiver, open_index + 1)
 
-    for match in DEFINE_PROPERTIES_CALL_RE.finditer(comment_text):
-        if match.start(1) not in handled_calls:
+    # A census of the method's name, however the call is spelled: the
+    # readers take `Object.defineProperties(` alone, and
+    # `Object['defineProperties'](...)`, a space before `(` or an alias
+    # gave the shape no members and no warning (movian#272).
+    for offset in _define_properties_occurrences(path):
+        if offset not in read_calls:
             _shape_diagnostic(
-                path, comment_text, match.start(1),
-                "ignored unsupported Object.defineProperties target %s" %
-                match.group(1).strip())
+                path, comment_text, offset,
+                "ignored unsupported Object.defineProperties call: no reader "
+                "takes this spelling or target")
     for match in DEFINE_PROPERTY_CALL_RE.finditer(comment_text):
         if match.start(1) not in handled_calls:
             _shape_diagnostic(
@@ -3488,33 +3490,309 @@ DESCRIPTOR_KEYS = frozenset({
     "value", "get", "set", "writable", "enumerable", "configurable"})
 
 
-def _inline_descriptor(text: str) -> bool:
-    """Whether `text`, a field's value in an `Object.defineProperties` map,
-    is an object literal of descriptor keys whose `get` and `set` are
-    function literals written in place.
+def _descriptor_keys(text: str) -> set[str] | None:
+    """The keys of `text`, a field's value in an `Object.defineProperties`
+    map, when it is an object literal of descriptor keys whose `get` and
+    `set` are function literals written in place; `None` otherwise.
 
     An accessor runs with the object as `this`, so a local-object shape
     holds only where every accessor is text the scan reads. `set: mutate`
     or a descriptor built elsewhere could add or remove members.
+
+    `text` is `_LexedJs.code`, where a literal is `0` and a comment blank,
+    so a key is one the descriptor has: `value: 'get: x'` is a value
+    descriptor, and the comma in `value: /x,y/` separates nothing.
     """
     text = text.strip()
     end = _balanced_end(text, 0) if text.startswith("{") else None
     if end is None or text[end:].strip():
-        return False
+        return None
+    keys: set[str] = set()
     for field in _split_js_fields(text[1:end - 1]):
         if not field.strip():
             continue
         entry = re.fullmatch(r"\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*(.*?)\s*",
                              field, re.S)
         if entry is None or entry.group(1) not in DESCRIPTOR_KEYS:
-            return False
+            return None
         if entry.group(1) in ("get", "set"):
             function = FIELD_FUNCTION_RE.match(entry.group(2))
             close = (_balanced_end(entry.group(2), function.end() - 1)
                      if function else None)
             if close is None or entry.group(2)[close:].strip():
-                return False
-    return True
+                return None
+        keys.add(entry.group(1))
+    return keys
+
+
+def _census_offset(call: re.Match[str], base: int = 0) -> int:
+    """Where a `DEFINE_PROPERTIES_RE` call spells `defineProperties`: the
+    offset `DEFINE_PROPERTIES_CALL_RE` finds it at."""
+    return base + call.start() + len("Object.")
+
+
+def _define_properties_occurrences(path: Path) -> list[int]:
+    """Where the module spells `defineProperties` as code, in source order:
+    the name in a code span, and a literal span `'defineProperties'` or
+    `"defineProperties"` in brackets that are code and read a member.
+
+    A census needs an enumerator independent of the builder (ADR-0004), so
+    this walks the module again with `_js_spans`, not the readers' mask:
+    `var r = /'/;` or a string continued onto the next line makes the mask
+    hide the code after it, and a census reading the masked text was blind
+    to a call there exactly where the readers were. The offsets are in the
+    readers' coordinates all the same -- both read the lines `_js_lines`
+    gives, and the masks keep every column -- so each compares with the
+    offset `_census_offset` gives a call a reader took.
+
+    A string is not a call. Read with strings intact, `var s =
+    'defineProperties';` and `"Object.defineProperties"` were reported as
+    calls no reader takes (movian#272). `var k = 'defineProperties';
+    Object[k](...)` was reported only for its string, and is not now: a name
+    computed through a variable is not seen.
+
+    `_js_spans` has its own blind spot. `_js_regex_allowed` reads a `/`
+    right after `}` as a regex, which is safe for stripping comments,
+    because a mistaken regex is copied out verbatim. It is not safe here:
+    this blanks every literal, so `{} / Object['defineProperties'](...) /
+    2` hides the call. That is accepted (#272): dividing an object literal
+    is absurd, and no lexer settles `}` then `/` without parsing.
+    """
+    source = "\n".join(_js_lines(path.read_text(encoding="utf-8")))
+    # The source with every literal and comment blanked, newlines kept, so
+    # an offset into it is an offset into the source.
+    parts: list[str] = []
+    literals: list[tuple[int, str]] = []
+    position = 0
+    for kind, span in _js_spans(source):
+        if kind == "literal":
+            literals.append((position, span))
+        parts.append(span if kind == "code" else re.sub(r"[^\n]", " ", span))
+        position += len(span)
+    code = "".join(parts)
+    offsets = [match.start()
+               for match in DEFINE_PROPERTIES_CALL_RE.finditer(code)]
+    for start, span in literals:
+        if span not in DEFINE_PROPERTIES_LITERALS:
+            continue
+        before = code[:start].rstrip()
+        if (before.endswith("[")
+                and code[start + len(span):].lstrip().startswith("]")
+                and _reads_a_member(code, len(before) - 1)):
+            offsets.append(start + 1)
+    return sorted(offsets)
+
+
+def _reads_a_member(text: str, bracket: int) -> bool:
+    """Whether the `[` at `bracket` in `text`, whose comments and literals
+    are blanked, reads a member of what precedes it: a name, `)` or `]`. After
+    anything else it opens an array literal, and after a word
+    `_JS_REGEX_KEYWORDS` names too: an expression begins there, so
+    `return ['defineProperties']` returns an array, as `return /x/` returns
+    a regex.
+
+    A `)` that closes a condition, `if (d) [...]`, and a label after `break`
+    or `continue` are taken as ending an expression, so an array there still
+    counts: the census errs toward reporting.
+    """
+    before = text[:bracket].rstrip()
+    if before.endswith((")", "]")):
+        return True
+    word = re.search(r"[A-Za-z0-9_$]+$", before)
+    return word is not None and word.group() not in _JS_REGEX_KEYWORDS
+
+
+DESCRIPTOR_MAP_KEY_RE = re.compile(
+    r"\s*(?:([A-Za-z_$][A-Za-z0-9_$]*)|(['\"])([^'\"]+)\2)\s*:")
+
+
+class _LexedJs(NamedTuple):
+    """A module as `_js_spans` reads it, in the coordinates of its masked
+    text: both split the source into the lines `_js_lines` gives, and keep
+    every column."""
+
+    # Comments blank, and each literal the operand `0` followed by blanks:
+    # one token wherever it stands, with nothing inside it -- a comma, a
+    # brace -- left as code. Line terminators are kept, inside a comment
+    # too, where ES5.1 7.4 counts one.
+    code: str
+    # Comments blank, literals as written.
+    kept: str
+
+
+def _lexed_js(path: Path) -> _LexedJs:
+    source = "\n".join(_js_lines(path.read_text(encoding="utf-8")))
+    code: list[str] = []
+    kept: list[str] = []
+    for kind, span in _js_spans(source):
+        blank = re.sub(r"[^\n]", " ", span)
+        if kind == "code":
+            code.append(span)
+            kept.append(span)
+        elif kind == "literal":
+            code.append("0" + blank[1:])
+            kept.append(span)
+        else:
+            code.append(blank)
+            kept.append(blank)
+    return _LexedJs("".join(code), "".join(kept))
+
+
+def _open_paren_of(text: str, close: int) -> int | None:
+    """The index of the `(` matching the `)` at `close`, or None."""
+    depth = 0
+    for index in range(close, -1, -1):
+        if text[index] == ")":
+            depth += 1
+        elif text[index] == "(":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
+def _expression_may_begin(text: str, index: int) -> bool:
+    """Whether an expression may begin at `index` in `text`, whose literals
+    and comments are blank or `0`.
+
+    The question `_js_regex_allowed` asks of the token before a `/`, asked
+    of the token before `index` and read from the text around it, not the
+    lexer's running state: after `(`, `&&`, `return` or the `)` of
+    `if (x)` it may, and after a name, a literal, `]`, `++` or the `)` of
+    `f(x)` it may not.
+    """
+    before = text[:index].rstrip()
+    word = re.search(r"[A-Za-z0-9_$]+$", before)
+    prev_word = word.group() if word else ""
+    # `break outer` puts a label where the keyword was.
+    jump = re.search(r"([A-Za-z0-9_$]+)\s+$",
+                     before[:len(before) - len(prev_word)]) if word else None
+    closed_word = ""
+    if before.endswith(")"):
+        opening = _open_paren_of(before, len(before) - 1)
+        if opening is not None:
+            closed = re.search(r"[A-Za-z0-9_$]+$", before[:opening].rstrip())
+            closed_word = closed.group() if closed else ""
+    prev = before[-1:]
+    return _js_regex_allowed(prev, len(before) - len(before.rstrip(prev)),
+                             prev_word, jump.group(1) if jump else "",
+                             closed_word)
+
+
+def _statement_begins_at(code: str, index: int) -> bool:
+    """Whether a statement begins at `index` in `code` (`_LexedJs.code`):
+    the token before it is `;`, `{` or `}`, or none, or ends a line where
+    ES5.1 7.9.1 inserts a semicolon -- no expression may begin after it,
+    so the token at `index` cannot continue one. `x = d` then a call on
+    the next line are two statements; `d &&` or `if (d)` then the call are
+    one."""
+    before = code[:index].rstrip()
+    if not before or before[-1] in ";{}":
+        return True
+    return ("\n" in code[len(before):index]
+            and not _expression_may_begin(code, index))
+
+
+# What continues an expression across a line terminator, so ES5.1 7.9.1
+# inserts no semicolon before it: `f()` then `(g)()` on the next line is
+# `f()(g)()`. `+` and `-` take `++` and `--` too, and `!` takes `!=`: a
+# prefix `++` or a `!` there would begin a statement, and reading it as a
+# continuation only refuses.
+_JS_CONTINUING_PUNCTUATORS = "([.,?:=+-*/%&|^<>!"
+_JS_CONTINUING_WORDS = frozenset(("in", "instanceof"))
+
+
+def _statement_ends_at(code: str, index: int) -> bool:
+    """Whether the statement ends at `index` in `code` (`_LexedJs.code`):
+    the next token is `;` or `}`, or there is none, or it follows a line
+    terminator and cannot continue the expression (ES5.1 7.9.1)."""
+    rest = code[index:]
+    token = rest.lstrip()
+    if not token or token[0] in ";}":
+        return True
+    if "\n" not in rest[:len(rest) - len(token)]:
+        return False
+    word = re.match(r"[A-Za-z0-9_$]+", token)
+    if word is not None:
+        return word.group() not in _JS_CONTINUING_WORDS
+    return token[0] not in _JS_CONTINUING_PUNCTUATORS
+
+
+def _read_descriptor_map(
+        lexed: _LexedJs, call: re.Match[str], base: int = 0
+) -> tuple[list[tuple[str, int, str]], str | None]:
+    """`(members, refusal)` for the `Object.defineProperties(<target>, {...})`
+    that `call` matched `base` into the module's masked text.
+
+    The one reading of a descriptor map, for every target the generator
+    reads -- `this` in a constructor, `X.prototype`, and a local
+    (ADR-0006). Each reader had its own, and only the local one checked
+    the map: the other two recorded `a` from `{ a: {...} } && d`, which
+    passes `d` (movian#272). A call that fails a check records no member,
+    and the reason is returned for the caller's warning.
+
+    The map is read on the module's scanner, `lexed`, not on the masked
+    text the call was found in. That mask works a line at a time and knows
+    no regex literal, so `/x,y/` split a descriptor at its comma, and it
+    knows no statement, so a call ended by a line terminator was refused
+    for want of a `;`. The scanner's own blind spot comes with it: a `/`
+    right after `}` starts a regex (`_define_properties_occurrences`), so
+    in `{ a: { value: {} / 2 }, b: { value: 4 / 2 } }` it swallows `b`. A
+    map holding such a regex is refused, so the loss is reported, not
+    silent. Each member is `(name, offset of its key, "value" or
+    "accessor")`.
+    """
+    code = lexed.code
+    start, open_index = base + call.start(), base + call.end() - 1
+    # The mask's string reading may show code the scanner reads as a
+    # string -- the second line of one continued with a backslash -- and
+    # there is no call there to read.
+    if code[start:open_index + 1] != call.group(0):
+        return [], ("the module's scanner reads it as part of a literal or a "
+                    "comment")
+    close = _balanced_end(code, open_index)
+    # A regex literal starts where `kept` has `/` and `code` its `0`. Right
+    # after `}` the scanner cannot tell it from a division, and either
+    # reading can hide a field. A map that never closes on this reading runs
+    # to the end of the module.
+    for brace in re.compile(r"\}\s*0").finditer(
+            code, open_index, len(code) if close is None else close):
+        if lexed.kept[brace.end() - 1] == "/":
+            return [], ("a `/` after `}`, read as a regex, cannot be told "
+                        "from a division")
+    paren = re.match(r"\s*\)", code[close:]) if close is not None else None
+    # `x && Object.defineProperties(...)` defines its members on one path,
+    # `{...} && d` passes `d`, and `(...).x = 1` writes to the object the
+    # call returns.
+    if (not _statement_begins_at(code, start) or close is None
+            or paren is None
+            or not _statement_ends_at(code, close + paren.end())):
+        return [], ("the map is not the whole second argument, or the call "
+                    "not a whole statement")
+    members: list[tuple[str, int, str]] = []
+    cursor = open_index + 1
+    for field in _split_js_fields(code[open_index + 1:close - 1]):
+        field_end = cursor + len(field)
+        key = DESCRIPTOR_MAP_KEY_RE.match(lexed.kept, cursor, field_end)
+        if key is not None:
+            name = key.group(1) or key.group(3)
+            # `'foo-bar'` cannot be declared unquoted, and `'x\u0061'` is
+            # the key `xa` at runtime, not what the text says.
+            if not IDENT_RE.fullmatch(name):
+                return [], "a key that is not a plain identifier"
+            keys = _descriptor_keys(code[key.end():field_end])
+            if keys is None:
+                return [], ("a descriptor that is not an object literal of "
+                            "value, get and set written in place")
+            members.append((
+                name, key.start(1) if key.group(1) else key.start(2),
+                "accessor" if keys & {"get", "set"} else "value"))
+        elif field.strip():
+            # A member the call defines and the scan cannot name: recording
+            # the others would claim a partial set.
+            return [], "a key the scan cannot read"
+        cursor = field_end + 1
+    return members, None
 
 
 def _statement_at_top(region: str, open_brace: int, offset: int) -> bool:
@@ -3659,9 +3937,34 @@ def _factory_result(
         # `delete x.value` names a member the shape has and removes it, and
         # `x.model()` runs what the member holds with the object as `this`.
         if re.search(r"\bdelete[\s(]*$", region[:use.start()]) or \
-                re.match(r"\s*\(", region[use.end() + member.end():]):
+                _is_called(region, use.end() + member.end()):
             return None
     return shape["name"]
+
+
+def _is_called(text: str, index: int) -> bool:
+    """Whether the member reference ending at `index` in `text` is called:
+    a `(` follows it, directly or past `)`s that close groupings around it.
+
+    A grouping keeps the reference, so `(x.m)()` and `((x.m))()` call `m`
+    with `x` as `this`, as `x.m()` does (ES5.1 11.1.6). Any other `)` ends
+    the reference, and a `(` after it calls something else: a control
+    header's, `if (x.m) (f)();`, or an argument list's, `f(x.m)()`, which
+    passes the value. A `(` opens a grouping where an expression may begin.
+
+    `text` is a method that passed `UNREADABLE_BODY_RE`, strings and
+    comments masked: no `/`, so no regex literal holds a paren.
+    """
+    while True:
+        token = re.compile(r"\s*(\S)").match(text, index)
+        if token is None or token.group(1) not in "()":
+            return False
+        if token.group(1) == "(":
+            return True
+        opening = _open_paren_of(text, token.start(1))
+        if opening is None or not _expression_may_begin(text, opening):
+            return False
+        index = token.end()
 
 
 class _DefinedLocal(NamedTuple):
@@ -3671,12 +3974,14 @@ class _DefinedLocal(NamedTuple):
     name: str
     # Offsets of each call's target, in the module text.
     targets: list[int]
+    # Where each call spells `defineProperties`, for the census.
+    calls: list[int]
     members: dict[str, dict[str, Any]]
     refusal: str | None
 
 
 def _scan_local_object_shapes(
-        path: Path, text: str
+        path: Path, text: str, shape_names: set[str]
 ) -> tuple[list[dict[str, Any]], set[int]]:
     """`(shapes, handled calls)` for the locals a module function builds with
     `Object.defineProperties` and returns (ADR-0006).
@@ -3688,15 +3993,19 @@ def _scan_local_object_shapes(
         return item;
 
     The descriptors are the ones `Object.defineProperties(this, ...)` already
-    gives `Service`, read by the same `_property_names`, so the result is a
-    named shape of the same kind: it claims the member SET and types every
-    member `any`. The shape is named after the local, the way the shared
-    object `sp` is named after its variable.
+    gives `Service`, read by the same `_read_descriptor_map`, so the result
+    is a named shape of the same kind: it claims the member SET and types
+    every member `any`. The shape is named after the local, the way the
+    shared object `sp` is named after its variable.
 
-    `handled calls` are the offsets of the targets read here, so the
-    unsupported-target warning does not also fire for them.
+    `shape_names` are the names the module's prototype shapes take, which a
+    local may not.
+
+    `handled calls` are where each call read here spells `defineProperties`,
+    so the census does not also report them.
     """
     comment_text = _masked_js_text(path, mask_strings=False)
+    lexed = _lexed_js(path)
     # Every spelling the export scanner reads, `exports['x'] =` included.
     exported = {name for name, _, _ in _commonjs_export_regions(path)}
     found: list[_DefinedLocal] = []
@@ -3723,12 +4032,15 @@ def _scan_local_object_shapes(
                 region, open_brace, name, local, calls)
             # One interface per name in a module block: TypeScript MERGES a
             # second declaration into the first, so a return type naming it
-            # would mean both.
+            # would mean both. A prototype shape is one whether or not its
+            # constructor is declared: `item = function () {}` is an
+            # implicit global, and `item.prototype.actual` still emits
+            # `interface item`.
             if refusal is None and (
                     _top_level_matches(text, re.compile(
                         r"\b(?:function|var|let|const)\s+(%s)\b"
                         % re.escape(name)))
-                    or name in exported):
+                    or name in exported or name in shape_names):
                 refusal = "the name is already declared in this module"
             if refusal is None and name in TS_PREDEFINED_TYPE_NAMES:
                 refusal = "the name is a type TypeScript predefines"
@@ -3758,38 +4070,10 @@ def _scan_local_object_shapes(
                            "module")
             properties: dict[str, dict[str, dict[str, Any]]] = {}
             for call in calls if refusal is None else []:
-                # Balanced in the masked region, which closes inside it; read
-                # from the text that keeps strings, for a quoted key.
-                open_index = call.end() - 1
-                close = _balanced_end(region, open_index)
-                # `{...} && d` passes `d`, and `(...).x = 1` writes to the
-                # object the call returns.
-                if not re.match(r"\s*\)\s*;", region[close:]):
-                    refusal = ("the map is not the whole second argument, or "
-                               "the call not a whole statement")
-                if not all(
-                        _inline_descriptor(field[key.end():])
-                        for field in _split_js_fields(
-                            region[open_index + 1:close - 1])
-                        for key in [re.match(
-                            r"\s*(?:[A-Za-z_$][A-Za-z0-9_$]*"
-                            r"|(['\"])[^'\"]*\1)\s*:", field)]
-                        if key is not None):
-                    refusal = ("a descriptor that is not an object literal of "
-                               "value, get and set written in place")
-                body = comment_text[shift + open_index + 1:shift + close - 1]
-                names = _property_names(body, path, comment_text,
-                                        shift + open_index + 1)
-                if len(names) != len([field for field in
-                                      _split_js_fields(body)
-                                      if field.strip()]):
-                    refusal = "a key the scan cannot read"
-                # `'foo-bar'` cannot be declared unquoted, and `'x\u0061'`
-                # is the key `xa` at runtime, not what the text says.
-                if any(not IDENT_RE.fullmatch(member)
-                       for member, _, _ in names):
-                    refusal = "a key that is not a plain identifier"
-                for member, offset, kind in names:
+                members, refusal = _read_descriptor_map(lexed, call, shift)
+                if refusal is not None:
+                    break
+                for member, offset, kind in members:
                     _add_property(properties, name, member, path,
                                   comment_text, offset, kind)
             if refusal is None and not properties:
@@ -3797,6 +4081,7 @@ def _scan_local_object_shapes(
             found.append(_DefinedLocal(
                 factory.group(1), name,
                 [shift + call.start(1) for call in calls],
+                [_census_offset(call, shift) for call in calls],
                 properties.get(name, {}), refusal))
 
     builders: dict[str, int] = {}
@@ -3809,7 +4094,7 @@ def _scan_local_object_shapes(
         refusal = local.refusal
         if refusal is None and builders[local.name] > 1:
             refusal = "the name is built by more than one function"
-        handled.update(local.targets)
+        handled.update(local.calls)
         if refusal is not None:
             for target in local.targets:
                 _shape_diagnostic(
@@ -3837,10 +4122,16 @@ def _scan_local_object_shapes(
 def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
     """Scan top-level prototype and shared-object assignments."""
     text = _masked_js_text(path)
-    local_shapes, local_calls = _scan_local_object_shapes(path, text)
+    prototype_matches = _top_level_matches(text, PROTOTYPE_FUNCTION_RE)
+    top_alias_matches = _top_level_matches(text, PROTOTYPE_ALIAS_RE)
+    # The receivers below are keyed on these, and each is named before any
+    # of its members is read -- so a local that would take a prototype
+    # shape's name is declined before a method is typed as returning it.
+    local_shapes, local_calls = _scan_local_object_shapes(
+        path, text, {_shape_owner(match.group(1), text)
+                     for match in prototype_matches + top_alias_matches})
     factories = {shape["factory"]: shape for shape in local_shapes}
     by_receiver: dict[str, dict[str, dict[str, Any]]] = {}
-    prototype_matches = _top_level_matches(text, PROTOTYPE_FUNCTION_RE)
     top_prototype_starts = {
         match.start(1) for match in prototype_matches
     }
@@ -3861,9 +4152,7 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
 
     unresolved_aliases: list[tuple[str, str, str, int]] = []
     alias_matches = list(PROTOTYPE_ALIAS_RE.finditer(text))
-    top_alias_starts = {
-        match.start(1) for match in _top_level_matches(text, PROTOTYPE_ALIAS_RE)
-    }
+    top_alias_starts = {match.start(1) for match in top_alias_matches}
     for match in alias_matches:
         receiver, name, target_receiver, target = match.groups()
         line = _source_line(text, match.start(1))
