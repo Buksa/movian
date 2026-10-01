@@ -59,7 +59,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 METADATA_DIR = Path(__file__).resolve().parent
@@ -2422,6 +2422,15 @@ OBJECT_FUNCTION_RE = re.compile(
     r"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)"
     r"\s*=\s*function\s*"
     r"(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\(([^)]*)\)", re.M)
+# The same two members assigned ANYTHING. The forms above are what the scan
+# reads, and `C.prototype.m = helper;` installs a function as well, so these
+# count a member's implementations (movian#267).
+PROTOTYPE_ASSIGN_RE = re.compile(
+    r"^\s*((?:exports\.)?[A-Za-z_$][A-Za-z0-9_$]*)\.prototype\."
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)", re.M)
+OBJECT_ASSIGN_RE = re.compile(
+    r"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)"
+    r"\s*=(?!=)", re.M)
 SHARED_OBJECT_DECL_RE = re.compile(
     r"^\s*(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*="
     r"\s*\{\s*\}\s*;?", re.M)
@@ -4007,7 +4016,7 @@ def _scan_local_object_shapes(
     comment_text = _masked_js_text(path, mask_strings=False)
     lexed = _lexed_js(path)
     # Every spelling the export scanner reads, `exports['x'] =` included.
-    exported = {name for name, _, _ in _commonjs_export_regions(path)}
+    exported = {export.name for export in _commonjs_export_regions(path)}
     found: list[_DefinedLocal] = []
     for factory in _top_level_matches(text, FACTORY_DECL_RE):
         # A declaration, not `x = function F(...)`: a function expression's
@@ -4119,6 +4128,30 @@ def _scan_local_object_shapes(
     return shapes, handled
 
 
+def _assignment_lines(text: str, pattern: re.Pattern[str]
+                      ) -> dict[tuple[str, str], list[int]]:
+    """`(receiver, member)` -> the line of every assignment `pattern` finds,
+    conditional and nested ones included: any of them may install the
+    function the runtime holds."""
+    lines: dict[tuple[str, str], list[int]] = {}
+    for match in pattern.finditer(text):
+        lines.setdefault((match.group(1), match.group(2)), []).append(
+            _source_line(text, match.start(1)))
+    return lines
+
+
+def _withhold_reassigned(
+        path: Path, receiver: str, methods: dict[str, dict[str, Any]],
+        assignments: dict[tuple[str, str], list[int]]) -> None:
+    """Replace the record of each of `receiver`'s methods assigned more than
+    once. It was the last body's, which is runtime order again (movian#267).
+    """
+    for name in methods:
+        lines = assignments.get((receiver, name), [])
+        if len(lines) > 1:
+            methods[name] = _withheld(name, path, lines[0], lines)
+
+
 def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
     """Scan top-level prototype and shared-object assignments."""
     text = _masked_js_text(path)
@@ -4149,6 +4182,11 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
             match.group(2), match.group(3), path,
             _source_line(text, match.start(1)),
             region=text[match.start(1):], factories=factories)
+    # Before the aliases resolve, so that an alias of a member assigned more
+    # than once copies the refusal and not one of its bodies (movian#267).
+    prototype_assignments = _assignment_lines(text, PROTOTYPE_ASSIGN_RE)
+    for receiver, methods in by_receiver.items():
+        _withhold_reassigned(path, receiver, methods, prototype_assignments)
 
     unresolved_aliases: list[tuple[str, str, str, int]] = []
     alias_matches = list(PROTOTYPE_ALIAS_RE.finditer(text))
@@ -4175,6 +4213,19 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
         for receiver, name, target, line in unresolved_aliases:
             methods = by_receiver.setdefault(receiver, {})
             if target in methods:
+                own = prototype_assignments.get((receiver, name), [])
+                if len(own) > 1:
+                    methods[name] = _withheld(name, path, own[0], own)
+                    progress = True
+                    continue
+                if "implementations" in methods[target]:
+                    # The alias holds whichever one the target held at the
+                    # alias statement, and that is runtime order.
+                    methods[name] = _withheld(
+                        name, path, line, methods[target]["implementations"],
+                        alias_of=target)
+                    progress = True
+                    continue
                 method = dict(methods[target])
                 method["name"] = name
                 method["source"] = {"file": rel(path), "line": line}
@@ -4244,6 +4295,19 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
             name, match.group(3), path,
             _source_line(text, match.start(1)),
             region=text[match.start(1):], factories=factories)
+    object_assignments = _assignment_lines(text, OBJECT_ASSIGN_RE)
+    for receiver in consumed_shared_names & set(by_receiver):
+        _withhold_reassigned(
+            path, receiver, by_receiver[receiver], object_assignments)
+    withheld = [
+        ("%s.%s" % (receiver if receiver in consumed_shared_names
+                    else receiver + ".prototype", name), method)
+        for receiver, methods in by_receiver.items()
+        for name, method in methods.items()
+        if "implementations" in method]
+    for display, method in sorted(
+            withheld, key=lambda item: (item[1]["source"]["line"], item[0])):
+        _warn_withheld(path, display, method)
     properties_by_receiver = _scan_shape_properties(
         path, text, set(by_receiver), consumed_shared_names, local_calls)
 
@@ -4587,10 +4651,18 @@ def _commonjs_masked_lines(path: Path) -> list[str]:
     return masked_lines
 
 
-def _commonjs_export_regions(
-        path: Path) -> list[tuple[str, int, str]]:
-    """`(export name, 0-based head line, region text)` for each export the
-    scan reads.
+class _ExportRegion(NamedTuple):
+    name: str
+    # 0-based, the line of this assignment.
+    line_index: int
+    text: str
+    # 1-based, the line of EVERY assignment of `name` in the module, this one
+    # included. More than one and the name has more than one implementation.
+    implementations: tuple[int, ...]
+
+
+def _commonjs_export_regions(path: Path) -> list[_ExportRegion]:
+    """Every `exports.<name> = ...` the scan reads, and the region after it.
 
     Split out of `scan_commonjs_exports` in movian#229 so the coverage census
     and the generator see the SAME regions. A census that rebuilt its own idea
@@ -4598,11 +4670,10 @@ def _commonjs_export_regions(
     generator never looked at -- the two sides blind in the same way, which is
     the defect this census exists to make impossible.
 
-    A repeated export name is skipped here exactly as the generator skips it.
-    That is deliberate: a second `exports.foo = ...` wins at runtime and the
-    scan describes the first, so a `return {` inside the second belongs to no
-    region the generator read, and the census is supposed to say so rather
-    than quietly count it.
+    A repeated export name yields a region for each assignment. The scan
+    described the first and skipped the rest, while the last one wins at
+    runtime. Now it takes no claim from any of them (movian#267), and both
+    sides learn that from the same `implementations`.
     """
     masked_lines = _commonjs_masked_lines(path)
     candidates: list[tuple[int, str]] = []
@@ -4611,24 +4682,77 @@ def _commonjs_export_regions(
         if match is not None:
             candidates.append((line_index, match.group(1) or match.group(3)))
 
-    regions: list[tuple[str, int, str]] = []
-    seen: set[str] = set()
+    implementations: dict[str, list[int]] = {}
+    for line_index, export_name in candidates:
+        implementations.setdefault(export_name, []).append(line_index + 1)
+    regions: list[_ExportRegion] = []
     for candidate_index, (line_index, export_name) in enumerate(candidates):
-        if export_name in seen:
-            continue
-        seen.add(export_name)
         next_line = (candidates[candidate_index + 1][0]
                      if candidate_index + 1 < len(candidates)
                      else len(masked_lines))
-        regions.append((
+        regions.append(_ExportRegion(
             export_name, line_index,
-            _export_region(masked_lines, line_index, next_line)))
+            _export_region(masked_lines, line_index, next_line),
+            tuple(implementations[export_name])))
     return regions
+
+
+def _withheld(name: str, path: Path, line: int,
+              implementations: Sequence[int],
+              alias_of: str | None = None) -> dict[str, Any]:
+    """The record of a name with more than one implementation (movian#267).
+
+    Built from nothing, not cut down from a body's record: every field a
+    body yields -- `params`, `variadic`, `accessors`, `returns`, the
+    `@param` and `@returns` of its block, and whatever a later field adds --
+    is a claim about that one function. The runtime may hold another under
+    the same name: the last of several assignments wins, and an alias holds
+    what its target held at the alias statement. A field that is not here
+    cannot be taken from the wrong body. An export adds what is not a claim
+    about its own call, in `scan_commonjs_exports`.
+
+    `member_signature` declares it as accepting any arguments, and a value of
+    any kind in each: a fixed parameter list is a claim too, and `any` gives
+    an unannotated callback no signature (ADR-0005), so either would reject
+    a call today's declaration accepts.
+    """
+    record: dict[str, Any] = {
+        "name": name,
+        "source": {"file": rel(path), "line": line},
+        "implementations": list(implementations),
+    }
+    if alias_of is not None:
+        record["aliasOf"] = alias_of
+    return record
+
+
+def _withheld_reason(implementations: Sequence[int],
+                     alias_of: str | None = None) -> str:
+    """Why a name whose implementations are at these lines takes no claim
+    from a body -- the one wording the warning and every census use."""
+    lines = ", ".join(map(str, implementations))
+    held = ("an alias of %s, which holds more than one implementation "
+            "(lines %s)" % (alias_of, lines)
+            if alias_of is not None
+            else "assigned more than once (lines %s)" % lines)
+    return "%s; the declaration takes no claim from any one body" % held
+
+
+def _warn_withheld(path: Path, display: str, record: dict[str, Any]) -> None:
+    print("gen.py: %s:%d: warning: %s: %s" % (
+        rel(path), record["source"]["line"], display,
+        _withheld_reason(record["implementations"], record.get("aliasOf"))),
+        file=sys.stderr)
 
 
 def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
     exports: list[dict[str, Any]] = []
-    for export_name, line_index, region in _commonjs_export_regions(path):
+    seen: set[str] = set()
+    for export_name, line_index, region, implementations in \
+            _commonjs_export_regions(path):
+        if export_name in seen:
+            continue
+        seen.add(export_name)
         record = {
             "name": export_name,
             "source": {"file": rel(path), "line": line_index + 1},
@@ -4707,6 +4831,24 @@ def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
                 record["voidWhen"] = callback_params[0]
         _attach_doc_types(record, path)
         _attach_forwarding(record, region, path)
+        if len(implementations) > 1:
+            first = record
+            record = _withheld(export_name, path, implementations[0],
+                               implementations)
+            # Callable or a value as the first assignment makes it, which is
+            # what the declaration has been: `any` and a callable type each
+            # accept a use the other rejects, so changing the form would
+            # narrow today's declaration either way.
+            if ("params" in first or first.get("constructor")
+                    or first.get("receiverMutation")):
+                record["callable"] = True
+            # What the first body installs on the module receiver stays
+            # declared as it was. Those are other names, each with its own
+            # record, merged across initializers (#262); dropping them would
+            # narrow the module, which is no part of withholding this one.
+            if "receiverMembers" in first:
+                record["receiverMembers"] = first["receiverMembers"]
+            _warn_withheld(path, "exports.%s" % export_name, record)
         exports.append(record)
     exports.sort(key=lambda r: r["name"])
     return exports
@@ -5382,7 +5524,7 @@ def _indirect_object_returns(path: Path) -> list[dict[str, Any]]:
     counting zero sites and calling that coverage.
     """
     records: list[dict[str, Any]] = []
-    for export_name, line_index, region in _commonjs_export_regions(path):
+    for export_name, line_index, region, _ in _commonjs_export_regions(path):
         function = COMMONJS_FUNCTION_RE.search(region)
         if function is None:
             continue
@@ -5489,11 +5631,18 @@ def _object_return_census() -> list[dict[str, Any]]:
         # the exact failure this pass exists to remove.
         census.extend(_indirect_object_returns(path))
         covered: set[tuple[int, int]] = set()
-        for export_name, line_index, region in _commonjs_export_regions(path):
+        for export_name, line_index, region, implementations in \
+                _commonjs_export_regions(path):
             found = list(RETURN_OBJECT_RE.finditer(region))
             if not found:
                 continue
-            shape, reason = _anonymous_return_shape_verbose(region)
+            if len(implementations) > 1:
+                # The generator takes no claim from any body of this export
+                # (movian#267), so no site in one is emitted, and each says
+                # why.
+                shape, reason = None, _withheld_reason(implementations)
+            else:
+                shape, reason = _anonymous_return_shape_verbose(region)
             for match in found:
                 offset = match.start()
                 line, column = _site_at(region, offset)
@@ -5740,7 +5889,13 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
                           by_module, native_slots)
         shape_names = shape_names_by_module.get(module, set())
         params = record.get("params")
-        if params is None:
+        if "implementations" in record:
+            census.append({
+                "module": module, "member": display, "slot": "...args",
+                "kind": "parameter", "status": "any",
+                "reason": _withheld_reason(record["implementations"],
+                                           record.get("aliasOf"))})
+        elif params is None:
             # `params_signature(None)` emits `...args: any[]`. One real `any`
             # slot in the declaration that the census skipped entirely,
             # because it iterated a list that was None.
@@ -6048,7 +6203,8 @@ def _static_export_kind(
             None)
         if export is None:
             result = "value"
-        elif "params" in export or export.get("constructor"):
+        elif ("params" in export or export.get("constructor")
+              or export.get("callable")):
             result = "function"
         else:
             source = REPO_ROOT / export["source"]["file"]
@@ -7731,6 +7887,13 @@ def render_doc_type(type_text: str) -> str:
 # or the return (ADR-0005).
 ACCESSOR_SIGNATURE = "(...args: any[]) => void"
 
+# Every argument of a name with more than one implementation (movian#267):
+# a value of any kind, and the accessor's arrow for an unannotated callback.
+# `any` would give that callback no signature, which fails it with TS7006
+# where one of the bodies' declarations accepted it (ADR-0005).
+WITHHELD_ARGUMENT = "Function | (%s) | {} | null | undefined" % (
+    ACCESSOR_SIGNATURE)
+
 
 def _is_signature(type_text: str) -> bool:
     """Whether `type_text` is one function type, `(...) => R`.
@@ -7909,6 +8072,9 @@ class TypeScope:
         author saying so. When both exist the proof wins and the annotation
         is reported, because a comment must not overrule a reading of the
         code or the annotations become a second, unchecked type system."""
+        if "implementations" in record:
+            return SlotType("any", _withheld_reason(
+                record["implementations"], record.get("aliasOf")))
         proved = record.get("returns")
         claimed = record.get("docReturns")
         if proved is not None:
@@ -8012,6 +8178,9 @@ def member_signature(
     Returns `None` for the arity when the parameter list did not parse, which
     is the caller's signal to omit the annotation.
     """
+    if "implementations" in member:
+        # No parameter list and no arity: each is one body's (movian#267).
+        return None, "...args: (%s)[]" % WITHHELD_ARGUMENT
     params = member.get("params")
     variadic = member.get("variadic", False)
     signature = params_signature(params, export, shape_names, scope)
@@ -8298,7 +8467,9 @@ def render_dts(artifact: dict[str, Any]) -> str:
                             "?" if prop.get("optional") else ""))
                     lines.append("  }")
                 for export in exports:
-                    if not export.get("receiverMutation"):
+                    # `receiverMutation` or a withheld export that kept its
+                    # first body's members (movian#267).
+                    if "receiverMembers" not in export:
                         continue
                     own = export.get("receiverMembers", [])
                     bases = " extends %s" % ", ".join(
@@ -8357,7 +8528,21 @@ def render_dts(artifact: dict[str, Any]) -> str:
                 # errors the runtime does not have. The honest count stays in
                 # @arity.
                 arity, sig = member_signature(exp, exp, shape_names, scope)
-                if exp.get("receiverMutation"):
+                if exp.get("implementations"):
+                    # More than one implementation (movian#267). Callable or
+                    # constructed, as each body may be, with anything and
+                    # returning anything -- or `any`, when the first
+                    # assignment was not a function and that is what the
+                    # declaration has been.
+                    if exp.get("callable"):
+                        result = member_return_type(exp, shape_names, scope)
+                        lines.append("  %sconst %s: {" % (decl, ename))
+                        lines.append("    new (%s): %s;" % (sig, result))
+                        lines.append("    (%s): %s;" % (sig, result))
+                        lines.append("  };")
+                    else:
+                        lines.append("  %sconst %s: any;" % (decl, ename))
+                elif exp.get("receiverMutation"):
                     # `this.__proto__ = sp` does not choose between the two
                     # call forms: constructed, `this` is the new instance;
                     # called plainly, it is the module receiver (which is why
