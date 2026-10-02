@@ -4148,20 +4148,33 @@ class _Write(NamedTuple):
     ordered: bool
 
 
-def _writes(code: str, pattern: re.Pattern[str],
+def _writes(lexed: _LexedJs, pattern: re.Pattern[str],
             receivers: set[str]) -> dict[tuple[str, ...], list[_Write]]:
-    """`pattern`'s groups -> every assignment it finds in `code` to one of
-    `receivers`, conditional and nested ones included: any of them may
-    install the function the runtime holds.
+    """`pattern`'s groups -> every assignment it finds in `lexed`, the
+    module's scanner, to one of `receivers`, conditional and nested ones
+    included: any of them may install the function the runtime holds.
 
-    `code` is the module's `_LexedJs.code`, which keeps every column of its
-    masked text, and a write counts only where the module's scanner reads
-    code. The masked text leaves a regex literal as written, so
+    A write counts where the scanner reads code, whose columns are those of
+    the masked text. That text leaves a regex literal as written, so
     `/C.prototype = {}/` was counted as a replacement there, and its `'` in
     `/'/` opens a string to the end of the line, so a write after it on the
-    same line was not counted at all (movian#267)."""
+    same line was not counted at all (movian#267).
+
+    The scanner's one blind spot is a `/` right after `}`: it reads a
+    regex there, and the `/` may be a division (ADR-0006) that leaves what
+    the regex swallowed as code. A write found inside such a regex counts
+    as well, and is never `ordered`, so the count errs toward more
+    implementations, never fewer: in `var o = {} / 2; C.prototype.m = ...`
+    the regex runs to the next `/`, and the write in it is real."""
+    code = lexed.code
+    matches = list(pattern.finditer(code))
+    # A regex literal is `/` in `kept` where `code` has its `0`; the span
+    # runs over its blanks, and over any blank after it, which hold nothing.
+    for brace in re.finditer(r"\}\s*(0 *)", code):
+        if lexed.kept[brace.start(1)] == "/":
+            matches.extend(pattern.finditer(lexed.kept, *brace.span(1)))
     writes: dict[tuple[str, ...], list[_Write]] = {}
-    for match in pattern.finditer(code):
+    for match in sorted(matches, key=lambda match: match.start()):
         if match.group(1) not in receivers:
             continue
         before = code[:match.start()]
@@ -4245,10 +4258,10 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
     # one implementation copies the refusal and not one of its bodies
     # (movian#267). An alias resolves only to a method of its own receiver,
     # so these are all the receivers it can reach.
-    code = _lexed_js(path).code
-    prototype_writes = _writes(code, PROTOTYPE_ASSIGN_RE, set(by_receiver))
+    lexed = _lexed_js(path)
+    prototype_writes = _writes(lexed, PROTOTYPE_ASSIGN_RE, set(by_receiver))
     prototype_replacements = _writes(
-        code, PROTOTYPE_REPLACE_RE, set(by_receiver))
+        lexed, PROTOTYPE_REPLACE_RE, set(by_receiver))
     for receiver, methods in by_receiver.items():
         _withhold_reassigned(path, receiver, methods, prototype_writes,
                              prototype_replacements.get((receiver,), []))
@@ -4365,8 +4378,9 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
     # `var sp = {}` writes the whole object as well. It runs before every
     # member assigned after it, so it implements none of them.
     shared_receivers = consumed_shared_names & set(by_receiver)
-    object_writes = _writes(code, OBJECT_ASSIGN_RE, shared_receivers)
-    shared_replacements = _writes(code, SHARED_REPLACE_RE, shared_receivers)
+    object_writes = _writes(lexed, OBJECT_ASSIGN_RE, shared_receivers)
+    shared_replacements = _writes(
+        lexed, SHARED_REPLACE_RE, shared_receivers)
     for receiver in shared_receivers:
         _withhold_reassigned(
             path, receiver, by_receiver[receiver], object_writes,

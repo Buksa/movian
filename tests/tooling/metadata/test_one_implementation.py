@@ -447,9 +447,10 @@ class TheReplacedObject(WithheldRecord):
 
 class TheLiteral(WithheldRecord):
     """A write or a replacement counts where the module's scanner reads code,
-    and only there. The masked text the count matched on blanked a string,
-    but left a regex literal as written, and read the `'` in `/'/` as
-    opening a string to the end of its line."""
+    and inside a literal only where that reading may be wrong: a regex it
+    began right after `}`. The masked text the count matched on blanked a
+    string, but left a regex literal as written, and read the `'` in `/'/`
+    as opening a string to the end of its line."""
 
     def test_a_lookalike_in_a_literal_is_no_write(self) -> None:
         """The reviewer's probe: `/C.prototype = {}/` withheld `C.m` as
@@ -486,6 +487,37 @@ class TheLiteral(WithheldRecord):
                                     [4, 8], **rest)
                 self.assertIn("%s:4: warning: C.prototype.m: " % PROBE_FILE,
                               warnings)
+
+    def test_a_write_a_regex_after_a_brace_may_hold_counts(self) -> None:
+        """`{} / 2` divides, and the scanner reads a regex from that `/` to
+        the next one: on code alone the write between them did not count,
+        and `C.m` kept the first body's `{cb}`."""
+        head = ITEM + "function C() {}\nC.prototype.m = " + INVOKES
+        stores = "function (cb) { this.cb = cb / 1; }"
+        for label, second, rest in (
+                ("member", "C.prototype.m = %s;\n" % stores, {}),
+                ("replacement", "C.prototype = { m: %s };\n" % stores,
+                 {"replacements": [8]})):
+            with self.subTest(label):
+                module, warnings = build(head + "var o = {} / 2; " + second)
+                self.assertWithheld(methods_of(module)["C.m"], "m", 4,
+                                    [4, 8], **rest)
+                self.assertIn("%s:4: warning: C.prototype.m: " % PROBE_FILE,
+                              warnings)
+
+    def test_a_lookalike_after_another_token_is_no_write(self) -> None:
+        """Only `}` leaves the scanner unsure: after `;`, `(`, `,` or `||`
+        a `/` begins a regex, and what looks like a write in it is none."""
+        head = ITEM + "function C() {}\nC.prototype.m = " + INVOKES
+        for lookalike in ("var o = {}; /C.prototype.m = f/.test(s);",
+                          "f(/C.prototype.m = f/);",
+                          "f(1, /C.prototype = {}/);",
+                          "x = a || /C.prototype = {}/;"):
+            with self.subTest(lookalike):
+                module, warnings = build(head + lookalike + "\n")
+                self.assertEqual(methods_of(module)["C.m"]["accessors"],
+                                 {"cb": [5]})
+                self.assertEqual(warnings, "")
 
 
 class TheCorpus(unittest.TestCase):
