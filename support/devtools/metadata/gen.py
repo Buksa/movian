@@ -4139,7 +4139,7 @@ def _scan_local_object_shapes(
 
 class _Write(NamedTuple):
     """One assignment to a receiver's member, or to its whole object."""
-    # Where the receiver's name stands in the module's masked text.
+    # Where the receiver's name stands in the module's `_LexedJs.code`.
     offset: int
     line: int
     # An unconditional statement at the module's top level: it runs once, at
@@ -4148,19 +4148,25 @@ class _Write(NamedTuple):
     ordered: bool
 
 
-def _writes(text: str, code: str, pattern: re.Pattern[str],
+def _writes(code: str, pattern: re.Pattern[str],
             receivers: set[str]) -> dict[tuple[str, ...], list[_Write]]:
-    """`pattern`'s groups -> every assignment it finds in `text` to one of
+    """`pattern`'s groups -> every assignment it finds in `code` to one of
     `receivers`, conditional and nested ones included: any of them may
-    install the function the runtime holds. `code` is `_LexedJs.code` of the
-    same module, which keeps every column of `text`."""
+    install the function the runtime holds.
+
+    `code` is the module's `_LexedJs.code`, which keeps every column of its
+    masked text, and a write counts only where the module's scanner reads
+    code. The masked text leaves a regex literal as written, so
+    `/C.prototype = {}/` was counted as a replacement there, and its `'` in
+    `/'/` opens a string to the end of the line, so a write after it on the
+    same line was not counted at all (movian#267)."""
     writes: dict[tuple[str, ...], list[_Write]] = {}
-    for match in pattern.finditer(text):
+    for match in pattern.finditer(code):
         if match.group(1) not in receivers:
             continue
         before = code[:match.start()]
         writes.setdefault(match.groups(), []).append(_Write(
-            match.start(1), _source_line(text, match.start(1)),
+            match.start(1), _source_line(code, match.start(1)),
             before.count("{") == before.count("}")
             and _statement_begins_at(code, match.start())))
     return writes
@@ -4240,10 +4246,9 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
     # (movian#267). An alias resolves only to a method of its own receiver,
     # so these are all the receivers it can reach.
     code = _lexed_js(path).code
-    prototype_writes = _writes(
-        text, code, PROTOTYPE_ASSIGN_RE, set(by_receiver))
+    prototype_writes = _writes(code, PROTOTYPE_ASSIGN_RE, set(by_receiver))
     prototype_replacements = _writes(
-        text, code, PROTOTYPE_REPLACE_RE, set(by_receiver))
+        code, PROTOTYPE_REPLACE_RE, set(by_receiver))
     for receiver, methods in by_receiver.items():
         _withhold_reassigned(path, receiver, methods, prototype_writes,
                              prototype_replacements.get((receiver,), []))
@@ -4360,9 +4365,8 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
     # `var sp = {}` writes the whole object as well. It runs before every
     # member assigned after it, so it implements none of them.
     shared_receivers = consumed_shared_names & set(by_receiver)
-    object_writes = _writes(text, code, OBJECT_ASSIGN_RE, shared_receivers)
-    shared_replacements = _writes(
-        text, code, SHARED_REPLACE_RE, shared_receivers)
+    object_writes = _writes(code, OBJECT_ASSIGN_RE, shared_receivers)
+    shared_replacements = _writes(code, SHARED_REPLACE_RE, shared_receivers)
     for receiver in shared_receivers:
         _withhold_reassigned(
             path, receiver, by_receiver[receiver], object_writes,

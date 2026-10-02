@@ -445,6 +445,49 @@ class TheReplacedObject(WithheldRecord):
         self.assertNotIn("replaced", warnings)
 
 
+class TheLiteral(WithheldRecord):
+    """A write or a replacement counts where the module's scanner reads code,
+    and only there. The masked text the count matched on blanked a string,
+    but left a regex literal as written, and read the `'` in `/'/` as
+    opening a string to the end of its line."""
+
+    def test_a_lookalike_in_a_literal_is_no_write(self) -> None:
+        """The reviewer's probe: `/C.prototype = {}/` withheld `C.m` as
+        replaced, `/C.prototype.m = f/` as assigned more than once."""
+        shared = ("exports.init = function() {\n"
+                  "  this.__proto__ = sp;\n"
+                  "};\n")
+        for member, head, tail, lookalikes in (
+                ("C.m", ITEM + "function C() {}\nC.prototype.m = " + INVOKES,
+                 "", ("/C.prototype = {}/", "/C.prototype.m = f/",
+                      "'C.prototype = {}'")),
+                ("sp.m", ITEM + "var sp = {};\nsp.m = " + INVOKES,
+                 shared, ("/sp = {}/", "/sp.m = f/", "'sp = {}'"))):
+            for lookalike in lookalikes:
+                with self.subTest(lookalike):
+                    module, warnings = build(
+                        head + "var x = %s;\n" % lookalike + tail)
+                    method = methods_of(module)[member]
+                    self.assertEqual(method["accessors"], {"cb": [5]})
+                    self.assertNotIn("implementations", method)
+                    self.assertEqual(warnings, "")
+
+    def test_a_write_after_a_regex_on_its_line_counts(self) -> None:
+        """The mask hid the second body, so `C.m` kept the first one's
+        `{cb}` while the runtime holds the second -- a narrowing."""
+        head = ITEM + "function C() {}\nC.prototype.m = " + INVOKES
+        for label, second, rest in (
+                ("member", "C.prototype.m = " + STORES, {}),
+                ("replacement", replacing("C.prototype", STORES),
+                 {"replacements": [8]})):
+            with self.subTest(label):
+                module, warnings = build(head + "var r = /'/; " + second)
+                self.assertWithheld(methods_of(module)["C.m"], "m", 4,
+                                    [4, 8], **rest)
+                self.assertIn("%s:4: warning: C.prototype.m: " % PROBE_FILE,
+                              warnings)
+
+
 class TheCorpus(unittest.TestCase):
     def test_the_html_aliases_keep_their_targets_records(self) -> None:
         """`getElementsByClassName` and `getElementsByTagName`, the corpus's
