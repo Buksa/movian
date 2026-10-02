@@ -302,6 +302,149 @@ class ThePrototypeAlias(WithheldRecord):
         self.assertNotIn("more than once", warnings)
 
 
+class TheAssignmentCount(WithheldRecord):
+    """Every assignment to the member counts, wherever it stands in its
+    statement, and none to another object's member of the same name."""
+
+    def test_an_assignment_after_a_condition_on_its_line_counts(self) -> None:
+        """`if (legacy) C.prototype.m = ...` begins no line, and a count
+        that read only the start of one missed it."""
+        for receiver in ("C", "exports.C"):
+            with self.subTest(receiver):
+                source = (ITEM + "function C() {}\n"
+                          + receiver + ".prototype.m = " + INVOKES
+                          + "if (legacy) " + receiver + ".prototype.m = "
+                          + STORES)
+                module, warnings = build(source)
+                self.assertWithheld(methods_of(module)["C.m"],
+                                    "m", 4, [4, 8])
+                self.assertIn("%s.prototype.m: assigned more than once "
+                              "(lines 4, 8)" % receiver, warnings)
+
+    def test_another_objects_member_is_not_counted(self) -> None:
+        """`a.C.prototype.m` is a member of whatever `a.C` is, and `a.sp.m`
+        of whatever `a.sp` is."""
+        for member, source in (
+                ("C.m", ITEM + "function C() {}\n"
+                 "C.prototype.m = " + INVOKES
+                 + "a.C.prototype.m = " + STORES),
+                ("sp.m", ITEM + "var sp = {};\n"
+                 "sp.m = " + INVOKES
+                 + "a.sp.m = " + STORES
+                 + "exports.init = function() {\n"
+                 "  this.__proto__ = sp;\n"
+                 "};\n")):
+            with self.subTest(member):
+                module, warnings = build(source)
+                self.assertEqual(methods_of(module)[member]["accessors"],
+                                 {"cb": [5]})
+                self.assertNotIn("more than once", warnings)
+
+
+def lines_with(source: str, fragment: str) -> list[int]:
+    """The 1-based lines of `source` that hold `fragment`."""
+    return [number for number, line in enumerate(source.splitlines(), 1)
+            if fragment in line]
+
+
+def replacing(receiver: str, body: str) -> str:
+    """`<receiver> = { m: <body> };`: the object replaced whole, its `m`
+    the other body. Nothing reads the literal's members."""
+    return "%s = { m: %s };\n" % (receiver, body.rstrip(";\n"))
+
+
+class TheReplacedObject(WithheldRecord):
+    """`C.prototype = ...` or `sp = ...` replaces every member at once, so it
+    is an implementation of each member it can change: one assigned before
+    it, or any member where order cannot be read."""
+
+    BASE = ITEM + "function Base() {}\nfunction C() {}\n"
+    REASON = ("C.prototype.m: assigned at line %d and the object holding it "
+              "replaced at line %d; the declaration takes no claim from any "
+              "one body")
+
+    def check(self, source: str) -> None:
+        module, warnings = build(source)
+        member = lines_of(source, "C.prototype.m =")[0]
+        replaced = lines_with(source, "C.prototype = ")[0]
+        self.assertWithheld(methods_of(module)["C.m"], "m", member,
+                            [member, replaced], replacements=[replaced])
+        self.assertIn("%s:%d: warning: " % (PROBE_FILE, member)
+                      + self.REASON % (member, replaced), warnings)
+
+    def test_the_storing_body_replaces_the_invoking_one(self) -> None:
+        """The reviewers' probe: the scan kept `{cb}`, no warning."""
+        self.check(self.BASE + "C.prototype.m = " + INVOKES
+                   + replacing("C.prototype", STORES))
+
+    def test_the_invoking_body_replaces_the_storing_one(self) -> None:
+        self.check(self.BASE + "C.prototype.m = " + STORES
+                   + replacing("C.prototype", INVOKES))
+
+    def test_a_shared_object_replaced_after_its_declaration(self) -> None:
+        """`var sp = {}` writes the whole object too, and runs before every
+        member, so neither it nor `sp = {...}` implements `sp.k` after
+        both."""
+        source = (ITEM + "var sp = {};\n"
+                  "sp.m = " + INVOKES
+                  + replacing("sp", STORES)
+                  + "sp.k = " + INVOKES
+                  + "exports.init = function() {\n"
+                  "  this.__proto__ = sp;\n"
+                  "};\n")
+        module, warnings = build(source)
+        methods = methods_of(module)
+        self.assertWithheld(methods["sp.m"], "m", 4, [4, 8],
+                            replacements=[8])
+        self.assertIn("sp.m: assigned at line 4 and the object holding it "
+                      "replaced at line 8", warnings)
+        self.assertEqual(methods["sp.k"]["accessors"], {"cb": [12]})
+        self.assertNotIn("sp.k", warnings)
+
+    def test_a_replacement_whose_order_cannot_be_read(self) -> None:
+        """Nested, conditional, or inside a function: it may run after any
+        member, so it withholds every member, `n` after it as well."""
+        for replacement in ("if (legacy) {\n  C.prototype = {};\n}\n",
+                            "if (legacy) C.prototype = {};\n",
+                            "function legacy() {\n  C.prototype = {};\n}\n"):
+            with self.subTest(replacement):
+                source = (self.BASE + "C.prototype.m = " + INVOKES
+                          + replacement + "C.prototype.n = " + INVOKES)
+                methods = methods_of(build(source)[0])
+                m = lines_of(source, "C.prototype.m =")[0]
+                n = lines_of(source, "C.prototype.n =")[0]
+                replaced = lines_with(source, "C.prototype = ")[0]
+                self.assertWithheld(methods["C.m"], "m", m, [m, replaced],
+                                    replacements=[replaced])
+                self.assertWithheld(methods["C.n"], "n", n, [replaced, n],
+                                    replacements=[replaced])
+
+    def test_a_member_whose_order_cannot_be_read(self) -> None:
+        """The replacement is unconditional; the member's assignment is not
+        a statement of its own."""
+        source = (self.BASE + "C.prototype = Object.create(Base.prototype);\n"
+                  "if (legacy)\n"
+                  "  C.prototype.m = " + INVOKES)
+        self.assertWithheld(methods_of(build(source)[0])["C.m"],
+                            "m", 7, [5, 7], replacements=[5])
+
+    def test_the_inheritance_idiom_keeps_its_records(self) -> None:
+        """Replaced first, then every member assigned once: one
+        implementation is installed, and withholding it would cost every
+        subclass its types for nothing."""
+        source = (self.BASE + "C.prototype = Object.create(Base.prototype);\n"
+                  "C.prototype.constructor = C;\n"
+                  "C.prototype.m = " + INVOKES
+                  + "C.prototype.alias = C.prototype.m;\n")
+        module, warnings = build(source)
+        methods = methods_of(module)
+        self.assertEqual(methods["C.m"]["accessors"], {"cb": [8]})
+        self.assertEqual(methods["C.alias"]["accessors"], {"cb": [8]})
+        self.assertNotIn("implementations", methods["C.m"])
+        self.assertNotIn("implementations", methods["C.alias"])
+        self.assertNotIn("replaced", warnings)
+
+
 class TheCorpus(unittest.TestCase):
     def test_the_html_aliases_keep_their_targets_records(self) -> None:
         """`getElementsByClassName` and `getElementsByTagName`, the corpus's
@@ -436,6 +579,31 @@ class TheCensuses(unittest.TestCase):
             [(2, "declined", reason), (5, "declined", reason)])
         self.assertTrue(ok, output)
         self.assertNotIn("returns", make)
+
+    def test_an_indirect_return_in_a_withheld_body_is_declined(self) -> None:
+        """`var o = {...}; return o;` is a site no `return {` sees. In a
+        body the generator reads it is `uncovered`; in a withheld one it is
+        declined, for the reason a direct `return {` there gives."""
+        body = ("function() {\n"
+                "  var o = { n: 1 };\n"
+                "  return o;\n"
+                "};\n")
+        route = ("the object literal is bound to a local and the local is "
+                 "returned")
+        census, _, ok, output = self.census("exports.make = " + body)
+        self.assertEqual(
+            [(site["line"], site["status"], site["reason"])
+             for site in census],
+            [(3, "uncovered", route)])
+        reason = ("assigned more than once (lines 1, 5); the declaration "
+                  "takes no claim from any one body")
+        census, _, ok, output = self.census(
+            "exports.make = " + body + "exports.make = " + body)
+        self.assertEqual(
+            [(site["line"], site["status"], site["reason"])
+             for site in census],
+            [(3, "declined", reason), (7, "declined", reason)])
+        self.assertTrue(ok, output)
 
     def test_the_doc_type_census_names_the_refusal(self) -> None:
         module, _ = build(MODULE)

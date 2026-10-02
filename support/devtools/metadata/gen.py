@@ -2422,15 +2422,24 @@ OBJECT_FUNCTION_RE = re.compile(
     r"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)"
     r"\s*=\s*function\s*"
     r"(?:[A-Za-z_$][A-Za-z0-9_$]*\s*)?\(([^)]*)\)", re.M)
-# The same two members assigned ANYTHING. The forms above are what the scan
-# reads, and `C.prototype.m = helper;` installs a function as well, so these
-# count a member's implementations (movian#267).
+# The same two members assigned ANYTHING, and their whole objects. The forms
+# above are what the scan reads, and `C.prototype.m = helper;` installs a
+# function as well, so these count a member's implementations (movian#267).
+# Anywhere in a statement, `if (legacy) C.prototype.m = ...` included, but
+# not as the tail of another name: `a.C.prototype.m` is a member of `a.C`.
 PROTOTYPE_ASSIGN_RE = re.compile(
-    r"^\s*((?:exports\.)?[A-Za-z_$][A-Za-z0-9_$]*)\.prototype\."
-    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)", re.M)
+    r"(?<![A-Za-z0-9_$.])((?:exports\.)?[A-Za-z_$][A-Za-z0-9_$]*)"
+    r"\.prototype\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
 OBJECT_ASSIGN_RE = re.compile(
-    r"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)"
-    r"\s*=(?!=)", re.M)
+    r"(?<![A-Za-z0-9_$.])([A-Za-z_$][A-Za-z0-9_$]*)"
+    r"\.([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
+PROTOTYPE_REPLACE_RE = re.compile(
+    r"(?<![A-Za-z0-9_$.])((?:exports\.)?[A-Za-z_$][A-Za-z0-9_$]*)"
+    r"\.prototype\s*=(?!=)")
+# `var` and all, so that the statement is read from where it begins.
+SHARED_REPLACE_RE = re.compile(
+    r"(?<![A-Za-z0-9_$.])(?:(?:var|let|const)\s+)?"
+    r"([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)")
 SHARED_OBJECT_DECL_RE = re.compile(
     r"^\s*(?:var|let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*="
     r"\s*\{\s*\}\s*;?", re.M)
@@ -4128,28 +4137,72 @@ def _scan_local_object_shapes(
     return shapes, handled
 
 
-def _assignment_lines(text: str, pattern: re.Pattern[str]
-                      ) -> dict[tuple[str, str], list[int]]:
-    """`(receiver, member)` -> the line of every assignment `pattern` finds,
-    conditional and nested ones included: any of them may install the
-    function the runtime holds."""
-    lines: dict[tuple[str, str], list[int]] = {}
+class _Write(NamedTuple):
+    """One assignment to a receiver's member, or to its whole object."""
+    # Where the receiver's name stands in the module's masked text.
+    offset: int
+    line: int
+    # An unconditional statement at the module's top level: it runs once, at
+    # load, in the order of the text. Nested, conditional, or inside a
+    # function, it may run before or after any other write.
+    ordered: bool
+
+
+def _writes(text: str, code: str, pattern: re.Pattern[str],
+            receivers: set[str]) -> dict[tuple[str, ...], list[_Write]]:
+    """`pattern`'s groups -> every assignment it finds in `text` to one of
+    `receivers`, conditional and nested ones included: any of them may
+    install the function the runtime holds. `code` is `_LexedJs.code` of the
+    same module, which keeps every column of `text`."""
+    writes: dict[tuple[str, ...], list[_Write]] = {}
     for match in pattern.finditer(text):
-        lines.setdefault((match.group(1), match.group(2)), []).append(
-            _source_line(text, match.start(1)))
-    return lines
+        if match.group(1) not in receivers:
+            continue
+        before = code[:match.start()]
+        writes.setdefault(match.groups(), []).append(_Write(
+            match.start(1), _source_line(text, match.start(1)),
+            before.count("{") == before.count("}")
+            and _statement_begins_at(code, match.start())))
+    return writes
+
+
+def _withheld_member(path: Path, name: str, writes: Sequence[_Write],
+                     replacements: Sequence[_Write]) -> dict[str, Any] | None:
+    """The record of a member assigned by `writes`, whose object is replaced
+    whole by `replacements`, if it has more than one implementation; None
+    if it has one (movian#267).
+
+    A replacement implements each member it can change: one assigned before
+    it, or any member when either is not `ordered`. One that runs before
+    every assignment of the member is the ES5 inheritance idiom,
+    `C.prototype = Object.create(Base.prototype)` and then the members, and
+    leaves one implementation installed. What the replacing object itself
+    holds is not read: a member it does not define is gone at runtime and
+    still declared.
+    """
+    replaced = [
+        write.line for write in replacements
+        if not (write.ordered and all(
+            own.ordered and own.offset > write.offset for own in writes))]
+    if len(writes) + len(replaced) < 2:
+        return None
+    return _withheld(name, path, writes[0].line,
+                     sorted([own.line for own in writes] + replaced),
+                     replacements=replaced)
 
 
 def _withhold_reassigned(
         path: Path, receiver: str, methods: dict[str, dict[str, Any]],
-        assignments: dict[tuple[str, str], list[int]]) -> None:
-    """Replace the record of each of `receiver`'s methods assigned more than
-    once. It was the last body's, which is runtime order again (movian#267).
-    """
+        writes: dict[tuple[str, ...], list[_Write]],
+        replacements: Sequence[_Write]) -> None:
+    """Replace the record of each of `receiver`'s methods with more than one
+    implementation. It was one body's, which is runtime order again
+    (movian#267)."""
     for name in methods:
-        lines = assignments.get((receiver, name), [])
-        if len(lines) > 1:
-            methods[name] = _withheld(name, path, lines[0], lines)
+        withheld = _withheld_member(
+            path, name, writes.get((receiver, name), []), replacements)
+        if withheld is not None:
+            methods[name] = withheld
 
 
 def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
@@ -4182,11 +4235,18 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
             match.group(2), match.group(3), path,
             _source_line(text, match.start(1)),
             region=text[match.start(1):], factories=factories)
-    # Before the aliases resolve, so that an alias of a member assigned more
-    # than once copies the refusal and not one of its bodies (movian#267).
-    prototype_assignments = _assignment_lines(text, PROTOTYPE_ASSIGN_RE)
+    # Before the aliases resolve, so that an alias of a member with more than
+    # one implementation copies the refusal and not one of its bodies
+    # (movian#267). An alias resolves only to a method of its own receiver,
+    # so these are all the receivers it can reach.
+    code = _lexed_js(path).code
+    prototype_writes = _writes(
+        text, code, PROTOTYPE_ASSIGN_RE, set(by_receiver))
+    prototype_replacements = _writes(
+        text, code, PROTOTYPE_REPLACE_RE, set(by_receiver))
     for receiver, methods in by_receiver.items():
-        _withhold_reassigned(path, receiver, methods, prototype_assignments)
+        _withhold_reassigned(path, receiver, methods, prototype_writes,
+                             prototype_replacements.get((receiver,), []))
 
     unresolved_aliases: list[tuple[str, str, str, int]] = []
     alias_matches = list(PROTOTYPE_ALIAS_RE.finditer(text))
@@ -4213,9 +4273,11 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
         for receiver, name, target, line in unresolved_aliases:
             methods = by_receiver.setdefault(receiver, {})
             if target in methods:
-                own = prototype_assignments.get((receiver, name), [])
-                if len(own) > 1:
-                    methods[name] = _withheld(name, path, own[0], own)
+                own = _withheld_member(
+                    path, name, prototype_writes.get((receiver, name), []),
+                    prototype_replacements.get((receiver,), []))
+                if own is not None:
+                    methods[name] = own
                     progress = True
                     continue
                 if "implementations" in methods[target]:
@@ -4295,10 +4357,16 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
             name, match.group(3), path,
             _source_line(text, match.start(1)),
             region=text[match.start(1):], factories=factories)
-    object_assignments = _assignment_lines(text, OBJECT_ASSIGN_RE)
-    for receiver in consumed_shared_names & set(by_receiver):
+    # `var sp = {}` writes the whole object as well. It runs before every
+    # member assigned after it, so it implements none of them.
+    shared_receivers = consumed_shared_names & set(by_receiver)
+    object_writes = _writes(text, code, OBJECT_ASSIGN_RE, shared_receivers)
+    shared_replacements = _writes(
+        text, code, SHARED_REPLACE_RE, shared_receivers)
+    for receiver in shared_receivers:
         _withhold_reassigned(
-            path, receiver, by_receiver[receiver], object_assignments)
+            path, receiver, by_receiver[receiver], object_writes,
+            shared_replacements.get((receiver,), []))
     withheld = [
         ("%s.%s" % (receiver if receiver in consumed_shared_names
                     else receiver + ".prototype", name), method)
@@ -4699,7 +4767,8 @@ def _commonjs_export_regions(path: Path) -> list[_ExportRegion]:
 
 def _withheld(name: str, path: Path, line: int,
               implementations: Sequence[int],
-              alias_of: str | None = None) -> dict[str, Any]:
+              alias_of: str | None = None,
+              replacements: Sequence[int] = ()) -> dict[str, Any]:
     """The record of a name with more than one implementation (movian#267).
 
     Built from nothing, not cut down from a body's record: every field a
@@ -4723,26 +4792,46 @@ def _withheld(name: str, path: Path, line: int,
     }
     if alias_of is not None:
         record["aliasOf"] = alias_of
+    # Those of `implementations` that replace the member's whole object.
+    if replacements:
+        record["replacements"] = list(replacements)
     return record
 
 
 def _withheld_reason(implementations: Sequence[int],
-                     alias_of: str | None = None) -> str:
+                     alias_of: str | None = None,
+                     replacements: Sequence[int] = ()) -> str:
     """Why a name whose implementations are at these lines takes no claim
     from a body -- the one wording the warning and every census use."""
     lines = ", ".join(map(str, implementations))
-    held = ("an alias of %s, which holds more than one implementation "
-            "(lines %s)" % (alias_of, lines)
-            if alias_of is not None
-            else "assigned more than once (lines %s)" % lines)
+    if alias_of is not None:
+        held = ("an alias of %s, which holds more than one implementation "
+                "(lines %s)" % (alias_of, lines))
+    elif replacements:
+        assigned = list(implementations)
+        for line in replacements:
+            assigned.remove(line)
+        held = "assigned at %s and the object holding it replaced at %s" % (
+            _line_list(assigned), _line_list(replacements))
+    else:
+        held = "assigned more than once (lines %s)" % lines
     return "%s; the declaration takes no claim from any one body" % held
+
+
+def _line_list(lines: Sequence[int]) -> str:
+    return "line%s %s" % ("s" if len(lines) > 1 else "",
+                          ", ".join(map(str, lines)))
+
+
+def _record_withheld_reason(record: dict[str, Any]) -> str:
+    return _withheld_reason(record["implementations"], record.get("aliasOf"),
+                            record.get("replacements", ()))
 
 
 def _warn_withheld(path: Path, display: str, record: dict[str, Any]) -> None:
     print("gen.py: %s:%d: warning: %s: %s" % (
         rel(path), record["source"]["line"], display,
-        _withheld_reason(record["implementations"], record.get("aliasOf"))),
-        file=sys.stderr)
+        _record_withheld_reason(record)), file=sys.stderr)
 
 
 def scan_commonjs_exports(path: Path) -> list[dict[str, Any]]:
@@ -5524,7 +5613,8 @@ def _indirect_object_returns(path: Path) -> list[dict[str, Any]]:
     counting zero sites and calling that coverage.
     """
     records: list[dict[str, Any]] = []
-    for export_name, line_index, region, _ in _commonjs_export_regions(path):
+    for export_name, line_index, region, implementations in \
+            _commonjs_export_regions(path):
         function = COMMONJS_FUNCTION_RE.search(region)
         if function is None:
             continue
@@ -5557,11 +5647,16 @@ def _indirect_object_returns(path: Path) -> list[dict[str, Any]]:
                              "local is returned")
             if route is None:
                 continue
+            status, reason = "uncovered", route
+            if len(implementations) > 1:
+                # As a `return {` in the same body is: the generator takes no
+                # claim from it, whatever the route (movian#267).
+                status, reason = "declined", _withheld_reason(implementations)
             line, column = _site_at(region, start)
             records.append({
                 "file": rel(path), "line": line + line_index,
                 "column": column, "export": export_name,
-                "status": "uncovered", "reason": route,
+                "status": status, "reason": reason,
             })
     return records
 
@@ -5893,8 +5988,7 @@ def _doc_type_census(artifact: dict[str, Any]) -> list[dict[str, Any]]:
             census.append({
                 "module": module, "member": display, "slot": "...args",
                 "kind": "parameter", "status": "any",
-                "reason": _withheld_reason(record["implementations"],
-                                           record.get("aliasOf"))})
+                "reason": _record_withheld_reason(record)})
         elif params is None:
             # `params_signature(None)` emits `...args: any[]`. One real `any`
             # slot in the declaration that the census skipped entirely,
@@ -8073,8 +8167,7 @@ class TypeScope:
         is reported, because a comment must not overrule a reading of the
         code or the annotations become a second, unchecked type system."""
         if "implementations" in record:
-            return SlotType("any", _withheld_reason(
-                record["implementations"], record.get("aliasOf")))
+            return SlotType("any", _record_withheld_reason(record))
         proved = record.get("returns")
         claimed = record.get("docReturns")
         if proved is not None:
