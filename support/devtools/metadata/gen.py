@@ -2303,12 +2303,6 @@ def _own_block(region: str) -> int | None:
     return None if open_brace < 0 else open_brace
 
 
-def _own_returns(region: str) -> list[str]:
-    """`_returns_after` for the function assigned at the head of `region`."""
-    open_brace = _own_block(region)
-    return [] if open_brace is None else _returns_after(region, open_brace)
-
-
 # A construction, `new <Class>(`. The callback route enumerates a region's
 # classes with it and reads the class at a position with it, and the two must
 # agree: the shape is chosen from the first and has to be the second.
@@ -3025,9 +3019,10 @@ def _member_record(
 def _shape_method(
         name: str, raw_params: str, path: Path, line: int,
         alias_of: str | None = None,
-        region: str | None = None,
-        factories: dict[str, dict[str, Any]] | None = None
+        region: str | None = None
 ) -> dict[str, Any]:
+    """A method's record, all but its return type, which
+    `_attach_returned_shapes` reads once the module's shapes are built."""
     record = _member_record(
         name, _parse_params(raw_params), path, line, alias_of=alias_of)
     # Same rule the module exports get: a method that reads its own
@@ -3039,9 +3034,6 @@ def _shape_method(
     if region is not None and "params" in record and _uses_arguments(region):
         record["variadic"] = True
     if region is not None:
-        returned = _returned_shape(region, factories)
-        if returned is not None:
-            record["returns"] = returned
         _attach_forwarding(record, region, path)
         _attach_accessors(record, region)
     return record
@@ -3096,8 +3088,16 @@ def _mapped_element_shape(statement: str) -> str | None:
     return next(iter(shapes))
 
 
+# A `return` whose value begins on the same line. ES5.1 7.9.1 ends the
+# statement at a line terminator right after `return`, so `return`, a
+# newline and `x` is `return;`. Group 1 is the value.
+SAME_LINE_RETURN_RE = re.compile(r"return[ \t\f\v]+(\S.*)\Z", re.S)
+
+
 def _returned_shape(
-        region: str, factories: dict[str, dict[str, Any]] | None = None
+        region: str, factories: dict[str, dict[str, Any]] | None = None,
+        declared: dict[str, set[str]] | None = None,
+        rebound: set[str] | None = None
 ) -> str | dict[str, Any] | None:
     """The shape a method returns, when it plainly returns one.
 
@@ -3129,79 +3129,257 @@ def _returned_shape(
     through exactly that path at four sites, type-checked clean, and rendered
     an `openerror` at runtime until it was fixed by hand (`5706c66cf`).
 
-    Answers only when the evidence is unambiguous -- one shape, and every
-    value-returning path agreeing. A method returning two different things, a
-    shape mixed with a plain value, or an array mixed with a scalar, keeps
-    `any`, because a wrong return type invents errors a plugin does not have.
+    Answers only when every return the function itself makes is accounted
+    for, and all of them agree (movian#268). A return is accounted for when
+    it is
 
-    "Every value-returning path" is exact, and narrower than it sounds: a path
-    that returns NO value is not consulted. `function (n) { if (n) return new
-    "Every value-returning path" is exact, and it used to be the whole test,
-    which left a path that returns NO value unexamined: `function (n) { if (n)
-    return new Node(n); }` answered `Node`, and `function (t) { if (t) return
-    new Item(this); }` answered `Item` from #178 onward, both yielding
-    `undefined` on the other branch. `_always_returns` now gates both forms
-    (movian#190). It cost nothing: all eleven members that carry a return type
-    end their body with an unconditional `return`, measured before the change.
+    * `return new X(...)`, the construction the whole value
+      (`_whole_construction`): `return new Item(this).page` returns what
+      `.page` holds;
+    * `return x`, for a local `_constructed_local` reads as an instance of
+      X, or one `_factory_result` reads as a local-object shape (ADR-0006);
+    * a mapped array -- and then every return is one, of one element.
+
+    Anything else leaves the method `any`: a plain value, a bare `return;`,
+    or a line terminator right after `return`. `if (t) return 5; return new
+    Item(this);` has no single type, and answering `Item` from the return
+    that agreed is how a declaration invents errors a plugin does not have.
+    So does a body the scan cannot read (`UNREADABLE_BODY_RE`): the mask
+    works a line at a time, and a regex literal holding a quote blanks the
+    rest of its line, a `return 5` on it included.
+
+    `_always_returns` gates all of it first. Returns that agree say nothing
+    about the path that returns nothing at all: `function (n) { if (n)
+    return new Node(n); }` answered `Node`, and yields `undefined` on the
+    other branch (movian#190).
+
+    A class a construction names, directly, through the local or in the
+    mapped callback, must be the module's: nothing in the method binds or
+    writes the name (`_names_the_module_class`), and the module binds it
+    by its one declaration and writes it nowhere (`_rebound`).
 
     `factories` maps a module function to the local-object shape it returns
-    (ADR-0006), and `_factory_result` decides when a local holds it. Four
-    `movian/settings` methods are
-
-        var item = createSetting(group, 'bool', id, title);
-        ...
-        return item;
+    (ADR-0006). `declared` maps a class to the members its built shape
+    declares, which a method may write through the instance it returns;
+    without it every such write declines. `rebound` names the classes the
+    module binds otherwise; without it the module is not read.
 
     Returns a shape name, or `{"kind": "array", "element": name}`.
     """
-    body = _own_body(region)
-    if not body:
-        return None
-    # Before reading what the returns say, ask whether one is always reached.
-    # Everything below compares return VALUES and requires them to agree, which
-    # is silent about the path that returns nothing at all -- and a function
-    # that can fall out of its body yields `undefined` no matter how well its
-    # explicit returns agree (movian#190).
     open_brace = _own_block(region)
-    if open_brace is None or not _always_returns(region, open_brace):
+    end = _balanced_end(region, open_brace) if open_brace is not None \
+        else None
+    if end is None or not _always_returns(region, open_brace):
         return None
-    direct = set(re.findall(
-        r"\breturn\s+new\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(", body))
-    named = set(re.findall(r"\breturn\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*;", body))
-    shapes = set(direct)
-    for name in named:
-        constructed = re.findall(
-            r"\b(?:var|let|const)\s+%s\s*=\s*new\s+([A-Za-z_$][A-Za-z0-9_$]*)"
-            r"\s*\(" % re.escape(name), body)
-        built = _factory_result(region, name, factories or {})
-        if built is not None:
-            constructed.append(built)
-        if not constructed:
-            # `return someArgument;` or a value built another way -- no claim.
+    function = region[:end]
+    if UNREADABLE_BODY_RE.search(function):
+        return None
+    classes: set[str] = set()
+    elements: set[str] = set()
+    # The classes a `new` names, which must be the module's.
+    constructed: set[str] = set()
+    for start, stop in _scan_returns(function, open_brace)[0]:
+        statement = function[start:stop]
+        value = SAME_LINE_RETURN_RE.match(statement)
+        if value is None:
             return None
-        shapes.update(constructed)
-
-    # Read from the unstripped statements, since the construction sits inside
-    # the callback that `_own_body` removed. Every return of the function has
-    # to be a mapped array of the same element: a method answering an array on
-    # one path and a bare node on another has no single type, and guessing one
-    # is how a declaration starts inventing errors.
-    returns = _own_returns(region)
-    elements = set()
-    mapped = 0
-    for statement in returns:
+        # Read from the whole statement, since the construction sits inside
+        # the callback that the own returns leave out.
         element = _mapped_element_shape(statement)
         if element is not None:
-            mapped += 1
             elements.add(element)
-    if mapped:
-        if shapes or len(elements) != 1 or mapped != len(returns):
+            constructed.add(element)
+            continue
+        expression = value.group(1).strip()
+        shape = _whole_construction(expression)
+        if shape is None and IDENT_RE.fullmatch(expression):
+            shape = _constructed_local(function, open_brace, expression,
+                                       declared or {})
+            if shape is None:
+                # A local-object shape, which no `new` names (ADR-0006).
+                shape = _factory_result(region, expression, factories or {})
+                if shape is None:
+                    return None
+                classes.add(shape)
+                continue
+        if shape is None:
+            return None
+        classes.add(shape)
+        constructed.add(shape)
+    # Each must name the module's class, in the method and in the module.
+    if any(name in (rebound or set())
+           or not _names_the_module_class(function, name)
+           for name in constructed):
+        return None
+    # An array on one path and a bare node on another is no single type.
+    if elements:
+        if classes or len(elements) != 1:
             return None
         return {"kind": "array", "element": next(iter(elements))}
-
-    if len(shapes) != 1:
+    if len(classes) != 1:
         return None
-    return next(iter(shapes))
+    return next(iter(classes))
+
+
+def _names_the_module_class(function: str, name: str) -> bool:
+    """Whether `name` in `function` can name nothing but the module's
+    binding of it: it occurs there only as `new name` and `name.<m>`.
+
+    `new Item(this)` constructs whatever `Item` names where it runs, and a
+    parameter, a `var`, a function or a catch clause of that name in the
+    method names something else -- an instance of no class the module
+    declares. Any other occurrence declines, so every one of those does, and
+    every write to the name, in a nested function as well. Matching is by
+    name, not by scope, as `_constructed_local` matches the local (#274).
+    """
+    for use in re.finditer(
+            r"(?<![.\w$])%s(?![\w$])" % re.escape(name), function):
+        if not (re.search(r"(?<![.\w$])new\s+\Z", function[:use.start()])
+                or MEMBER_ACCESS_RE.match(function, use.end())):
+            return False
+    return True
+
+
+# A member reference, `.m` after the name.
+MEMBER_ACCESS_RE = re.compile(r"\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)")
+# What makes a reference a write once any groupings around it close: an
+# assignment, a compound assignment, or a postfix `++`/`--`. A method that
+# is read holds no `/`, and in the lexer's code a regex literal is `0`, so a
+# `/=` is a division's.
+WRITE_RE = re.compile(r"\s*(?:=(?!=)|[-+*/%&|^]=|<<=|>>>?=|\+\+|--)")
+
+
+def _is_written(text: str, start: int, end: int) -> bool:
+    """Whether the reference at `start:end` in `text` is written: by `=`, a
+    compound assignment, a prefix or postfix `++`/`--`, or as a for-in
+    target, directly or through groupings around it (`_past_groupings`).
+
+    `text` is a method that passed `UNREADABLE_BODY_RE`, or the lexer's
+    code: no regex literal in it holds a paren.
+    """
+    before = text[:start]
+    after = _past_groupings(text, end)
+    return bool(re.search(r"(?:\+\+|--)[\s(]*\Z", before)
+                or WRITE_RE.match(text, after)
+                # `for (x.m in o)` assigns each key to `x.m`.
+                or (re.search(r"\bfor\s*\([\s(]*\Z", before)
+                    and re.match(r"\s*in(?![\w$])", text[after:])))
+
+
+def _constructed_local(
+        function: str, open_brace: int, name: str,
+        declared: dict[str, set[str]]) -> str | None:
+    """The class X when the local `name` holds the instance `var name =
+    new X(...)` made wherever the method returns it, and the method writes
+    no member through it that X does not declare; else `None` (movian#268,
+    ADR-0006 "The `new` path").
+
+    A whitelist of the name's occurrences, keyed on what the claim is: an
+    instance of X. X's shape claims its members for every instance, and a
+    call cannot rebind the caller's local, so passing the local as an
+    argument, as `this.items.push(item)` does, keeps the claim -- unlike
+    the factory caller rule, whose member set is that very local's. In
+    `function` the name may occur only
+
+    * first, in `var name = new X(...)` with the construction the whole
+      initializer, as a statement of the method's own body. First, because
+      `var` is hoisted and its value is not: a `return name` above it
+      returns `undefined`;
+    * in an own `return name`;
+    * as a whole argument of a call or a construction (`_passed_as_
+      argument`);
+    * as `name.m`, read, called, or written when X declares `m` -- not
+      after `delete`, which removes it, and never as `name.__proto__`,
+      the prototype every X shares.
+
+    Anything else declines, and with it every write to the name: an
+    assignment, `++`, a second `var`, a parameter or a function of that
+    name, in a nested function as well. Matching is by name, not by scope,
+    so a binding that only shadows it declines too (#274). So does `x[k]`,
+    a member the scan cannot name.
+
+    `function` is a method that passed `UNREADABLE_BODY_RE`, with strings
+    and comments masked.
+    """
+    uses = [use.start() for use in re.finditer(
+        r"(?<![.\w$])%s(?![\w$])" % re.escape(name), function)]
+    if not uses:
+        return None
+    declaration = re.search(r"(?<![.\w$])var\s+\Z", function[:uses[0]])
+    assignment = re.compile(r"\s*=(?!=)").match(
+        function, uses[0] + len(name))
+    if declaration is None or assignment is None or \
+            not _statement_at_top(function, open_brace, declaration.start()):
+        return None
+    # The initializer ends at the `,` that begins another declarator, or
+    # where the statement does.
+    constructed = _whole_construction(_split_js_fields(function[
+        assignment.end():_statement_end(function, assignment.end())])[0])
+    if constructed is None:
+        return None
+    returned = set()
+    for start, stop in _scan_returns(function, open_brace)[0]:
+        own = re.match(r"return[ \t\f\v]+(%s)\s*\Z" % re.escape(name),
+                       function[start:stop])
+        if own is not None:
+            returned.add(start + own.start(1))
+    members = declared.get(constructed, set())
+    for use in uses[1:]:
+        if use in returned or \
+                _passed_as_argument(function, use, use + len(name)):
+            continue
+        member = MEMBER_ACCESS_RE.match(function, use + len(name))
+        # `x.__proto__` is the prototype every X shares: written through,
+        # it changes the members the method claims.
+        if member is None or member.group(1) == "__proto__":
+            return None
+        if re.search(r"\bdelete[\s(]*\Z", function[:use]):
+            return None
+        if _is_written(function, use, member.end()) and \
+                member.group(1) not in members:
+            return None
+    return constructed
+
+
+# The words after which `(` opens no argument list: a control header, a
+# `catch` clause, or a function's parameters.
+NOT_ARGUMENTS_KEYWORDS = _JS_CONDITION_KEYWORDS | {
+    "switch", "catch", "function"}
+
+
+def _passed_as_argument(text: str, start: int, end: int) -> bool:
+    """Whether the name at `start:end` in `text` is a whole argument of a
+    call or a construction: `f(x)`, `o.m(a, x)`, `new C(x)`, `g()(x)`.
+
+    Not one where the parenthesis groups, `(x)`; heads a control statement,
+    `if (x)`; or binds the name, `function (a, x)` and `catch (x)`. `text`
+    has its literals and comments masked.
+    """
+    before = text[:start].rstrip()
+    after = text[end:].lstrip()
+    if not before.endswith(("(", ",")) or not after.startswith((")", ",")):
+        return False
+    depth = 0
+    for paren in range(start - 1, -1, -1):
+        if text[paren] in ")]}":
+            depth += 1
+        elif text[paren] in "([{":
+            if depth:
+                depth -= 1
+                continue
+            if text[paren] != "(" or _expression_may_begin(text, paren):
+                return False
+            callee = text[:paren].rstrip()
+            word = re.search(r"[A-Za-z0-9_$]+\Z", callee)
+            if word is None:
+                return True
+            declarer = re.search(r"([A-Za-z0-9_$]+)\s*\Z",
+                                 callee[:word.start()])
+            return word.group() not in NOT_ARGUMENTS_KEYWORDS and (
+                declarer is None
+                or declarer.group(1) not in ("function", "get", "set"))
+    return False
+
 
 def _split_js_fields(text: str) -> list[str]:
     fields: list[str] = []
@@ -3962,26 +4140,34 @@ def _factory_result(
 
 def _is_called(text: str, index: int) -> bool:
     """Whether the member reference ending at `index` in `text` is called:
-    a `(` follows it, directly or past `)`s that close groupings around it.
+    a `(` follows it, directly or past `)`s that close groupings around it
+    (`_past_groupings`)."""
+    return re.compile(r"\s*\(").match(
+        text, _past_groupings(text, index)) is not None
+
+
+def _past_groupings(text: str, index: int) -> int:
+    """Where the reference ending at `index` in `text` ends: past every `)`
+    that closes a grouping around it.
 
     A grouping keeps the reference, so `(x.m)()` and `((x.m))()` call `m`
-    with `x` as `this`, as `x.m()` does (ES5.1 11.1.6). Any other `)` ends
-    the reference, and a `(` after it calls something else: a control
-    header's, `if (x.m) (f)();`, or an argument list's, `f(x.m)()`, which
-    passes the value. A `(` opens a grouping where an expression may begin.
+    with `x` as `this`, as `x.m()` does, and `(x.m) = 1` writes it (ES5.1
+    11.1.6). Any other `)` ends the reference, and a `(` after it calls
+    something else: a control header's, `if (x.m) (f)();`, or an argument
+    list's, `f(x.m)()`, which passes the value. A `(` opens a grouping where
+    an expression may begin.
 
     `text` is a method that passed `UNREADABLE_BODY_RE`, strings and
-    comments masked: no `/`, so no regex literal holds a paren.
+    comments masked: no `/`, so no regex literal holds a paren. Or it is
+    the lexer's code, where a regex literal is `0`.
     """
     while True:
-        token = re.compile(r"\s*(\S)").match(text, index)
-        if token is None or token.group(1) not in "()":
-            return False
-        if token.group(1) == "(":
-            return True
-        opening = _open_paren_of(text, token.start(1))
+        token = re.compile(r"\s*\)").match(text, index)
+        if token is None:
+            return index
+        opening = _open_paren_of(text, token.end() - 1)
         if opening is None or not _expression_may_begin(text, opening):
-            return False
+            return index
         index = token.end()
 
 
@@ -4168,11 +4354,8 @@ def _writes(lexed: _LexedJs, pattern: re.Pattern[str],
     the regex runs to the next `/`, and the write in it is real."""
     code = lexed.code
     matches = list(pattern.finditer(code))
-    # A regex literal is `/` in `kept` where `code` has its `0`; the span
-    # runs over its blanks, and over any blank after it, which hold nothing.
-    for brace in re.finditer(r"\}\s*(0 *)", code):
-        if lexed.kept[brace.start(1)] == "/":
-            matches.extend(pattern.finditer(lexed.kept, *brace.span(1)))
+    for start, end in _regexes_after_braces(lexed):
+        matches.extend(pattern.finditer(lexed.kept, start, end))
     writes: dict[tuple[str, ...], list[_Write]] = {}
     for match in sorted(matches, key=lambda match: match.start()):
         if match.group(1) not in receivers:
@@ -4183,6 +4366,72 @@ def _writes(lexed: _LexedJs, pattern: re.Pattern[str],
             before.count("{") == before.count("}")
             and _statement_begins_at(code, match.start())))
     return writes
+
+
+def _regexes_after_braces(lexed: _LexedJs) -> list[tuple[int, int]]:
+    """Where the scanner read a regex literal right after `}`, its one
+    blind spot: the `/` may be a division (ADR-0006), and what the regex
+    swallowed code. A regex literal is `/` in `kept` where `code` has its
+    `0`; a span runs over its blanks, and over any blank after it, which
+    hold nothing."""
+    return [brace.span(1)
+            for brace in re.finditer(r"\}\s*(0 *)", lexed.code)
+            if lexed.kept[brace.start(1)] == "/"]
+
+
+def _inside_a_function(code: str, offset: int) -> bool:
+    """Whether `offset` in `code` (`_LexedJs.code`) is inside a function's
+    body, not only inside a block: a `var` in `if (t) { ... }` at the top
+    level declares the module's name. An accessor's body is not
+    recognized, so a declaration in one counts as the module's."""
+    depth = 0
+    for index in range(offset - 1, -1, -1):
+        if code[index] == "}":
+            depth += 1
+        elif code[index] == "{":
+            if depth:
+                depth -= 1
+                continue
+            head = code[:index].rstrip()
+            opening = _open_paren_of(head, len(head) - 1) \
+                if head.endswith(")") else None
+            if opening is not None and re.search(
+                    r"(?<![.\w$])function(?:\s+[A-Za-z_$][\w$]*)?\s*\Z",
+                    head[:opening]):
+                return True
+    return False
+
+
+def _rebound(lexed: _LexedJs, name: str) -> bool:
+    """Whether the module binds `name` by anything but one declaration:
+    a second top-level `function name` or `var name`, or a write to the
+    name anywhere -- `name = ...`, `(name) = ...`, a compound assignment,
+    `++`/`--`, a for-in target (movian#268).
+
+    Then `new name(...)` may run after the write and construct something
+    else. A write counts wherever it stands, inside a function too, where
+    it may assign the module's name or a local's: matching is by name, not
+    by scope (#274). A declaration inside a function binds a local of it,
+    which matters only where it shadows a construction, and the method's
+    own are `_names_the_module_class`'s. Read on the lexer's code, as
+    `_writes` reads #267's, with the name inside a regex the scanner took
+    after `}` counted as written.
+    """
+    code = lexed.code
+    pattern = re.compile(r"(?<![.\w$])%s(?![\w$])" % re.escape(name))
+    declarations = 0
+    for use in pattern.finditer(code):
+        if re.search(r"(?<![.\w$])(?:var|function)\s+\Z",
+                     code[:use.start()]):
+            if not _inside_a_function(code, use.start()):
+                declarations += 1
+        elif not MEMBER_ACCESS_RE.match(code, use.end()) and \
+                _is_written(code, use.start(), use.end()):
+            return True
+    if any(pattern.search(lexed.kept, start, end)
+           for start, end in _regexes_after_braces(lexed)):
+        return True
+    return declarations != 1
 
 
 def _withheld_member(path: Path, name: str, writes: Sequence[_Write],
@@ -4237,6 +4486,9 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
                      for match in prototype_matches + top_alias_matches})
     factories = {shape["factory"]: shape for shape in local_shapes}
     by_receiver: dict[str, dict[str, dict[str, Any]]] = {}
+    # `(receiver, record, region)` of each method read, typed once the
+    # shapes are built.
+    typed: list[tuple[str, dict[str, Any], str]] = []
     top_prototype_starts = {
         match.start(1) for match in prototype_matches
     }
@@ -4253,7 +4505,9 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
         methods[match.group(2)] = _shape_method(
             match.group(2), match.group(3), path,
             _source_line(text, match.start(1)),
-            region=text[match.start(1):], factories=factories)
+            region=text[match.start(1):])
+        typed.append(
+            (receiver, methods[match.group(2)], text[match.start(1):]))
     # Before the aliases resolve, so that an alias of a member with more than
     # one implementation copies the refusal and not one of its bodies
     # (movian#267). An alias resolves only to a method of its own receiver,
@@ -4374,7 +4628,8 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
         methods[name] = _shape_method(
             name, match.group(3), path,
             _source_line(text, match.start(1)),
-            region=text[match.start(1):], factories=factories)
+            region=text[match.start(1):])
+        typed.append((receiver, methods[name], text[match.start(1):]))
     # `var sp = {}` writes the whole object as well. It runs before every
     # member assigned after it, so it implements none of them.
     shared_receivers = consumed_shared_names & set(by_receiver)
@@ -4423,8 +4678,51 @@ def scan_commonjs_shapes(path: Path) -> list[dict[str, Any]]:
             shape["properties"] = [
                 properties[name] for name in sorted(properties)]
         shapes.append(shape)
+    _attach_returned_shapes(shapes, by_receiver, typed, factories, lexed)
     shapes.extend(sorted(local_shapes, key=lambda shape: shape["name"]))
     return shapes
+
+
+def _attach_returned_shapes(
+        shapes: list[dict[str, Any]],
+        by_receiver: dict[str, dict[str, dict[str, Any]]],
+        typed: list[tuple[str, dict[str, Any], str]],
+        factories: dict[str, dict[str, Any]], lexed: _LexedJs) -> None:
+    """Give each method record in `typed` the shape `_returned_shape` reads
+    in its region, and every alias that copied the record the same.
+
+    Last, because a method may write a member through the instance it
+    returns only when the class declares that member, and a class declares
+    what its built shape holds: the members its constructor and prototype
+    give it (ADR-0006, "The `new` path"). Only a record still in place is
+    typed. One replaced since -- by another body, an alias, or the record of
+    a name with more than one implementation (movian#267) -- takes no claim
+    from this body. `lexed` is the module, which must bind a class only by
+    its declaration for a method to answer it (`_rebound`).
+    """
+    declared: dict[str, set[str]] = {}
+    for shape in shapes:
+        if shape["kind"] == "prototype":
+            declared.setdefault(shape["name"], set()).update(
+                member["name"] for member in
+                shape["methods"] + shape.get("properties", []))
+    rebound = {name for name in declared if _rebound(lexed, name)}
+    for receiver, record, region in typed:
+        methods = by_receiver[receiver]
+        if methods.get(record["name"]) is not record:
+            continue
+        returned = _returned_shape(region, factories, declared, rebound)
+        if returned is None:
+            continue
+        pending, seen = [record["name"]], set()
+        while pending:
+            target = pending.pop()
+            if target in seen or "implementations" in methods[target]:
+                continue
+            seen.add(target)
+            methods[target]["returns"] = returned
+            pending.extend(alias for alias, method in methods.items()
+                           if method.get("aliasOf") == target)
 
 
 FIELD_FUNCTION_RE = re.compile(
