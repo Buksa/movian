@@ -572,6 +572,23 @@ class NewPathReadsTheBuiltShape(unittest.TestCase):
         self.assertIsNone(self.returns_of(
             "var x = new Item(this);\nx.extra = t;\nreturn x;"))
 
+    def test_any_use_of_the_prototype_through_the_local_declines(
+            self) -> None:
+        """`x.__proto__` is the prototype every `Item` shares, and a write
+        through it changes the member set the method claims. Reading an
+        instance's declared members never needs it."""
+        for label, body in [
+                ("a member written through it",
+                 "var x = new Item(this);\nx.__proto__.extra = 1;\n"
+                 "return x;"),
+                ("read into a local",
+                 "var x = new Item(this);\nvar p = x.__proto__;\n"
+                 "return x;"),
+                ("passed on",
+                 "var x = new Item(this);\nf(x.__proto__);\nreturn x;")]:
+            with self.subTest(label):
+                self.assertIsNone(self.returns_of(body))
+
     def test_a_comment_holding_a_line_terminator_ends_the_return(
             self) -> None:
         """ES5.1 7.4: such a comment counts as a line terminator, so each

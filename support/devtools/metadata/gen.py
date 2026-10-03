@@ -3230,7 +3230,8 @@ def _constructed_local(
     * as a whole argument of a call or a construction (`_passed_as_
       argument`);
     * as `name.m`, read, called, or written when X declares `m` -- not
-      after `delete`, which removes it.
+      after `delete`, which removes it, and never as `name.__proto__`,
+      the prototype every X shares.
 
     Anything else declines, and with it every write to the name: an
     assignment, `++`, a second `var`, a parameter or a function of that
@@ -3269,7 +3270,9 @@ def _constructed_local(
                 _passed_as_argument(function, use, use + len(name)):
             continue
         member = MEMBER_ACCESS_RE.match(function, use + len(name))
-        if member is None:
+        # `x.__proto__` is the prototype every X shares: written through,
+        # it changes the members the method claims.
+        if member is None or member.group(1) == "__proto__":
             return None
         before = function[:use]
         if re.search(r"\bdelete[\s(]*\Z", before):
