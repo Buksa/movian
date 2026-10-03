@@ -555,10 +555,11 @@ class NewPathReadsTheBuiltShape(unittest.TestCase):
     """What a class declares is what its built shape holds: the members its
     constructor and its prototype give it (movian#268)."""
 
-    def returns_of(self, body: str) -> object:
+    def returns_of(self, body: str, params: str = "t",
+                   module: str = "") -> object:
         return scanned_returns(
-            CLASSES + "Page.prototype.m = function(t) {\n%s\n};\n"
-            % body)["Page.m"]
+            CLASSES + "Page.prototype.m = function(%s) {\n%s\n};\n%s"
+            % (params, body, module))["Page.m"]
 
     def test_a_member_the_constructor_declares_may_be_written(self) -> None:
         self.assertEqual(self.returns_of(
@@ -588,6 +589,114 @@ class NewPathReadsTheBuiltShape(unittest.TestCase):
                  "var x = new Item(this);\nf(x.__proto__);\nreturn x;")]:
             with self.subTest(label):
                 self.assertIsNone(self.returns_of(body))
+
+    def test_the_class_is_not_bound_in_the_method(self) -> None:
+        """`new Item(...)` constructs whatever `Item` names where it runs,
+        and a binding of that name in the method names something other than
+        the module's class: the result is no `Item`. Matched by name, not
+        by scope, as the local is (#274)."""
+        for label, params, body in [
+                ("a function declaration, hoisted", "t",
+                 "var x = new Item(this);\nfunction Item() {}\nreturn x;"),
+                ("a var", "t",
+                 "var Item = function () {};\nvar x = new Item(this);\n"
+                 "return x;"),
+                ("a parameter", "Item",
+                 "var x = new Item(this);\nreturn x;"),
+                ("a parameter, the construction returned", "Item",
+                 "return new Item(this);"),
+                ("a nested function's parameter", "t",
+                 "f(function (Item) { g(new Item(t)); });\n"
+                 "var x = new Item(this);\nreturn x;"),
+                ("a catch clause", "t",
+                 "try { f(); } catch (Item) { g(); }\n"
+                 "var x = new Item(this);\nreturn x;"),
+                ("a mapped array's callback", "Item",
+                 "return xs.map(function (n) { return new Item(n); });")]:
+            with self.subTest(label):
+                self.assertIsNone(self.returns_of(body, params))
+
+    def test_the_module_does_not_rebind_the_class(self) -> None:
+        """The module's `Item` is the class only while nothing but its
+        declaration binds it: once another statement writes the name, a
+        construction may run after it and build something else. Any write
+        counts, wherever it stands, so one inside a function does too."""
+        method = "var x = new Item(this);\nreturn x;"
+        for label, module in [
+                ("an assignment", "Item = function () {};\n"),
+                ("through a grouping", "(Item) = function () {};\n"),
+                ("a compound assignment", "Item += 1;\n"),
+                ("a division assignment", "Item /= 2;\n"),
+                ("in a function", "function setup() { Item = Page; }\n"),
+                ("a second declaration", "var Item = Page;\n"),
+                ("a second function declaration", "function Item() {}\n"),
+                ("a var in a top-level block",
+                 "if (legacy) { var Item = Page; }\n"),
+                ("a for-in target", "for (Item in legacy) {}\n")]:
+            with self.subTest(label):
+                self.assertIsNone(self.returns_of(method, module=module))
+
+    def test_what_the_class_name_rule_keeps(self) -> None:
+        """`Item` constructed, and read as `Item.<m>`, binds nothing; nor
+        does the one declaration, a function's or a `var`'s, nor a `var`
+        that binds a local of another function. The local's own keep forms
+        keep answering end to end."""
+        for label, body in [
+                ("push(x)",
+                 "var x = new Item(this);\nthis.items.push(x);\nreturn x;"),
+                ("a member read and a member call",
+                 "var x = new Item(this);\nvar r = x.root;\nx.toString();\n"
+                 "return x;"),
+                ("a declared member written",
+                 "var x = new Item(this);\nx.page = t;\nreturn x;"),
+                ("two returns of the class",
+                 "if (t) return new Item(t);\nvar it = new Item(this);\n"
+                 "return it;"),
+                ("a member of the class read",
+                 "var x = new Item(this);\nItem.prototype.toString.call(x);\n"
+                 "return x;")]:
+            with self.subTest(label):
+                self.assertEqual(self.returns_of(body), "Item")
+        with self.subTest("constructed in several methods"):
+            returns = scanned_returns(
+                CLASSES + "Page.prototype.m = function(t) {\n"
+                "return new Item(t);\n};\n"
+                "Page.prototype.n = function(t) {\n"
+                "var x = new Item(t);\nreturn x;\n};\n"
+                "Item.prototype.clone = function() {\n"
+                "return new Item(this.page);\n};\n")
+            self.assertEqual(
+                (returns["Page.m"], returns["Page.n"], returns["Item.clone"]),
+                ("Item", "Item", "Item"))
+        with self.subTest("a local of that name in another function"):
+            self.assertEqual(self.returns_of(
+                "var x = new Item(this);\nreturn x;",
+                module="function helper(o) { var Item = o; return Item; }\n"),
+                "Item")
+        with self.subTest("exported"):
+            self.assertEqual(self.returns_of(
+                "var x = new Item(this);\nreturn x;",
+                module="exports.Item = Item;\n"), "Item")
+        with self.subTest("declared by a var"):
+            self.assertEqual(scanned_returns(
+                "var Item = function (p) { this.page = p; };\n"
+                "Item.prototype.toString = function() { return 1; };\n"
+                "function Page() { this.items = []; }\n"
+                "Page.prototype.m = function(t) {\n"
+                "var x = new Item(this);\nreturn x;\n};\n")["Page.m"], "Item")
+
+    def test_a_write_the_lexer_reads_as_code_counts(self) -> None:
+        """Read on the lexer's code, as `_writes` reads #267's. The mask
+        takes the quote in `/'/` for a string's and blanks the rest of the
+        line, the write after it included; and the lexer takes a `/` after
+        `}` for a regex's, which may be a division with a write after it."""
+        for label, module in [
+                ("after /'/", "var r = /'/; Item = Page;\n"),
+                ("in a regex begun after }",
+                 "var n = {} / 2; Item = Page; var h = n / 2;\n")]:
+            with self.subTest(label):
+                self.assertIsNone(self.returns_of(
+                    "var x = new Item(this);\nreturn x;", module=module))
 
     def test_a_comment_holding_a_line_terminator_ends_the_return(
             self) -> None:
