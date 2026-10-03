@@ -221,9 +221,14 @@ The owner settled the rule on 2026-10-02. In the method:
 - `x.<m>` may be read or called, and written only when X declares `m` --
   by `=`, a compound assignment, `++` or `--`, through a grouping, or as a
   for-in target. `delete x.<m>` declines, and so does `x[k]`, a member the
-  scan cannot name. X declares what its built shape holds, the members its
+  scan cannot name, and any use of `x.__proto__`, the prototype every X
+  shares. X declares what its built shape holds, the members its
   constructor and its prototype give it, so a method's return type is read
-  after the module's shapes are built.
+  after the module's shapes are built;
+- X is the module's class. In the method it occurs only as `new X` and
+  `X.<m>`, so no parameter, `var`, function, catch clause or write binds
+  it there, and in the module it has one top-level declaration and no
+  write anywhere else: no `X = ...`, `(X) = ...` or second `var X`.
 
 `movian/page`'s three methods use `item` only in the declaration, in
 `this.items.push(item)` (two of them), as `item.root`, and in `return
