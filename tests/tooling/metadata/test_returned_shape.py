@@ -39,6 +39,11 @@ gen = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gen)
 
 
+# What `movian/page`'s `Item` declares, cut down: two members its
+# constructor defines and one its prototype does. A method may write these
+# through an `Item` it returns (movian#268).
+ITEM = {"Item": {"page", "root", "toString"}}
+
 # Each region is what the scanner sees: text starting at the `=` of an
 # assignment, exactly as `_shape_method` and the export scan pass it.
 ANSWERED = [
@@ -58,18 +63,9 @@ ANSWERED = [
      "= function(u){ return new Request(u); }",
      "Request"),
     ("a conditional BLOCK before an unconditional return",
-     "= function(u){ var i = new Item(this); if(u){ i.x = 1; }"
+     "= function(u){ var i = new Item(this); if(u){ i.page = 1; }"
      " prop.setParent(i, n); return i; }",
      "Item"),
-    # movian/http's `request`: the callback form exits through a bare `return;`
-    # inside `if(callback)`, and the synchronous form returns the shape. The
-    # split is modelled separately as `voidWhen` (#178); what matters here is
-    # that an early return in a branch does not by itself make the function
-    # fall through, because the LAST statement is still an unconditional return.
-    ("an early bare return in a branch, shape returned at the end",
-     "= function(u,c,cb){ if(cb){ io.httpReq(u, c, function(e,r){}); return; }"
-     " var res = io.httpReq(u,c); return new HttpResponse(res); }",
-     "HttpResponse"),
     # The paren-skipping backward scan must not swallow an ordinary call that
     # happens to sit before the return: `foo(a, b);` ends in `)` too, and a
     # scan that stepped over it would keep walking into whatever precedes it.
@@ -95,6 +91,13 @@ REFUSED = [
      "= function(t){ while (n--) return new Item(this); }"),
     ("a bare `return;` as the final statement",
      "= function(t){ if (t) return new Item(this); return; }"),
+    # movian/http's `request` is this form, and its export is read by
+    # another route, which models the bare `return;` as `voidWhen` (#178).
+    # Here every return must be accounted for, and a bare one is not
+    # (movian#268).
+    ("an early bare return in a branch, shape returned at the end",
+     "= function(u,c,cb){ if(cb){ io.httpReq(u, c, function(e,r){}); return; }"
+     " var res = io.httpReq(u,c); return new HttpResponse(res); }"),
     ("a property named `return`, which is not a return statement",
      "= function(t){ if (t) return new Item(this); iterator.return(); }"),
     ("a body that constructs but never returns",
@@ -247,7 +250,8 @@ class ReturnedShape(unittest.TestCase):
     def test_answers_the_shapes_the_corpus_uses(self) -> None:
         for label, region, expected in ANSWERED:
             with self.subTest(label):
-                self.assertEqual(gen._returned_shape(region), expected)
+                self.assertEqual(
+                    gen._returned_shape(region, declared=ITEM), expected)
 
     def test_refuses_a_body_that_can_fall_through(self) -> None:
         for label, region in REFUSED:
@@ -318,6 +322,318 @@ class ReturnedShape(unittest.TestCase):
             dict(counted),
             {"commonjs": 16, "native": 91, "returnField": 1},
             members)
+
+
+
+def method(body: str, params: str = "t, other") -> str:
+    """A method region as `_shape_method` sees one, around `body`."""
+    return "= function(%s) {\n%s\n}" % (params, body)
+
+
+class NewPath(unittest.TestCase):
+    """`_returned_shape`'s `new` path (movian#268, ADR-0006 "The `new`
+    path").
+
+    One test per rule, so that a mutation removing a rule names the tests it
+    turns red. Each region is a method that would answer `Item` but for the
+    one form under test; `KEPT` cases answer it with the same form allowed.
+    """
+
+    def answer(self, body: str, params: str = "t, other") -> object:
+        return gen._returned_shape(method(body, params), declared=ITEM)
+
+    def assert_kept(self, cases: list[tuple[str, str]]) -> None:
+        for label, body in cases:
+            with self.subTest(label):
+                self.assertEqual(self.answer(body), "Item")
+
+    def assert_declined(self, cases: list[tuple[str, str]]) -> None:
+        for label, body in cases:
+            with self.subTest(label):
+                self.assertIsNone(self.answer(body))
+
+    # 1. Passing the local, and calling its members.
+
+    def test_passing_the_local_as_an_argument_keeps_its_class(self) -> None:
+        self.assert_kept([
+            ("push(x), the movian/page form",
+             "var x = new Item(this);\nthis.items.push(x);\nreturn x;"),
+            ("one argument among several",
+             "var x = new Item(this);\nprop.setParent(t, x, other);\n"
+             "return x;"),
+            ("an argument of a construction",
+             "var x = new Item(this);\nvar p = new Page(x);\nreturn x;"),
+        ])
+
+    def test_calling_a_member_keeps_its_class(self) -> None:
+        self.assert_kept([
+            ("x.m()", "var x = new Item(this);\nx.toString();\nreturn x;"),
+            ("(x.m)(), the same reference",
+             "var x = new Item(this);\n(x.toString)();\nreturn x;"),
+        ])
+
+    # 2. The local.
+
+    def test_a_write_to_the_name_declines(self) -> None:
+        self.assert_declined([
+            ("an assignment",
+             "var x = new Item(this);\nx = other;\nreturn x;"),
+            ("a compound assignment",
+             "var x = new Item(this);\nx += 1;\nreturn x;"),
+            ("a postfix ++", "var x = new Item(this);\nx++;\nreturn x;"),
+            ("a second var",
+             "var x = new Item(this);\nvar x = new Item(t);\nreturn x;"),
+            ("an assignment in a nested function",
+             "var x = new Item(this);\n"
+             "f(function () { x = other; });\nreturn x;"),
+            ("a nested function's parameter of that name",
+             "var x = new Item(this);\nf(function (x) { g(x); });\n"
+             "return x;"),
+            ("a catch clause binding it",
+             "var x = new Item(this);\ntry { f(); } catch (x) { g(); }\n"
+             "return x;"),
+        ])
+
+    def test_a_parameter_of_that_name_declines(self) -> None:
+        self.assertIsNone(gen._returned_shape(
+            method("var x = new Item(this);\nreturn x;", "t, x"),
+            declared=ITEM))
+
+    def test_the_local_holds_a_whole_construction(self) -> None:
+        self.assert_declined([
+            ("a member of the construction",
+             "var x = new Item(this).page;\nreturn x;"),
+            ("an operand", "var x = new Item(this) || other;\nreturn x;"),
+        ])
+
+    def test_the_declaration_is_an_unconditional_statement(self) -> None:
+        self.assert_declined([
+            ("in a block",
+             "if (t) { var x = new Item(this); }\nreturn x;"),
+            ("under an unbraced if",
+             "if (t) var x = new Item(this);\nreturn x;"),
+        ])
+
+    def test_a_return_above_the_declaration_declines(self) -> None:
+        """`var` is hoisted and its value is not: the first `return x`
+        returns `undefined`."""
+        self.assert_declined([
+            ("return x before var x",
+             "if (t) return x;\nvar x = new Item(this);\nreturn x;"),
+        ])
+
+    def test_any_other_use_of_the_name_declines(self) -> None:
+        self.assert_declined([
+            ("an alias, through which a member is added",
+             "var x = new Item(this);\nvar y = x;\ny.extra = 1;\n"
+             "return x;"),
+            ("a closure returning it",
+             "var x = new Item(this);\nf(function () { return x; });\n"
+             "return x;"),
+            ("a computed member", "var x = new Item(this);\nx[t] = 1;\n"
+             "return x;"),
+        ])
+
+    # 3. Members.
+
+    def test_reading_a_member_keeps_its_class(self) -> None:
+        self.assert_kept([
+            ("a declared member",
+             "var x = new Item(this);\nvar r = x.root;\nreturn x;"),
+            ("a member the class does not declare",
+             "var x = new Item(this);\nvar e = x.extra;\nreturn x;"),
+        ])
+
+    def test_writing_a_declared_member_keeps_its_class(self) -> None:
+        self.assert_kept([
+            ("an assignment",
+             "var x = new Item(this);\nx.page = t;\nreturn x;"),
+            ("a compound assignment",
+             "var x = new Item(this);\nx.page += 1;\nreturn x;"),
+            ("in a nested function",
+             "var x = new Item(this);\nf(function () { x.page = 2; });\n"
+             "return x;"),
+        ])
+
+    def test_writing_an_undeclared_member_declines(self) -> None:
+        self.assert_declined([
+            ("an assignment",
+             "var x = new Item(this);\nx.extra = 1;\nreturn x;"),
+            ("a compound assignment",
+             "var x = new Item(this);\nx.count += 1;\nreturn x;"),
+            ("a prefix ++", "var x = new Item(this);\n++x.extra;\nreturn x;"),
+            ("a postfix --", "var x = new Item(this);\nx.extra--;\nreturn x;"),
+            ("through a grouping",
+             "var x = new Item(this);\n(x.extra) = 1;\nreturn x;"),
+            ("as a for-in target",
+             "var x = new Item(this);\nfor (x.extra in t) {}\nreturn x;"),
+        ])
+
+    def test_delete_declines(self) -> None:
+        self.assert_declined([
+            ("a declared member",
+             "var x = new Item(this);\ndelete x.page;\nreturn x;"),
+            ("through a grouping",
+             "var x = new Item(this);\ndelete (x.page);\nreturn x;"),
+        ])
+
+    def test_without_the_class_members_a_member_write_declines(self) -> None:
+        self.assertIsNone(gen._returned_shape(method(
+            "var x = new Item(this);\nx.page = t;\nreturn x;")))
+
+    # 4. Returns.
+
+    def test_two_returns_of_one_class_keep_it(self) -> None:
+        self.assert_kept([
+            ("a construction and a local",
+             "if (t) return new Item(t);\nvar it = new Item(other);\n"
+             "return it;"),
+        ])
+
+    def test_every_return_is_accounted_for(self) -> None:
+        self.assert_declined([
+            ("a number, then a local",
+             "if (t) return 5;\nvar x = new Item(this);\nreturn x;"),
+            ("a number, then a construction",
+             "if (t) return 5;\nreturn new Item(this);"),
+            ("a parameter, then a construction",
+             "if (t) return other;\nreturn new Item(this);"),
+            ("a bare return, then a construction",
+             "if (t) return;\nreturn new Item(this);"),
+            ("two classes",
+             "if (t) return new Item(t);\nreturn new Page();"),
+        ])
+
+    def test_a_construction_is_the_whole_return_value(self) -> None:
+        self.assert_declined([
+            ("a member of it", "return new Item(this).page;"),
+        ])
+
+    def test_a_line_terminator_after_return_declines(self) -> None:
+        """ES5.1 7.9.1: `return`, a line terminator and a value is
+        `return;` -- beside a return that is accounted for, too."""
+        self.assert_declined([
+            ("before a local",
+             "var x = new Item(this);\nreturn\nx;"),
+            ("before a construction", "return\nnew Item(this);"),
+            ("before a local, after a construction",
+             "if (t) return new Item(t);\nvar x = new Item(this);\n"
+             "return\nx;"),
+            ("before a construction, after a local",
+             "var x = new Item(this);\nif (t) return x;\n"
+             "return\nnew Item(this);"),
+        ])
+
+
+MODULES = REPO_ROOT / "res" / "ecmascript" / "modules"
+PROBE = MODULES / "movian" / "_new_path_probe.js"
+
+# A class whose constructor declares `page` and `root` and whose prototype
+# declares `toString`, and a method of another class returning one.
+CLASSES = (
+    "function Item(p) { this.page = p; this.root = {}; }\n"
+    "Item.prototype.toString = function() { return 1; };\n"
+    "function Page() { this.items = []; }\n")
+
+
+def scanned_returns(source: str) -> dict[str, object]:
+    """`{"Shape.method": returns}` of `source` scanned as a core module."""
+    import contextlib
+    import io
+    PROBE.write_text(source, encoding="utf-8")
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            shapes = gen.scan_commonjs_shapes(PROBE)
+    finally:
+        PROBE.unlink()
+        gen._RAW_LINES_CACHE.pop(PROBE, None)
+    return {"%s.%s" % (shape["name"], member["name"]): member.get("returns")
+            for shape in shapes for member in shape["methods"]}
+
+
+class NewPathReadsTheBuiltShape(unittest.TestCase):
+    """What a class declares is what its built shape holds: the members its
+    constructor and its prototype give it (movian#268)."""
+
+    def returns_of(self, body: str) -> object:
+        return scanned_returns(
+            CLASSES + "Page.prototype.m = function(t) {\n%s\n};\n"
+            % body)["Page.m"]
+
+    def test_a_member_the_constructor_declares_may_be_written(self) -> None:
+        self.assertEqual(self.returns_of(
+            "var x = new Item(this);\nx.page = t;\nreturn x;"), "Item")
+
+    def test_a_member_the_prototype_declares_may_be_written(self) -> None:
+        self.assertEqual(self.returns_of(
+            "var x = new Item(this);\nx.toString = t;\nreturn x;"), "Item")
+
+    def test_a_member_neither_declares_may_not(self) -> None:
+        self.assertIsNone(self.returns_of(
+            "var x = new Item(this);\nx.extra = t;\nreturn x;"))
+
+    def test_a_comment_holding_a_line_terminator_ends_the_return(
+            self) -> None:
+        """ES5.1 7.4: such a comment counts as a line terminator, so each
+        of these is `return;`. The mask blanks a comment and keeps its line
+        breaks.
+
+        A construction follows, not a local: an `x` left standing after
+        `return;` is a use of the local the whitelist refuses on its own,
+        and a test that two rules decline cannot tell either is there."""
+        for label, body in [
+                ("a line comment",
+                 "if (t) return new Item(t);\n"
+                 "return // the item\nnew Item(this);"),
+                ("a block comment spanning lines",
+                 "if (t) return new Item(t);\n"
+                 "return /* the\nitem */ new Item(this);")]:
+            with self.subTest(label):
+                self.assertIsNone(self.returns_of(body))
+
+    def test_a_body_the_scan_cannot_read_accounts_for_no_return(
+            self) -> None:
+        """The mask works a line at a time and blanks a string to the end
+        of its line, and it knows no regex literal: in `/'/` it takes the
+        quote for a string's, and the `return 5` after it is not there to
+        account for. `/` is what `UNREADABLE_BODY_RE` refuses."""
+        self.assertIsNone(self.returns_of(
+            "var r = /'/; if (t) return 5;\nreturn new Item(this);"))
+
+    def test_an_alias_of_the_method_returns_what_it_returns(self) -> None:
+        returns = scanned_returns(
+            CLASSES + "Page.prototype.m = function(t) {\n"
+            "var x = new Item(this);\nreturn x;\n};\n"
+            "Page.prototype.n = Page.prototype.m;\n")
+        self.assertEqual((returns["Page.m"], returns["Page.n"]),
+                         ("Item", "Item"))
+
+
+class NewPathCorpus(unittest.TestCase):
+    """The corpus users of both forms the rule must keep answering."""
+
+    def returns_in(self, module: str) -> dict[str, object]:
+        path = MODULES / "movian" / module
+        return {"%s.%s" % (shape["name"], member["name"]):
+                member.get("returns")
+                for shape in gen.scan_commonjs_shapes(path)
+                for member in shape["methods"]}
+
+    def test_the_append_methods_return_item(self) -> None:
+        returns = self.returns_in("page.js")
+        for name in ("appendItem", "appendAction", "appendPassiveItem"):
+            with self.subTest(name):
+                self.assertEqual(returns["Page." + name], "Item")
+
+    def test_the_html_selectors_return_arrays_of_node(self) -> None:
+        """Both selectors, and the two aliases of them, which take their
+        target's type."""
+        returns = self.returns_in("html.js")
+        for name in ("getElementByTagName", "getElementByClassName",
+                     "getElementsByTagName", "getElementsByClassName"):
+            with self.subTest(name):
+                self.assertEqual(returns["Node." + name],
+                                 {"kind": "array", "element": "Node"})
 
 
 if __name__ == "__main__":
