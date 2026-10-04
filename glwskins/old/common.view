@@ -57,7 +57,10 @@
 	  });
       
 	  widget(clip, {
-	    clipping: [-1, 0, 1 - ($self.model.percentage / 100), 0];
+	    left: -1;
+	    top: 0;
+	    right: 1 - ($self.model.percentage / 100);
+	    bottom: 0;
 	    widget(backdrop, {
 	      margin: [-8, -3, -8, -5];
 	      border: [16, 8];

@@ -338,7 +338,10 @@ widget(deck, {
 	    });
 	    
 	    widget(clip, {
-	      clipping: [-1, 0, 1 - (($parent.media.currenttime - $self.timestamp) / ($self.end - $self.timestamp)), 0];
+	      left: -1;
+	      top: 0;
+	      right: 1 - (($parent.media.currenttime - $self.timestamp) / ($self.end - $self.timestamp));
+	      bottom: 0;
 	      widget(backdrop, {
 		margin: [-8, -3, -8, -5];
 		border: [16, 8];
