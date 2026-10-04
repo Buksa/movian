@@ -44,7 +44,7 @@ When your output names a domain concept (in an issue title, a refactor proposal,
 
 If the concept you need isn't in the glossary yet, that's a signal — either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
 
-**Only within the glossary's declared coverage.** `CONTEXT.md:3-9` scopes itself to the plugin API surface and the tooling that describes it, and says outright that general programming vocabulary does not belong. So an absent term is a signal when you are working on that surface, and says nothing at all when you are in playback, SMB, GLW rendering or any other area the glossary never claimed. Do not read a gap there, and do not avoid an established term because this file does not list it.
+**Only within the glossary's declared coverage.** `CONTEXT.md:3-10` scopes itself to the plugin API surface and the tooling that describes it, plus skins, and says outright that general programming vocabulary does not belong. So an absent term is a signal when you are working in those areas, and says nothing at all when you are in playback, SMB, GLW internals outside skins, or any other area the glossary never claimed. Do not read a gap there, and do not avoid an established term because this file does not list it.
 
 ## Flag ADR conflicts
 

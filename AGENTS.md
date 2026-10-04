@@ -287,5 +287,5 @@ axis from `wip:*` (work state) and `area:*` / `type:*` (subject). See
 `docs/agents/triage-labels.md`.
 
 **Domain docs** — single-context: `CONTEXT.md` and `docs/adr/` at the repo
-root. The glossary is scoped to the plugin API surface; see
+root. The glossary is scoped to the plugin API surface and to skins; see
 `docs/agents/domain.md`.
