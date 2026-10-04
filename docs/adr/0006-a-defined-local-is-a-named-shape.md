@@ -187,6 +187,81 @@ a division. That refuses a real regex too -- `if (x) {} /re/.test(y)` in a
 getter -- because telling it from a division is what the scanner cannot do.
 A member may still be lost there, but not silently.
 
+## The `new` path
+
+`_returned_shape` also answers a class: for `return new X(...)`, and for
+`var x = new X(...); ... return x;`, which `movian/page`'s `appendItem`,
+`appendAction` and `appendPassiveItem` use. Until #268 it found `return new
+X(` and `var x = new X(` anywhere in the method and skipped every other
+return, so `x = y`, `x.extra = 1`, `new X(...).page`, a line terminator
+after `return`, and an `if (t) return 5;` beside it all still answered `X`.
+The owner settled the rule on 2026-10-02. In the method:
+
+- the text passes the readable-body whitelist. The mask takes the quote in
+  `/'/` for a string's and blanks the rest of the line, a `return 5` on it
+  included;
+- every return the method itself makes is accounted for: `return x` for a
+  local that passes the rules below, `return new X(...)` with the
+  construction the whole value, or `return x` for a factory local (above),
+  all of one class -- or every one a mapped array of one element, which is
+  how `movian/html`'s selectors answer `Node[]`. A plain value, a bare
+  `return;`, or a line terminator right after `return` declines.
+  `_always_returns` still gates first;
+- the local is declared as `var x = new X(...)`, the construction the whole
+  initializer, as an unconditional statement of the method's own body, and
+  that is the first mention of the name: `var` is hoisted and its value is
+  not, so a `return x` above it returns `undefined`. `_whole_construction`
+  is the one reading of "a whole `new X(...)`" (#266);
+- x occurs otherwise only in an own `return x`, as a whole argument of a
+  call or a construction, and as `x.<m>`. Anything else declines, so every
+  write to the name does: an assignment, a compound assignment, `++` or
+  `--`, a second `var`, a parameter, a catch clause or a function of that
+  name, in a nested function as well. Matching is by name, not by scope,
+  so a binding that only shadows it declines too (#274);
+- `x.<m>` may be read or called, and written only when X declares `m` --
+  by `=`, a compound assignment, `++` or `--`, through a grouping, or as a
+  for-in target. `delete x.<m>` declines, and so does `x[k]`, a member the
+  scan cannot name, and any use of `x.__proto__`, the prototype every X
+  shares. X declares what its built shape holds, the members its
+  constructor and its prototype give it, so a method's return type is read
+  after the module's shapes are built;
+- X is the module's class. In the method it occurs only as `new X` and
+  `X.<m>`, so no parameter, `var`, function, catch clause or write binds
+  it there, and in the module it has one top-level declaration and no
+  write anywhere else: no `X = ...`, `(X) = ...` or second `var X`.
+
+`movian/page`'s three methods use `item` only in the declaration, in
+`this.items.push(item)` (two of them), as `item.root`, and in `return
+item`, and pass.
+
+### Why it differs from the caller rule
+
+The caller rule declines a call that receives its local, and a member
+call; this one keeps both. The difference is deliberate. Do not make one
+rule follow the other.
+
+The claims differ. A factory local's shape is derived from that very
+local: its member set is what the `Object.defineProperties` calls on it
+define, and nothing else states it. A function that receives the local
+may add to that set or take from it, and a value member, called, runs a
+function nothing has read with the object as `this`. Either way the
+declaration describes what the text no longer guarantees.
+
+A class's shape is not derived from the local. X's constructor and
+prototype claim their members for every instance, and the method claims
+only that what it returns is one. A call cannot rebind the caller's local,
+so after `push(item)` the local still holds the instance it was given. A
+callee may add a member the declaration does not offer, as it may to any
+X anywhere, and a plugin that reaches for it gets TS2339 as it would on
+any X. A member call is the same: `x.m()` runs what an X holds as `m`, and
+whatever that does to an instance belongs to X, not to what this method
+says about its result.
+
+What the method writes itself is different. `x.extra = 1` in its own text
+adds a member to what it hands back, and `delete x.m` takes one away, so
+both decline: the method is telling its callers about an object X does not
+describe.
+
 ## Considered
 
 - **Record only.** Read the descriptors into the artifact, silence the
@@ -207,10 +282,8 @@ A member may still be lost there, but not silently.
   either), and there is no type parameter.
 - `Object.defineProperty(V, 'x', ...)` alone is not read and keeps its
   warning. No core module does it.
-- The `new` path is unchanged. `var x = new C(); x = y; return x;` and
-  `var x = new C(); x.extra = 1; return x;` still return `C`, since
-  `_returned_shape` traces no caller of a constructor. Giving it the same
-  whitelist is outside this issue.
+- The `new` path has a whitelist of its own since #268, and it differs
+  from the caller rule on purpose (above).
 - The runtime oracle calls `globalSettings` and none of the four methods, so
   `item`'s three members are reviewed exclusions. Tier3 results are matched
   to shapes by lowercased name, and `item` made the `items` key ambiguous with
