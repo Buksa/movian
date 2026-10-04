@@ -3,7 +3,8 @@
 A media player and its plugin runtime. This glossary covers the vocabulary of
 the **plugin API surface and the tooling that describes it** — the area where
 the same word has repeatedly meant two different things and cost real
-debugging time.
+debugging time. It also covers the **skins** the user interface is built
+from, where "theme" and "view" are easily confused with them.
 
 Terms here are concepts specific to this project. General programming
 vocabulary does not belong, however much the project uses it.
@@ -149,3 +150,19 @@ one argument slot, whatever the callee already did before throwing. A failure
 that surfaces later -- in a subscription, or only in the log -- is not a
 rejection: the call accepted the value.
 _Avoid_: fails, errors, "throws" without saying where to
+
+## Skins
+
+**Skin**:
+A complete GLW user interface: a directory under `glwskins/` holding a
+`universe.view` and everything that file loads. A skin is chosen once per
+process. It is not a page view chosen per content type in Look and feel (the
+`selectedviews` setting). Nor is it `flat/theme.view`, which is a file of
+style macros inside one skin. See ADR-0007.
+_Avoid_: theme
+
+**Skin ID**:
+The name of a skin's directory under `glwskins/`, such as `flat` or `old`. It
+is the only thing the Skin setting stores. It is never a path: `--skin` takes a
+path, and that path is never stored.
+_Avoid_: skin path, skin name (for the stored value)
