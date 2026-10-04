@@ -101,7 +101,10 @@ widget(container_y, {
 	    
 
 	    widget(clip, {
-	      clipping: [0, 0, 1 - $args.metadata.rating / 100, 0];
+	      left: 0;
+	      top: 0;
+	      right: 1 - $args.metadata.rating / 100;
+	      bottom: 0;
 	      
 	      widget(container_x, {
 		STAR_FULL();
