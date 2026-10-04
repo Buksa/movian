@@ -1,12 +1,17 @@
 # A skin is chosen from a built-in list, at startup
 
+**Decided, not yet implemented.** The owner took this decision on
+2026-10-04. #283 implements it, and #283 waits on #256. Until #283 lands,
+`glw_init4()` reads only `--skin` and the compiled default. The selector, the
+saved ID and the startup check described below do not exist yet.
+
 Look and feel gets a **Skin** selector. What it saves is a **skin ID**, such as
 `flat` or `old`, and never a path. `app_dataroot()` differs between a source
 checkout, an installed package, and a ZIP or compiled-in bundle, so one saved
 value has to mean the same skin in all of them. The choice takes effect at the
 next start. `glw_init4()` already prefers `--skin` and otherwise falls back to
-`SHOWTIME_GLW_DEFAULT_SKIN` (`glw.c:214,234-238`). Between the two it now
-consults the saved ID, resolved under `<dataroot>/glwskins/`. The setting's
+`SHOWTIME_GLW_DEFAULT_SKIN` (`glw.c:214,234-238`). Between the two it is to
+consult the saved ID, resolved under `<dataroot>/glwskins/`. The setting's
 callback only records the ID, so a root that is already built does not change.
 `--skin` is never written to the setting and keeps taking any path.
 

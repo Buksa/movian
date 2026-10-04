@@ -154,9 +154,9 @@ _Avoid_: fails, errors, "throws" without saying where to
 ## Skins
 
 **Skin**:
-A complete GLW user interface: a directory under `glwskins/` holding a
-`universe.view` and everything that file loads. A skin is chosen once per
-process. It is not a page view chosen per content type in Look and feel (the
+A complete GLW user interface: a directory holding a `universe.view` and
+everything that file loads. The skins that ship are under `glwskins/`, and
+`--skin` can name one anywhere. A skin is chosen once per process. It is not a page view chosen per content type in Look and feel (the
 `selectedviews` setting). Nor is it `flat/theme.view`, which is a file of
 style macros inside one skin. See ADR-0007.
 _Avoid_: theme
