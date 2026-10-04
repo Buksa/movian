@@ -14,7 +14,7 @@ widget(container_z, {
       widget(image, {
 	align: bottom;
 	width: $ui.size * 8;
-	$clone.ready = isReady();
+	$clone.ready = isLoaded() || isError();
 	source: "thumb://" + $self.url;
 	color: isFocused() + 0.5;
       });

@@ -263,7 +263,7 @@ widget(deck, {
 	    widget(image, {
 	      align: bottom;
 	      
-	      $clone.ready = isReady();
+	      $clone.ready = isLoaded() || isError();
 	      source: $self.image;
 	      color: isFocused() + 0.6;
 	    });

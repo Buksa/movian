@@ -55,7 +55,7 @@ widget(container_y, {
 	      widget(image, {
 		align: bottom;
 		width: $ui.size * 8;
-		$clone.ready = isReady();
+		$clone.ready = isLoaded() || isError();
 		source: $self.metadata.icon;
 		color: isFocused() + 0.5;
 	      });

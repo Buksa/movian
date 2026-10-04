@@ -249,7 +249,7 @@ widget(list_y, {
 	  widget(image, {
 	    align: bottom;
 
-	    $clone.ready = isReady();
+	    $clone.ready = isLoaded() || isError();
 	    source: $self.image;
 	    stencil: "skin://graphics/stencil.png";
 	    stencilBorder: 16;

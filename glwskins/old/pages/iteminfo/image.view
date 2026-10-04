@@ -14,7 +14,7 @@ widget(container_y, {
     widget(image, {
       align: center;
       source: $args.url;
-      $view.ready = delay(isReady(), 0, 0.25);
+      $view.ready = delay(isLoaded() || isError(), 0, 0.25);
     });
 
     widget(backdrop, {
