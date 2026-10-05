@@ -59,7 +59,8 @@ widget(container_y, {
       widget(list_x, {
 	spacing: 5;
 
-	scrollThreshold: $ui.width / 10;
+	scrollThresholdTop: $ui.width / 10;
+	scrollThresholdBottom: $ui.width / 10;
 
 	$view.focused <- focusedChild();
 	
