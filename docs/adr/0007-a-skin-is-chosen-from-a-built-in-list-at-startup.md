@@ -1,9 +1,12 @@
 # A skin is chosen from a built-in list, at startup
 
-**Decided, not yet implemented.** The owner took this decision on
-2026-10-04. #283 implements it, and #283 waits on #256. Until #283 lands,
-`glw_init4()` reads only `--skin` and the compiled default. The selector, the
-saved ID and the startup check described below do not exist yet.
+**Decided and implemented.** The owner took this decision on 2026-10-04, and
+#283 implements it. The list, the resolver, the Skin row and the startup check
+are in `src/ui/glw/glw_settings.c`. The check runs once in
+`glw_settings_init()`, and `glw_init4()` now takes the skin it fixed
+(`glw_settings.gs_skin`) rather than reading `--skin` itself, so the `glw.c`
+line numbers below describe the code before #283. `old` is in `BUNDLES` next
+to the default skin.
 
 Look and feel gets a **Skin** selector. What it saves is a **skin ID**, such as
 `flat` or `old`, and never a path. `app_dataroot()` differs between a source
