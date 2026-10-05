@@ -1,0 +1,36 @@
+#import "skin://common.view"
+
+widget(container_y, {
+  alpha: 1 - iir(clamp(getLayer(), 0, 1), 7) * 0.5;
+  blur:  iir(clamp(getLayer(), 0, 1), 7);
+
+  PageTitle();
+  VerticalSeparator();
+
+  widget(container_y, {
+    spacing: 10;
+
+    space(1);
+
+    widget(label, {
+      align: center;
+      caption: $core.app.name;
+      TextStyleItem();
+      sizeScale: 2;
+    });
+
+    widget(label, {
+      align: center;
+      caption: $core.app.version;
+      TextStyleItem();
+    });
+
+    widget(label, {
+      align: center;
+      caption: $core.app.copyright;
+      TextStyleItem();
+    });
+
+    space(1);
+  });
+});
