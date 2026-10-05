@@ -17,6 +17,8 @@
  *  This program is also available under a commercial proprietary license.
  *  For more information, contact andreas@lonelycoder.com
  */
+#include <limits.h>
+
 #include "main.h"
 #include "prop/prop_concat.h"
 #include "settings.h"
@@ -321,6 +323,93 @@ set_custom_bg(void *opaque, const char *str)
 
 
 /**
+ * The skins the Skin setting offers, as { ID, title }. A list rather
+ * than a scan of glwskins/, see ADR-0007. Adding a skin also takes a
+ * line in BUNDLES (support/configure.inc) and an acceptance pass on a
+ * display.
+ */
+static const char *glw_skins[][2] = {
+  { "flat", "Flat" },
+  { "old",  "Old"  },
+};
+
+
+/**
+ * Write the path of skin 'id' under the data root to 'path'
+ */
+static void
+glw_skin_path(const char *id, char *path, size_t pathlen)
+{
+  snprintf(path, pathlen, "%s/glwskins/%s", app_dataroot(), id);
+}
+
+
+/**
+ * Write the path of skin 'id' to 'path'. Return 0 if 'id' is on the
+ * list and its universe.view can be opened.
+ */
+static int
+glw_skin_resolve(const char *id, char *path, size_t pathlen,
+                 char *errbuf, size_t errlen)
+{
+  char buf[PATH_MAX];
+
+  for(int i = 0; i < ARRAYSIZE(glw_skins); i++) {
+    if(strcmp(glw_skins[i][0], id))
+      continue;
+
+    glw_skin_path(id, path, pathlen);
+    fa_pathjoin(buf, sizeof(buf), path, "universe.view");
+
+    fa_handle_t *fh = fa_open(buf, errbuf, errlen);
+    if(fh == NULL)
+      return -1;
+    fa_close(fh);
+    return 0;
+  }
+  snprintf(errbuf, errlen, "Not on the list of skins");
+  return -1;
+}
+
+
+/**
+ * The Skin setting stores an ID and nothing else; the skin in use
+ * only changes at the next start. The row is hidden unless at least
+ * two skins can be offered.
+ */
+static void
+glw_settings_init_skin_selector(prop_t *s)
+{
+  const char *opts[ARRAYSIZE(glw_skins) * 2 + 1];
+  char path[PATH_MAX];
+  int n = 0;
+
+  for(int i = 0; i < ARRAYSIZE(glw_skins); i++) {
+    if(glw_skin_resolve(glw_skins[i][0], path, sizeof(path), NULL, 0))
+      continue;
+    opts[n * 2]     = glw_skins[i][0];
+    opts[n * 2 + 1] = glw_skins[i][1];
+    n++;
+  }
+  opts[n * 2] = NULL;
+
+  if(n < 2)
+    return;
+
+  glw_settings.gs_setting_skin =
+    setting_create(SETTING_MULTIOPT, s, 0,
+                   SETTING_TITLE(_p("Skin")),
+                   SETTING_OPTION_LIST(opts),
+                   SETTING_VALUE(SHOWTIME_GLW_DEFAULT_SKIN),
+                   SETTING_STORE("glw", "skin"),
+                   NULL);
+
+  settings_create_info(s, NULL,
+                       _p("A new skin is used after Movian is restarted"));
+}
+
+
+/**
  *
  */
 void
@@ -345,6 +434,8 @@ glw_settings_init(void)
 			 NULL);
 
   prop_t *s = glw_settings.gs_settings;
+
+  glw_settings_init_skin_selector(s);
 
   glw_settings.gs_setting_size =
     setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
@@ -467,5 +558,6 @@ glw_settings_fini(void)
   setting_destroy(glw_settings.gs_setting_wheel_mapping);
 #endif
   setting_destroy(glw_settings.gs_setting_custom_bg);
+  setting_destroy(glw_settings.gs_setting_skin);
   prop_destroy(glw_settings.gs_settings);
 }
