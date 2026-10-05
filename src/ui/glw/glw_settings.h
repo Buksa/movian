@@ -30,6 +30,7 @@ typedef struct glw_settings {
   int gs_screensaver_delay;
   int gs_bing_image;
 
+  struct setting *gs_setting_skin;
   struct setting *gs_setting_size;
   struct setting *gs_setting_underscan_v;
   struct setting *gs_setting_underscan_h;
