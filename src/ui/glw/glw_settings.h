@@ -46,6 +46,8 @@ typedef struct glw_settings {
 
   struct prop *gs_settings;
 
+  char *gs_skin; // The skin of every root in this process, fixed at startup
+
 } glw_settings_t;
 
 extern glw_settings_t glw_settings;

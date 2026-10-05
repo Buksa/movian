@@ -373,6 +373,43 @@ glw_skin_resolve(const char *id, char *path, size_t pathlen,
 
 
 /**
+ * Fix the skin this process runs, before any root exists: --skin if
+ * given, else the saved ID if it resolves, else the compiled default.
+ * A saved ID that does not resolve is logged and forgotten.
+ */
+static void
+glw_settings_init_skin(void)
+{
+  char path[PATH_MAX];
+  char errbuf[256];
+
+  if(gconf.skin != NULL) {
+    glw_settings.gs_skin = strdup(gconf.skin);
+    return;
+  }
+
+  rstr_t *id = htsmsg_store_get_str("glw", "skin");
+  if(id != NULL) {
+    if(!glw_skin_resolve(rstr_get(id), path, sizeof(path),
+                         errbuf, sizeof(errbuf))) {
+      glw_settings.gs_skin = strdup(path);
+    } else {
+      TRACE(TRACE_ERROR, "GLW",
+            "Saved skin '%s' rejected, using the default -- %s",
+            rstr_get(id), errbuf);
+      htsmsg_store_set("glw", "skin", -1);
+    }
+    rstr_release(id);
+  }
+
+  if(glw_settings.gs_skin == NULL) {
+    glw_skin_path(SHOWTIME_GLW_DEFAULT_SKIN, path, sizeof(path));
+    glw_settings.gs_skin = strdup(path);
+  }
+}
+
+
+/**
  * The Skin setting stores an ID and nothing else; the skin in use
  * only changes at the next start. The row is hidden unless at least
  * two skins can be offered.
@@ -435,6 +472,7 @@ glw_settings_init(void)
 
   prop_t *s = glw_settings.gs_settings;
 
+  glw_settings_init_skin();
   glw_settings_init_skin_selector(s);
 
   glw_settings.gs_setting_size =

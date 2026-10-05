@@ -210,8 +210,7 @@ glw_init4(glw_root_t *gr,
           prop_courier_t *courier,
           int flags)
 {
-  char skinbuf[PATH_MAX];
-  const char *skin = gconf.skin;
+  const char *skin = glw_settings.gs_skin;
   prop_t *p;
 
   atomic_set(&gr->gr_refcount, 1);
@@ -231,11 +230,6 @@ glw_init4(glw_root_t *gr,
   if(prop_set_parent(gr->gr_prop_ui, p))
     abort();
 
-  if(skin == NULL) {
-    snprintf(skinbuf, sizeof(skinbuf),
-             "%s/glwskins/"SHOWTIME_GLW_DEFAULT_SKIN, app_dataroot());
-    skin = skinbuf;
-  }
   hts_mutex_init(&gr->gr_mutex);
   gr->gr_token_pool = pool_create("glwtokens", sizeof(token_t), POOL_ZERO_MEM);
   gr->gr_clone_pool = pool_create("glwclone", sizeof(glw_clone_t),
