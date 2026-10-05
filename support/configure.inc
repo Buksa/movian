@@ -691,6 +691,8 @@ EOF
     # Generate default skin path for GLW
     if enabled glw; then
 	echo >>${CONFIG_MAK} "BUNDLES+=glwskins/${GLW_DEFAULT_SKIN}"
+	# Offered by the Skin setting (src/ui/glw/glw_settings.c)
+	echo >>${CONFIG_MAK} "BUNDLES+=glwskins/old"
 	echo >>${CONFIG_H} "#define SHOWTIME_GLW_DEFAULT_SKIN \""${GLW_DEFAULT_SKIN}"\""
     fi
 
