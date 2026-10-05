@@ -13,9 +13,10 @@ Look and feel gets a **Skin** selector. What it saves is a **skin ID**, such as
 checkout, an installed package, and a ZIP or compiled-in bundle, so one saved
 value has to mean the same skin in all of them. The choice takes effect at the
 next start. `glw_init4()` already prefers `--skin` and otherwise falls back to
-`SHOWTIME_GLW_DEFAULT_SKIN` (`glw.c:214,234-238`). Between the two it is to
-consult the saved ID, resolved under `<dataroot>/glwskins/`. The setting's
-callback only records the ID, so a root that is already built does not change.
+`SHOWTIME_GLW_DEFAULT_SKIN` (`glw.c:214,234-238`). Between the two it
+consults the saved ID, resolved under `<dataroot>/glwskins/`. The setting only
+stores the ID, with no callback, so a root that is already built does not
+change.
 `--skin` is never written to the setting and keeps taking any path.
 
 The selectable skins are a list in the code, `flat` and `old`, not a scan of
