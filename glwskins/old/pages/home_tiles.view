@@ -187,17 +187,20 @@ widget(container_y, {
     height: $ui.size / 2;
   });
   VerticalSeparator();
-  widget(dummy, {
-    height: $ui.size;
-  });
 
+
+widget(clip, {
+  topPx: 1;
+  bottomPx: 1;
 
 widget(array, {
   navWrap: true;
   scrollThresholdTop: $ui.size;
   scrollThresholdBottom: $ui.size;
-  alphaFallOff: 0.1;
-  blurFallOff: 0.1;
+  clipOffsetTop: $ui.size;
+  clipOffsetBottom: $ui.size;
+  clipAlpha: 0.2;
+  clipBlur: 1;
 
   Yspacing: $ui.size / 2;
   Xspacing: $ui.size / 2;
@@ -223,5 +226,6 @@ widget(array, {
 		       "photos",   "Pictures") + ".svg",
 	     navOpen($self.url, void, $self), $self.badge);
   });
+});
 });
 });
