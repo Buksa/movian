@@ -3,9 +3,8 @@
 widget(container_y, {
   spacing: $ui.size;
   padding: $ui.size;
-  widget(stencil, {
+  widget(container_z, {
     filterConstraintY: true;
-    source: "skin://graphics/stencil2.png";
 
     widget(quad, {
       color: 0;

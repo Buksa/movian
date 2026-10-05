@@ -226,12 +226,9 @@ widget(deck, {
   commandMenuChromeUltraWide(
     widget(container_y, {
       space(1);
-    widget(fader, {
+    widget(container_z, {
       height: $ui.size * 8;
       weight: 1;
-      plane: [0,1,0,1];
-      alphaFallOff: 1;
-      blurFallOff: 0.2;
       widget(mirror, {
 	alpha: 0.4;
 	widget(list_x, {
