@@ -72,30 +72,37 @@ widget(keyintercept, {
     
     widget(container_x, {
 
-      widget(array, {
-	id: "array";
-	$clone.focused <- focusedChild();
+      widget(clip, {
+	topPx: 1;
+	bottomPx: 1;
 
-	scrollThresholdTop: 100;
-	scrollThresholdBottom: 100;
+	widget(array, {
+	  id: "array";
+	  $clone.focused <- focusedChild();
 
-	alphaFallOff: 0.3;
-	blurFallOff: 0.1;
-	
-	Yspacing: $ui.size / 2;
-	Xspacing: $ui.size / 2;
+	  scrollThresholdTop: 100;
+	  scrollThresholdBottom: 100;
 
-	childTilesX: 6;
-	
-	cloner($self.model.nodes, loader, {
-	  time: 0.1;
-	  effect: blend;
-	  source: "squareitems/" + 
-	    translate($self.type, "default",
-		      "separator", "separator",
-		      "artistalbum", "artistalbum",
-		      "album", "album")
-	    + ".view";
+	  clipOffsetTop: $ui.size;
+	  clipOffsetBottom: $ui.size;
+	  clipAlpha: 0.2;
+	  clipBlur: 1;
+
+	  Yspacing: $ui.size / 2;
+	  Xspacing: $ui.size / 2;
+
+	  childTilesX: 6;
+
+	  cloner($self.model.nodes, loader, {
+	    time: 0.1;
+	    effect: blend;
+	    source: "squareitems/" +
+	      translate($self.type, "default",
+			"separator", "separator",
+			"artistalbum", "artistalbum",
+			"album", "album")
+	      + ".view";
+	  });
 	});
       });
 
