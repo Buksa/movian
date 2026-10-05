@@ -4,8 +4,7 @@ widget(container_z, {
   width: $ui.size * 8;
 
 
-  widget(stencil, {
-    source: "skin://graphics/stencil.png";
+  widget(container_z, {
     widget(container_z, {
       widget(quad, {
 	color: 0;

@@ -20,12 +20,9 @@ widget(container_y, {
     height: $ui.size * 2;
   });
 
-  widget(fader, {
+  widget(container_z, {
     filterConstraintY: true;
     weight: 1;
-    plane: [0,1,0,1];
-    alphaFallOff: 1;
-    blurFallOff: 0.2;
     widget(mirror, {
       alpha: 0.4;
 
@@ -44,8 +41,7 @@ widget(container_y, {
 
 	  onEvent(activate, navOpen($self.url, void, void, $parent.model, void, $parent.url));
 
-	  widget(stencil, {
-	    source: "skin://graphics/stencil.png";
+	  widget(container_z, {
 	    widget(container_z, {
 	      widget(quad, {
 		color: 0;
