@@ -3,11 +3,11 @@
 #import "skin://include/separators.view"
 #import "skin://include/slider.view"
 
-$view.showFilter = $page.model.filter && 1;
+$view.showFilter = $self.model.filter && 1;
 
 widget(keyintercept, {
-  bind($page.model.filter);
-  .enabled = $page.model.canFilter;
+  bind($self.model.filter);
+  .enabled = $self.model.canFilter;
   
   widget(container_y, {
     .filterConstraintX = true;
@@ -29,7 +29,7 @@ widget(keyintercept, {
 	    });
 	    
 	    widget(label, {
-	      .caption = $page.model.filter;
+	      .caption = $self.model.filter;
 	    });
 	    
 	  });
@@ -37,7 +37,7 @@ widget(keyintercept, {
 	ICON2("skin://svg/Delete.svg",
 	      "Clear",
 	      {
-		$page.model.filter = void;
+		$self.model.filter = void;
 	      },
 	      PLATE_COLOR_DELETE(),
 	      1, 0.1);
@@ -48,7 +48,7 @@ widget(keyintercept, {
     widget(list_y, {
       .spacing = 3;
       .padding = [20,0];
-      cloner($page.model.nodes, container_x, {
+      cloner($self.model.nodes, container_x, {
 
 	$clone.active = isFocused();
 
