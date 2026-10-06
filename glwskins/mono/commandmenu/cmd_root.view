@@ -52,7 +52,7 @@
     .spacing = 10;
     widget(label, {
       .align = right;
-      .caption = value2duration(preferTentative(CURRENTTIME));
+      .caption = value2duration(CURRENTTIME);
       .width = 100;
     });
     widget(container_z, {
