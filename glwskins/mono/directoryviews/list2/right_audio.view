@@ -1,7 +1,7 @@
 .weight = 0.7;
 widget(backdrop, {
   .focusable = true;
-  
+
   .focusable = isLink($self.metadata.artist);
   onEvent(activate, navOpen($self.metadata.artist));
   .source = "skin://graphics/8x8round.png";
@@ -11,7 +11,7 @@ widget(backdrop, {
 				  isHovered() || isFocused(),
 				  0);
   .color = 0;
-  
+
   widget(backdrop, {
     .source = "skin://graphics/8x8round-open.png";
     .borderOnly = true;
@@ -19,7 +19,7 @@ widget(backdrop, {
     .color = [0.9, 0.9, 1.0];
     .padding = [6,3];
     .alphaSelf = iir(isFocused() * 0.5, 5);
-    
+
     widget(label, {
       .align = topLeft;
       .caption = $self.metadata.artist;

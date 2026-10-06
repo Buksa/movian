@@ -7,8 +7,8 @@ widget(backdrop, {
   .color = 0;
 
   widget(icon, {
-    .source = $self.metadata.icon ?? 
-      "skin://svg/" + 
+    .source = $self.metadata.icon ??
+      "skin://svg/" +
       translate($self.type, "File",
 		"video", "Movie",
 		"dvd", "Disc",

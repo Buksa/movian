@@ -33,7 +33,7 @@ widget(container_y, {
     });
   });
 
-  HORIZONTAL_SEPARATOR();	
+  HORIZONTAL_SEPARATOR();
 
   widget(label, {
     .sizeScale = 0.8;
@@ -43,4 +43,3 @@ widget(container_y, {
     .ellipsize = true;
   });
 });
-

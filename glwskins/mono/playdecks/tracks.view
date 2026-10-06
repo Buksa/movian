@@ -4,7 +4,7 @@ $ui.showplaydeck = true;
 
 widget(container_x, {
   .padding = [5, 0, 5, 5];
-  
+
   .align = center;
   widget(backdrop, {
     .source = "skin://graphics/blackdrop.png";
@@ -46,7 +46,7 @@ widget(container_x, {
 
 	widget(label, {
 	  .align = right;
-	  .caption = value2duration($global.media.current.currenttime) + 
+	  .caption = value2duration($global.media.current.currenttime) +
 	    select($global.media.current.metadata.duration,
 		   " / " + value2duration($global.media.current.metadata.duration), "");
 	});

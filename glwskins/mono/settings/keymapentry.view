@@ -52,7 +52,7 @@ widget(container_x, {
 	  PLATE_COLOR_DELETE(),
 	  1, 0.1);
   });
-  
+
 
 
 
@@ -98,7 +98,7 @@ widget(container_x, {
 	  PLATE_COLOR_DELETE(),
 	  1, 0.1);
   });
-  
+
 
 
 });

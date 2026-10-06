@@ -20,7 +20,7 @@ widget(backdrop, {
       .source =  ICON;
       .shadow = true;
     });
-  
+
     HORIZONTAL_SEPARATOR();
 
     widget(label, {

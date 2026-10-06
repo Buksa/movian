@@ -9,7 +9,7 @@ widget(container_x, {
 
   widget(icon, {
     .color = select(isFocused() || isHovered(), 1, 0.3);
-    .source = $self.metadata.icon ?? 
+    .source = $self.metadata.icon ??
       translate($self.subtype,
 		"skin://svg/Settings.svg",
 		"sound", "skin://svg/Sound.svg",
@@ -43,4 +43,3 @@ widget(container_x, {
     });
   });
 });
-

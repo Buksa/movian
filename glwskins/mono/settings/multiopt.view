@@ -5,7 +5,7 @@ widget(container_x, {
   .spacing = $ui.size / 2;
 
   widget(dummy, { .width = $ui.size * 2; });
-  
+
   widget(container_y, {
     .filterConstraintX = true;
 
@@ -15,7 +15,7 @@ widget(container_x, {
       .color = select($view.highlight, 1, 0.4);
       .shadow = true;
     });
-  
+
     widget(label, {
       .caption = $self.metadata.shortdesc;
       .sizeScale = 0.8;
@@ -24,7 +24,7 @@ widget(container_x, {
       .shadow = true;
     });
   });
-    
+
   widget(container_y, {
     $view.highlight = isFocused() || isHovered();
     .filterConstraintX = true;

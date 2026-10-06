@@ -1,12 +1,12 @@
 widget(detachable, {
   widget(backdrop, {
     .width = $ui.size * 8;
-    
+
     .focusable = isLink($self.metadata.album) * 0.1;
     onEvent(activate, select($ui.fancyAnimations,
 			     navOpen($self.metadata.album, void, $self),
 			     navOpen($self.metadata.album)));
-    
+
     .source = "skin://graphics/8x8round.png";
     .border = 3;
     .padding = -3;
@@ -14,7 +14,7 @@ widget(detachable, {
 				    isHovered() || isFocused(),
 				    0);
     .color = 0;
-    
+
     widget(backdrop, {
       .source = "skin://graphics/8x8round-open.png";
       .borderOnly = true;

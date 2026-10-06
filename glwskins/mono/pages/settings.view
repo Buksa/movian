@@ -6,18 +6,18 @@ widget(container_y, {
   .padding = $ui.size / 2;
   .alpha = 1 - iir(clamp(getLayer(), 0, 1), 7) * 0.5;
   .blur  = iir(clamp(getLayer(), 0, 1), 7);
-  
+
   widget(container_x, {
 
     widget(dummy, { .width = 2; });
-    
+
     widget(list_y, {
       .id = "list";
       .spacing = 5;
-      LIST_ITEM_SIMPLE("Add new entry", 
+      LIST_ITEM_SIMPLE("Add new entry",
 		       "skin://svg/Add.svg",
 		       {
-			 createChild($self.model.nodes); 
+			 createChild($self.model.nodes);
 		       },
 		       [0.3, 0.5, 0.3],
 		       0.8,
@@ -31,7 +31,7 @@ widget(container_y, {
       });
 
     });
-    
+
     widget(dummy, { .width = 2; });
     LIST_Y_SLIDER("list");
     widget(dummy, { .width = 2; });

@@ -6,7 +6,7 @@ widget(container_x, {
   .spacing = $ui.size / 2;
 
   widget(dummy, { .width = $ui.size * 2; });
-  
+
   widget(container_y, {
     .filterConstraintX = true;
 
@@ -16,7 +16,7 @@ widget(container_x, {
       .color = select($view.highlight, 1, 0.4);
       .shadow = true;
     });
-  
+
     widget(label, {
       .caption = $self.metadata.shortdesc;
       .sizeScale = 0.8;
@@ -25,7 +25,7 @@ widget(container_x, {
       .shadow = true;
     });
   });
-    
+
   widget(container_y, {
     $view.highlight = isFocused() || isHovered();
     .filterConstraintX = true;
@@ -41,12 +41,12 @@ widget(container_x, {
 	.max = $self.max;
 	.step = $self.step;
 	bind($self.value);
-	
+
 	widget(backdrop, {
 	  .alphaSelf = 0.2 + iir(isFocused() * 1, 8) + isHovered() * 0.1;
 	  .color = PLATE_COLOR_OTHER();
 	  PLATE_GFX();
-	  
+
 	  widget(label, {
 	    .align = center;
 	    .caption = fmt("%d %s", $self.value, $self.unit);

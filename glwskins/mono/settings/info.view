@@ -12,11 +12,11 @@ widget(container_y, {
       .source = $self.image;
       .align = top;
     });
-    
+
     widget(dummy, {
       .width = 4;
     });
-    
+
     widget(label, {
       .caption = $self.description;
       .maxlines = 10;

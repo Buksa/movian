@@ -14,13 +14,13 @@ widget(backdrop, {
 
   .color = PLATE_COLOR_VIDEO();
   PLATE_GFX();
-  
+
 
   widget(container_y, {
 
     widget(container_x, {
 
-	
+
       widget(label, {
 	.weight = 1.0;
 	.filterConstraintX = true;
@@ -35,17 +35,17 @@ widget(backdrop, {
 	.filterConstraintX = true;
 
 	cloner($self.metadata.events, container_x, {
-	  
+
 	  widget(label, {
 	    .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_VIDEO());
-	    .align = left; 
+	    .align = left;
 	    .caption = $self.title;
 	    .ellipsize = true;
 	  });
-	  
+
 	  widget(label, {
 	    .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_VIDEO());
-	    .caption = strftime($self.start, "%H:%M") + " - " + 
+	    .caption = strftime($self.start, "%H:%M") + " - " +
 	      strftime($self.stop, "%H:%M");
 	  });
 	}, 0, 1);
@@ -66,19 +66,19 @@ widget(backdrop, {
 	widget(container_y, {
 	  .weight = 2.0;
 	  .filterConstraintX = true;
-	  
+
 	  cloner($self.metadata.events, container_x, {
-	    
+
 	    widget(label, {
 	      .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_VIDEO());
-	      .align = left; 
+	      .align = left;
 	      .caption = $self.title;
 	      .ellipsize = true;
 	    });
-	    
+
 	    widget(label, {
 	      .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_VIDEO());
-	      .caption = strftime($self.start, "%H:%M") + " - " + 
+	      .caption = strftime($self.start, "%H:%M") + " - " +
 		strftime($self.stop, "%H:%M");
 	    });
 	  }, 1, 2);

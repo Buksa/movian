@@ -53,7 +53,7 @@ widget(container_z, {
     .zoffset = -1500;
     .alpha = iir(1 - ($ui.fullwindow || $ui.screensaverActive), 16);
   });
-  
+
   widget(container_y, {
     space(1);
     widget(throbber3d, {
@@ -94,7 +94,7 @@ widget(container_z, {
 	  PLATE_GFX();
 	  .color = [0.1, 0.1, 0.1];
 	  .alphaSelf = 0.8;
-	  
+
 	  widget(container_y, {
 
 	    widget(label, {
@@ -116,7 +116,7 @@ widget(container_z, {
 				     "INFO",  [1, 1, 0.5],
 				     "ERROR", [1, 0.5, 0.5]);
 
-		  
+
 		});
 	      });
 	      LIST_Y_SLIDER("list", true);
@@ -189,18 +189,18 @@ widget(container_z, {
 	PLATE_GFX();
 	.alpha = iir(changed($global.audio.mastervolume, 2, true), 7);
 	.color = PLATE_COLOR_AUDIO();
-	
+
 	widget(label, {
 	  .caption = fmt(_("Master volume: %d dB"), $global.audio.mastervolume);
 	  .align = center;
 	});
       });
-      
+
       widget(backdrop, {
 	PLATE_GFX();
 	.alpha = iir($global.audio.mastermute, 7);
 	.color = PLATE_COLOR_OFF();
-	
+
         widget(label, {
 	  .caption = _("Audio muted");
 	  .align = center;
@@ -210,4 +210,3 @@ widget(container_z, {
     space(1);
   });
 });
-

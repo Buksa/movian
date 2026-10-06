@@ -11,7 +11,7 @@ $ui.showplaydeck =  $ui.menu ||
 
 widget(container_x, {
   .padding = [5, 0, 5, 5];
-  
+
   .align = center;
 
   widget(backdrop, {
@@ -59,7 +59,7 @@ widget(container_x, {
 			       "warning",  [1, 1, 0.5],
 			       "error", [1, 0.5, 0.5]);
 	  });
-	  
+
 	  widget(label, {
 	    .caption = $self.text;
 	    .color = translate($self.type, [1,1,1],
@@ -105,7 +105,7 @@ widget(container_x, {
 
 	widget(label, {
 	  .align = right;
-	  .caption = value2duration($global.media.current.currenttime) + 
+	  .caption = value2duration($global.media.current.currenttime) +
 	    select($global.media.current.metadata.duration,
 		   " / " + value2duration($global.media.current.metadata.duration), "");
 	});

@@ -20,20 +20,20 @@ widget(backdrop, {
   .focusable = 1.0;
   .focusOnClick = true;
   .filterConstraintX = true;
-  
+
   onEvent(activate,
 	  translate($self.type, navOpen($self.url),
 		    "audio", playTrackFromSource($self, $parent.model)
 		   ));
-  
+
   .alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
-  
+
   .color = PLATE_COLOR_AUDIO();
   PLATE_GFX();
-  
+
   widget(label, {
     .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_AUDIO());
-    .align = left; 
+    .align = left;
     .caption = $self.metadata.title;
     .ellipsize = true;
   });
@@ -42,15 +42,15 @@ widget(backdrop, {
 widget(backdrop, {
   delta($view.showArtists, $self.metadata.artist);
   .hidden = !$view.showArtists;
-  
+
   .focusable = isLink($self.metadata.artist);
   onEvent(activate, navOpen($self.metadata.artist));
-    
+
   .alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
-    
+
   .color = PLATE_COLOR_AUDIO();
   PLATE_GFX();
-  
+
   widget(label, {
     .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_AUDIO());
     .align = left;
@@ -65,15 +65,15 @@ widget(backdrop, {
 
   .focusable = isLink($self.metadata.album);
   onEvent(activate, navOpen($self.metadata.album));
-  
+
   .alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
-  
+
   .color = PLATE_COLOR_AUDIO();
   PLATE_GFX();
-  
+
   widget(label, {
     .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_AUDIO());
-    .align = left; 
+    .align = left;
     .caption = $self.metadata.album;
     .ellipsize = true;
   });
@@ -85,15 +85,15 @@ widget(backdrop, {
 
   .focusable = isLink($self.metadata.user.name);
   onEvent(activate, navOpen($self.metadata.user.name));
-  
+
   .alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
-  
+
   .color = PLATE_COLOR_AUDIO();
   PLATE_GFX();
-  
+
   widget(label, {
     .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_AUDIO());
-    .align = left; 
+    .align = left;
     .caption = $self.metadata.user.name;
     .ellipsize = true;
   });

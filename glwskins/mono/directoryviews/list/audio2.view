@@ -2,28 +2,28 @@
 #import "skin://include/defs.view"
 
 widget(container_x, {
-  
+
   // Title
   widget(container_y, {
     .weight = 1.5;
     .filterConstraintX = true;
 
     widget(container_x, {
-      
+
       widget(container_x, {
 	.filterConstraintX = true;
-	
+
 	widget(deck, {
 	  .effect = flipVertical;
 	  .noInitialTransform = true;
 	  .time = 0.2;
-	  
+
 	  ICON2("skin://svg/Pause.svg",
 		"Pause",
 		event(Pause),
 		PLATE_COLOR_AUDIO(),
 		1);
-	  
+
 	  ICON2("skin://svg/Play.svg",
 		"Play",
 		event(Play),
@@ -35,13 +35,13 @@ widget(container_x, {
 		playTrackFromSource($self, $parent.source),
 		PLATE_COLOR_AUDIO(),
 		1);
-	  
-	  .page = translate($self.media.playstatus, 
+
+	  .page = translate($self.media.playstatus,
 			    2,
 			    "play",  0,
 			    "pause", 1);
 	});
-	
+
 
 	ICON2("skin://svg/Enqueue.svg",
 	      "Enqueue",
@@ -65,7 +65,7 @@ widget(container_x, {
 	  .color = PLATE_COLOR_AUDIO();
 	  .filterConstraintX = true;
 	  .align = right;
-	  .caption = 
+	  .caption =
 	    select($self.playing,
 		   value2duration($self.media.currenttime) + " / ",
 		   "") + value2duration($self.metadata.duration);
@@ -86,12 +86,12 @@ widget(container_x, {
       .focusOnClick = true;
       .filterConstraintX = true;
       onEvent(activate, navOpen($self.artist));
-	
+
       .alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
-	
+
       .color = PLATE_COLOR_AUDIO();
       PLATE_GFX();
-	
+
       widget(label, {
 	.caption = $self.artist;
 	.color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_AUDIO());
@@ -102,7 +102,7 @@ widget(container_x, {
   widget(dummy, {
     .width = $ui.fontsize / 2;
   });
-  
+
   // Album
   widget(container_x, {
     .hidden = $args.hide_album;
@@ -119,7 +119,7 @@ widget(container_x, {
 	.source = $self.metadata.album_art;
 	.sizeScale = select($self.metadata.album_art, 4, 0);
       });
-      
+
       widget(label, {
 	.color = PLATE_COLOR_AUDIO();
 	.sizeScale = select($self.metadata.album_year, 0.6, 0);

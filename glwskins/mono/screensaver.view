@@ -15,7 +15,7 @@ widget(container_z, {
         .sizeScale = 5;
       });
   });
-  }    
+  }
 
 
   widget(deck, {

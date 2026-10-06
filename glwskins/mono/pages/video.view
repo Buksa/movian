@@ -28,7 +28,7 @@ widget(container_z, {
     .hidden = select($self.media.error && !$self.media.primary, false, true);
 
     space(1);
-    
+
     widget(label, {
       .align = center;
       .sizeScale = 1.5;
@@ -42,18 +42,18 @@ widget(container_z, {
       .align = center;
       .caption = _("Unable to start video playback");
     });
-    
-    
+
+
     space(0.1);
-    
+
     widget(label, {
       .align = center;
       .caption = $self.media.error;
     });
-    
+
     space(1);
   });
-  
+
   widget(container_y, {
     .padding = 5;
     widget(container_x, {
@@ -61,17 +61,17 @@ widget(container_z, {
         .source = "skin://graphics/blackdrop.png";
         .border = [12,12,12,12];
 	.alphaSelf = $view.statsAlpha * 0.66;
-	
+
 	widget(container_y, {
 	  .alpha = $view.statsAlpha;
-	  
+
 	  widget(label, {
 	    .caption = _("Playback status");
 	    .align = center;
 	  });
 
 	  HORIZONTAL_SEPARATOR();
-	  
+
 	  widget(container_x, {
 
 	    widget(container_y, {
@@ -79,12 +79,12 @@ widget(container_z, {
 		.align = right;
 		.caption = "Source:";
 	      });
-	      
+
 	      widget(label, {
 		.align = right;
 		.caption = "Video codec:";
 	      });
-	      
+
 	      widget(label, {
 		.align = right;
 		.caption = "Video bitrate:";
@@ -94,12 +94,12 @@ widget(container_z, {
 		.align = right;
 		.caption = "Audio codec:";
 	      });
-	      
+
 	      widget(label, {
 		.align = right;
 		.caption = "Video decode time:";
 	      });
-	      
+
 	      widget(label, {
 		.align = right;
 		.caption = "A/V diff:";
@@ -147,11 +147,11 @@ widget(container_z, {
 	      widget(label, {
 		.caption = $self.media.metadata.format;
 	      });
-	      
+
 	      widget(label, {
 		.caption = $self.media.video.codec;
 	      });
-	      
+
 	      widget(label, {
 		.caption = fmt("%d kb/s", $self.media.video.bitrate);
 	      });
@@ -159,11 +159,11 @@ widget(container_z, {
 	      widget(label, {
 		.caption = $self.media.audio.codec;
 	      });
-	      
+
 	      widget(label, {
 		.caption = fmt("%d ms", $self.media.video.decodetime_avg);
 	      });
-	      
+
 	      widget(label, {
 		.caption = translate($self.media.avdiffError,
 				     fmt("%d ms %s", $self.media.avdiff * 1000),
@@ -196,7 +196,7 @@ widget(container_z, {
 	      widget(label, {
 		.caption = $self.media.audio.dqlen;
 	      });
-	      
+
 
 	      widget(bar, {
 		.hidden = !$self.media.io.cacheSizeValid;

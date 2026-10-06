@@ -18,18 +18,18 @@ widget(backdrop, {
       .source = $self.metadata.icon ?? "skin://svg/Folder.svg";
       .shadow = true;
     });
-  
+
     widget(dummy, { .width = 4; });
-    
+
     widget(label, {
       .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_DIR());
-      .align = left; 
+      .align = left;
       .caption = $self.metadata.title;
       .ellipsize = true;
     });
 
     widget(dummy, { .width = 4; });
-    
+
     widget(label, {
       .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_DIR());
       .caption = $self.entries;

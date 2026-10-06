@@ -31,28 +31,28 @@ widget(container_x, {
       });
 
     widget(container_x, {
-      
+
       widget(list_y, {
 	.id = "list";
-	
+
 	cloner($self.focused.metadata.events, container_x, {
-	  
+
 	  widget(label, {
 	    .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_VIDEO());
-	    .align = left; 
+	    .align = left;
 	    .caption = $self.title;
 	    .ellipsize = true;
 	  });
-	  
+
 	  widget(label, {
 	    .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_VIDEO());
-	    .caption = strftime($self.start, "%H:%M") + " - " + 
+	    .caption = strftime($self.start, "%H:%M") + " - " +
 	      strftime($self.stop, "%H:%M");
 	  });
 	});
-	
+
       });
-      
+
       widget(dummy, { .width = 2; });
       LIST_Y_SLIDER("list");
       widget(dummy, { .width = 2; });

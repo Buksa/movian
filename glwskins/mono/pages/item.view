@@ -44,21 +44,21 @@ widget(container_y, {
       .aspectConstraint = true;
     });
 
-    
+
     widget(container_y, {
       .filterConstraintY = true;
       .filterConstraintX = true;
       .spacing = 2;
       cloner($self.model.nodes, loader, {
 	.source = "skin://itemviews/" + $self.type + ".view";
-      });	  
-      
+      });
+
       widget(dummy, { .height = 20; });
 
       actionGroup(widget(container_x, {
 	.spacing = 10;
 	.homogenous = true;
-	
+
 	cloner($self.model.actions, container_z, {
 	  .hidden = !$self.enabled;
 	  itemActionButton(true,
@@ -66,7 +66,7 @@ widget(container_y, {
 				     "pageevent", deliverEvent($parent.eventSink, $self.data),
 				     "navopen", navOpen($self.data)
 				    ),
-			   
+
 			   $self.metadata.class, $self.metadata.title);
 	});
       }));
@@ -74,4 +74,3 @@ widget(container_y, {
   });
 });
 });
-

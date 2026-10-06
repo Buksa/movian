@@ -4,7 +4,7 @@
 widget(container_x, {
 
   widget(dummy, { .width = 2; });
-  
+
   widget(list_y, {
     .id = "list";
     cloner($self.model.nodes, loader, {
@@ -13,7 +13,7 @@ widget(container_x, {
       .source = "skin://directoryviews/list/" + $self.type + ".view";
     });
   });
-  
+
   widget(dummy, { .width = 2; });
   LIST_Y_SLIDER("list");
   widget(dummy, { .width = 2; });

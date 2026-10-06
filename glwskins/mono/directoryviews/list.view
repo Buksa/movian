@@ -8,30 +8,30 @@ $view.showFilter = $self.model.filter && 1;
 widget(keyintercept, {
   bind($self.model.filter);
   .enabled = $self.model.canFilter;
-  
+
   widget(container_y, {
     .filterConstraintX = true;
-    
+
     widget(expander_y, {
       .filterConstraintX = true;
       .expansion = scurve($view.showFilter, 0.25);
       .alpha     = scurve($view.showFilter, 0.25);
-      
+
       widget(container_x, {
 	widget(backdrop, {
 	  .filterConstraintX = true;
 	  .color = [0.3, 0.3, 0.3];
 	  PLATE_GFX();
 	  widget(container_x, {
-	    
+
 	    widget(label, {
 	      .caption = "Filter: ";
 	    });
-	    
+
 	    widget(label, {
 	      .caption = $self.model.filter;
 	    });
-	    
+
 	  });
 	});
 	ICON2("skin://svg/Delete.svg",
@@ -44,8 +44,8 @@ widget(keyintercept, {
       });
     });
 
-    
-    
+
+
     widget(container_x, {
       .filterConstraintY = true;
       .padding = [5, 5, 5, 0];
@@ -55,13 +55,13 @@ widget(keyintercept, {
 	.weight = 1;
 	.id = "list";
 	$view.focused <- focusedChild();
-	
+
 
 	cloner($self.model.nodes, container_x, {
 
 	  suggestFocus($self.playing);
 
-	  delta($view.showArtists, 
+	  delta($view.showArtists,
 		select($self.metadata.artist, 1, 0));
 
 
@@ -81,24 +81,24 @@ widget(keyintercept, {
 			       ) + ".svg";
 	    .shadow = true;
 	  });
-	  
+
 	  widget(backdrop, {
 	    .weight = 1;
 	    .autoRefocusable = true;
 	    .focusable = 1.0;
 	    .focusOnClick = true;
-	    
+
 	    onEvent(activate,
 		    translate($self.type,
 			      navOpen($self.url, void, void, $parent.model),
 			      "audio", playTrackFromSource($self, $parent.model)
 			     ));
-	    
+
 	    .alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
-	    
+
 	    .color = 0.6;
 	    PLATE_GFX();
-	    
+
 	    widget(label, {
 	      .color = select(isFocused(), 1.0, 0.6);
 	      .caption = $self.metadata.title;
@@ -113,14 +113,14 @@ widget(keyintercept, {
 	    .focusable = isLink($self.metadata.artist);
 	    .focusOnClick = true;
 	    .filterConstraintX = true;
-	    
+
 	    onEvent(activate, navOpen($self.metadata.artist));
-	    
+
 	    .alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
-	    
+
 	    .color = 0.6;
 	    PLATE_GFX();
-	    
+
 	    widget(label, {
 	      .color = select(isFocused(), 1.0, 0.6);
 	      .caption = $self.metadata.artist;
@@ -130,7 +130,7 @@ widget(keyintercept, {
 
 	});
       });
-      
+
       LIST_Y_SLIDER("list");
 
       widget(container_y, {
