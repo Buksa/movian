@@ -1,0 +1,13 @@
+#import "skin://include/buttons.view"
+
+// An action added with page.appendAction(): one of the page's nodes,
+// activated through its own event sink.
+
+widget(container_x, {
+  _glossybuttonTextRight(ICON="skin://svg/Command.svg",
+			 CAPTION=$self.metadata.title,
+			 EVENT=deliverEvent($self.eventSink),
+			 ENABLED=true,
+			 HIDDEN=!$self.enabled);
+  space(1);
+});
