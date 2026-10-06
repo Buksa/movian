@@ -1,0 +1,3 @@
+#import "theme://include/nav.view"
+
+skinNavLocation(_("Page load error"), "theme://svg/Alert.svg");
