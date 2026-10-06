@@ -64,7 +64,7 @@ widget(container_y, {
     .childTilesX = 6;
     .childTilesY = 3;
 
-    cloner(propSorter($global.sources, "node.title"), displacement, {
+    cloner(propSorter($global.services.enabled, "node.title"), displacement, {
       .focusable = true;
       .padding = $view.sizer * -1.5 * iir(isHovered() || isFocused(), 3) + $view.sizer * iir(isPressed(), 3);
 
