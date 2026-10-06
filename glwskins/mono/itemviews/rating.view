@@ -33,7 +33,10 @@ widget(container_x, {
 
 
     widget(clip, {
-      .clipping = [0, 0, 1 - $self.data, 0];
+      .left = 0;
+      .top = 0;
+      .right = 1 - $self.data;
+      .bottom = 0;
       widget(container_x, {
 	widget(icon, {
 	  .color = [1.0, 1.0, 0];
