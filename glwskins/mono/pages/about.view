@@ -19,21 +19,21 @@ widget(container_y, {
   widget(label, {
     .align = center;
     .shadow = true;
-    .caption = "Showtime Mediacenter";
+    .caption = $global.app.name;
     .sizeScale = 3;
   });
 
   widget(label, {
     .align = center;
     .shadow = true;
-    .caption = $global.showtime.copyright;
+    .caption = $global.app.copyright;
     .sizeScale = 1.5;
   });
 
   widget(label, {
     .align = center;
     .shadow = true;
-    .caption = fmt(_("Version: %s"), $global.showtime.version);
+    .caption = fmt(_("Version: %s"), $global.app.version);
     .color = 0.5;
     .sizeScale = 1.5;
   });
