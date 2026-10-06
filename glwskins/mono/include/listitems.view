@@ -1,4 +1,4 @@
-#import "theme://include/defs.view"
+#import "skin://include/defs.view"
 
 #define LIST_ITEM_SIMPLE(TITLE, ICON, EVENT, COLOR, FOCUS=1.0, HIDDEN=false) {
 

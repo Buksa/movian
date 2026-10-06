@@ -1,5 +1,5 @@
-#include "theme://include/separators.view"
-#include "theme://include/slider.view"
+#include "skin://include/separators.view"
+#include "skin://include/slider.view"
 
 widget(container_x, {
 
@@ -10,7 +10,7 @@ widget(container_x, {
     cloner($page.model.nodes, loader, {
       .time = 0.3;
       .noInitialTransform = true;
-      .source = "theme://directoryviews/list/" + $self.type + ".view";
+      .source = "skin://directoryviews/list/" + $self.type + ".view";
     });
   });
   

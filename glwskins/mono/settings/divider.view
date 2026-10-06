@@ -1,5 +1,5 @@
 
-#import "theme://include/separators.view"
+#import "skin://include/separators.view"
 
 widget(container_y, {
   widget(dummy, { .height = 10;   });

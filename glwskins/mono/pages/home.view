@@ -1,4 +1,4 @@
-#import "theme://include/buttons.view"
+#import "skin://include/buttons.view"
 
 // $view.sizer = -10 + $ui.size;
 
@@ -18,14 +18,14 @@ widget(container_y, {
       .filterConstraintX = true;
       .alphaSelf = $view.searchAlpha;
       .color = [0.45, 0.45, 0.5];
-      .source = "theme://graphics/shadedplate.png";
+      .source = "skin://graphics/shadedplate.png";
       .border =  [4, 4, 4, 4];
       .padding = [0, -2, -2, -2];
       
       widget(container_x, {
 	.filterConstraintX = true;
         widget(icon, {
-          .source = "theme://svg/Search.svg";
+          .source = "skin://svg/Search.svg";
 	  .sizeScale = 1.5;
           .alpha = $view.searchAlpha;
         });
@@ -34,7 +34,7 @@ widget(container_y, {
           .weight = 2;
           .filterConstraintX = true;
           .color = [0.0, 0.0, 0.0];
-          .source = "theme://graphics/shadedplate.png";
+          .source = "skin://graphics/shadedplate.png";
           .border =  [4, 4, 4, 4];
           .padding = [0, -2, 0, -2];
 	  
@@ -76,7 +76,7 @@ widget(container_y, {
 	widget(detachable, {
 	  widget(container_z, {
 	    widget(backdrop, {
-	      .source = "theme://graphics/boxbg.png";
+	      .source = "skin://graphics/boxbg.png";
 	      .border = 12;
 	      .padding = -4;
 	      .color = 0.3 + isHovered() * 0.4 + isFocused() * 0.4 + isPressed() * 0.4;
@@ -84,7 +84,7 @@ widget(container_y, {
 		.color = 0.5 + isHovered() * 0.4 + isFocused() * 0.4 + isPressed() * 0.4;
 		
 		.source = $self.icon ?? 
-		  "theme://svg/" + 
+		  "skin://svg/" + 
 		  translate($self.type, "Folder",
 			    "music",    "Music",
 			    "video",    "Movie",
@@ -97,7 +97,7 @@ widget(container_y, {
 	      });
 	    });
 	    widget(backdrop, {
-	      .source = "theme://graphics/boxgloss.png";
+	      .source = "skin://graphics/boxgloss.png";
 	      .border = 12;
 	      .alpha = iir(0.2 + isHovered() * 0.2 + isFocused() * 0.2 + isPressed() * 0.2 , 5);
 	      .additive = true;

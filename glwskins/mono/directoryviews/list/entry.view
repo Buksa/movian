@@ -2,14 +2,14 @@ suggestFocus($self.playing);
 
 widget(icon, {
   .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_AUDIO());
-  .source = translate($self.type,  "theme://svg/File",
-		      "archive",   "theme://svg/Archive",
-		      "artist",    "theme://svg/User",
-		      "audio",     "theme://svg/Music",
-		      "directory", "theme://svg/Folder",
-		      "dvd",       "theme://svg/Disc",
-		      "playlist",  "theme://svg/List",
-		      "video",     "theme://svg/Movie"
+  .source = translate($self.type,  "skin://svg/File",
+		      "archive",   "skin://svg/Archive",
+		      "artist",    "skin://svg/User",
+		      "audio",     "skin://svg/Music",
+		      "directory", "skin://svg/Folder",
+		      "dvd",       "skin://svg/Disc",
+		      "playlist",  "skin://svg/List",
+		      "video",     "skin://svg/Movie"
 		     ) + ".svg";
   .shadow = true;
 });

@@ -1,5 +1,5 @@
-#import "theme://include/defs.view"
-#import "theme://include/separators.view"
+#import "skin://include/defs.view"
+#import "skin://include/separators.view"
 
 #define SQUARE_ITEM_SIMPLE(TITLE, ICON, EVENT, COLOR) {
 

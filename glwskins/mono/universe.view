@@ -1,7 +1,7 @@
-#import "theme://include/defs.view"
-#import "theme://include/separators.view"
-#import "theme://include/buttons.view"
-#import "theme://include/slider.view"
+#import "skin://include/defs.view"
+#import "skin://include/separators.view"
+#import "skin://include/buttons.view"
+#import "skin://include/slider.view"
 
 settingBool(_("Top bar navigation buttons"), "navtools", true, $ui.topBarTools);
 
@@ -57,7 +57,7 @@ widget(container_z, {
   widget(loader, {
     .time = 0.3;
     .effect = blend;
-    .source = select($ui.screensaverActive, "theme://screensaver.view", "");
+    .source = select($ui.screensaverActive, "skin://screensaver.view", "");
   });
 
 
@@ -66,16 +66,16 @@ widget(container_z, {
       widget(layer, {
 	.alpha = iir(1 - $ui.screensaverActive, 8);
 
-	#include "theme://maindeck.view"
+	#include "skin://maindeck.view"
 
 	// Command menu
 
-	#include "theme://commandmenu/cmd_root.view"
+	#include "skin://commandmenu/cmd_root.view"
 
 	// Popup cloner
 
 	cloner($global.popups, loader, {
-	  .source = "theme://popups/" + $self.type + ".view";
+	  .source = "skin://popups/" + $self.type + ".view";
 	});
 
 	// Log window
@@ -127,7 +127,7 @@ widget(container_z, {
 	    .time = 0.3;
 	    .effect = blend;
 	    .noInitialTransform = true;
-	    .source = "theme://playdecks/" + $global.media.current.type + ".view";
+	    .source = "skin://playdecks/" + $global.media.current.type + ".view";
 	  });
 	});
       });
@@ -141,7 +141,7 @@ widget(container_z, {
     .align = top;
     cloner($global.notifications.nodes, container_x, {
       widget(backdrop, {
-	.source = "theme://graphics/blackdrop.png";
+	.source = "skin://graphics/blackdrop.png";
 	.border = 12;
 	.padding = [4,-4];
 	.alphaSelf = 0.8;
@@ -150,7 +150,7 @@ widget(container_z, {
 	  .spacing = 10;
 	  widget(icon, {
 	    .sizeScale = 1.5;
-	    .source = "theme://svg/Alert.svg";
+	    .source = "skin://svg/Alert.svg";
 	    .color = translate($self.type, [1,1,1],
 			       "info", [0.5, 1, 0.5],
 			       "warning",  [1, 1, 0.5],

@@ -1,4 +1,4 @@
-#import "theme://include/defs.view"
+#import "skin://include/defs.view"
 
 #define BUTTON(CAPTION, ICON, EVENT, COLOR, SIZE, FONTSCALE, HIDDEN, FOCUSABLE)
 {
@@ -51,7 +51,7 @@
     .alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
     .color = COLOR;
       
-    .source = "theme://graphics/shadedplate.png";
+    .source = "skin://graphics/shadedplate.png";
     .border =  [4, 4, 4, 4];
     .padding = [-4, -4, 0, -4];
    
@@ -208,7 +208,7 @@
     .padding = [0, -5, 0, -5];
     .focusOnClick = true;
     .focusable = select(DISABLED, 0, 1);
-    .source = "theme://graphics/glossy.png";
+    .source = "skin://graphics/glossy.png";
     .color = [0.5, 0.5, 0.5] + 0.35 * (isFocused() + isHovered()) - 0.5 * isPressed();
 
     widget(container_x, {
@@ -236,7 +236,7 @@
 #define _gloss() {
   widget(backdrop, {
     .additive = true;
-    .source = "theme://graphics/bar-gloss.png";
+    .source = "skin://graphics/bar-gloss.png";
     .border = [2,4,2,4];
     .padding = [5,0,5,0];
     .color = [0.3, 0.3, 0.3];
@@ -251,7 +251,7 @@
     widget(container_z, {
       widget(backdrop, {
 	.focusable = ENABLED;
-	.source = "theme://graphics/bar3.png";
+	.source = "skin://graphics/bar3.png";
 	.border = [2,4,2,4];
 	.padding = [5,0,5,0];
 	.color = select(isHovered() || isFocused(), SELCOLOR(), BASECOLOR());
@@ -279,7 +279,7 @@
     widget(container_z, {
       widget(backdrop, {
 	.focusable = ENABLED;
-	.source = "theme://graphics/bar3.png";
+	.source = "skin://graphics/bar3.png";
 	.border = [2,4,2,4];
 	.padding = [5,0,5,0];
 	.color = select(isHovered() || isFocused(), SELCOLOR(), BASECOLOR());
@@ -310,7 +310,7 @@
     widget(container_z, {
       widget(backdrop, {
 	.focusable = ENABLED;
-	.source = "theme://graphics/bar3.png";
+	.source = "skin://graphics/bar3.png";
 	.border = [2,4,2,4];
 	.padding = [5,0,5,0];
 	.color = select(isHovered() || isFocused(), SELCOLOR(), BASECOLOR());
@@ -353,7 +353,7 @@
     widget(container_z, {
       widget(backdrop, {
 	
-	.source = "theme://graphics/bar3.png";
+	.source = "skin://graphics/bar3.png";
 	.border = [2,4,2,4];
 	.padding = [5,0,5,0];
 	.color = select(isHovered() || isFocused(), SELCOLOR(), BASECOLOR());
@@ -386,7 +386,7 @@
     widget(container_z, {
       widget(backdrop, {
 	.focusable = ENABLED;
-	.source = "theme://graphics/bar3.png";
+	.source = "skin://graphics/bar3.png";
 	.border = [2,4,2,4];
 	.padding = [5,0,5,0];
 	.color = select(isHovered() || isFocused(), SELCOLOR(), BASECOLOR());
@@ -412,7 +412,7 @@
   widget(container_z, {
     .filterConstraintX = true;
     widget(backdrop, {
-      .source = "theme://graphics/bar4.png";
+      .source = "skin://graphics/bar4.png";
       .border = [6,4,6,4];
       .color = BASECOLOR();
       BODY
@@ -424,7 +424,7 @@
 #define _glossycontainer2(BODY) {
   widget(container_z, {
     widget(backdrop, {
-      .source = "theme://graphics/bar3.png";
+      .source = "skin://graphics/bar3.png";
       .border = [2,4,2,4];
       .padding = [5,0,5,0];
       .color = select(isHovered() || isFocused(), SELCOLOR(), BASECOLOR());
@@ -445,7 +445,7 @@
 	onEvent(activate, EVENT);
 	
 	.color = select(isHovered() || isFocused(), SELCOLOR(), BASECOLOR());
-	.source = "theme://graphics/bar3.png";
+	.source = "skin://graphics/bar3.png";
 	.border = [2,4,2,4];
 	.padding = [5,0,5,0];
 	
@@ -462,7 +462,7 @@
 	    .alpha = iir($page.glw.curView == TYPE, 4);
 	    .color = select(isHovered() || isFocused(), SELCOLOR(), BASECOLOR());
 	    .shadow = true;
-	    .source = "theme://svg/Selected.svg";
+	    .source = "skin://svg/Selected.svg";
 	    .sizeScale = SCALE;
 	  });
 	});

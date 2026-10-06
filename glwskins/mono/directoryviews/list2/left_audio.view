@@ -7,7 +7,7 @@ widget(detachable, {
 			     navOpen($self.metadata.album, void, $self),
 			     navOpen($self.metadata.album)));
     
-    .source = "theme://graphics/8x8round.png";
+    .source = "skin://graphics/8x8round.png";
     .border = 3;
     .padding = -3;
     .alphaSelf = 0.2 + 0.4 * select(isLink($self.metadata.album),
@@ -16,14 +16,14 @@ widget(detachable, {
     .color = 0;
     
     widget(backdrop, {
-      .source = "theme://graphics/8x8round-open.png";
+      .source = "skin://graphics/8x8round-open.png";
       .borderOnly = true;
       .border = 3;
       .color = [0.9, 0.9, 1.0];
       .alphaSelf = iir(isFocused() * 0.5, 5);
 
       widget(icon, {
-	.source = $self.metadata.album_art ?? "theme://svg/Music.svg";
+	.source = $self.metadata.album_art ?? "skin://svg/Music.svg";
 	.sizeScale = 4;
 	.alpha = iir(isReady(), 10);
 	.saturation = 1 - iir(isReady(), 10);

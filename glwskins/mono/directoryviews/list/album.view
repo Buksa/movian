@@ -1,4 +1,4 @@
-#import "theme://include/defs.view"
+#import "skin://include/defs.view"
 
 
 widget(container_x, {
@@ -7,7 +7,7 @@ widget(container_x, {
 
   widget(icon, {
 
-    .source = $self.metadata.album_art ?? "theme://svg/Disc.svg";
+    .source = $self.metadata.album_art ?? "skin://svg/Disc.svg";
     .shadow    = select($self.metadata.album_art, false, true);
     .color = select(isFocused() || $self.metadata.album_art,
 		    [1.0, 1.0, 1.0], PLATE_COLOR_AUDIO());

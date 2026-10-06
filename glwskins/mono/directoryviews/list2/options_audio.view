@@ -22,7 +22,7 @@
 
 widget(backdrop, {
   .width = $ui.size * 5;
-  .source = "theme://graphics/8x8round.png";
+  .source = "skin://graphics/8x8round.png";
   .border = 3;
   .padding = -3;
   .color = 0;
@@ -30,7 +30,7 @@ widget(backdrop, {
   .alphaSelf = 0.2 + 0.4 * (isHovered() || isFocused());
 
   widget(backdrop, {
-    .source = "theme://graphics/8x8round-open.png";
+    .source = "skin://graphics/8x8round-open.png";
     .borderOnly = true;
     .border = 3;
     .color = [0.9, 0.9, 1.0];
@@ -39,18 +39,18 @@ widget(backdrop, {
 
     widget(list_y, {
 
-      OPTION(_("Queue"), "theme://svg/Enqueue.svg", {
+      OPTION(_("Queue"), "skin://svg/Enqueue.svg", {
 	  fireEvent(enqueuetrack($self));
       });
 
-      OPTION(_("Delete"), "theme://svg/Delete.svg", {
+      OPTION(_("Delete"), "skin://svg/Delete.svg", {
 	delete($self);
       }, !$parent.model.canDelete);
 
       OPTION(select($self.metadata.starred, _("Unstar"), _("Star")),
 	     select($self.metadata.starred,
-		    "theme://svg/Star.svg",
-		    "theme://svg/Nostar.svg"),
+		    "skin://svg/Star.svg",
+		    "skin://svg/Nostar.svg"),
 	     deliverEvent($self, "starToggle"),
 	     isVoid($self.metadata.starred));
     });

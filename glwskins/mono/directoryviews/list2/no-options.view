@@ -1,6 +1,6 @@
 widget(backdrop, {
   .width = $ui.size * 5;
-  .source = "theme://graphics/8x8round.png";
+  .source = "skin://graphics/8x8round.png";
   .border = 3;
   .padding = -3;
   .color = 0;
@@ -10,7 +10,7 @@ widget(backdrop, {
   .focusOnClick = true;
 
   widget(backdrop, {
-    .source = "theme://graphics/8x8round-open.png";
+    .source = "skin://graphics/8x8round-open.png";
     .borderOnly = true;
     .border = 3;
     .color = [0.9, 0.9, 1.0];
@@ -18,7 +18,7 @@ widget(backdrop, {
     .alphaSelf = iir(isFocused() * 0.5, 10);
 
     widget(icon, {
-      .source = "theme://svg/Enter.svg";
+      .source = "skin://svg/Enter.svg";
       .sizeScale = 4;
       .alpha = iir(isHovered() || isFocused(), 5) + 0.05;
     });

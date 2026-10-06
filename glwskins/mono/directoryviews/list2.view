@@ -1,7 +1,7 @@
-#import "theme://include/infobox.view"
-#import "theme://include/buttons.view"
-#import "theme://include/separators.view"
-#import "theme://include/slider.view"
+#import "skin://include/infobox.view"
+#import "skin://include/buttons.view"
+#import "skin://include/separators.view"
+#import "skin://include/slider.view"
 
 $view.showFilter = $page.model.filter && 1;
 
@@ -34,7 +34,7 @@ widget(keyintercept, {
 	    
 	  });
 	});
-	ICON2("theme://svg/Delete.svg",
+	ICON2("skin://svg/Delete.svg",
 	      "Clear",
 	      {
 		$page.model.filter = void;
@@ -58,7 +58,7 @@ widget(keyintercept, {
 
 	  .time = 0.3;
 	  .noInitialTransform = true;
-	  .source = "theme://directoryviews/list2/" +
+	  .source = "skin://directoryviews/list2/" +
 	    translate($self.type, "left_default",
 		      "audio", "left_audio"
 		     ) + ".view";
@@ -73,7 +73,7 @@ widget(keyintercept, {
 			    "audio", playTrackFromSource($self, $parent.model)
 			   ));
 	  
-	  .source = "theme://graphics/8x8round.png";
+	  .source = "skin://graphics/8x8round.png";
 	  
 	  .border = 3;
 	  .padding = -3;
@@ -81,7 +81,7 @@ widget(keyintercept, {
 	  .color = 0;
 	  
 	  widget(backdrop, {
-	    .source = "theme://graphics/8x8round-open.png";
+	    .source = "skin://graphics/8x8round-open.png";
 	    .borderOnly = true;
 	    .border = 3;
 	    .color = [0.9, 0.9, 1.0];
@@ -101,7 +101,7 @@ widget(keyintercept, {
 	      widget(loader, {
 		.time = 0.3;
 		.noInitialTransform = true;
-	      	.source = "theme://directoryviews/list2/" +
+	      	.source = "skin://directoryviews/list2/" +
 		  translate($self.type, void,
 			    "audio", "center_audio",
 			    "playlist", "center_playlist",
@@ -116,7 +116,7 @@ widget(keyintercept, {
 	widget(loader, {
 	  .time = 0.3;
 	  .noInitialTransform = true;
-	  .source = "theme://directoryviews/list2/" +
+	  .source = "skin://directoryviews/list2/" +
 	    translate($self.type, "right_default",
 		      "audio", "right_audio"
 		     ) + ".view";
@@ -127,7 +127,7 @@ widget(keyintercept, {
 	  .effect = flipHorizontal;
 	  .time = 0.2;
 	  .noInitialTransform = true;
-	  .source = "theme://directoryviews/list2/" + 
+	  .source = "skin://directoryviews/list2/" + 
 	    translate($self.type, "options_none",
 		      "audio", select(isFocused(),
 				      "options_audio",

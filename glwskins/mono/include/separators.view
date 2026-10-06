@@ -2,7 +2,7 @@
 #define VERTICAL_SEPARATOR()
 {
   widget(backdrop, {
-    .source = "theme://graphics/separator_vertical.png";
+    .source = "skin://graphics/separator_vertical.png";
     .border = 3;
     .width = 8;
     .alphaSelf = 0.35;
@@ -13,7 +13,7 @@
 {
   widget(backdrop, {
     .hidden = v;
-    .source = "theme://graphics/separator_horizontal.png";
+    .source = "skin://graphics/separator_horizontal.png";
     .border = [3, 1];
     .height = 4;
     .alphaSelf = 0.35;

@@ -1,8 +1,8 @@
-#import "theme://include/separators.view"
-#import "theme://include/buttons.view"
+#import "skin://include/separators.view"
+#import "skin://include/buttons.view"
 
 #define itemActionButton(ENABLED, EVENT, ICONCLASS, CAPTION) {
-  _glossybuttonTextRight(ICON=translate(ICONCLASS, "theme://svg/Command.svg"),
+  _glossybuttonTextRight(ICON=translate(ICONCLASS, "skin://svg/Command.svg"),
 			 CAPTION=CAPTION,
 			 EVENT=EVENT,
 			 ENABLED=true,
@@ -12,7 +12,7 @@
 
 #define actionGroup(BODY) {
   widget(backdrop, {
-    .source = "theme://graphics/border.png";
+    .source = "skin://graphics/border.png";
     .border = [12,12,12,12];
     .borderOnly = true;
     .color = 0.5;
@@ -50,7 +50,7 @@ widget(container_y, {
       .filterConstraintX = true;
       .spacing = 2;
       cloner($page.model.nodes, loader, {
-	.source = "theme://itemviews/" + $self.type + ".view";
+	.source = "skin://itemviews/" + $self.type + ".view";
       });	  
       
       widget(dummy, { .height = 20; });

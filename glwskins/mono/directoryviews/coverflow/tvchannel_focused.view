@@ -1,5 +1,5 @@
-#import "theme://include/defs.view"
-#include "theme://include/slider.view"
+#import "skin://include/defs.view"
+#include "skin://include/slider.view"
 
 
 widget(container_x, {

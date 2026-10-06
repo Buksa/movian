@@ -4,7 +4,7 @@ widget(backdrop, {
   
   .focusable = isLink($self.metadata.artist);
   onEvent(activate, navOpen($self.metadata.artist));
-  .source = "theme://graphics/8x8round.png";
+  .source = "skin://graphics/8x8round.png";
   .border = 3;
   .padding = -3;
   .alphaSelf = 0.2 + 0.4 * select(isLink($self.metadata.artist),
@@ -13,7 +13,7 @@ widget(backdrop, {
   .color = 0;
   
   widget(backdrop, {
-    .source = "theme://graphics/8x8round-open.png";
+    .source = "skin://graphics/8x8round-open.png";
     .borderOnly = true;
     .border = 3;
     .color = [0.9, 0.9, 1.0];
