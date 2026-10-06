@@ -50,6 +50,7 @@ widget(container_z, {
 
   widget(backdrop, {
     .source = "pixmap:gradient:0,0,0:38,33,33";
+    .zoffset = -1500;
     .alpha = iir(1 - ($ui.fullwindow || $ui.screensaverActive), 16);
   });
   
