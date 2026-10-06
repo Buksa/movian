@@ -9,7 +9,7 @@ widget(image, {
               "tv",        "Display.svg",
               "photos",    "Pictures.svg");
 
-  .alpha = iir(isReady(), 10);
-  .saturation = 1 - iir(isReady(), 10);
+  .alpha = iir(isLoaded() || isError(), 10);
+  .saturation = 1 - iir(isLoaded() || isError(), 10);
 
 });
