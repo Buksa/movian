@@ -1,6 +1,6 @@
-#include "theme://include/separators.view"
-#include "theme://include/slider.view"
-#include "theme://include/listitems.view"
+#include "skin://include/separators.view"
+#include "skin://include/slider.view"
+#include "skin://include/listitems.view"
 
 widget(container_y, {
   .padding = $ui.size / 2;
@@ -15,7 +15,7 @@ widget(container_y, {
       .id = "list";
       .spacing = 5;
       LIST_ITEM_SIMPLE("Add new entry", 
-		       "theme://svg/Add.svg",
+		       "skin://svg/Add.svg",
 		       {
 			 createChild($page.model.nodes); 
 		       },
@@ -25,7 +25,7 @@ widget(container_y, {
 
 
       cloner($page.model.nodes, loader, {
-	.source = "theme://settings/" + $self.type + ".view";
+	.source = "skin://settings/" + $self.type + ".view";
 	.time = 0.3;
 	.noInitialTransform = true;
       });

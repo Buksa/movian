@@ -1,6 +1,6 @@
-#import "theme://include/buttons.view"
-#import "theme://include/separators.view"
-#import "theme://include/slider.view"
+#import "skin://include/buttons.view"
+#import "skin://include/separators.view"
+#import "skin://include/slider.view"
 
 $view.showFilter = $page.model.filter && 1;
 
@@ -38,7 +38,7 @@ widget(container_y, {
 		});
       	      });
 	    });
-	    ICON2("theme://svg/Delete.svg",
+	    ICON2("skin://svg/Delete.svg",
 		  "Clear",
 		  {
 		    $page.model.filter = void;
@@ -73,7 +73,7 @@ widget(container_y, {
 	      widget(detachable, {
 		widget(container_z, {
 		  widget(backdrop, {
-		    .source = "theme://graphics/boxbg.png";
+		    .source = "skin://graphics/boxbg.png";
 		    .border = 12;
 		    .padding = -4;
 		    .color = 0.3 + isHovered() * 0.4 + isFocused() * 0.4 + isPressed() * 0.4;
@@ -81,7 +81,7 @@ widget(container_y, {
 		    widget(loader, {
 		      .time = 0.3;
 		      .noInitialTransform = true;
-		      .source = "theme://directoryviews/array/" +
+		      .source = "skin://directoryviews/array/" +
 			translate($self.type, "default",
 				  "album", "album",
 				  "directory", "directory",
@@ -89,7 +89,7 @@ widget(container_y, {
 		    });
 		  });
 		  widget(backdrop, {
-		    .source = "theme://graphics/boxgloss.png";
+		    .source = "skin://graphics/boxgloss.png";
 		    .border = 12;
 		    .alpha = iir(0.2 + isHovered() * 0.2 + isFocused() * 0.2 + isPressed() * 0.2 , 5);
 		    .additive = true;

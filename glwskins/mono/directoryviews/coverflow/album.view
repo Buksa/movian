@@ -6,7 +6,7 @@ widget(image, {
   .focusable = true;
   .focusOnClick = true;
   .alphaEdges = 2;
-  .source = $self.metadata.album_art ?? "theme://svg/Disc.svg";
+  .source = $self.metadata.album_art ?? "skin://svg/Disc.svg";
   onEvent(activate, navOpen($self.url));
 
 });

@@ -1,5 +1,5 @@
-#import "theme://include/defs.view"
-#import "theme://include/listitems.view"
+#import "skin://include/defs.view"
+#import "skin://include/listitems.view"
 
 widget(container_x, {
   .focusable = true;
@@ -11,15 +11,15 @@ widget(container_x, {
     .color = select(isFocused() || isHovered(), 1, 0.3);
     .source = $self.metadata.icon ?? 
       translate($self.subtype,
-		"theme://svg/Settings.svg",
-		"sound", "theme://svg/Sound.svg",
-		"audio", "theme://svgs/Music.svg",
-		"video", "theme://svg/Movie.svg",
-		"bookmark", "theme://svg/Bookmark.svg",
-		"display", "theme://svg/Display.svg",
-		"search", "theme://svg/Search.svg",
-		"keymap", "theme://svg/Keyboard.svg",
-		"subtitle", "theme://svg/Script.svg"
+		"skin://svg/Settings.svg",
+		"sound", "skin://svg/Sound.svg",
+		"audio", "skin://svgs/Music.svg",
+		"video", "skin://svg/Movie.svg",
+		"bookmark", "skin://svg/Bookmark.svg",
+		"display", "skin://svg/Display.svg",
+		"search", "skin://svg/Search.svg",
+		"keymap", "skin://svg/Keyboard.svg",
+		"subtitle", "skin://svg/Script.svg"
 	       );
 
     .shadow = true;

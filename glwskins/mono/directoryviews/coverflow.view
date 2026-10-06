@@ -4,7 +4,7 @@ widget(container_y, {
     .time = 0.1;
     .effect = blend;
     .noInitialTransform = true;
-    .source = "theme://directoryviews/coverflow/"
+    .source = "skin://directoryviews/coverflow/"
       + $self.focused.type + "_focused.view";
   });
 
@@ -22,7 +22,7 @@ widget(container_y, {
 	cloner($page.model.nodes, loader, {
 	  .time = 0.3;
 	  .noInitialTransform = true;
-	  .source = "theme://directoryviews/coverflow/" + $self.type + ".view";
+	  .source = "skin://directoryviews/coverflow/" + $self.type + ".view";
 	});
       });
     });

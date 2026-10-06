@@ -1,3 +1,3 @@
-#import "theme://include/separators.view"
+#import "skin://include/separators.view"
 
 HORIZONTAL_SEPARATOR();

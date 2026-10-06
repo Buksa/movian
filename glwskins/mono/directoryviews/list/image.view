@@ -1,5 +1,5 @@
-#import "theme://include/defs.view"
-#import "theme://include/listitems.view"
+#import "skin://include/defs.view"
+#import "skin://include/listitems.view"
 
 LIST_ITEM_SIMPLE($self.metadata.title,
 		 "thumb://" + $self.url,

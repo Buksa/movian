@@ -1,4 +1,4 @@
-#import "theme://include/defs.view"
+#import "skin://include/defs.view"
 
 widget(backdrop, {
   .autoRefocusable = true;
@@ -15,7 +15,7 @@ widget(backdrop, {
     widget(icon, {
       .color = select(isFocused() || $self.metadata.icon,
 		      [1.0, 1.0, 1.0], PLATE_COLOR_DIR());
-      .source = $self.metadata.icon ?? "theme://svg/Folder.svg";
+      .source = $self.metadata.icon ?? "skin://svg/Folder.svg";
       .shadow = true;
     });
   

@@ -1,5 +1,5 @@
-#import "theme://include/defs.view"
-#import "theme://include/coverflowitems.view"
+#import "skin://include/defs.view"
+#import "skin://include/coverflowitems.view"
 
 COVERFLOW_ITEM_SIMPLE($self.metadata.title,
 		      $self.metadata.icon,

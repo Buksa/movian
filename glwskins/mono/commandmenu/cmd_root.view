@@ -1,7 +1,7 @@
-#import "theme://include/buttons.view"
+#import "skin://include/buttons.view"
 
 #define commandButton(EVENT, TYPE, ENABLED) {
-  _glossybutton(ICON="theme://svg/" + 
+  _glossybutton(ICON="skin://svg/" + 
 		translate(TYPE, TYPE,
 			  "SeekForward", "SeekFwd",
 			  "Subtitles", "Script",
@@ -14,7 +14,7 @@
 }
 
 #define commandButton2(EVENT, TYPE, ENABLED, VISIBLE) {
-  _glossybutton(ICON="theme://svg/" + 
+  _glossybutton(ICON="skin://svg/" + 
 		translate(TYPE, TYPE,
 			  "SeekForward", "SeekFwd",
 			  "Subtitles", "Script"
@@ -34,7 +34,7 @@
 }
 
 #define commandToggle(STATE, TYPE, ENABLED) {
-  _glossybuttontoggle(ICON="theme://svg/" +
+  _glossybuttontoggle(ICON="skin://svg/" +
 		      translate(TYPE, TYPE) + ".svg",
 		      STATE=STATE,
 		      HIDDEN=!ENABLED,
@@ -58,7 +58,7 @@
     widget(container_z, {
       .width ?= WIDTH;
       widget(backdrop, {
-	.source = "theme://graphics/hsliderbackground.png";
+	.source = "skin://graphics/hsliderbackground.png";
 	.border = 5;
 	.padding = -5;
 	.color = select(isHovered() || isFocused(), SELCOLOR(), BASECOLOR());
@@ -72,7 +72,7 @@
 	  .alwaysGrabKnob = true;
 	  widget(backdrop, {
 	    .width = $ui.size;
-	    .source = "theme://graphics/hsliderknob.png";
+	    .source = "skin://graphics/hsliderknob.png";
 	    .border = 6;
 	    .color = select(isHovered() || isFocused(), SELCOLOR(), BASECOLOR());
 	  });
@@ -92,7 +92,7 @@
 
 #define commandSlider(VALUE, MIN, MAX, STEP, CAPTION, ENABLED=true, HIDDEN=false) {
   widget(backdrop, {
-    .source = "theme://graphics/border-tiny.png";
+    .source = "skin://graphics/border-tiny.png";
     .border = 4;
     .color = select(isHovered() || isFocused(), SELCOLOR(), BASECOLOR());
     
@@ -104,7 +104,7 @@
       bind(VALUE);
       .alwaysGrabKnob = true;
       widget(backdrop, {
-	.source = "theme://graphics/focused.png";
+	.source = "skin://graphics/focused.png";
 	.border =  5;
 	.padding = [0, -3];
 	.additive = true;
@@ -124,7 +124,7 @@
     onEvent(activate, EVENT);
     
     widget(icon, {
-      .source = "theme://svg/Check.svg";
+      .source = "skin://svg/Check.svg";
       .shadow = true;
       .alpha = iir(SELECTED, 8);
       .color = select(isHovered() || isFocused(), SELCOLOR(), BASECOLOR());
@@ -152,7 +152,7 @@
     onEvent(activate, EVENT);
     
     widget(icon, {
-      .source = "theme://svg/Check.svg";
+      .source = "skin://svg/Check.svg";
       .shadow = true;
       .alpha = iir(SELECTED, 8);
       .color = select(isHovered() || isFocused(), SELCOLOR(), BASECOLOR());
@@ -185,7 +185,7 @@
 
 #define commandGroup(BODY) {
   widget(backdrop, {
-    .source = "theme://graphics/blackdrop.png";
+    .source = "skin://graphics/blackdrop.png";
     .border = 12;
     .alphaSelf = 0.8;
     BODY;
@@ -197,7 +197,7 @@
 
 #define commandGroupFullWidth(BODY) {
   widget(backdrop, {
-    .source = "theme://graphics/blackdrop.png";
+    .source = "skin://graphics/blackdrop.png";
     .border = 12;
     .alphaSelf = 0.66;
     .leftBorder = false;
@@ -213,13 +213,13 @@
     .height = $ui.size + 6;
     widget(backdrop, {
       .width = 30;
-      .source = "theme://graphics/tab-top.png";
+      .source = "skin://graphics/tab-top.png";
       .border = [2,0,2,0];
     });
 
     BODY;
     widget(backdrop, {
-      .source = "theme://graphics/tab-top.png";
+      .source = "skin://graphics/tab-top.png";
       .border = [2,0,2,0];
     });
     
@@ -230,8 +230,8 @@
 #define commandTab(PAGEPROP, CAPTION, PAGENUM) {
   widget(backdrop, {
     .source = select(PAGEPROP == PAGENUM,
-		     "theme://graphics/tab-selected.png",
-		     "theme://graphics/tab-unselected.png");
+		     "skin://graphics/tab-selected.png",
+		     "skin://graphics/tab-unselected.png");
     .border  = [15,0];
     .padding = [8,0];
     widget(label, {
@@ -246,7 +246,7 @@
 }
 
 
-#import "theme://include/separators.view";
+#import "skin://include/separators.view";
 
 $view.videofeatures =
   $global.media.current.type == "video" ||
@@ -279,15 +279,15 @@ widget(container_y, {
     commandGroup(widget(container_z, {
       .width = $ui.size * 4;
       widget(image, {
-	.source = "theme://graphics/clock.png";
+	.source = "skin://graphics/clock.png";
       });
       widget(image, {
-	.source = "theme://graphics/clock-hand-short.png";
+	.source = "skin://graphics/clock-hand-short.png";
 	.angle = ($global.clock.hour % 12) * 30 + 
 	  ($global.clock.minute) / 2;
       });
       widget(image, {
-	.source = "theme://graphics/clock-hand-long.png";
+	.source = "skin://graphics/clock-hand-long.png";
 	.angle = $global.clock.minute * 6;
       });
     }));
@@ -436,7 +436,7 @@ widget(container_y, {
 	  .spacing = 5;
 
 	  cloner($global.media.current.audio.settings.model.nodes, loader, {
-	    .source = "theme://settings/" + $self.model.type + ".view";
+	    .source = "skin://settings/" + $self.model.type + ".view";
 	    .time = 0.3;
 	    .noInitialTransform = true;
 	  });
@@ -481,7 +481,7 @@ widget(container_y, {
 	  .spacing = 5;
 
 	  cloner($global.media.current.subtitle.settings.model.nodes, loader, {
-	    .source = "theme://settings/" + $self.model.type + ".view";
+	    .source = "skin://settings/" + $self.model.type + ".view";
 	    .time = 0.3;
 	    .noInitialTransform = true;
 	  });
@@ -501,7 +501,7 @@ widget(container_y, {
       cloner($global.media.current.seekindex.positions, backdrop, {
 	.alphaSelf = 0.2 + (isFocused() || isHovered());
 	.width = $ui.size * 7 * 16 / 9;
-	.source = "theme://graphics/border.png";
+	.source = "skin://graphics/border.png";
 	.borderOnly = true;
 	.border = 12;
 	.padding = -4;
@@ -549,7 +549,7 @@ widget(container_y, {
       });
 
       cloner($global.media.current.video.settings.model.nodes, loader, {
-	.source = "theme://settings/" + $self.model.type + ".view";
+	.source = "skin://settings/" + $self.model.type + ".view";
 	.time = 0.3;
 	.noInitialTransform = true;
       });

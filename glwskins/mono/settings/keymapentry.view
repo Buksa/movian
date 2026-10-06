@@ -1,6 +1,6 @@
-#import "theme://include/buttons.view"
-#import "theme://include/defs.view"
-#import "theme://include/separators.view"
+#import "skin://include/buttons.view"
+#import "skin://include/defs.view"
+#import "skin://include/separators.view"
 
 widget(container_x, {
 
@@ -21,7 +21,7 @@ widget(container_x, {
 
     .alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
     .color = [0.45, 0.45, 0.5];
-    .source = "theme://graphics/shadedplate.png";
+    .source = "skin://graphics/shadedplate.png";
     .border =  [4, 4, 4, 4];
     .padding = [0, -4, 0, -4];
 
@@ -44,7 +44,7 @@ widget(container_x, {
     .filterConstraintX = true;
     .weight = 0.5;
 
-    ICON2("theme://svg/Delete.svg",
+    ICON2("skin://svg/Delete.svg",
 	  "Clear",
 	  {
 	    $self.keycode1 = void;
@@ -68,7 +68,7 @@ widget(container_x, {
 
     .alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
     .color = [0.45, 0.45, 0.5];
-    .source = "theme://graphics/shadedplate.png";
+    .source = "skin://graphics/shadedplate.png";
     .border =  [4, 4, 4, 4];
     .padding = [0, -4, 0, -4];
 
@@ -90,7 +90,7 @@ widget(container_x, {
     .filterConstraintX = true;
     .weight = 0.5;
 
-    ICON2("theme://svg/Delete.svg",
+    ICON2("skin://svg/Delete.svg",
 	  "Clear",
 	  {
 	    $self.keycode2 = void;

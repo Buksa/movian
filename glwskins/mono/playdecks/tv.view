@@ -1,4 +1,4 @@
-#import "theme://include/separators.view"
+#import "skin://include/separators.view"
 
 $ui.showplaydeck =  $ui.menu ||
   $global.media.current.error ||
@@ -11,7 +11,7 @@ widget(container_x, {
   
   .align = center;
   widget(backdrop, {
-    .source = "theme://graphics/blackdrop.png";
+    .source = "skin://graphics/blackdrop.png";
     .border = [12,12,12,12];
     .alphaSelf = 0.66;
     .filterConstraintX = true;
@@ -95,7 +95,7 @@ widget(container_x, {
 	widget(container_x, {
 	  .hidden = select($global.media.current.error, false, true);
 	  widget(icon, {
-	    .source = "theme://svg/Alert.svg";
+	    .source = "skin://svg/Alert.svg";
 	  });
 	  widget(label, {
 	    .caption = $global.media.current.error;

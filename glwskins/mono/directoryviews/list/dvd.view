@@ -1,7 +1,7 @@
-#import "theme://include/defs.view"
-#import "theme://include/listitems.view"
+#import "skin://include/defs.view"
+#import "skin://include/listitems.view"
 
 LIST_ITEM_SIMPLE($self.metadata.title,
-		 "theme://svg/DVD.svg",
+		 "skin://svg/DVD.svg",
 		 navOpen($self.url),
 		 PLATE_COLOR_VIDEO());

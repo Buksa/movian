@@ -1,7 +1,7 @@
-#import "theme://include/buttons.view"
+#import "skin://include/buttons.view"
 #define skinInfoboxFocusable(FOCUSABLE, EVENT, BODY) {
   widget(backdrop, {
-    .source = "theme://graphics/focused.png";
+    .source = "skin://graphics/focused.png";
     .additive = true;
     .margin = -3;
     .border =  5;
@@ -26,21 +26,21 @@
 #define skinInfoboxEnqueue(ENABLED, EVENT) {
   skinInfoboxFocusableCommand(
     ENABLED, EVENT,
-    "theme://svg/Enqueue.svg",
+    "skin://svg/Enqueue.svg",
     _("Enqueue"));
 }
 
 #define skinInfoboxDelete(ENABLED, EVENT) {
   skinInfoboxFocusableCommand(
     ENABLED, EVENT,
-    "theme://svg/Delete.svg",
+    "skin://svg/Delete.svg",
     _("Delete"));
 }
 
 
 #define skinInfoboxGroup(BODY) {
   widget(backdrop, {
-    .source = "theme://graphics/border.png";
+    .source = "skin://graphics/border.png";
     .border = [12,12,12,12];
     .borderOnly = true;
     .alphaSelf = 0.5;

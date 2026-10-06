@@ -1,4 +1,4 @@
-#import "theme://include/nav.view"
+#import "skin://include/nav.view"
 
 // Main container 
 widget(container_y, {
@@ -38,7 +38,7 @@ widget(container_y, {
 	
 	cloner($global.nav.pages, loader, {
 	  .time = 0.2;
-	  .source = "theme://pages/" + $page.model.type + "_top.view";
+	  .source = "skin://pages/" + $page.model.type + "_top.view";
 	});
       });
     });
@@ -57,14 +57,14 @@ widget(container_y, {
       cloner($global.nav.pages, loader, {
 	.time = 0.2;
 	.noInitialTransform = true;
-	.source = "theme://pages/" + $page.model.type + ".view";
+	.source = "skin://pages/" + $page.model.type + ".view";
       });
     });
 
     widget(loader, {
       .time = 0.3;
       .effect = blend;
-      .source = select($ui.showSysteminfo, "theme://sysinfo.view", "");
+      .source = select($ui.showSysteminfo, "skin://sysinfo.view", "");
     });
   });
 });

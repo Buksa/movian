@@ -1,8 +1,8 @@
-#import "theme://include/buttons.view"
+#import "skin://include/buttons.view"
 
 #define settingGroup(BODY) {
   widget(backdrop, {
-    .source = "theme://graphics/border-tiny.png";
+    .source = "skin://graphics/border-tiny.png";
     .border = 4;
     .padding = -2;
     .color = 0.5;
@@ -11,21 +11,21 @@
 }
 
 #define settingButtonUp(EVENT, ENABLED, HIDDEN) {
-  _glossybutton(ICON="theme://svg/ArrowUp.svg",
+  _glossybutton(ICON="skin://svg/ArrowUp.svg",
 		EVENT=EVENT,
 		ENABLED=ENABLED,
 		HIDDEN=HIDDEN);
 }
 
 #define settingButtonDown(EVENT, ENABLED, HIDDEN) {
-  _glossybutton(ICON="theme://svg/ArrowDown.svg",
+  _glossybutton(ICON="skin://svg/ArrowDown.svg",
 		EVENT=EVENT,
 		ENABLED=ENABLED,
 		HIDDEN=HIDDEN);
 }
 
 #define settingButtonAction(CAPTION, EVENT, ENABLED, HIDDEN) {
-  _glossybuttonTextRight(ICON="theme://svg/Command.svg",
+  _glossybuttonTextRight(ICON="skin://svg/Command.svg",
 			 CAPTION=CAPTION,
 			 EVENT=EVENT,
 			 ENABLED=ENABLED,

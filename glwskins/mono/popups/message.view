@@ -1,7 +1,7 @@
-#import "theme://include/defs.view"
-#import "theme://include/buttons.view"
-#import "theme://include/separators.view"
-#import "theme://include/popup.view"
+#import "skin://include/defs.view"
+#import "skin://include/buttons.view"
+#import "skin://include/separators.view"
+#import "skin://include/popup.view"
 
 widget(container_x, {
   space(0.2);

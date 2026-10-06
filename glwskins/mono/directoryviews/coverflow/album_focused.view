@@ -1,6 +1,6 @@
-#import "theme://include/buttons.view"
-#import "theme://include/separators.view"
-#import "theme://include/slider.view"
+#import "skin://include/buttons.view"
+#import "skin://include/separators.view"
+#import "skin://include/slider.view"
 
 widget(container_y, {
   widget(label, {
@@ -47,7 +47,7 @@ widget(container_y, {
 		
 	      });
 	    });
-	    ICON2("theme://svg/Delete.svg",
+	    ICON2("skin://svg/Delete.svg",
 		  "Clear",
 		  {
 		    $view.browse.model.filter = void;
@@ -67,7 +67,7 @@ widget(container_y, {
 	    .args = {
 	      hide_album = true;
 	    };
-	    .source = "theme://directoryviews/list/" + $self.type + ".view";
+	    .source = "skin://directoryviews/list/" + $self.type + ".view";
 
 	  });
 	});

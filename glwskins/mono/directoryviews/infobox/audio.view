@@ -1,6 +1,6 @@
-#import "theme://include/defs.view"
-#import "theme://include/separators.view"
-#import "theme://include/infobox.view"
+#import "skin://include/defs.view"
+#import "skin://include/separators.view"
+#import "skin://include/infobox.view"
 
 widget(container_y, {
   .spacing = 5;

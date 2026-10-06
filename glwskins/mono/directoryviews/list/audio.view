@@ -1,4 +1,4 @@
-#import "theme://include/defs.view"
+#import "skin://include/defs.view"
 
 suggestFocus($self.playing);
 
@@ -8,7 +8,7 @@ widget(container_x, {
 
   widget(icon, {
     .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_AUDIO());
-    .source = "theme://svg/Music.svg";
+    .source = "skin://svg/Music.svg";
     .shadow = true;
     .align = top;
   });
@@ -101,7 +101,7 @@ widget(container_x, {
 	  hide_album = $args.hide_album;
 	};
 	.source = select($view.expanded_pre, 
-			 "theme://directoryviews/list/audio2.view", "");
+			 "skin://directoryviews/list/audio2.view", "");
       });
     });
   });

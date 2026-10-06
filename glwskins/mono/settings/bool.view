@@ -1,6 +1,6 @@
-#import "theme://include/defs.view"
-#import "theme://include/buttons.view"
-#import "theme://settings/settings-common.view"
+#import "skin://include/defs.view"
+#import "skin://include/buttons.view"
+#import "skin://settings/settings-common.view"
 
 widget(container_x, {
 

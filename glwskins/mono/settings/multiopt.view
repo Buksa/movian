@@ -1,4 +1,4 @@
-#import "theme://settings/settings-common.view"
+#import "skin://settings/settings-common.view"
 
 widget(container_x, {
 

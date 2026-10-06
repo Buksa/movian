@@ -1,5 +1,5 @@
-#import "theme://include/separators.view"
-#import "theme://include/defs.view"
+#import "skin://include/separators.view"
+#import "skin://include/defs.view"
 
 $self.directClose = 1;
 
@@ -53,7 +53,7 @@ widget(container_z, {
     .padding = 5;
     widget(container_x, {
       widget(backdrop, {
-        .source = "theme://graphics/blackdrop.png";
+        .source = "skin://graphics/blackdrop.png";
         .border = [12,12,12,12];
 	.alphaSelf = $view.statsAlpha * 0.66;
 	

@@ -1,4 +1,4 @@
-#import "theme://include/defs.view"
+#import "skin://include/defs.view"
 
 widget(backdrop, {
 

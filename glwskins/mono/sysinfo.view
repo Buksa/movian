@@ -1,5 +1,5 @@
-#import "theme://include/defs.view"
-#import "theme://include/separators.view"
+#import "skin://include/defs.view"
+#import "skin://include/separators.view"
 
 #define BAR_COLOR_LEFT()  {[0.0, 1.0, 0.0]}
 #define BAR_COLOR_RIGHT() {[1.0, 1.0, 0.0]}

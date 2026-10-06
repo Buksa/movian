@@ -8,6 +8,6 @@ widget(container_z, {
         .blur  = iir(clamp(getLayer(), 0, 1), 7);
         .noInitialTransform = true;
         .time = 0.1;
-        .source = "theme://directoryviews/" + $page.glw.curView + ".view";
+        .source = "skin://directoryviews/" + $page.glw.curView + ".view";
     });
 });

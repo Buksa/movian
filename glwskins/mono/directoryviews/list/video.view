@@ -1,11 +1,11 @@
-#import "theme://include/defs.view"
+#import "skin://include/defs.view"
 
 widget(container_x, {
 
   widget(icon, {
     .align = top;
     .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_VIDEO());
-    .source = "theme://svg/Movie.svg";
+    .source = "skin://svg/Movie.svg";
     .shadow = true;
     .debug = true;
   });
@@ -71,7 +71,7 @@ widget(container_x, {
 	widget(container_x, {
 	  .hidden = select($self.metadata.format, 0, 1);
 	  widget(icon, {
-	    .source = "theme://svg/Container.svg";
+	    .source = "skin://svg/Container.svg";
 	    .sizeScale = 0.75;
 	  });
 	  widget(label, {
@@ -82,7 +82,7 @@ widget(container_x, {
 	
 	cloner($self.metadata.videostreams, container_x, {
 	  widget(icon, {
-	    .source = "theme://svg/Camcorder.svg";
+	    .source = "skin://svg/Camcorder.svg";
 	    .sizeScale = 0.75;
 	  });
 	  widget(label, {
@@ -94,7 +94,7 @@ widget(container_x, {
 
 	cloner($self.metadata.audiostreams, container_x, {
 	  widget(icon, {
-	    .source = "theme://svg/Sound.svg";
+	    .source = "skin://svg/Sound.svg";
 	    .sizeScale = 0.75;
 	  });
 	  widget(label, {

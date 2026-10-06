@@ -1,5 +1,5 @@
-#import "theme://include/buttons.view"
-#import "theme://include/defs.view"
+#import "skin://include/buttons.view"
+#import "skin://include/defs.view"
 
 widget(container_x, {
   
@@ -18,19 +18,19 @@ widget(container_x, {
 	  .noInitialTransform = true;
 	  .time = 0.2;
 	  
-	  ICON2("theme://svg/Pause.svg",
+	  ICON2("skin://svg/Pause.svg",
 		"Pause",
 		event(Pause),
 		PLATE_COLOR_AUDIO(),
 		1);
 	  
-	  ICON2("theme://svg/Play.svg",
+	  ICON2("skin://svg/Play.svg",
 		"Play",
 		event(Play),
 		PLATE_COLOR_AUDIO(),
 		1);
 
-	  ICON2("theme://svg/Play.svg",
+	  ICON2("skin://svg/Play.svg",
 		"Play",
 		playTrackFromSource($self, $parent.source),
 		PLATE_COLOR_AUDIO(),
@@ -43,7 +43,7 @@ widget(container_x, {
 	});
 	
 
-	ICON2("theme://svg/Enqueue.svg",
+	ICON2("skin://svg/Enqueue.svg",
 	      "Enqueue",
 	      {
 		fireEvent(enqueuetrack($self));
@@ -51,7 +51,7 @@ widget(container_x, {
 	      PLATE_COLOR_AUDIO(),
 	      1);
 
-	ICON2("theme://svg/Delete.svg",
+	ICON2("skin://svg/Delete.svg",
 	      "Delete",
 	      {
 		delete($self);

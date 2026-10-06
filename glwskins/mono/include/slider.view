@@ -16,7 +16,7 @@
       .alphaSelf = iir(0.5 + 0.5 * (isFocused() || isPressed()), 4);
 
       .color = [0.45, 0.45, 0.5];
-      .source = "theme://graphics/shadedplate.png";
+      .source = "skin://graphics/shadedplate.png";
       .border =  [4, 4, 4, 4];
     });
   });
