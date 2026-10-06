@@ -48,9 +48,9 @@ $ui.fullwindow = 0;
 
 widget(container_z, {
 
-  widget(gradient, {
-    .color1 = [0, 0, 0] * iir(1 - ($ui.fullwindow || $ui.screensaverActive), 16);
-    .color2 = [0.15, 0.13, 0.13] * iir(1 - ($ui.fullwindow || $ui.screensaverActive), 16);
+  widget(backdrop, {
+    .source = "pixmap:gradient:0,0,0:38,33,33";
+    .alpha = iir(1 - ($ui.fullwindow || $ui.screensaverActive), 16);
   });
   
   widget(container_y, {
