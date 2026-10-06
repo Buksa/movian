@@ -520,9 +520,8 @@ widget(container_y, {
 	    .align = bottom;
 
 	    widget(container_z, {
-	      widget(gradient, {
-		.color1 = 0;
-		.color2 = 0.1;
+	      widget(backdrop, {
+		.source = "pixmap:gradient:0,0,0:26,26,26";
 		.alphaSelf = 0.75;
 	      });
 	    
