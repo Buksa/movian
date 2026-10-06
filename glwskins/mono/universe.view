@@ -3,16 +3,23 @@
 #import "skin://include/buttons.view"
 #import "skin://include/slider.view"
 
-settingBool(_("Top bar navigation buttons"), "navtools", true, $ui.topBarTools);
+// These were user settings until skins could no longer declare settings.
+// Each keeps the default it had.
 
-settingBool(_("Adjust background tint based on daytime"), "daytimegradient", 
-	    true, $ui.dayTimeGradient);
+// Top bar navigation buttons
+$ui.topBarTools = true;
 
-settingBool(_("Fancy UI animations"), "fancyAnimations", true, $ui.fancyAnimations);
+// Adjust background tint based on daytime
+$ui.dayTimeGradient = true;
 
-settingBool(_("Alternate list layout"), "list2", false, $ui.list2);
+// Fancy UI animations
+$ui.fancyAnimations = true;
 
-settingBool(_("Multilingual 'No media loaded'"), "nmlmode", true, $ui.nmlmode);
+// Alternate list layout
+$ui.list2 = false;
+
+// Multilingual 'No media loaded'
+$ui.nmlmode = true;
 
 onEvent(menu, {
   $ui.menu = !$ui.menu;
