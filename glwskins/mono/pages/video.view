@@ -11,6 +11,8 @@ $view.statsAlpha = iir($self.media.stats, 8);
 delta($ui.fullwindow, isVisible());
 
 widget(container_z, {
+  .filterConstraintX = true;
+  .filterConstraintY = true;
   widget(video, {
     .itemModel = $self.previous.itemModel;
     .parentModel = $self.previous.parentModel;
