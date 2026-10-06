@@ -12,7 +12,8 @@ delta($ui.fullwindow, isVisible());
 
 widget(container_z, {
   widget(video, {
-    .model = $self.openedFrom;
+    .itemModel = $self.previous.itemModel;
+    .parentModel = $self.previous.parentModel;
     .primary = true;
     .source = $self.source;
   });
