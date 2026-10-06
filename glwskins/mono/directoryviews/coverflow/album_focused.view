@@ -10,7 +10,7 @@ widget(container_y, {
       $self.focused.metadata.title;
     });
   
-    &view.browse = browse($self.focused.url);
+    $view.browse <- browse($self.focused.url);
   
   $view.showFilter = $view.browse.model.filter && 1;
 
