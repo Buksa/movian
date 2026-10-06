@@ -386,7 +386,7 @@ widget(container_y, {
 	    fireEvent(navOpen("settings:"));
 	  }, "Settings", true);
 
-	  commandToggle($global.nav.currentpage.bookmarked,
+	  commandToggle($nav.currentpage.bookmarked,
 			"Bookmark",
 			true);
 

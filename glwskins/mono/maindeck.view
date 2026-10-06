@@ -17,17 +17,17 @@ widget(container_y, {
       
       skinNavButton(TYPE="back",
 		    EVENT = event(Back),
-		    ENABLED = 0.01 * $global.nav.canGoBack,
+		    ENABLED = 0.01 * $nav.canGoBack,
 		    HIDDEN = !$ui.topBarTools);
 
       skinNavButton(TYPE="forward",
 		    EVENT = event(Forward),
-		    ENABLED = 0.01 * $global.nav.canGoForward,
+		    ENABLED = 0.01 * $nav.canGoForward,
 		    HIDDEN = !$ui.topBarTools);
 
       skinNavButton(TYPE="home",
 		    EVENT = event(Home),
-		    ENABLED = 0.01 * $global.nav.canGoHome,
+		    ENABLED = 0.01 * $nav.canGoHome,
 		    HIDDEN = !$ui.topBarTools);
 
       widget(deck, {
@@ -36,7 +36,7 @@ widget(container_y, {
 	.effect = flipHorizontal;
 	.noInitialTransform = true;
 	
-	cloner($global.nav.pages, loader, {
+	cloner($nav.pages, loader, {
 	  .time = 0.2;
 	  .source = "skin://pages/" + $page.model.type + "_top.view";
 	});
@@ -52,7 +52,7 @@ widget(container_y, {
       .effect = blend;
       .noInitialTransform = true;
       
-      cloner($global.nav.pages, loader, {
+      cloner($nav.pages, loader, {
 	.time = 0.2;
 	.noInitialTransform = true;
 	.source = "skin://pages/" + $page.model.type + ".view";

@@ -56,7 +56,7 @@ widget(container_z, {
   widget(container_y, {
     space(1);
     widget(throbber3d, {
-      .alpha = iir($global.nav.currentpage.model.loading, 4);
+      .alpha = iir($nav.currentpage.model.loading, 4);
     });
     space(1);
   });
