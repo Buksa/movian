@@ -54,7 +54,7 @@ widget(keyintercept, {
       widget(list_y, {
 	.weight = 1;
 	.id = "list";
-	&view.focused = focusedChild();
+	$view.focused <- focusedChild();
 	
 
 	cloner($self.model.nodes, container_x, {
@@ -141,7 +141,7 @@ widget(keyintercept, {
 	    .time = 0.1;
 	    .effect = blend;
 	    .source = "skin://directoryviews/infobox/" + $view.focused.type + ".view";
-	    .args ?= $view.focused;
+	    .args <- $view.focused;
 	  });
 	}));
       });

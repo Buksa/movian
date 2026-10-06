@@ -17,7 +17,7 @@ widget(container_y, {
       .translation = [0,0,-1];
       widget(coverflow, {
 
-	&self.focused = focusedChild();
+	$self.focused <- focusedChild();
 
 	cloner($self.model.nodes, loader, {
 	  .time = 0.3;
