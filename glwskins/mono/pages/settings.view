@@ -17,14 +17,14 @@ widget(container_y, {
       LIST_ITEM_SIMPLE("Add new entry", 
 		       "skin://svg/Add.svg",
 		       {
-			 createChild($page.model.nodes); 
+			 createChild($self.model.nodes); 
 		       },
 		       [0.3, 0.5, 0.3],
 		       0.8,
-		       !$page.model.mayadd);
+		       !$self.model.mayadd);
 
 
-      cloner($page.model.nodes, loader, {
+      cloner($self.model.nodes, loader, {
 	.source = "skin://settings/" + $self.type + ".view";
 	.time = 0.3;
 	.noInitialTransform = true;

@@ -7,7 +7,7 @@ widget(container_x, {
   
   widget(list_y, {
     .id = "list";
-    cloner($page.model.nodes, loader, {
+    cloner($self.model.nodes, loader, {
       .time = 0.3;
       .noInitialTransform = true;
       .source = "skin://directoryviews/list/" + $self.type + ".view";

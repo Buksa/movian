@@ -43,7 +43,7 @@
 			     "coverflow", "skin://svg/Coverflow.svg",
 			     "slideshow", "skin://svg/Pictures.svg"),
 		   TYPE,
-		   { $page.glw.userView = TYPE; },
+		   { $self.glw.userView = TYPE; },
 		   ENABLED,
 		   NAVSCALE());
 }

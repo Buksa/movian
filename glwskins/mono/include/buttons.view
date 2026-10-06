@@ -459,7 +459,7 @@
 	  });
 	  
 	  widget(icon, {
-	    .alpha = iir($page.glw.curView == TYPE, 4);
+	    .alpha = iir($self.glw.curView == TYPE, 4);
 	    .color = select(isHovered() || isFocused(), SELCOLOR(), BASECOLOR());
 	    .shadow = true;
 	    .source = "skin://svg/Selected.svg";

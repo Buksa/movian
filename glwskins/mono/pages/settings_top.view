@@ -1,7 +1,7 @@
 #import "skin://include/nav.view"
 
-skinNavLocation($page.model.metadata.title,
-		translate($page.model.subtype,
+skinNavLocation($self.model.metadata.title,
+		translate($self.model.subtype,
 			  "skin://svg/Settings.svg",
 			  "sound", "skin://svg/Sound.svg",
 			  "audio", "skin://svg/Music.svg",

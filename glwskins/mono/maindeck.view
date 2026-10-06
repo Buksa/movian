@@ -38,7 +38,7 @@ widget(container_y, {
 	
 	cloner($nav.pages, loader, {
 	  .time = 0.2;
-	  .source = "skin://pages/" + $page.model.type + "_top.view";
+	  .source = "skin://pages/" + $self.model.type + "_top.view";
 	});
       });
     });
@@ -55,7 +55,7 @@ widget(container_y, {
       cloner($nav.pages, loader, {
 	.time = 0.2;
 	.noInitialTransform = true;
-	.source = "skin://pages/" + $page.model.type + ".view";
+	.source = "skin://pages/" + $self.model.type + ".view";
       });
     });
 
