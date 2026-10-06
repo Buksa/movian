@@ -52,8 +52,6 @@ widget(container_y, {
       .effect = blend;
       .noInitialTransform = true;
       
-      delta($ui.fullwindow, wantFullWindow());
-      
       cloner($global.nav.pages, loader, {
 	.time = 0.2;
 	.noInitialTransform = true;
