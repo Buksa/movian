@@ -25,8 +25,8 @@ widget(detachable, {
       widget(icon, {
 	.source = $self.metadata.album_art ?? "skin://svg/Music.svg";
 	.sizeScale = 4;
-	.alpha = iir(isReady(), 10);
-	.saturation = 1 - iir(isReady(), 10);
+	.alpha = iir(isLoaded() || isError(), 10);
+	.saturation = 1 - iir(isLoaded() || isError(), 10);
       });
     });
   });

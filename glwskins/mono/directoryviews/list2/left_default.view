@@ -17,8 +17,8 @@ widget(backdrop, {
 		"playlist", "List",
 		"directory", "Folder") + ".svg";
     .sizeScale = 4;
-    .alpha = iir(isReady(), 10);
-    .saturation = 1 - iir(isReady(), 10);
+    .alpha = iir(isLoaded() || isError(), 10);
+    .saturation = 1 - iir(isLoaded() || isError(), 10);
     .color = 0.5 + $clone.active * 0.5;
     .shadow = true;
   });
