@@ -29,7 +29,7 @@ widget(container_y, {
       .ellipsize = true;
     });
   );
-  
+
   cloner($args.metadata.additional_artists, container_z, {
     skinInfoboxFocusable(
       true,

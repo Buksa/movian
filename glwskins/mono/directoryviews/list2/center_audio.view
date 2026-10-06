@@ -13,7 +13,7 @@ widget(container_x, {
       .sizeScale = 2;
       .color = 0.5 + (isHovered() || isFocused()) * 0.5;
     });
-    
+
   });
 
 

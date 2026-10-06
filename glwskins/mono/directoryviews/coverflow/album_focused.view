@@ -9,42 +9,42 @@ widget(container_y, {
     .caption = $self.focused.metadata.artist + " • " +
       $self.focused.metadata.title;
     });
-  
+
     $view.browse <- browse($self.focused.url);
-  
+
   $view.showFilter = $view.browse.model.filter && 1;
 
   widget(container_x, {
-    
+
     widget(dummy, { .width = 2; });
-    
+
     widget(keyintercept, {
       bind($view.browse.model.filter);
       .enabled = $view.browse.model.canFilter;
-      
+
       widget(container_y, {
 	.filterConstraintX = true;
-	
+
 	widget(expander_y, {
 	.filterConstraintX = true;
 	  .expansion = scurve($view.showFilter, 0.25);
 	  .alpha     = scurve($view.showFilter, 0.25);
-	  
+
 	  widget(container_x, {
 	    widget(backdrop, {
 	      .filterConstraintX = true;
 	      .color = [0.3, 0.3, 0.3];
 	      PLATE_GFX();
 	      widget(container_x, {
-		
+
 		widget(label, {
 		  .caption = "Filter: ";
 		});
-		
+
 		widget(label, {
 		  .caption = $view.browse.model.filter;
 		});
-		
+
 	      });
 	    });
 	    ICON2("skin://svg/Delete.svg",
@@ -59,7 +59,7 @@ widget(container_y, {
 
 	widget(list_y, {
 	  .id = "list";
-	  
+
 	  cloner($view.browse.model.nodes, loader, {
 	    .time = 0.3;
 	    .noInitialTransform = true;

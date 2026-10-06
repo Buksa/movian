@@ -46,7 +46,7 @@
     onEvent(activate, {
       (STATE) = !STATE;
     });
-      
+
 
     widget(backdrop, {
       .width = $ui.size + 2;

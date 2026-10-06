@@ -1,6 +1,6 @@
 #import "skin://include/nav.view"
 
-// Main container 
+// Main container
 widget(container_y, {
 
   widget(expander_y, {
@@ -14,7 +14,7 @@ widget(container_y, {
       .blur  = iir(clamp(getLayer(), 0, 1), 7);
 
       .padding = [2,2,2,2];
-      
+
       skinNavButton(TYPE="back",
 		    EVENT = event(Back),
 		    ENABLED = 0.01 * $nav.canGoBack,
@@ -35,7 +35,7 @@ widget(container_y, {
 	.time = 0.2;
 	.effect = flipHorizontal;
 	.noInitialTransform = true;
-	
+
 	cloner($nav.pages, loader, {
 	  .time = 0.2;
 	  .source = "skin://pages/" + $self.model.type + "_top.view";
@@ -51,7 +51,7 @@ widget(container_y, {
       .time = 0.1;
       .effect = blend;
       .noInitialTransform = true;
-      
+
       cloner($nav.pages, loader, {
 	.time = 0.2;
 	.noInitialTransform = true;

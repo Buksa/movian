@@ -10,10 +10,10 @@ widget(container_x, {
     .weight = 1.0;
 
     .align = center;
-    
+
     popupGroup(
       .filterConstraintX = true;
-      
+
       widget(container_y, {
 	.spacing = 4;
 	widget(container_x, {
@@ -42,10 +42,10 @@ widget(container_x, {
 	  .hidden = $self.disableUsername;
 	  .caption = _("Username");
 	});
-      
+
 	popupInputField(
 	  .hidden = $self.disableUsername;
- 	  widget(text, {
+	  widget(text, {
 	    .id = "username";
 	    .focusable = true;
 	    bind($self.username);
@@ -58,7 +58,7 @@ widget(container_x, {
 	widget(label, {
 	  .caption = _("Password");
 	});
-      
+
 	popupInputField(
 	  widget(text, {
 	    .id = "password";
@@ -75,7 +75,7 @@ widget(container_x, {
           .hidden = $self.disableDomain;
 	  .caption = _("Domain");
 	});
-      
+
 	popupInputField(
           .hidden = $self.disableDomain;
 	  widget(text, {

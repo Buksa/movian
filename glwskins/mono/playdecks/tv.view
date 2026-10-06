@@ -8,7 +8,7 @@ $ui.showplaydeck =  $ui.menu ||
 
 widget(container_x, {
   .padding = [5, 0, 5, 5];
-  
+
   .align = center;
   widget(backdrop, {
     .source = "skin://graphics/blackdrop.png";
@@ -62,7 +62,7 @@ widget(container_x, {
 	    widget(label, {
 	      .hidden = select($global.media.current.metadata.events.current.title, false, true);
 	      .caption =
-		strftime($global.media.current.metadata.events.current.start, "%H:%M") + " - " + 
+		strftime($global.media.current.metadata.events.current.start, "%H:%M") + " - " +
 		strftime($global.media.current.metadata.events.current.stop, "%H:%M");
 	      .align = right;
 	    });
@@ -70,7 +70,7 @@ widget(container_x, {
 	    widget(label, {
 	      .hidden = select($global.media.current.metadata.events.next.title, false, true);
 	      .caption =
-		strftime($global.media.current.metadata.events.next.start, "%H:%M") + " - " + 
+		strftime($global.media.current.metadata.events.next.start, "%H:%M") + " - " +
 		strftime($global.media.current.metadata.events.next.stop, "%H:%M");
 	      .align = right;
 	    });
@@ -78,10 +78,10 @@ widget(container_x, {
 
 	});
 
-	HORIZONTAL_SEPARATOR();	
+	HORIZONTAL_SEPARATOR();
 
-	widget(container_x, {      
-      	  .hidden = select($global.media.current.error, true, false);
+	widget(container_x, {
+	  .hidden = select($global.media.current.error, true, false);
 	  widget(label, {
 	    .sizeScale = 0.8;
 	    .autohide = true;

@@ -21,7 +21,7 @@ widget(container_y, {
       .source = "skin://graphics/shadedplate.png";
       .border =  [4, 4, 4, 4];
       .padding = [0, -2, -2, -2];
-      
+
       widget(container_x, {
 	.filterConstraintX = true;
         widget(icon, {
@@ -37,13 +37,13 @@ widget(container_y, {
           .source = "skin://graphics/shadedplate.png";
           .border =  [4, 4, 4, 4];
           .padding = [0, -2, 0, -2];
-	  
+
           widget(text, {
             bind($view.searchQuery);
 	    .sizeScale = 1.5;
             .focusable = 0.7;
             $view.searchAlpha = 0.3 + iir(isFocused() * 0.7, 8) + isHovered() * 0.1;
-	    
+
 	    onEvent(enter, navOpen("search:" + $view.searchQuery));
           });
 	});
@@ -82,9 +82,9 @@ widget(container_y, {
 	      .color = 0.3 + isHovered() * 0.4 + isFocused() * 0.4 + isPressed() * 0.4;
 	      widget(image, {
 		.color = 0.5 + isHovered() * 0.4 + isFocused() * 0.4 + isPressed() * 0.4;
-		
-		.source = $self.icon ?? 
-		  "skin://svg/" + 
+
+		.source = $self.icon ??
+		  "skin://svg/" +
 		  translate($self.type, "Folder",
 			    "music",    "Music",
 			    "video",    "Movie",
@@ -101,7 +101,7 @@ widget(container_y, {
 	      .border = 12;
 	      .alpha = iir(0.2 + isHovered() * 0.2 + isFocused() * 0.2 + isPressed() * 0.2 , 5);
 	      .additive = true;
-	      
+
 	    });
 	  });
 	});

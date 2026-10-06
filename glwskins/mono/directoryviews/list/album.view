@@ -12,7 +12,7 @@ widget(container_x, {
     .color = select(isFocused() || $self.metadata.album_art,
 		    [1.0, 1.0, 1.0], PLATE_COLOR_AUDIO());
   });
-  
+
   widget(container_y, {
 
     // TITLE
@@ -24,40 +24,40 @@ widget(container_x, {
 	.focusable = 1.0;
 	.focusOnClick = true;
 	.filterConstraintX = true;
-	
+
 	onEvent(activate, navOpen($self.url));
-	
+
 	.alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
-	
+
 	.color = PLATE_COLOR_AUDIO();
 	PLATE_GFX();
-	
+
 	widget(label, {
 	  .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_AUDIO());
-	  .align = left; 
+	  .align = left;
 	  .caption = $self.metadata.title;
 	  .ellipsize = true;
 	});
       });
-      
+
       widget(dummy, {
 	.width = $ui.fontsize / 2;
       });
 
       // Artist
-      
+
       widget(backdrop, {
         .weight = 2;
 	.filterConstraintX = true;
 
 	.focusable = isLink($self.metadata.artist);
 	onEvent(activate, navOpen($self.metadata.artist));
-	
+
 	.alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
-	
+
 	.color = PLATE_COLOR_AUDIO();
 	PLATE_GFX();
-	
+
 	widget(label, {
 	  .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_AUDIO());
 	  .align = left;

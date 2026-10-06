@@ -23,7 +23,7 @@ widget(container_y, {
       .source = $args.metadata.icon;
       .hidden = select($args.metadata.icon, false, true);
     });
-    
+
     widget(container_y, {
 
       widget(container_x, {
@@ -52,7 +52,7 @@ widget(container_y, {
 
 	widget(container_y, {
 	  .filterConstraintX = true;
-	
+
 	  widget(label, {
 	    .hidden = select($args.metadata.duration, 0, 1);
 	    .caption = value2duration($args.metadata.duration);

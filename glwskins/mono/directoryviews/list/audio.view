@@ -12,7 +12,7 @@ widget(container_x, {
     .shadow = true;
     .align = top;
   });
-  
+
   widget(container_y, {
 
     // TITLE
@@ -24,37 +24,37 @@ widget(container_x, {
 	.focusable = 1.0;
 	.focusOnClick = true;
 	.filterConstraintX = true;
-	
+
 	onEvent(activate, playTrackFromSource($self, $parent.model));
-	
+
 	.alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
-	
+
 	.color = PLATE_COLOR_AUDIO();
 	PLATE_GFX();
-	
+
 	widget(label, {
 	  .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_AUDIO());
-	  .align = left; 
+	  .align = left;
 	  .caption = $self.metadata.title;
 	  .ellipsize = true;
 	});
       });
-      
+
       widget(dummy, {
 	.width = $ui.fontsize / 2;
       });
 
       // Artist
-      
+
       widget(backdrop, {
 	.focusable = isLink($self.metadata.artist);
 	onEvent(activate, navOpen($self.metadata.artist));
-	
+
 	.alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
-	
+
 	.color = PLATE_COLOR_AUDIO();
 	PLATE_GFX();
-	
+
 	widget(label, {
 	  .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_AUDIO());
 	  .align = left;
@@ -68,39 +68,39 @@ widget(container_x, {
       });
 
       // Album
-      
+
       widget(backdrop, {
 	.hidden = $args.hide_album;
 	.focusable = isLink($self.metadata.album);
 	onEvent(activate, navOpen($self.metadata.album));
-	
+
 	.alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
-	
+
 	.color = PLATE_COLOR_AUDIO();
 	PLATE_GFX();
-	
+
 	widget(label, {
 	  .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_AUDIO());
-	  .align = left; 
+	  .align = left;
 	  .caption = $self.metadata.album;
 	  .ellipsize = true;
 	});
       });
 
-      
+
     });
 
     widget(expander_y, {
       .filterConstraintX = true;
       .expansion = scurve($view.expanded, 0.15);
-      
+
       widget(loader, {
 	.time = 0.15;
 	.effect = blend;
 	.args = {
 	  hide_album = $args.hide_album;
 	};
-	.source = select($view.expanded_pre, 
+	.source = select($view.expanded_pre,
 			 "skin://directoryviews/list/audio2.view", "");
       });
     });

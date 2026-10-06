@@ -8,30 +8,30 @@ $view.showFilter = $self.model.filter && 1;
 widget(keyintercept, {
   bind($self.model.filter);
   .enabled = $self.model.canFilter;
-  
+
   widget(container_y, {
     .filterConstraintX = true;
-    
+
     widget(expander_y, {
       .filterConstraintX = true;
       .expansion = scurve($view.showFilter, 0.25);
       .alpha     = scurve($view.showFilter, 0.25);
-      
+
       widget(container_x, {
 	widget(backdrop, {
 	  .filterConstraintX = true;
 	  .color = [0.3, 0.3, 0.3];
 	  PLATE_GFX();
 	  widget(container_x, {
-	    
+
 	    widget(label, {
 	      .caption = "Filter: ";
 	    });
-	    
+
 	    widget(label, {
 	      .caption = $self.model.filter;
 	    });
-	    
+
 	  });
 	});
 	ICON2("skin://svg/Delete.svg",
@@ -72,14 +72,14 @@ widget(keyintercept, {
 		  translate($self.type, navOpen($self.url, void, void, $parent.model),
 			    "audio", playTrackFromSource($self, $parent.model)
 			   ));
-	  
+
 	  .source = "skin://graphics/8x8round.png";
-	  
+
 	  .border = 3;
 	  .padding = -3;
 	  .alphaSelf = 0.2 +  (isHovered() || isFocused()) * 0.4;
 	  .color = 0;
-	  
+
 	  widget(backdrop, {
 	    .source = "skin://graphics/8x8round-open.png";
 	    .borderOnly = true;
@@ -97,11 +97,11 @@ widget(keyintercept, {
 		.sizeScale = 1.5;
 		.color = 0.75 + (isHovered() || isFocused()) * 0.25;
 	      });
-	      
+
 	      widget(loader, {
 		.time = 0.3;
 		.noInitialTransform = true;
-	      	.source = "skin://directoryviews/list2/" +
+		.source = "skin://directoryviews/list2/" +
 		  translate($self.type, void,
 			    "audio", "center_audio",
 			    "playlist", "center_playlist",
@@ -112,7 +112,7 @@ widget(keyintercept, {
 	    });
 	  });
 	});
-	
+
 	widget(loader, {
 	  .time = 0.3;
 	  .noInitialTransform = true;
@@ -120,14 +120,14 @@ widget(keyintercept, {
 	    translate($self.type, "right_default",
 		      "audio", "right_audio"
 		     ) + ".view";
-	  
+
 	});
 
 	widget(loader, {
 	  .effect = flipHorizontal;
 	  .time = 0.2;
 	  .noInitialTransform = true;
-	  .source = "skin://directoryviews/list2/" + 
+	  .source = "skin://directoryviews/list2/" +
 	    translate($self.type, "options_none",
 		      "audio", select(isFocused(),
 				      "options_audio",

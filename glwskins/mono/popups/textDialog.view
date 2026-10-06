@@ -11,10 +11,10 @@ widget(container_x, {
     .weight = 1.0;
 
     .align = center;
-    
+
     popupGroup(
       .filterConstraintX = true;
-      
+
       widget(container_y, {
 	.spacing = 4;
 
@@ -25,7 +25,7 @@ widget(container_x, {
 	});
 
         popupInputField(
- 	  widget(text, {
+	  widget(text, {
 	    .id = "input";
 	    .focusable = true;
 	    bind($self.input);

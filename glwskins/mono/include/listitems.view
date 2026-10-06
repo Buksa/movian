@@ -20,12 +20,12 @@ widget(backdrop, {
       .source =  ICON;
       .shadow = true;
     });
-  
+
     widget(dummy, { .width = 4; });
-    
+
     widget(label, {
       .color = select(isFocused(), [1.0, 1.0, 1.0], COLOR);
-      .align = left; 
+      .align = left;
       .caption = TITLE;
       .ellipsize = true;
     });
