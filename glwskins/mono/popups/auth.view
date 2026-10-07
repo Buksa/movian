@@ -3,6 +3,9 @@
 #import "skin://include/separators.view"
 #import "skin://include/popup.view"
 
+onEvent(cancel, deliverEvent($self.eventSink));
+onEvent(back,   deliverEvent($self.eventSink, "cancel"));
+
 widget(container_x, {
   space(0.2);
 
@@ -51,7 +54,6 @@ widget(container_x, {
 	    bind($self.username);
 
 	    onEvent(enter, deliverEvent($self.eventSink, "Ok"));
-	    onEvent(cancel, deliverEvent($self.eventSink));
 	  });
 	);
 
@@ -66,7 +68,6 @@ widget(container_x, {
 	    .password = true;
 	    bind($self.password);
 	    onEvent(enter, deliverEvent($self.eventSink, "Ok"));
-	    onEvent(cancel, deliverEvent($self.eventSink));
 	  });
 	);
 
@@ -83,7 +84,6 @@ widget(container_x, {
 	    .focusable = true;
 	    bind($self.domain);
 	    onEvent(enter, deliverEvent($self.eventSink, "Ok"));
-	    onEvent(cancel, deliverEvent($self.eventSink));
 	  });
 	);
 

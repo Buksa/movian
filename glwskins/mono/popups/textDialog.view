@@ -3,6 +3,9 @@
 #import "skin://include/separators.view"
 #import "skin://include/popup.view"
 
+onEvent(cancel, deliverEvent($self.eventSink));
+onEvent(back,   deliverEvent($self.eventSink, "cancel"));
+
 widget(container_x, {
   space(0.2);
 
@@ -31,7 +34,6 @@ widget(container_x, {
 	    bind($self.input);
 
 	    onEvent(enter, deliverEvent($self.eventSink, "Ok"));
-	    onEvent(cancel, deliverEvent($self.eventSink));
 	  });
 	);
 
