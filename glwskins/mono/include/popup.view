@@ -19,6 +19,13 @@
   });
 }
 
+#define popupButton(EVENT, ENABLED, HIDDEN, CAPTION) {
+  _glossybuttonTextOnly(CAPTION=CAPTION,
+			EVENT=EVENT,
+			ENABLED=ENABLED,
+			HIDDEN=HIDDEN);
+}
+
 #define popupButtonOK(EVENT, ENABLED, HIDDEN) {
   _glossybuttonTextRight(ICON="skin://svg/Check.svg",
 			 CAPTION=_("OK"),
