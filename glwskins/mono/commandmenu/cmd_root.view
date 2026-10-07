@@ -52,7 +52,7 @@
     .spacing = 10;
     widget(label, {
       .align = right;
-      .caption = value2duration(CURRENTTIME);
+      .caption = value2duration($view.tentativeSeekPosition ?? CURRENTTIME);
       .width = 100;
     });
     widget(container_z, {
@@ -69,6 +69,7 @@
 	  .max = DURATION;
 	  .step = 15;
 	  bind(CURRENTTIME);
+	  .tentative = $view.tentativeSeekPosition;
 	  .alwaysGrabKnob = true;
 	  widget(backdrop, {
 	    .width = $ui.size;
