@@ -7,6 +7,6 @@ widget(container_x, {
 
   .align = left;
   settingButtonAction($self.metadata.title,
-		      deliverEvent($self.action),
+		      deliverEvent($self.eventSink),
 		      true, false);
 });
