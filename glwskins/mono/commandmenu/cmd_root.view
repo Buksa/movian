@@ -556,7 +556,7 @@ widget(container_y, {
 
 
     //--- Deck control
-    .page = select($view.videofeatures, $view.settingpage, 0);
+    .page = $view.settingpage * $view.videofeatures;
     .effect = flipHorizontal;
     .time = 0.3;
 
