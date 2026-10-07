@@ -435,8 +435,8 @@ widget(container_y, {
 	widget(list_y, {
 	  .spacing = 5;
 
-	  cloner($global.media.current.audio.settings.model.nodes, loader, {
-	    .source = "skin://settings/" + $self.model.type + ".view";
+	  cloner($global.media.current.audio.settings.nodes, loader, {
+	    .source = "skin://settings/" + $self.type + ".view";
 	    .time = 0.3;
 	    .noInitialTransform = true;
 	  });
@@ -480,8 +480,8 @@ widget(container_y, {
 	widget(list_y, {
 	  .spacing = 5;
 
-	  cloner($global.media.current.subtitle.settings.model.nodes, loader, {
-	    .source = "skin://settings/" + $self.model.type + ".view";
+	  cloner($global.media.current.subtitle.settings.nodes, loader, {
+	    .source = "skin://settings/" + $self.type + ".view";
 	    .time = 0.3;
 	    .noInitialTransform = true;
 	  });
@@ -547,8 +547,8 @@ widget(container_y, {
 	.sizeScale = 1.5;
       });
 
-      cloner($global.media.current.video.settings.model.nodes, loader, {
-	.source = "skin://settings/" + $self.model.type + ".view";
+      cloner($global.media.current.video.settings.nodes, loader, {
+	.source = "skin://settings/" + $self.type + ".view";
 	.time = 0.3;
 	.noInitialTransform = true;
       });
