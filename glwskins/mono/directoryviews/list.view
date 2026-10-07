@@ -91,7 +91,8 @@ widget(keyintercept, {
 	    onEvent(activate,
 		    translate($self.type,
 			      navOpen($self.url, void, void, $parent.model),
-			      "audio", playTrackFromSource($self, $parent.model)
+			      "audio", playTrackFromSource($self, $parent.model),
+			      "font",  deliverEvent($self, "use:" + $self.url)
 			     ));
 
 	    .alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
