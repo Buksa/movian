@@ -1,6 +1,7 @@
 widget(image, {
   .align = bottom;
   .focusable = true;
+  onEvent(activate, navOpen($self.url, void, $self, $parent.model, void, $parent.url));
   .alphaEdges = 2;
   .source = "thumb://" + $self.url;
 });
