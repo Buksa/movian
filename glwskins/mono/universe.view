@@ -3,6 +3,8 @@
 #import "skin://include/buttons.view"
 #import "skin://include/slider.view"
 
+setDefaultFont($core.fonts.main);
+
 // These were user settings until skins could no longer declare settings.
 // Each keeps the default it had.
 
