@@ -7,7 +7,6 @@ widget(container_x, {
     .color = select(isFocused(), [1.0, 1.0, 1.0], PLATE_COLOR_VIDEO());
     .source = "skin://svg/Movie.svg";
     .shadow = true;
-    .debug = true;
   });
 
   widget(container_y, {
