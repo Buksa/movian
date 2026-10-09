@@ -1,0 +1,9 @@
+widget(container_y, {
+  widget(label, {
+    .font = $args.url;
+    .caption = "The quick brown fox jumped over the lazy dog";
+    .maxlines = 3;
+    .sizeScale = 2;
+  });
+  space(1);
+});
