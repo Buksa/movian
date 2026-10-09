@@ -1,0 +1,47 @@
+#import "skin://include/defs.view"
+#import "skin://include/buttons.view"
+#import "skin://include/separators.view"
+#import "skin://include/popup.view"
+
+onEvent(cancel, deliverEvent($self.eventSink));
+onEvent(back,   deliverEvent($self.eventSink, "cancel"));
+
+widget(container_x, {
+  space(0.2);
+
+  widget(container_y, {
+
+    .weight = 1.0;
+
+    .align = center;
+
+    popupGroup(
+      .filterConstraintX = true;
+
+      widget(container_y, {
+	.spacing = 4;
+
+	widget(label, {
+	  .maxlines = 10;
+	  .align = center;
+	  .caption = fmt(_("Resume %s from %s"),
+			 $self.title, value2duration($self.position));
+	});
+
+	HORIZONTAL_SEPARATOR();
+
+	widget(container_x, {
+	  .align = center;
+	  .spacing = 20;
+	  .homogenous = true;
+
+	  popupButton(deliverEvent($self.eventSink, "OK"),
+		      1.0, false, _("Yes"));
+	  popupButton(deliverEvent($self.eventSink, "cancel"),
+		      0.5, false, _("No, Start over"));
+	});
+      });
+    );
+  });
+  space(0.2);
+});
