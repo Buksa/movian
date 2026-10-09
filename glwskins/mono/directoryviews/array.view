@@ -85,6 +85,7 @@ widget(container_y, {
 			translate($self.type, "default",
 				  "album", "album",
 				  "directory", "directory",
+				  "image", "image",
 				  "plugin", "plugin") + ".view";
 		    });
 		  });
