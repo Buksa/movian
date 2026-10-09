@@ -143,6 +143,7 @@ widget(keyintercept, {
 	    .time = 0.1;
 	    .effect = blend;
 	    .args <- $view.focused;
+	    .alt = "skin://directoryviews/infobox/file.view";
 	    .source = "skin://directoryviews/infobox/" + $view.focused.type + ".view";
 	  });
 	}));
