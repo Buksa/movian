@@ -1,0 +1,5 @@
+#import "skin://include/nav.view"
+
+widget(container_x, {
+  skinNavLocation($self.model.metadata.title);
+});
