@@ -25,6 +25,7 @@ widget(container_y, {
 
 
       cloner($self.model.nodes, loader, {
+	.alt = "skin://settings/settings.view";
 	.source = "skin://settings/" + $self.type + ".view";
 	.time = 0.3;
 	.noInitialTransform = true;

@@ -437,6 +437,7 @@ widget(container_y, {
 	  .spacing = 5;
 
 	  cloner($global.media.current.audio.settings.nodes, loader, {
+	    .alt = "skin://settings/settings.view";
 	    .source = "skin://settings/" + $self.type + ".view";
 	    .time = 0.3;
 	    .noInitialTransform = true;
@@ -482,6 +483,7 @@ widget(container_y, {
 	  .spacing = 5;
 
 	  cloner($global.media.current.subtitle.settings.nodes, loader, {
+	    .alt = "skin://settings/settings.view";
 	    .source = "skin://settings/" + $self.type + ".view";
 	    .time = 0.3;
 	    .noInitialTransform = true;
@@ -549,6 +551,7 @@ widget(container_y, {
       });
 
       cloner($global.media.current.video.settings.nodes, loader, {
+	.alt = "skin://settings/settings.view";
 	.source = "skin://settings/" + $self.type + ".view";
 	.time = 0.3;
 	.noInitialTransform = true;
