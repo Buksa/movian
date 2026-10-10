@@ -92,7 +92,8 @@ widget(keyintercept, {
 		    translate($self.type,
 			      navOpen($self.url, void, void, $parent.model),
 			      "audio", playTrackFromSource($self, $parent.model),
-			      "font",  deliverEvent($self, "use:" + $self.url)
+			      "font",  deliverEvent($self, "use:" + $self.url),
+			      "action", deliverEvent($self.eventSink)
 			     ));
 
 	    .alphaSelf = iir(isFocused() * 0.5, 8) + isHovered() * 0.1;
@@ -141,8 +142,9 @@ widget(keyintercept, {
 	  widget(loader, {
 	    .time = 0.1;
 	    .effect = blend;
-	    .source = "skin://directoryviews/infobox/" + $view.focused.type + ".view";
 	    .args <- $view.focused;
+	    .alt = "skin://directoryviews/infobox/file.view";
+	    .source = "skin://directoryviews/infobox/" + $view.focused.type + ".view";
 	  });
 	}));
       });

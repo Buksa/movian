@@ -1,0 +1,169 @@
+#import "skin://include/buttons.view"
+#import "skin://include/separators.view"
+#import "skin://include/slider.view"
+
+// The page upgrade_open_url() opens. Everything on it comes from
+// $global.upgrade, which upgrade.c fills and listens on.
+
+#define UPGRADE_TEXT(CAPTION) {
+  widget(label, {
+    .caption = CAPTION;
+    .align = center;
+    .shadow = true;
+    .sizeScale = 1.5;
+  });
+}
+
+#define UPGRADE_BUTTON(CAPTION, EVENT) {
+  widget(container_x, {
+    .align = center;
+    _glossybuttonTextOnly(CAPTION=CAPTION,
+			  EVENT=deliverEvent($global.upgrade.eventSink, EVENT));
+  });
+}
+
+#define UPGRADE_VERSION(CAPTION, VALUE) {
+  widget(container_x, {
+    .spacing = 10;
+    widget(label, {
+      .filterConstraintX = true;
+      .caption = CAPTION;
+      .color = 0.7;
+      .sizeScale = 1.5;
+      .align = right;
+      .shadow = true;
+    });
+
+    widget(label, {
+      .filterConstraintX = true;
+      .caption = VALUE;
+      .sizeScale = 1.5;
+      .shadow = true;
+    });
+  });
+}
+
+
+widget(container_y, {
+
+  .alpha = 1 - iir(clamp(getLayer(), 0, 1), 7) * 0.5;
+  .blur  = iir(clamp(getLayer(), 0, 1), 7);
+
+  .padding = [20, 10, 20, 0];
+  .spacing = 10;
+
+  UPGRADE_VERSION(_("Current version:"), $global.app.version);
+  UPGRADE_VERSION(_("Available version:"),
+		  $global.upgrade.availableVersion ?? _("No upgrade available"));
+
+  widget(deck, {
+    .filterConstraintY = true;
+
+    widget(container_y, {
+      .id = "checking";
+      .align = center;
+      UPGRADE_TEXT(_("Checking for updates..."));
+    });
+
+    widget(container_y, {
+      .id = "canUpgrade";
+      .align = center;
+      .spacing = 10;
+      UPGRADE_TEXT(fmt(_("New version %s is available for download"),
+		       $global.upgrade.availableVersion));
+      UPGRADE_BUTTON(_("Download and install..."), "install");
+    });
+
+    widget(container_y, {
+      .id = "upgradeError";
+      .align = center;
+      .spacing = 10;
+      UPGRADE_TEXT(_("An error occured during download"));
+      UPGRADE_TEXT($global.upgrade.error);
+      UPGRADE_BUTTON(_("Retry..."), "install");
+    });
+
+    widget(container_y, {
+      .id = "checkError";
+      .align = center;
+      .spacing = 10;
+      UPGRADE_TEXT(_("Unable to query for new version"));
+      UPGRADE_TEXT($global.upgrade.error);
+      UPGRADE_BUTTON(_("Retry..."), "checkUpdates");
+    });
+
+    widget(container_y, {
+      .id = "upToDate";
+      .align = center;
+      .spacing = 10;
+      UPGRADE_TEXT(fmt(_("%s is up to date"), $global.app.name));
+      UPGRADE_BUTTON(_("Check for updates now"), "checkUpdates");
+    });
+
+    widget(container_y, {
+      .id = "download";
+      .align = center;
+      .spacing = 10;
+      UPGRADE_TEXT(fmt(_("Downloading %s"), $global.upgrade.task));
+      widget(container_x, {
+	space(1);
+	widget(bar, {
+	  .weight = 2;
+	  .height = $ui.size;
+	  .color1 = [1,1,1];
+	  .color2 = [1,1,1];
+	  .fill = $global.upgrade.progress;
+	});
+	space(1);
+      });
+    });
+
+    .page = $global.upgrade.status;
+  });
+
+  widget(label, {
+    .caption = fmt(_("Changelog for %s releases"),
+		   translate($global.upgrade.track, $global.upgrade.track,
+			     "testing", _("Testing"),
+			     "stable", _("Stable")));
+    .align = center;
+    .shadow = true;
+  });
+
+  HORIZONTAL_SEPARATOR();
+
+  widget(container_x, {
+    .weight = 2;
+    .spacing = 5;
+
+    widget(list_y, {
+      .id = "list";
+      .spacing = 10;
+
+      cloner($global.upgrade.changelog, container_x, {
+	.spacing = 10;
+	.focusable = 0.1;
+
+	widget(label, {
+	  .weight = 0.4;
+	  .filterConstraintX = true;
+	  .align = topRight;
+	  .caption = $self.version;
+	  .color = select(isFocused(), 1.0, 0.6);
+	  .sizeScale = 1.5;
+	  .shadow = true;
+	});
+
+	widget(label, {
+	  .filterConstraintX = true;
+	  .maxlines = 10;
+	  .caption = $self.text;
+	  .color = select(isFocused(), 1.0, 0.6);
+	  .shadow = true;
+	});
+      });
+    });
+
+    LIST_Y_SLIDER("list");
+  });
+});

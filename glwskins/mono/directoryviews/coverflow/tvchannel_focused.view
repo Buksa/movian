@@ -14,6 +14,7 @@ widget(container_x, {
     });
 
     widget(video, {
+      .itemModel = $self.focused;
       .source = $self.focused.url;
       .align = top;
     });
