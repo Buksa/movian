@@ -1094,6 +1094,34 @@ def parse_dev_flags(spec: str) -> dict[str, Any]:
     return flags
 
 
+def language_store_value(language: str) -> str:
+    """The `i18n.language` value for `--language`: a lang/ file name, or
+    "none", which is what the core stores for English (i18n.c)."""
+    if language == "en":
+        return "none"
+    if (language.startswith(".") or "/" in language
+            or not (REPO_ROOT / "lang" / (language + ".lang")).is_file()):
+        known = sorted(p.stem for p in (REPO_ROOT / "lang").glob("*.lang"))
+        raise MdevError("unknown --language %r; known: en %s"
+                        % (language, " ".join(known)))
+    return language
+
+
+def seed_language(persistent: Path, language: str) -> Path:
+    """Set `language` in <persistent>/settings/i18n, keeping its other keys."""
+    path = persistent / "settings" / "i18n"
+    try:
+        store = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        store = None
+    if not isinstance(store, dict):
+        store = {}
+    store["language"] = language_store_value(language)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(store), encoding="utf-8")
+    return path
+
+
 def build_argv(inst: Instance, plugins: list[str], skin: str | None,
                libav_log: bool, start_url: str | None,
                extra_flags: list[str] | None = None) -> list[str]:
