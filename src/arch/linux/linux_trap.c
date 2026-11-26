@@ -51,6 +51,8 @@ int (*extra_traphandler)(int sig, siginfo_t *si, void *UC);
 static char line1[200];
 static char libs[2048];
 static char self[PATH_MAX];
+static intptr_t self_bias;  // PIE load bias of the main program, 0 if not PIE
+static int self_seen;
 static char *symbuf;
 
 
@@ -140,7 +142,7 @@ add2lineresolve(const char *binary, void *addr, char *buf0, size_t buflen)
 {
   char *buf = buf0;
   int fd[2], r, f;
-  const char *argv[5];
+  const char *argv[7];
   pid_t p;
   char addrstr[30], *cp;
 
@@ -148,12 +150,16 @@ add2lineresolve(const char *binary, void *addr, char *buf0, size_t buflen)
     return -1;
 
   argv[0] = "addr2line";
-  argv[1] = "-e";
-  argv[2] = binary;
-  argv[3] = addrstr;
-  argv[4] = NULL;
+  argv[1] = "-f";
+  argv[2] = "-p";
+  argv[3] = "-e";
+  argv[4] = binary;
+  argv[5] = addrstr;
+  argv[6] = NULL;
 
-  snprintf(addrstr, sizeof(addrstr), "%p", (void *)((intptr_t)addr-1));
+  // addr2line wants the file-relative address, not the runtime one
+  snprintf(addrstr, sizeof(addrstr), "%p",
+           (void *)((intptr_t)addr - 1 - self_bias));
 
   if(pipe(fd) == -1)
     return -1;
@@ -207,16 +213,20 @@ addr2text(char *out, size_t outlen, void *ptr)
 {
   Dl_info dli = {};
   char buf[256];
+
+  // First, so a frame in the executable gets file:line, not just a symbol;
+  // addr2line answers "??" for an address outside it.
+  if(self[0] && !add2lineresolve(self, ptr, buf, sizeof(buf)) &&
+     buf[0] && strncmp(buf, "??", 2)) {
+    snprintf(out, outlen, "%s %p", buf, ptr);
+    return;
+  }
+
   int r = dladdr(ptr, &dli);
-  
+
   if(r && dli.dli_sname != NULL && dli.dli_saddr != NULL) {
     snprintf(out, outlen, "%s+0x%tx  (%s)",
 	     dli.dli_sname, ptr - dli.dli_saddr, dli.dli_fname);
-    return;
-  }
-  
-  if(self[0] && !add2lineresolve(self, ptr, buf, sizeof(buf))) {
-    snprintf(out, outlen, "%s %p", buf, ptr);
     return;
   }
 
@@ -344,8 +354,13 @@ traphandler(int sig, siginfo_t *si, void *UC)
 static int
 callback(struct dl_phdr_info *info, size_t size, void *data)
 {
-  if(info->dlpi_name[0])
+  if(info->dlpi_name[0]) {
     sappend(libs, sizeof(libs), "%s ", info->dlpi_name);
+  } else if(!self_seen) {
+    // The main program comes first and has no name
+    self_bias = info->dlpi_addr;
+    self_seen = 1;
+  }
   return 0;
 }
 
