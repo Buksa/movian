@@ -960,7 +960,7 @@ class RunJudgesBeforeItTouchesAnything(unittest.TestCase):
         base = dict(
             name="ordering", plugin=[], plugin_setting=[], force=False,
             dev_flags=None, skin=None, libav_log=None, start_url=None,
-            bypass_ecmascript_acl=False, json=False)
+            bypass_ecmascript_acl=False, language=None, json=False)
         base.update(overrides)
         return argparse.Namespace(**base)
 

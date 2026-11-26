@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     # request that was never going to run (movian#247).
     settings = harness.resolve_plugin_settings(
         args.plugin, args.plugin_setting)
+    if args.language:
+        harness.language_store_value(args.language)
 
     inst = Instance(args.name)
     own_pid = inst.live_pid()
@@ -92,6 +95,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         (settings_dir / "dev").write_text(
             json.dumps(flags), encoding="utf-8"
         )
+
+    if args.language:
+        path = harness.seed_language(inst.persistent, args.language)
+        print("seeded %s" % path, file=sys.stderr)
 
     # Before launch, so the plugin reads the value on its first load rather
     # than being asked (movian#247).
@@ -159,6 +166,27 @@ def cmd_open(args: argparse.Namespace) -> int:
     emit(args, result,
          "url:   %s\ntitle: %s\ntype:  %s\nnodes: %d"
          % (result["url"], result["title"], result["type"], result["nodes"]))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# key
+# ---------------------------------------------------------------------------
+
+KEY_SETTLE = 0.3  # seconds; lets focus move before the next action lands
+
+
+def cmd_key(args: argparse.Namespace) -> int:
+    base = Instance(args.name).base_url()
+    for i, action in enumerate(args.actions):
+        if i:
+            time.sleep(KEY_SETTLE)
+        path = "/api/input/action/" + urllib.parse.quote(action, safe="")
+        result = harness.http_request(base, path, timeout=5.0, method="POST")
+        if not result.get("ok"):
+            raise MdevError("POST %s failed: %s"
+                            % (path, result.get("error") or result.get("status")))
+    emit(args, {"sent": args.actions}, "sent %s" % " ".join(args.actions))
     return 0
 
 
@@ -659,7 +687,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mdev",
         description="Single-entrypoint Movian dev/test harness "
-                    "(isolated launch, open, smoke, shot, props, log, reload, watch)."
+                    "(isolated launch, open, key, smoke, shot, props, log, reload, watch)."
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -726,6 +754,13 @@ def build_parser() -> argparse.ArgumentParser:
                           "sqlite kvstore instead, and nothing here writes "
                           "that -- a seed for one of those lands in a file "
                           "the plugin never reads")
+    run.add_argument("--language", metavar="ll_CC",
+                     help="seed the UI language before launch: a file name "
+                          "from the core's lang/ folder without .lang, e.g. "
+                          "it_IT; `en` is English, the default. It stays in "
+                          "this --name's profile for later runs. Movian "
+                          "reports global.i18n.iso639_1 as the first two "
+                          "letters, so sp_SP reports `sp`, not `es`")
     run.add_argument("--libav-log", action="store_true",
                      help="pass --libav-log to movian")
     # The documented oracle recapture needs it: the ecmascript file ACL
@@ -753,6 +788,17 @@ def build_parser() -> argparse.ArgumentParser:
     opn.add_argument("--timeout", type=float, default=20.0,
                      help="page-ready timeout in seconds (default: 20)")
     opn.set_defaults(func=cmd_open)
+
+    key = sub.add_parser(
+        "key", parents=[common],
+        help="send navigation actions, e.g. `mdev key Activate Right Right`",
+        description="POST each action to /api/input/action/<ACTION> in "
+                    "order, %.1fs apart. Names are Movian's action names "
+                    "(Up, Down, Left, Right, Activate, Back, ...); an unknown "
+                    "name is accepted by the core and does nothing."
+                    % KEY_SETTLE)
+    key.add_argument("actions", nargs="+", metavar="ACTION")
+    key.set_defaults(func=cmd_key)
 
     shot = sub.add_parser("shot", parents=[common],
                           help="take a screenshot via /api/screenshot/raw")
